@@ -170,9 +170,10 @@ const pool = async (items, limit, worker) => {
 
 const main = async () => {
   const registry = await readJson(REGISTRY, [])
-  if (!Array.isArray(registry) || registry.length === 0) {
-    throw new Error('registry/servers.json is empty or not an array')
+  if (!Array.isArray(registry)) {
+    throw new Error('registry/servers.json is not an array')
   }
+  if (registry.length === 0) console.log('registry is empty — pruning recorded state, nothing to probe')
 
   const results = await pool(registry, CONCURRENCY, probe)
   const now = Date.now()
@@ -218,7 +219,14 @@ const main = async () => {
   await writeFile(HISTORY, `${JSON.stringify(history)}\n`)
   await writeFile(
     STATUS,
-    `${JSON.stringify({ generated_at: new Date(now).toISOString(), servers }, null, 2)}\n`,
+    /* No timestamp when there is nothing listed: the file stays byte-identical
+       between hourly runs, so an empty directory cannot churn a commit and a
+       rebuild every probe, and the page has no "last checked" fact to state. */
+    `${JSON.stringify(
+      { generated_at: registry.length ? new Date(now).toISOString() : null, servers },
+      null,
+      2,
+    )}\n`,
   )
 
   const reachable = results.filter((result) => result.ok).length

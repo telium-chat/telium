@@ -6,6 +6,7 @@ import {
   generatedAt,
   recommendationReason,
   recommendationServers,
+  servers,
 } from '../lib/servers'
 import { URLS } from '../config'
 
@@ -42,98 +43,122 @@ const checked = generatedAt
   </section>
 
   <section class="page pb-16">
-    <ServerTable autosort="latency" />
-
-    <details class="disclosure mt-6 py-4 text-[13px] leading-relaxed text-muted">
-      <summary class="disclosure-summary">
-        <Icon name="chevron-down" size={15} />
-        Automatic signup recommendations
-      </summary>
-      <div class="prose-measure mt-3 space-y-3">
-        <p>
-          Directory listing and automatic beginner recommendations are separate. Operators have to opt
-          in both here and on their running homeserver, then pass the published health and maturation
-          rules. Selection happens locally in the client from a signed list; being eligible is not an
-          endorsement by Telium.
+    {/* An empty registry is a real state — the directory starts empty and grows
+        by pull request — so it gets a sentence and the way in, rather than a
+        table with headers and nothing under them, and controls interpreting
+        numbers that do not exist. */}
+    {servers.length === 0 ? (
+      <div class="panel-inset px-6 py-12 text-center sm:px-10">
+        <p class="text-[15px] font-medium">No homeservers are listed yet.</p>
+        <p class="mx-auto mt-2 max-w-[56ch] text-[13.5px] leading-relaxed text-muted">
+          The directory fills in as operators add theirs. There is no application form and no
+          approval queue — you open a pull request against the public registry, and the page
+          rebuilds with your server in it when it merges.
         </p>
-
-        {recommendationServers.length === 0 ? (
-          <p>
-            No listed operator is currently asking to receive automatic beginner referrals. The
-            directory remains fully usable for manual server choice.
-          </p>
-        ) : (
-          <ul class="space-y-3 pt-1">
-            {recommendationServers.map((server) => {
-              const decision = server.probe.recommendation
-              const reasons = decision?.reasons ?? []
-              return (
-                <li class="panel-inset p-3">
-                  <div class="flex flex-wrap items-center justify-between gap-2">
-                    <span>
-                      <strong class="font-medium text-foreground">{server.name}</strong>{' '}
-                      <span class="font-mono text-[12px]">{server.domain}</span>
-                    </span>
-                    {decision?.eligible ? (
-                      <span class="eligibility-badge eligibility-yes">
-                        Eligible · weight {decision.weight}
-                      </span>
-                    ) : (
-                      <span class="eligibility-badge eligibility-no">
-                        Not eligible
-                      </span>
-                    )}
-                  </div>
-                  {!decision ? (
-                    <p class="mt-1.5 text-[12.5px] text-muted">
-                      Waiting for the next hourly probe to evaluate recommendation eligibility.
-                    </p>
-                  ) : reasons.length > 0 ? (
-                    <ul class="mt-1.5 list-disc space-y-0.5 pl-5 text-[12.5px] text-muted">
-                      {reasons.map((reason) => <li>{recommendationReason(reason)}</li>)}
-                    </ul>
-                  ) : (
-                    <p class="mt-1.5 text-[12.5px] text-muted">
-                      Registry opt-in, live acceptance, compatibility, observed age and health checks all pass.
-                    </p>
-                  )}
-                </li>
-              )
-            })}
-          </ul>
-        )}
+        <a
+          href={URLS.registry}
+          class="mt-4 inline-flex items-center gap-1.5 rounded text-[13.5px] text-link hover:underline"
+        >
+          Run a server? List it here
+          <Icon name="arrow-up-right" size={14} />
+        </a>
       </div>
-    </details>
+    ) : (
+      <>
+        <ServerTable autosort="latency" />
 
-    <details class="disclosure mt-6 py-4 text-[13px] leading-relaxed text-muted">
-      <summary class="disclosure-summary">
-        <Icon name="chevron-down" size={15} />
-        How these numbers work
-      </summary>
-      <div class="prose-measure mt-3 space-y-2">
-        <p>
-          Latency is measured from your browser, so each server sees your IP address. Turn it off
-          below and the column stays empty.
-        </p>
-        <p>
-          Uptime is our record of hourly checks over 30 days. Accounts are a range declared by the
-          operator. Registration, version, roles, upload limits and recommendation eligibility come
-          from the hourly probe plus the public registry. {checked && <>Last checked {checked} UTC.</>}
-        </p>
-      </div>
-    </details>
+        <details class="disclosure mt-6 py-4 text-[13px] leading-relaxed text-muted">
+          <summary class="disclosure-summary">
+            <Icon name="chevron-down" size={15} />
+            Automatic signup recommendations
+          </summary>
+          <div class="prose-measure mt-3 space-y-3">
+            <p>
+              Directory listing and automatic beginner recommendations are separate. Operators have to opt
+              in both here and on their running homeserver, then pass the published health and maturation
+              rules. Selection happens locally in the client from a signed list; being eligible is not an
+              endorsement by Telium.
+            </p>
 
-    <div class="probe-controls mt-8 flex flex-wrap items-center justify-between gap-x-8 gap-y-4 pt-6">
-      <label class="flex cursor-pointer items-center gap-2.5 text-[13.5px] select-none">
-        <input type="checkbox" data-probe-toggle checked class="size-3.5 accent-[var(--color-accent)]" />
-        Measure latency from my browser
-      </label>
+            {recommendationServers.length === 0 ? (
+              <p>
+                No listed operator is currently asking to receive automatic beginner referrals. The
+                directory remains fully usable for manual server choice.
+              </p>
+            ) : (
+              <ul class="space-y-3 pt-1">
+                {recommendationServers.map((server) => {
+                  const decision = server.probe.recommendation
+                  const reasons = decision?.reasons ?? []
+                  return (
+                    <li class="panel-inset p-3">
+                      <div class="flex flex-wrap items-center justify-between gap-2">
+                        <span>
+                          <strong class="font-medium text-foreground">{server.name}</strong>{' '}
+                          <span class="font-mono text-[12px]">{server.domain}</span>
+                        </span>
+                        {decision?.eligible ? (
+                          <span class="eligibility-badge eligibility-yes">
+                            Eligible · weight {decision.weight}
+                          </span>
+                        ) : (
+                          <span class="eligibility-badge eligibility-no">
+                            Not eligible
+                          </span>
+                        )}
+                      </div>
+                      {!decision ? (
+                        <p class="mt-1.5 text-[12.5px] text-muted">
+                          Waiting for the next hourly probe to evaluate recommendation eligibility.
+                        </p>
+                      ) : reasons.length > 0 ? (
+                        <ul class="mt-1.5 list-disc space-y-0.5 pl-5 text-[12.5px] text-muted">
+                          {reasons.map((reason) => <li>{recommendationReason(reason)}</li>)}
+                        </ul>
+                      ) : (
+                        <p class="mt-1.5 text-[12.5px] text-muted">
+                          Registry opt-in, live acceptance, compatibility, observed age and health checks all pass.
+                        </p>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        </details>
 
-      <a href={URLS.registry} class="inline-flex items-center gap-1.5 rounded text-[13.5px] text-link hover:underline">
-        Run a server? List it here
-        <Icon name="arrow-up-right" size={14} />
-      </a>
-    </div>
+        <details class="disclosure mt-6 py-4 text-[13px] leading-relaxed text-muted">
+          <summary class="disclosure-summary">
+            <Icon name="chevron-down" size={15} />
+            How these numbers work
+          </summary>
+          <div class="prose-measure mt-3 space-y-2">
+            <p>
+              Latency is measured from your browser, so each server sees your IP address. Turn it off
+              below and the column stays empty.
+            </p>
+            <p>
+              Uptime is our record of hourly checks over 30 days. Accounts are a range declared by the
+              operator. Registration, version, roles, upload limits and recommendation eligibility come
+              from the hourly probe plus the public registry. {checked && <>Last checked {checked} UTC.</>}
+            </p>
+          </div>
+        </details>
+
+        <div class="probe-controls mt-8 flex flex-wrap items-center justify-between gap-x-8 gap-y-4 pt-6">
+          <label class="flex cursor-pointer items-center gap-2.5 text-[13.5px] select-none">
+            <input type="checkbox" data-probe-toggle checked class="size-3.5 accent-[var(--color-accent)]" />
+            Measure latency from my browser
+          </label>
+
+          <a href={URLS.registry} class="inline-flex items-center gap-1.5 rounded text-[13.5px] text-link hover:underline">
+            Run a server? List it here
+            <Icon name="arrow-up-right" size={14} />
+          </a>
+        </div>
+      </>
+    )}
   </section>
 </Base>
 
