@@ -457,8 +457,8 @@ jobs:
                   # below decides, and a mirror serving other bytes fails
                   # here rather than reaching the build. The connect timeout
                   # is what makes the fallback reachable in one run: without
-                  # it each retry sits out the kernel's TCP timeout, and four
-                  # of those were the whole step.
+                  # it each retry sits out a full TCP timeout, and four of
+                  # those were the whole step.
                   curl -fsSL --retry 3 --connect-timeout 20 -o "$1" "https://musl.cc/$1" \
                     || curl -fsSL --retry 3 --connect-timeout 20 -o "$1" \
                         "https://web.archive.org/web/2024id_/https://musl.cc/$1"
