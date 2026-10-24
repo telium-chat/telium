@@ -449,7 +449,19 @@ jobs:
                   "aarch64-linux-musl-cross.tgz c909817856d6ceda86aa510894fa3527eac7989f0ef6e87b5721c58737a06c38"
                 do
                   set -- $entry
-                  curl -fsSL --retry 3 -o "$1" "https://musl.cc/$1"
+                  # musl.cc is the origin and the least reliable host in this
+                  # pipeline: a release has already lost a run to it answering
+                  # nothing for nine minutes. The Wayback Machine copy of the
+                  # same file is the fallback, verified byte-identical to the
+                  # pinned checksum. Neither URL is trusted -- the sha256sum
+                  # below decides, and a mirror serving other bytes fails
+                  # here rather than reaching the build. The connect timeout
+                  # is what makes the fallback reachable in one run: without
+                  # it each retry sits out the kernel's TCP timeout, and four
+                  # of those were the whole step.
+                  curl -fsSL --retry 3 --connect-timeout 20 -o "$1" "https://musl.cc/$1" \
+                    || curl -fsSL --retry 3 --connect-timeout 20 -o "$1" \
+                        "https://web.archive.org/web/2024id_/https://musl.cc/$1"
                   echo "$2  $1" | sha256sum --check -
                   tar -xzf "$1"
                 done
