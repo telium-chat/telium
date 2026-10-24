@@ -1,0 +1,135 @@
+.signal__rung {
+  fill: currentColor;
+  opacity: 0.2;
+  transition: opacity var(--dur-4) var(--ease);
+}
+
+.signal__rung[data-lit] {
+  opacity: 1;
+}
+
+.signal[data-level='unknown'] .signal__rung {
+  animation: signal-wake 1.6s var(--ease) infinite;
+}
+
+.signal[data-level='unknown'] .signal__rung:nth-child(2) { animation-delay: 110ms; }
+.signal[data-level='unknown'] .signal__rung:nth-child(3) { animation-delay: 220ms; }
+.signal[data-level='unknown'] .signal__rung:nth-child(4) { animation-delay: 330ms; }
+
+@keyframes signal-wake {
+  0%, 55%, 100% { opacity: 0.2; }
+  22% { opacity: 0.8; }
+}
+
+.ping-graph__bar {
+  fill: currentColor;
+}
+
+.ping-graph__avg {
+  color: var(--color-muted);
+  stroke-dasharray: 3 3;
+}
+
+.mobile-call-stage .speaking {
+  animation: none;
+  box-shadow: 0 0 0 2px var(--accent);
+  transition: box-shadow var(--dur-3) var(--ease-rise);
+}
+
+.stage-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: rgb(0 0 0 / 0.55);
+  color: #fff;
+  backdrop-filter: blur(6px);
+  transition:
+    background-color var(--dur-1) var(--ease),
+    opacity var(--dur-2) var(--ease);
+}
+
+.stage-chip:hover,
+.stage-chip[data-popup-open] {
+  background: rgb(0 0 0 / 0.75);
+}
+
+.screen-zoom {
+  will-change: transform;
+}
+
+.screen-zoom--step {
+  transition: transform var(--dur-2) var(--ease-rise);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .signal__rung {
+    transition: none;
+  }
+
+  .signal[data-level='unknown'] .signal__rung {
+    animation: none;
+    opacity: 0.35;
+  }
+
+  .mobile-call-stage .speaking {
+    transition: none;
+  }
+
+  .stage-chip {
+    transition: none;
+  }
+}
+
+.ringing-calls {
+  position: fixed;
+  z-index: 1500;
+  top: 12px;
+  inset-inline-end: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.ringing-call {
+  border-radius: var(--radius-card);
+  pointer-events: auto;
+}
+
+.ringing-call__face {
+  position: relative;
+  display: inline-flex;
+  border-radius: 50%;
+}
+
+.ringing-call__face::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  animation: ringing-pulse 1.8s var(--ease) infinite;
+}
+
+@keyframes ringing-pulse {
+  0% { opacity: 0.55; scale: 1; }
+  70%, 100% { opacity: 0; scale: 1.45; }
+}
+
+@media (max-width: 420px) {
+  .ringing-calls {
+    inset-inline: 12px;
+  }
+
+  .ringing-call {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ringing-call__face::after {
+    animation: none;
+    opacity: 0.55;
+  }
+}

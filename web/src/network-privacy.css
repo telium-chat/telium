@@ -1,0 +1,130 @@
+.netpriv-uncovered {
+  border-radius: var(--radius-card);
+  background-color: var(--accent-soft);
+  color: var(--accent-soft-foreground);
+  padding: 14px 16px 15px;
+}
+
+.netpriv-uncovered__title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.netpriv-uncovered__lead {
+  padding-top: 3px;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  opacity: 0.88;
+}
+
+.netpriv-uncovered__list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+  padding: 11px 0 0;
+  list-style: none;
+}
+
+.netpriv-uncovered__item {
+  display: grid;
+  grid-template-columns: 6px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
+.netpriv-uncovered__item::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-top: 0.42em;
+  border-radius: 2px;
+  background-color: currentcolor;
+  opacity: 0.55;
+}
+
+.netpriv-elsewhere {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  width: 100%;
+  padding: 13px 15px;
+  border-radius: var(--radius-card);
+  background-color: var(--surface-secondary);
+  color: var(--foreground);
+  text-align: start;
+  transition:
+    background-color var(--dur-2) var(--ease),
+    filter var(--dur-1) var(--ease);
+}
+
+.netpriv-elsewhere:hover {
+  background-color: var(--surface-tertiary);
+}
+
+.netpriv-elsewhere:active {
+  filter: brightness(var(--press));
+}
+
+.netpriv-elsewhere__glyph {
+  flex: none;
+  margin-top: 1px;
+  color: var(--muted);
+}
+
+.netpriv-elsewhere__body {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.netpriv-elsewhere__title {
+  font-size: 0.9375rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.netpriv-elsewhere__text {
+  padding-top: 2px;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.netpriv-why {
+  padding-top: 3px;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.netpriv-marked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-row);
+  background-color: var(--surface-secondary);
+}
+
+.netpriv-menu-why {
+  max-width: 17rem;
+  padding: 6px 8px 2px;
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.netpriv-marked__name {
+  min-width: 0;
+  flex: 1 1 10rem;
+  font-size: 0.9375rem;
+  line-height: 1.4;
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+}

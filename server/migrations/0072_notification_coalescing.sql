@@ -1,0 +1,90 @@
+-- Aggregation of the notification inbox at the account home.
+--
+-- # What this is for, and why it is not the same thing as the wake window
+--
+-- There are two separate places a burst of activity can be collapsed, and the
+-- server already had one of them. `push.rs::wake_recently` suppresses the
+-- *doorbell*: a device that has been rung in the last few seconds is not rung
+-- again. That protects FCM and APNs from a busy conversation and it protects
+-- the battery, and it is deliberately in memory and deliberately lossy,
+-- because a wake is allowed to be lost -- the device pulls its inbox to find
+-- out what actually happened.
+--
+-- What the doorbell window does nothing about is the inbox itself. Every event
+-- still becomes its own row, and the device still pulls every row and still
+-- posts every row. So the case the wake window is quiet about is exactly the
+-- case that hurts most: a phone that was off, or out of signal, or simply
+-- asleep for an hour, comes back, pulls sixty rows and puts sixty separate
+-- notifications in the shade. The user's first experience of reconnecting is
+-- clearing them one at a time. Coalescing has to happen here, on the rows,
+-- or it does not happen for the offline case at all.
+--
+-- # Why at the account home rather than on the device
+--
+-- The obvious alternative is to let Android group them: it has a grouping API
+-- and the client could bucket whatever it pulled. Three reasons not to.
+--
+-- First, the device cannot bucket what it cannot read *yet*. Rows are sealed
+-- per device and the client has to decrypt each one to see what it is about,
+-- so device-side grouping means decrypting sixty envelopes in a background
+-- service with a wake-lock budget, to then discard fifty-nine of them.
+--
+-- Second, the home is the only place that sees the whole account. Grouping on
+-- one device does nothing for the tablet that pulls the same rows.
+--
+-- Third, and most practically: the rows the user will never look at should not
+-- be kept, pulled, and decrypted at all. Superseding them here means the phone
+-- pulls one row per bucket.
+--
+-- # Why the key is blinded rather than being the guild or conversation id
+--
+-- `coalesce_key` is a truncated keyed hash (see `notifications::coalesce_bucket`)
+-- and not the routing identifier it is derived from. For a guild notification
+-- that changes nothing -- `guild_id` is already sitting in plaintext in the row
+-- next to it, because the account home legitimately knows which of its user's
+-- guilds a notification came from. For a conversation notification it changes
+-- everything: `guild_id` is NULL for those precisely because the home is not
+-- supposed to be building a per-conversation index of its users' direct
+-- messages, and putting a raw conversation id in an indexed column would hand
+-- anyone with the database file exactly the social graph the rest of this
+-- design spends so much effort not writing down. A blinded key groups rows
+-- that belong together without saying what they belong to.
+--
+-- # Why superseding is a tombstone and not a DELETE
+--
+-- The tempting version of this is `DELETE FROM notification_inbox WHERE
+-- <same bucket>` on insert. That would be a bug, and a subtle one.
+--
+-- `UNIQUE (origin, source_id, device_id)` is what makes signed federation
+-- retries exactly-once from the user's point of view: a guild that does not
+-- hear our 200 and sends the same notification again inserts nothing, gets
+-- back "queued: 0", and rings nobody. If the collapse deleted the older row
+-- instead of marking it, a retry of *that* older event would find no conflict,
+-- insert cleanly, and ring the phone a second time for something the user was
+-- already told about -- and it would do so exactly in the situation where the
+-- network is already unreliable enough to be retrying. So the row stays, with
+-- `superseded_at` set, until the device acknowledges past it and it is deleted
+-- by the ordinary cursor ack.
+ALTER TABLE notification_inbox ADD COLUMN coalesce_key TEXT;
+
+-- How many older rows in the same bucket this row stands for. Carried forward
+-- when a row supersedes a row that had itself superseded others, so it is the
+-- total the user has not seen rather than the number collapsed in this one
+-- step. A count and nothing else: the client renders "+3 earlier", never who
+-- or what, because for a conversation the home does not know and for a guild
+-- it should not be building a summary the user did not ask for.
+ALTER TABLE notification_inbox ADD COLUMN coalesced INTEGER NOT NULL DEFAULT 0;
+
+-- Set on a row that a newer row in the same bucket now stands for. Nullable
+-- rather than a boolean because the timestamp is worth having when working out
+-- afterwards why a device saw what it saw, and because `IS NULL` is what the
+-- partial-index-shaped queries below want.
+ALTER TABLE notification_inbox ADD COLUMN superseded_at INTEGER;
+
+-- Every query this feature adds is "the live rows of one bucket for one
+-- device": the insert path counts them and then marks them, and the pull path
+-- filters on `superseded_at IS NULL`. The existing `notification_inbox_device`
+-- index cannot serve those, because it is ordered for the cursor walk and has
+-- no idea about buckets.
+CREATE INDEX notification_inbox_bucket
+    ON notification_inbox (user_id, device_id, coalesce_key, superseded_at);

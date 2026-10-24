@@ -1,0 +1,141 @@
+{
+  "family": "signed-json",
+  "produced_by": "telium_protocol::sign_json / crypto::verify_json",
+  "refuses": [
+    {
+      "input": {
+        "amount": 1.5,
+        "note": "a non-integer number"
+      },
+      "name": "non-integer-number",
+      "note": "Refused, not signed. `sign_json` returns this document unchanged -- no `key_id`, no `signature` -- and `verify_json` returns false for any document containing a non-integer number at any depth, however it was signed. An implementation that signs this document is not wrong about JSON; it is making a promise this protocol does not make.",
+      "signed_document_is": "the input, unchanged and unsigned"
+    }
+  ],
+  "rule": "Remove the members `signature` and `key_id` if present. Serialise what remains as JSON with no insignificant whitespace and every object's members ordered by the UTF-8 bytes of their keys, at every depth. Sign those bytes with Ed25519. Base64url-encode the 64-byte signature with no padding. Re-insert `key_id` and `signature`.",
+  "vectors": [
+    {
+      "canonical": {
+        "hex": "7b226b657973223a5b7b226b65795f6964223a22656432353531393a737065632d7072696d617279222c227075626c69635f62363475223a22304571794d6e5172744b7336453269395268586b3574416953726361415775766853436a4d736c33687a63222c2276616c69645f66726f6d223a302c2276616c69645f756e74696c223a313736373331323030303030307d5d2c227365727665725f6e616d65223a22686f6d652e6578616d706c65222c2276616c69645f756e74696c223a313736373331323030303030307d",
+        "length": 204,
+        "utf8": "{\"keys\":[{\"key_id\":\"ed25519:spec-primary\",\"public_b64u\":\"0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc\",\"valid_from\":0,\"valid_until\":1767312000000}],\"server_name\":\"home.example\",\"valid_until\":1767312000000}"
+      },
+      "input": {
+        "keys": [
+          {
+            "key_id": "ed25519:spec-primary",
+            "public_b64u": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+            "valid_from": 0,
+            "valid_until": 1767312000000
+          }
+        ],
+        "server_name": "home.example",
+        "valid_until": 1767312000000
+      },
+      "key": {
+        "algorithm": "ed25519",
+        "key_id": "ed25519:spec-primary",
+        "public_b64u": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+        "seed_b64u": "ERERERERERERERERERERERERERERERERERERERERERE"
+      },
+      "name": "key-document",
+      "note": "The signed key document embedded in `/.well-known/telium/server` and served at `/_telium/v1/keys`. Verify this one first.",
+      "signature_b64u": "wO4D1rQrISREThNPHh6arLAWrMLt0UUvp08OG8YNS_pjdovm_HZAf2CoJPP2Qr3Z24XYinP7VeDe2YuqBGM3AA",
+      "signed_document": {
+        "key_id": "ed25519:spec-primary",
+        "keys": [
+          {
+            "key_id": "ed25519:spec-primary",
+            "public_b64u": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+            "valid_from": 0,
+            "valid_until": 1767312000000
+          }
+        ],
+        "server_name": "home.example",
+        "signature": "wO4D1rQrISREThNPHh6arLAWrMLt0UUvp08OG8YNS_pjdovm_HZAf2CoJPP2Qr3Z24XYinP7VeDe2YuqBGM3AA",
+        "valid_until": 1767312000000
+      }
+    },
+    {
+      "canonical": {
+        "hex": "7b2261756469656e6365223a226d656469612e6578616d706c65222c22657870223a313736373232353930303030302c226775696c645f6964223a2230314a4141414141414141414141414141414141414141414141222c22697373756572223a22686f6d652e6578616d706c65222c226d61785f6279746573223a31303438353736302c22757365725f6964223a2240616c6963653a686f6d652e6578616d706c65227d",
+        "length": 165,
+        "utf8": "{\"audience\":\"media.example\",\"exp\":1767225900000,\"guild_id\":\"01JAAAAAAAAAAAAAAAAAAAAAAA\",\"issuer\":\"home.example\",\"max_bytes\":10485760,\"user_id\":\"@alice:home.example\"}"
+      },
+      "input": {
+        "audience": "media.example",
+        "exp": 1767225900000,
+        "guild_id": "01JAAAAAAAAAAAAAAAAAAAAAAA",
+        "issuer": "home.example",
+        "max_bytes": 10485760,
+        "user_id": "@alice:home.example"
+      },
+      "key": {
+        "algorithm": "ed25519",
+        "key_id": "ed25519:spec-primary",
+        "public_b64u": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+        "seed_b64u": "ERERERERERERERERERERERERERERERERERERERERERE"
+      },
+      "name": "media-voucher",
+      "note": "A guild server's voucher authorising one upload at a media origin. The signature is necessary and not sufficient: `audience`, `exp` and `max_bytes` are all separately enforced.",
+      "signature_b64u": "Lg9xTfiZmSqt9zXfkRGxXV3oukMsubv_GJv-PU-Voi5NWWLDBKHEhH9Bagpuqhg0mQUzVEXBGaqtRfFEKBQEAw",
+      "signed_document": {
+        "audience": "media.example",
+        "exp": 1767225900000,
+        "guild_id": "01JAAAAAAAAAAAAAAAAAAAAAAA",
+        "issuer": "home.example",
+        "key_id": "ed25519:spec-primary",
+        "max_bytes": 10485760,
+        "signature": "Lg9xTfiZmSqt9zXfkRGxXV3oukMsubv_GJv-PU-Voi5NWWLDBKHEhH9Bagpuqhg0mQUzVEXBGaqtRfFEKBQEAw",
+        "user_id": "@alice:home.example"
+      }
+    },
+    {
+      "canonical": {
+        "hex": "7b22557070657263617365223a22736f727473206265666f7265206c6f776572636173653a2027552720697320307835352c202761272069732030783631222c22616c706861223a6e756c6c2c22656d7074795f6172726179223a5b5d2c22656d7074795f6f626a656374223a7b7d2c22696e74223a34322c226e6573746564223a7b2261223a312c2262223a327d2c22736c617368223a22612f62222c22756e69636f6465223a2268c3a96c6c6f20e2809420e29c8520e6bca2e5ad97222c227a657461223a226c617374206279206e616d652c20666972737420627920696e73657274696f6e227d",
+        "length": 234,
+        "utf8": "{\"Uppercase\":\"sorts before lowercase: 'U' is 0x55, 'a' is 0x61\",\"alpha\":null,\"empty_array\":[],\"empty_object\":{},\"int\":42,\"nested\":{\"a\":1,\"b\":2},\"slash\":\"a/b\",\"unicode\":\"héllo — ✅ 漢字\",\"zeta\":\"last by name, first by insertion\"}"
+      },
+      "input": {
+        "Uppercase": "sorts before lowercase: 'U' is 0x55, 'a' is 0x61",
+        "alpha": null,
+        "empty_array": [],
+        "empty_object": {},
+        "int": 42,
+        "nested": {
+          "a": 1,
+          "b": 2
+        },
+        "slash": "a/b",
+        "unicode": "héllo — ✅ 漢字",
+        "zeta": "last by name, first by insertion"
+      },
+      "key": {
+        "algorithm": "ed25519",
+        "key_id": "ed25519:spec-primary",
+        "public_b64u": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+        "seed_b64u": "ERERERERERERERERERERERERERERERERERERERERERE"
+      },
+      "name": "awkward-values",
+      "note": "Not a real document. Every member is a value whose canonical rendering differs between JSON writers. If your implementation reproduces these bytes, it will reproduce any Telium document.",
+      "signature_b64u": "lxst_hgv_O8ilH59Bv4c1nJeAu0XrdRcGOkGXLDRExAaOFfmUThwYaJb_E64M7QmvGBrkypXTNjoL5WeGLeNDQ",
+      "signed_document": {
+        "Uppercase": "sorts before lowercase: 'U' is 0x55, 'a' is 0x61",
+        "alpha": null,
+        "empty_array": [],
+        "empty_object": {},
+        "int": 42,
+        "key_id": "ed25519:spec-primary",
+        "nested": {
+          "a": 1,
+          "b": 2
+        },
+        "signature": "lxst_hgv_O8ilH59Bv4c1nJeAu0XrdRcGOkGXLDRExAaOFfmUThwYaJb_E64M7QmvGBrkypXTNjoL5WeGLeNDQ",
+        "slash": "a/b",
+        "unicode": "héllo — ✅ 漢字",
+        "zeta": "last by name, first by insertion"
+      }
+    }
+  ],
+  "verification_is_order_sensitive": true
+}

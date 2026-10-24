@@ -1,0 +1,31 @@
+{
+  "server_name": "future.example",
+  "client": "https://future.example",
+  "api": "https://future.example",
+  "fallback": null,
+  "authority": null,
+  "keys": null,
+  "gateway": "wss://future.example/gateway/v1",
+  "protocol_version": "v2",
+  "protocol": {
+    "version": 2,
+    "min_supported": 2,
+    "capabilities": [
+      "migrate.try_again",
+      "some.capability.this.build.has.never.heard.of"
+    ]
+  },
+  "moved_to": null,
+  "sunset": null,
+  "relocation": null,
+  "onboarding": {
+    "recommendations": {
+      "accepting": true,
+      "referral_weight": 1,
+      "suggest_alternatives": true
+    }
+  },
+  "a_field_added_after_this_build_shipped": {
+    "nested": ["and", "unrecognisable"]
+  }
+}

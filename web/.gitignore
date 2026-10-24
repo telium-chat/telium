@@ -1,0 +1,18 @@
+node_modules/
+dist/
+dist-electron/
+# The release-shaped APK and its checksum, staged by the Android workflow from
+# the Gradle output. Build output, not source.
+dist-android/
+electron/node_modules/
+electron/renderer/
+electron/build/
+electron/publisher.json
+electron/vendor/rpc-bridge/bridge.exe
+
+# Playwright's scratch output: traces, screenshots and the error-context files
+# it writes beside a failing browser test. Written by any local run of
+# e2e/smoke.spec.js and uploaded from CI as an artifact
+# rather than committed, so it has no business in the tree.
+test-results/
+playwright-report/

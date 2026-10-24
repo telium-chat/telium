@@ -1,0 +1,749 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#16131f" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="description" content="Telium — a better way to chat is coming." />
+  <title>Telium — Coming soon</title>
+
+  <!-- The same two files and the same two lines as site/src/layouts/Base.astro,
+       copied here for the same reason the tokens below are: this page has no
+       build step, and a tab showing the Telium mark beside a tab showing a
+       blank sheet is the kind of seam a teaser cannot afford. -->
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="alternate icon" href="favicon.ico" />
+
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+        href="fonts/ibm-plex-sans-latin-wght-normal.woff2" />
+
+  <!-- The theme is decided before the first paint, so the page never shows one
+       theme and then swaps to the other. Storage can throw in a private window,
+       and a refused read is not a reason to render nothing. -->
+  <script>
+    (function () {
+      var saved = null;
+      try { saved = localStorage.getItem('telium-theme'); } catch (e) {}
+      var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.dataset.theme =
+        saved === 'light' || saved === 'dark' ? saved : (dark ? 'dark' : 'light');
+    })();
+  </script>
+
+  <style>
+    /* The client's tokens, copied rather than reinvented.
+     *
+     * The ramp, the radii, the duration and the press multiplier below are
+     * lifted from `web/src/palette.css` and `motion.css`, so this page and the
+     * app do not look like two people drew them. There is no build step here:
+     * a token that changes in the client is a line to change here too, which
+     * is cheaper than a bundler for one file.
+     */
+    @font-face {
+      font-family: "IBM Plex Sans Variable";
+      src: url("fonts/ibm-plex-sans-latin-wght-normal.woff2") format("woff2-variations");
+      font-weight: 100 700;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    :root {
+      /* Two of the logo's four gradient stops, which the glows borrow. They are
+         not palette entries — the SVGs below hardcode all four. */
+      --logo-violet: #8b5fe8;
+      --logo-amethyst: #6740c7;
+
+      --telium-amethyst: #4b2e83;
+      --telium-violet: #7a5bc2;
+      --telium-lilac: #b68df0;
+
+      --radius-row: 10px;
+      --radius-card: 16px;
+
+      --ease: cubic-bezier(0.32, 0.72, 0, 1);
+      --dur-2: 140ms;
+
+      --arrival-duration: 1.35s;
+      --outer-turn: 8s;
+      --inner-turn: 10s;
+      --orbit-center-x: 49.4140625%;
+    }
+
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --background: oklch(95.2% 0.014 298);
+      --surface: oklch(99.2% 0.004 298);
+      --muted: oklch(50% 0.022 296);
+      --foreground: oklch(24% 0.035 295);
+      --accent: var(--telium-amethyst);
+      --accent-solid: var(--telium-amethyst);
+      --accent-solid-foreground: #ffffff;
+      --focus: var(--telium-violet);
+      --press: 0.955;
+      /* The two page glows. Purple carries on a dark page and turns to mud on a
+         pale one, so the light theme spends much less of it. */
+      --glow-near: color-mix(in oklab, var(--telium-amethyst) 9%, transparent);
+      --glow-far: color-mix(in oklab, var(--telium-violet) 7%, transparent);
+    }
+
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --background: oklch(19.5% 0.024 296);
+      --surface: oklch(24.5% 0.028 296);
+      --muted: oklch(70% 0.022 298);
+      --foreground: oklch(94.5% 0.012 300);
+      --accent: var(--telium-lilac);
+      --accent-solid: oklch(56% 0.165 296);
+      --accent-solid-foreground: #ffffff;
+      --focus: var(--telium-lilac);
+      --press: 1.115;
+      --glow-near: color-mix(in oklab, var(--logo-amethyst) 20%, transparent);
+      --glow-far: color-mix(in oklab, var(--logo-violet) 9%, transparent);
+    }
+
+    /* Nothing slides, sinks or scales under the pointer. A control says it was
+       pressed by going a step brighter or darker in place, and `--press` points
+       the other way in each theme so it reads the same on a pale page as on a
+       dark one. */
+    button:not(:disabled):active,
+    a.btn:active,
+    [role="button"]:not([aria-disabled="true"]):active {
+      filter: brightness(var(--press));
+    }
+
+    /* One focus ring for the page, inset so it follows the control's own
+       corner radius instead of drawing a second rectangle around it. */
+    :where(a, button, summary, [role="button"]):focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: -2px;
+    }
+
+    /* A link is a run of text with no box to draw inside of. */
+    :where(a:not(.btn)):focus-visible { outline-offset: 2px; }
+
+    * { box-sizing: border-box; }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--background);
+    }
+
+    body {
+      min-height: 100svh;
+      color: var(--foreground);
+      font-family: "IBM Plex Sans Variable", ui-sans-serif, system-ui, -apple-system,
+        BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body::before,
+    body::after {
+      content: "";
+      position: fixed;
+      pointer-events: none;
+      border-radius: 999px;
+      opacity: 0.9;
+    }
+
+    body::before {
+      width: min(62vw, 760px);
+      aspect-ratio: 1;
+      left: 50%;
+      top: 38%;
+      transform: translate(-50%, -50%);
+      background: radial-gradient(circle, var(--glow-near) 0%, transparent 70%);
+    }
+
+    body::after {
+      width: 44vw;
+      max-width: 620px;
+      aspect-ratio: 1;
+      right: -16vw;
+      bottom: -30vw;
+      background: radial-gradient(circle, var(--glow-far), transparent 68%);
+    }
+
+    .page {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      height: 100svh;
+      min-height: 100%;
+      display: grid;
+      grid-template-rows: 1fr auto;
+      padding:
+        max(24px, env(safe-area-inset-top))
+        clamp(22px, 5vw, 72px)
+        max(22px, env(safe-area-inset-bottom));
+      isolation: isolate;
+    }
+
+    main {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 0.95fr) minmax(320px, 0.8fr);
+      align-items: center;
+      gap: clamp(28px, 6vw, 96px);
+      width: min(1180px, 100%);
+      margin: 0 auto;
+    }
+
+    .copy {
+      max-width: 650px;
+      animation: copy-in 900ms 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    h1 {
+      max-width: 780px;
+      margin: 0;
+      font-size: clamp(3rem, 6.4vw, 6.35rem);
+      line-height: 0.94;
+      letter-spacing: -0.055em;
+      font-weight: 700;
+      text-wrap: balance;
+    }
+
+    h1 .gradient-text {
+      color: transparent;
+      background: linear-gradient(120deg, var(--foreground) 10%, var(--accent) 58%, var(--telium-violet));
+      background-clip: text;
+      -webkit-background-clip: text;
+      font-weight: 600;
+    }
+
+    .lede {
+      max-width: 570px;
+      margin: clamp(20px, 3vw, 30px) 0 0;
+      color: var(--muted);
+      font-size: clamp(1rem, 1.55vw, 1.18rem);
+      line-height: 1.62;
+      letter-spacing: -0.014em;
+    }
+
+    .lede strong {
+      color: var(--foreground);
+      font-weight: 600;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 14px;
+      margin-top: clamp(26px, 4vw, 38px);
+    }
+
+    /* 40px tall, 16px of side padding, a 10px corner, 13px text at weight 500,
+       a flat fill, no border, no ring and no shadow. Copying the client's
+       geometry while keeping a hover lift and a glow under it would be the
+       worst of both, so neither survives. */
+    .btn,
+    .icon-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      border-radius: var(--radius-row);
+      cursor: pointer;
+      user-select: none;
+      transition:
+        background-color var(--dur-2) var(--ease),
+        color var(--dur-2) var(--ease),
+        filter var(--dur-2) var(--ease);
+    }
+
+    /* The client's primary button, to the pixel. */
+    .btn {
+      gap: 8px;
+      height: 40px;
+      padding-inline: 16px;
+      background: var(--accent-solid);
+      color: var(--accent-solid-foreground);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .btn:hover { filter: brightness(1.1); }
+
+    .btn svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+      flex: 0 0 auto;
+    }
+
+    /* A square ghost control, the shape the client gives every toolbar icon:
+       transparent at rest, a wash of the foreground on hover. */
+    .icon-btn {
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      background: transparent;
+      color: var(--muted);
+    }
+
+    .icon-btn:hover {
+      background: color-mix(in oklab, var(--foreground) 9%, transparent);
+      color: var(--foreground);
+    }
+
+    .icon-btn svg {
+      width: 18px;
+      height: 18px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.75;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .theme-toggle {
+      position: absolute;
+      z-index: 2;
+      top: max(20px, env(safe-area-inset-top));
+      right: clamp(18px, 5vw, 72px);
+    }
+
+    :root[data-theme="dark"] .icon-moon,
+    :root[data-theme="light"] .icon-sun { display: none; }
+
+    .cta-note {
+      display: grid;
+      gap: 2px;
+      color: var(--muted);
+      font-size: 12.5px;
+      line-height: 1.35;
+    }
+
+    .cta-note .irony {
+      color: color-mix(in oklab, var(--muted) 68%, transparent);
+      font-size: 11.5px;
+    }
+
+    .visual {
+      display: grid;
+      place-items: center;
+      min-width: 0;
+      perspective: 900px;
+      perspective-origin: var(--orbit-center-x) 50%;
+      transform-style: preserve-3d;
+      animation: visual-in 1s 90ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    .halo {
+      position: relative;
+      width: min(39vw, 470px);
+      min-width: 320px;
+      aspect-ratio: 1;
+      display: grid;
+      place-items: center;
+      /* A card, told apart from the page by its fill rather than by a border
+         and a 100px shadow. That is how every surface in the client works, and
+         it is the reason the client reads as flat without reading as empty. */
+      border-radius: var(--radius-card);
+      background: var(--surface);
+      overflow: hidden;
+    }
+
+    .halo::before {
+      content: "";
+      position: absolute;
+      inset: 18%;
+      border-radius: 50%;
+      background: radial-gradient(circle, color-mix(in oklab, var(--logo-violet) 20%, transparent), transparent 68%);
+      filter: blur(22px);
+      animation: breathe 4.8s ease-in-out infinite;
+    }
+
+    .logo {
+      position: relative;
+      width: 72%;
+      aspect-ratio: 1;
+      transform-style: preserve-3d;
+    }
+
+    .rotor,
+    .piece {
+      position: absolute;
+      inset: 0;
+      transform-style: preserve-3d;
+    }
+
+    .rotor {
+      transform-origin: var(--orbit-center-x) 50%;
+      will-change: transform;
+    }
+
+    .piece {
+      opacity: 0;
+      transform-origin: var(--orbit-center-x) 50%;
+      will-change: transform, opacity, filter;
+      backface-visibility: hidden;
+      --start-z: 145px;
+      --start-blur: 1.6px;
+      --start-opacity: 0.72;
+    }
+
+    .piece svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+    }
+
+    .running .outer-rotor { animation: outer-spin var(--outer-turn) linear infinite; }
+    .running .inner-rotor { animation: inner-spin var(--inner-turn) linear infinite; }
+
+    .running .piece {
+      animation: piece-depth-arrival var(--arrival-duration) cubic-bezier(0.18, 0.72, 0.22, 1) forwards;
+      animation-delay: var(--delay);
+    }
+
+    .footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      color: var(--muted);
+      font-size: 11.5px;
+      letter-spacing: 0.02em;
+    }
+
+    @keyframes piece-depth-arrival {
+      from {
+        opacity: var(--start-opacity);
+        transform: translate3d(0, 0, var(--start-z));
+        filter: blur(var(--start-blur));
+      }
+      to {
+        opacity: 1;
+        transform: translate3d(0, 0, 0);
+        filter: blur(0);
+      }
+    }
+
+    /* Both rings turn under `linear` timing, and they have to: easing an
+     * infinite 0→360 loop makes it hitch once per revolution, where the
+     * ease-out tail arrives at 360deg near zero speed and the next iteration's
+     * ease-in head leaves 0deg the same way. No curve fixes that, because the
+     * defect is the seam between iterations rather than the curve.
+     *
+     * So the timing stays linear and the angle does the breathing:
+     *
+     *     theta(t) = 360t + A sin(2 pi t),   A = 6deg
+     *
+     * Its derivative, 360 + 2 pi A cos(2 pi t), is the same at t=0 and t=1, so
+     * the loop closes at one speed and there is no seam to see. The ring runs
+     * about 10% fast through half its turn and 10% slow through the other half,
+     * and never stops. The keyframes are that function sampled every 10%; for a
+     * dead-constant turn, replace each block with `from`/`to` at 0 and +/-360deg.
+     */
+    @keyframes outer-spin {
+      0% { transform: rotateZ(0deg); }
+      10% { transform: rotateZ(39.527deg); }
+      20% { transform: rotateZ(77.706deg); }
+      30% { transform: rotateZ(113.706deg); }
+      40% { transform: rotateZ(147.527deg); }
+      50% { transform: rotateZ(180deg); }
+      60% { transform: rotateZ(212.473deg); }
+      70% { transform: rotateZ(246.294deg); }
+      80% { transform: rotateZ(282.294deg); }
+      90% { transform: rotateZ(320.473deg); }
+      100% { transform: rotateZ(360deg); }
+    }
+
+    @keyframes inner-spin {
+      0% { transform: rotateZ(0deg); }
+      10% { transform: rotateZ(-39.527deg); }
+      20% { transform: rotateZ(-77.706deg); }
+      30% { transform: rotateZ(-113.706deg); }
+      40% { transform: rotateZ(-147.527deg); }
+      50% { transform: rotateZ(-180deg); }
+      60% { transform: rotateZ(-212.473deg); }
+      70% { transform: rotateZ(-246.294deg); }
+      80% { transform: rotateZ(-282.294deg); }
+      90% { transform: rotateZ(-320.473deg); }
+      100% { transform: rotateZ(-360deg); }
+    }
+
+    @keyframes breathe {
+      0%, 100% { opacity: 0.7; transform: scale(0.94); }
+      50% { opacity: 1; transform: scale(1.08); }
+    }
+
+    @keyframes copy-in {
+      from { opacity: 0; transform: translateY(18px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes visual-in {
+      from { opacity: 0; transform: translateY(14px) scale(0.97); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    @media (max-width: 820px) {
+      .page {
+        padding-left: clamp(20px, 6vw, 38px);
+        padding-right: clamp(20px, 6vw, 38px);
+      }
+
+      main {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto;
+        justify-items: center;
+        align-content: center;
+        gap: clamp(20px, 4vh, 40px);
+        text-align: center;
+      }
+
+      .copy {
+        order: 2;
+        display: grid;
+        justify-items: center;
+      }
+
+      .visual { order: 1; }
+
+      .halo {
+        width: min(43vh, 66vw, 340px);
+        min-width: 0;
+      }
+
+      h1 {
+        max-width: 620px;
+        font-size: clamp(2.7rem, 11vw, 4.6rem);
+      }
+
+      .lede {
+        max-width: 530px;
+        margin-top: 16px;
+        font-size: clamp(0.94rem, 3.2vw, 1.05rem);
+      }
+
+      .actions {
+        justify-content: center;
+        margin-top: 22px;
+      }
+
+      .cta-note { text-align: left; }
+    }
+
+    @media (max-width: 520px) {
+      .page {
+        padding-top: max(18px, env(safe-area-inset-top));
+        padding-bottom: max(16px, env(safe-area-inset-bottom));
+      }
+
+      main { gap: clamp(16px, 2.8vh, 28px); }
+
+      .halo {
+        width: min(35vh, 64vw, 270px);
+      }
+
+      h1 { font-size: clamp(2.35rem, 10.8vw, 3.35rem); }
+      .lede { line-height: 1.48; }
+
+      .actions {
+        display: grid;
+        justify-items: center;
+      }
+
+      .cta-note { text-align: center; }
+    }
+
+    @media (max-height: 700px) and (min-width: 821px) {
+      .page {
+        padding-top: 18px;
+        padding-bottom: 18px;
+      }
+
+      .halo {
+        width: min(54vh, 390px);
+        min-width: 260px;
+      }
+
+      h1 { font-size: clamp(2.9rem, 5.6vw, 5.1rem); }
+      .lede { margin-top: 18px; }
+      .actions { margin-top: 24px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+      }
+
+      .piece {
+        opacity: 1;
+        transform: none;
+        filter: none;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="page">
+    <button class="icon-btn theme-toggle" type="button" data-theme-toggle>
+      <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+      </svg>
+      <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+      </svg>
+    </button>
+
+    <main>
+      <section class="copy" aria-labelledby="headline">
+        <h1 id="headline">A better way to chat <span class="gradient-text">is coming.</span></h1>
+        <p class="lede">
+          <strong>Familiar chat, without one company owning the whole network.</strong> Simple on the surface. Interesting underneath.
+        </p>
+
+        <div class="actions">
+          <a class="btn" href="https://discord.gg/hcc4ySYyRc" target="_blank" rel="noreferrer">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M19.54 5.34A16.87 16.87 0 0 0 15.34 4l-.52 1.06a15.74 15.74 0 0 0-5.63 0L8.66 4a17.11 17.11 0 0 0-4.21 1.35C1.78 9.3 1.05 13.16 1.42 16.97a17.04 17.04 0 0 0 5.16 2.6l1.24-1.69a10.9 10.9 0 0 1-1.95-.94l.48-.37c3.76 1.74 7.83 1.74 11.55 0l.49.37c-.62.36-1.27.67-1.96.94l1.24 1.69a17 17 0 0 0 5.16-2.6c.44-4.42-.75-8.24-3.29-11.63ZM8.52 14.62c-1.13 0-2.06-1.04-2.06-2.31 0-1.28.91-2.32 2.06-2.32 1.16 0 2.08 1.05 2.06 2.32 0 1.27-.91 2.31-2.06 2.31Zm6.98 0c-1.13 0-2.06-1.04-2.06-2.31 0-1.28.91-2.32 2.06-2.32 1.16 0 2.08 1.05 2.06 2.32 0 1.27-.9 2.31-2.06 2.31Z" />
+            </svg>
+            Join the Discord
+          </a>
+          <span class="cta-note">
+            <span>Follow development and get in early.</span>
+            <span class="irony">Yes, we know the Discord link is ironic.</span>
+          </span>
+        </div>
+      </section>
+
+      <section class="visual" aria-label="Animated Telium logo">
+        <div class="halo">
+          <div class="logo running" role="img" aria-label="Telium logo assembling and rotating">
+            <div class="rotor outer-rotor">
+              <div class="piece" style="--delay: 0ms">
+                <svg viewBox="0 0 512 512" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="teliumGradientOuterA" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse">
+                      <stop offset="0" stop-color="#C9AEFF" />
+                      <stop offset="0.36" stop-color="#8B5FE8" />
+                      <stop offset="0.72" stop-color="#6740C7" />
+                      <stop offset="1" stop-color="#3F218D" />
+                    </linearGradient>
+                  </defs>
+                  <g transform="translate(-3 0)">
+                    <path d="M 83.099 209.671 A 179 179 0 0 1 302.329 83.099" stroke="url(#teliumGradientOuterA)" stroke-width="48" fill="none" stroke-linecap="round" />
+                  </g>
+                </svg>
+              </div>
+
+              <div class="piece" style="--delay: 80ms">
+                <svg viewBox="0 0 512 512" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="teliumGradientOuterB" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse">
+                      <stop offset="0" stop-color="#C9AEFF" />
+                      <stop offset="0.36" stop-color="#8B5FE8" />
+                      <stop offset="0.72" stop-color="#6740C7" />
+                      <stop offset="1" stop-color="#3F218D" />
+                    </linearGradient>
+                  </defs>
+                  <g transform="translate(-3 0)">
+                    <path d="M 382.572 129.428 A 179 179 0 0 1 424.205 317.222" stroke="url(#teliumGradientOuterB)" stroke-width="48" fill="none" stroke-linecap="round" />
+                  </g>
+                </svg>
+              </div>
+
+              <div class="piece" style="--delay: 160ms">
+                <svg viewBox="0 0 512 512" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="teliumGradientOuterC" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse">
+                      <stop offset="0" stop-color="#C9AEFF" />
+                      <stop offset="0.36" stop-color="#8B5FE8" />
+                      <stop offset="0.72" stop-color="#6740C7" />
+                      <stop offset="1" stop-color="#3F218D" />
+                    </linearGradient>
+                  </defs>
+                  <g transform="translate(-3 0)">
+                    <path d="M 389.023 375.774 A 179 179 0 0 1 85.761 311.314" stroke="url(#teliumGradientOuterC)" stroke-width="48" fill="none" stroke-linecap="round" />
+                  </g>
+                </svg>
+              </div>
+            </div>
+
+            <div class="rotor inner-rotor">
+              <div class="piece" style="--delay: 40ms; --start-z: 210px; --start-blur: 1.9px; --start-opacity: 0.76">
+                <svg viewBox="0 0 512 512" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="teliumGradientInnerA" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse">
+                      <stop offset="0" stop-color="#C9AEFF" />
+                      <stop offset="0.36" stop-color="#8B5FE8" />
+                      <stop offset="0.72" stop-color="#6740C7" />
+                      <stop offset="1" stop-color="#3F218D" />
+                    </linearGradient>
+                  </defs>
+                  <g transform="translate(-3 0)">
+                    <path d="M 144.494 224.026 A 116 116 0 0 1 264.092 140.283" stroke="url(#teliumGradientInnerA)" stroke-width="24" fill="none" stroke-linecap="round" />
+                  </g>
+                </svg>
+              </div>
+
+              <div class="piece" style="--delay: 120ms; --start-z: 210px; --start-blur: 1.9px; --start-opacity: 0.76">
+                <svg viewBox="0 0 512 512" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="teliumGradientInnerB" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse">
+                      <stop offset="0" stop-color="#C9AEFF" />
+                      <stop offset="0.36" stop-color="#8B5FE8" />
+                      <stop offset="0.72" stop-color="#6740C7" />
+                      <stop offset="1" stop-color="#3F218D" />
+                    </linearGradient>
+                  </defs>
+                  <g transform="translate(-3 0)">
+                    <path d="M 351.022 322.535 A 116 116 0 0 1 268.125 371.365" stroke="url(#teliumGradientInnerB)" stroke-width="24" fill="none" stroke-linecap="round" />
+                  </g>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer" aria-label="Site footer">
+      <span>© 2026 Telium</span>
+    </footer>
+  </div>
+
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var button = document.querySelector('[data-theme-toggle]');
+      var chrome = document.querySelector('meta[name="theme-color"]');
+      var GROUND = { dark: '#16131f', light: '#f0edf8' };
+
+      function label() {
+        var next = root.dataset.theme === 'dark' ? 'light' : 'dark';
+        button.setAttribute('aria-label', 'Switch to the ' + next + ' theme');
+        chrome.setAttribute('content', GROUND[root.dataset.theme] || GROUND.dark);
+      }
+
+      button.addEventListener('click', function () {
+        root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+        try { localStorage.setItem('telium-theme', root.dataset.theme); } catch (e) {}
+        label();
+      });
+
+      label();
+    })();
+  </script>
+</body>
+</html>

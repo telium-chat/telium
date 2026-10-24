@@ -1,0 +1,10 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Native starting window. The WebView paints the real Telium theme, but
+         Android owns the frames before that first paint. Keep them on-brand so
+         cold start does not flash the generated Material default. -->
+    <style name="Theme.telium_desktop" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/telium_launch_background</item>
+        <item name="android:colorAccent">@color/telium_accent</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>

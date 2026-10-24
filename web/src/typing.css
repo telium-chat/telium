@@ -1,0 +1,172 @@
+@keyframes typing-pulse {
+  0% {
+    opacity: var(--typing-dim-opacity);
+    animation-timing-function: var(--ease);
+  }
+  25% {
+    opacity: 1;
+    animation-timing-function: var(--ease);
+  }
+  50%,
+  100% {
+    opacity: var(--typing-dim-opacity);
+  }
+}
+
+:where(.typing-dot, .presence-typing-dot) {
+  --typing-dim-opacity: 0.35;
+}
+
+:root {
+  --typing-strip: 22px;
+}
+
+.typing-dock {
+  position: relative;
+  z-index: 1;
+  height: 0;
+  flex: none;
+}
+
+.typing-float {
+  position: absolute;
+  bottom: 0;
+  inset-inline-start: calc(1rem + 6px + 8px);
+  inset-inline-end: 1rem;
+  height: var(--typing-strip);
+  pointer-events: none;
+}
+
+.typing-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  white-space: nowrap;
+}
+
+@keyframes typing-line-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes typing-line-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.typing-line {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.4rem;
+  animation: typing-line-in 150ms var(--ease) both;
+}
+
+.typing-line.is-leaving {
+  animation: typing-line-out 120ms var(--ease) both;
+}
+
+.typing-dots {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+.typing-dot {
+  display: block;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: typing-pulse 1.6s linear infinite;
+}
+.typing-dot:nth-child(2) { animation-delay: 200ms; }
+.typing-dot:nth-child(3) { animation-delay: 400ms; }
+
+.status-typing {
+  display: inline-flex;
+  vertical-align: middle;
+  gap: 3px;
+  margin-inline-end: 0.35rem;
+  transform: translateY(-1px);
+}
+.status-typing .typing-dot {
+  width: 3px;
+  height: 3px;
+}
+
+.typing-row .typing-text {
+  min-width: 0;
+  overflow: hidden;
+  animation: none;
+  text-overflow: ellipsis;
+  will-change: auto;
+}
+
+.presence {
+  transition: width var(--dur-4) var(--ease);
+}
+
+.presence.is-typing {
+  color: var(--muted);
+  width: calc(var(--presence-plate) * 2.25);
+}
+
+.presence-typing {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--presence-plate) * 0.16);
+
+  overflow: hidden;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0;
+
+  transition: opacity var(--dur-1) var(--ease) var(--dur-3);
+}
+
+.presence.is-typing .presence-typing {
+  opacity: 1;
+  transition-delay: 0s;
+}
+
+.presence-typing-dot {
+  flex: none;
+  width: calc(var(--presence-plate) * 0.27);
+  height: calc(var(--presence-plate) * 0.27);
+  border-radius: 999px;
+
+  background: var(--presence-ring, var(--background));
+  opacity: 0;
+  transition: opacity var(--dur-2) var(--ease);
+}
+
+.presence.is-typing .presence-typing-dot {
+  opacity: var(--typing-dim-opacity);
+  animation: typing-pulse 1.6s linear 240ms infinite;
+}
+.presence.is-typing .presence-typing-dot:nth-child(2) {
+  animation-delay: 440ms;
+  transition-delay: 30ms;
+}
+.presence.is-typing .presence-typing-dot:nth-child(3) {
+  animation-delay: 640ms;
+  transition-delay: 60ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .typing-line,
+  .typing-dot,
+  .presence.is-typing .presence-typing-dot {
+    animation: none;
+  }
+  .typing-dot,
+  .presence.is-typing .presence-typing-dot {
+    opacity: 0.72;
+  }
+}

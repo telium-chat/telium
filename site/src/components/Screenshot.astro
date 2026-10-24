@@ -1,0 +1,99 @@
+---
+---
+
+<section class="page pb-10 sm:pb-16">
+  <div class="reveal mb-5 px-1">
+    <p class="eyebrow">The actual client</p>
+    <p class="mt-2 max-w-[48ch] text-[14px] leading-relaxed text-muted">
+      Telium with a community open: channels on the left, conversation in the middle, and members on the right.
+    </p>
+  </div>
+
+  <figure class="reveal screenshot-stage">
+    <div class="screenshot-frame relative overflow-hidden bg-surface">
+      <img
+        src="/screenshots/client-dark.webp"
+        srcset="/screenshots/client-dark.webp 1x, /screenshots/client-dark@2x.webp 2x"
+        width="1440"
+        height="900"
+        alt="The Telium client: a community rail on the left, a channel list, a conversation in #general, and a member list on the right."
+        class="shot shot-dark block w-full"
+        decoding="async"
+        fetchpriority="high"
+      />
+      <img
+        src="/screenshots/client-light.webp"
+        srcset="/screenshots/client-light.webp 1x, /screenshots/client-light@2x.webp 2x"
+        width="1440"
+        height="900"
+        alt=""
+        aria-hidden="true"
+        class="shot shot-light block w-full"
+        decoding="async"
+      />
+    </div>
+
+    <div class="floating-chip floating-chip-left" aria-hidden="true">
+      <span class="chip-dot"></span>
+      Channels & voice rooms
+    </div>
+    <div class="floating-chip floating-chip-right" aria-hidden="true">
+      <span class="chip-dot"></span>
+      Members & presence
+    </div>
+  </figure>
+</section>
+
+<style>
+  .shot-light { display: none; }
+  :root[data-theme='light'] .shot-dark { display: none; }
+  :root[data-theme='light'] .shot-light { display: block; }
+
+  .screenshot-stage {
+    position: relative;
+    isolation: isolate;
+  }
+
+  /* The screenshot is the one thing on this page that genuinely is a window, and
+     it still gets no shadow. It was carrying a 90px drop shadow over a blurred
+     34px gradient slab, which is a lot of lighting to explain a rectangle. The
+     image's own dark chrome is the contrast against the page; the panel radius
+     and a padded fill are the frame. */
+  .screenshot-frame {
+    border-radius: var(--radius-card);
+    padding: 6px;
+    background: var(--color-surface);
+  }
+
+  .screenshot-frame img {
+    border-radius: calc(var(--radius-card) - 6px);
+  }
+
+  /* A chip sits on the frame's fill, so it takes the step above it rather than
+     an outline and a backdrop blur. */
+  .floating-chip {
+    position: absolute;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: 999px;
+    background: var(--color-surface-secondary);
+    padding: 0.5rem 0.75rem;
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  .floating-chip-left { left: -1rem; top: 27%; }
+  .floating-chip-right { right: -1rem; top: 14%; }
+
+  .chip-dot {
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 999px;
+    background: var(--color-accent);
+  }
+
+  @media (max-width: 760px) {
+    .floating-chip { display: none; }
+  }
+</style>

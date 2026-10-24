@@ -1,0 +1,64 @@
+-- Second factors that survive a stolen database (docs/secrets.md).
+--
+-- `accounts.mfa_secret` held the base32 TOTP shared secret in the clear. That
+-- made a copy of this file a copy of every enrolled account's second factor:
+-- an attacker with the database could generate valid codes indefinitely, for
+-- everybody, and the only remedy was to tell every account to re-enrol. It was
+-- the single worst row in the inventory that had a fix, and this is the fix.
+--
+-- Two columns, and one of them is only here because deploys fail.
+--
+-- # Why a second column instead of re-using `mfa_secret`
+--
+-- Sealing in place -- writing ciphertext back into `mfa_secret` -- is one
+-- column and one UPDATE, and it is a trap. The moment it runs, the previous
+-- build of this binary can no longer read that column: it would hand the
+-- ciphertext to `verify_totp`, which would compute codes from it that match
+-- nothing, and every account with MFA enabled would be locked out with no
+-- error that says why. A rollback is the one thing a deploy must always be
+-- able to do, and a schema that makes rollback into a lockout is a schema that
+-- will be rolled forward through an outage instead.
+--
+-- With `mfa_sealed` separate, the previous build reads `mfa_secret` and finds
+-- NULL, which it already handles: `verify_login_mfa` refuses the sign-in with
+-- "MFA enabled without a secret" rather than silently failing codes, and
+-- `telium-server mfa unseal` puts the cleartext back for exactly this case.
+-- That is not free -- a rollback still needs a deliberate command -- but it is
+-- a command with a name, in a runbook, rather than a silent lockout somebody
+-- has to diagnose at 3am.
+--
+-- The backfill is not here, and cannot be: SQL cannot encrypt. The sealing
+-- pass runs in Rust at startup (`mfa::start`), one UPDATE per enrolled
+-- account, and it is idempotent -- a row with a sealed value is left alone --
+-- so it costs nothing on every boot after the first.
+ALTER TABLE accounts ADD COLUMN mfa_sealed TEXT;
+
+-- Whether this account has to enrol a second factor again before it is
+-- protected.
+--
+-- Set by `telium-server mfa reset-all`, which is the server's answer to the
+-- half of "MFA secrets cannot be rotated server-side" that is not inherent. A
+-- TOTP shared secret genuinely cannot change without the account holder's
+-- authenticator changing with it -- that much is the protocol, and no server
+-- can fix it. What a server *can* own is the forced re-enrolment: invalidate
+-- every enrolment at once, tell everybody affected, and have the client say so
+-- at the next sign-in rather than letting an account discover that its second
+-- factor is gone by finding it is not asked for one.
+--
+-- A column and not an inference. "Has no secret and is not enabled" is also
+-- true of every account that never enrolled, and the sentence the client needs
+-- to show is completely different for the two: one is an offer and the other
+-- is "the protection you had was withdrawn, here is why". Cleared when the
+-- account enrols again, and never set for an account that had nothing to lose.
+ALTER TABLE accounts ADD COLUMN mfa_reenrol_required INTEGER NOT NULL DEFAULT 0;
+
+-- The read the login path does not want to pay for.
+--
+-- Nothing queries these columns by value; the index is on the flag, so the
+-- startup sealing pass and `mfa reset-all` can find the handful of enrolled
+-- accounts on a server with a hundred thousand rows without a table scan.
+-- Partial, because on every server the overwhelming majority of accounts have
+-- no second factor at all and an index over them would be all of the cost and
+-- none of the benefit.
+CREATE INDEX accounts_mfa_enrolled ON accounts (user_id)
+    WHERE mfa_secret IS NOT NULL OR mfa_sealed IS NOT NULL;

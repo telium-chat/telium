@@ -1,0 +1,12 @@
+{
+  "op": "IDENTIFY",
+  "d": {
+    "token": "<token>",
+    "intents": ["GUILD_PRESENCES"],
+    "protocol": {
+      "version": 1,
+      "min_supported": 1,
+      "capabilities": ["sync.sealed"]
+    }
+  }
+}

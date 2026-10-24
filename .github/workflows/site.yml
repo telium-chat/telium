@@ -1,0 +1,145 @@
+name: Site
+
+on:
+  push:
+    branches: [main]
+    # The site is one directory of a monorepo whose other two are a Rust server
+    # and a web client. A commit that touches neither the site nor this file
+    # would produce an identical build, so it does not run one.
+    paths:
+      - 'site/**'
+      - '.github/workflows/site.yml'
+  pull_request:
+    paths:
+      - 'site/**'
+      - '.github/workflows/site.yml'
+  # Dispatched by probe.yml after it commits fresh directory data, and available
+  # by hand when a build or a deploy needs repeating.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never two of these at once for the same thing, but do drop a queued one when
+# a newer commit arrives — the older build is already obsolete.
+#
+# Keyed per pull request rather than globally. The group was `site`, one name
+# for every run of this workflow, which meant the deploy this serialises was
+# not the only thing it serialised: a second pull request touching `site/`
+# cancelled the first one's check, and a push to main cancelled both. A
+# cancelled check on a pull request that did nothing wrong reads as a failure
+# nobody can explain. Pushes to main still share one group and so still queue
+# behind each other, which is the part the deploy actually needs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      # Every `uses:` below names a commit, not a tag. A tag is a mutable
+      # pointer that the action's owner -- or anyone who takes their account
+      # -- can move onto new code, and this repository's runs would then
+      # execute it without a diff, a review, or a notification. The trailing
+      # comment is the release that commit was, so the pin is still readable;
+      # `docs/supply-chain.md` explains how to move one forward.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # The registry and privacy checks below are plain Node scripts, so Node
+      # stays; bun is only here as the package manager and script runner.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          check-latest: true
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.0
+
+      # setup-bun caches only the bun executable, so the package cache that
+      # setup-node's `cache: npm` used to manage has to be its own step.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('site/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - run: bun install --frozen-lockfile
+
+      # A malformed entry must never reach the built table. The same check runs
+      # on the pull request; running it again here covers a direct push to main.
+      - name: Validate the registry
+        run: npm run validate
+
+      - name: Test account-home recommendation rules and signatures
+        run: npm run test:recommendations
+
+      # This intentionally succeeds with zero eligible servers. Registry opt-in
+      # and the live homeserver signal are both required, so deploying the
+      # machinery cannot silently enroll existing directory operators.
+      - name: Check recommendation eligibility
+        run: npm run recommendations:check
+
+      # Publishing is independently gated until the project has created and
+      # pinned a dedicated Ed25519 key. Pull requests never receive the private
+      # seed. The public repository variable must match the signing seed before
+      # the feed is written, preventing a deploy clients could never verify.
+      - name: Build signed account-home recommendation feed
+        if: github.event_name != 'pull_request' && vars.RECOMMENDATIONS_ENABLED == 'true'
+        env:
+          TELIUM_RECOMMENDATION_SIGNING_KEY: ${{ secrets.TELIUM_RECOMMENDATION_SIGNING_KEY }}
+          TELIUM_RECOMMENDATION_PUBLIC_KEY: ${{ vars.TELIUM_RECOMMENDATION_PUBLIC_KEY }}
+          TELIUM_RECOMMENDATION_KEY_ID: ${{ vars.TELIUM_RECOMMENDATION_KEY_ID }}
+        run: npm run recommendations:write
+
+      - name: Build
+        run: bun run build
+
+      # The footer claims no analytics, no third-party fonts and no trackers.
+      # This is that claim as a test: anything in the output that would make the
+      # browser reach a host we do not control fails the build.
+      - name: Check for third-party requests
+        run: npm run check
+
+      # Only a run that will actually deploy uploads anything.
+      #
+      # This said `github.event_name != 'pull_request'`, which was the right
+      # idea aimed at the wrong half of the condition: the deploy below is also
+      # gated on `PAGES_ENABLED`, and that variable is not set, so every push to
+      # main uploaded a site nothing would ever publish. Ninety-seven of them
+      # accumulated, and the upload step is the one that finds out the account
+      # is out of artifact storage -- so a build that was green in every way
+      # that matters went red on the last step, for a file no one wanted. The
+      # condition is the deploy job's own, so the upload cannot outlive the
+      # reason for it again.
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
+        if: vars.PAGES_ENABLED == 'true' && github.event_name != 'pull_request'
+        with:
+          path: site/dist
+
+  # Off until GitHub Pages is turned on for this repository. `deploy-pages`
+  # fails rather than skips when it is not, so the gate is a repository
+  # variable instead of a comment. To publish:
+  #
+  #   Settings → Pages → Source: GitHub Actions
+  #   gh variable set PAGES_ENABLED --body true
+  #
+  # `astro.config.mjs` hardcodes `site: https://telium.chat`, so this expects a
+  # custom domain. Serving from github.io instead needs a `base` there too.
+  publish:
+    needs: build
+    if: vars.PAGES_ENABLED == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5

@@ -1,0 +1,126 @@
+# The staging server's configuration. Installed at /opt/telium/telium.toml and
+# mounted read-only into the container.
+#
+# No secrets live here. The federation signing key and the Web Push key are
+# minted into the data volume on first start and the backup key onto the backup
+# mount beside the archives; S3 credentials, if a remote backup is ever turned
+# on, come from the environment.
+
+# Identity, not hostname -- this is the half of a user id after the colon, and
+# it is baked into every id, guild alias and signature this server ever mints.
+# Changing it later is a migration, not an edit.
+server_name = "staging.telium.chat"
+
+# Where clients actually reach us. Published at /.well-known/telium/server, so
+# it has to be the public URL rather than the container's own idea of itself.
+public_base_url = "https://staging.telium.chat"
+
+# Every interface inside the container's namespace, which is not the same thing
+# as every interface on the box: compose publishes this to 127.0.0.1 only, and
+# the tunnel is what makes it reachable.
+bind = "0.0.0.0:8448"
+
+# Every path below is absolute and names one of the two mounts: /var/lib/telium
+# is the data volume, /var/backups/telium is the host directory the backups go
+# to. The defaults are all relative to the working directory, which in a
+# container is a path that does not survive a redeploy.
+database_url = "sqlite:///var/lib/telium/telium.db?mode=rwc"
+media_dir = "/var/lib/telium/media"
+
+# The client the server serves itself, built into the image beside the binary.
+# Mounted as a fallback behind the API routes, so it cannot shadow /_telium.
+[web]
+dir = "/srv/telium/web"
+
+[archive]
+dir = "/var/lib/telium/cold"
+
+[backup]
+# Not in the data volume, and that is the only interesting thing about this
+# line. It used to be /var/lib/telium/backups, with a comment saying that the
+# volume was therefore the whole backup story -- which was accurate, and read
+# by nobody on 2026-09-18, when the deployment was re-provisioned and the
+# volume was created empty. /var/backups/telium is a bind mount of a host
+# directory (compose.yml), so `docker volume rm`, a `compose down -v` and a
+# re-provision all leave the archives standing.
+#
+# It does not survive the disk failing or the box going away. For that there is
+# [backup.remote] below, which is off.
+dir = "/var/backups/telium/archives"
+
+# With the archives, not with the data. Minted on first start if absent, and
+# the key is the whole of the restore: archives that outlive the volume sealed
+# under a key that did not are ciphertext nobody can open, which is worse than
+# no archives because it looks like a recovery plan. The server logs an ERROR
+# in capitals the first time it generates one -- that line is the instruction
+# to copy this file off the machine, and it is not rhetorical.
+key_file = "/var/backups/telium/backup.key"
+
+# The off-box copy, and the only line in this file that would survive losing
+# this machine. Off because it needs credentials, and credentials are not
+# something this repository can hold or this config can invent.
+#
+# Turning it on is three values and two environment variables: set endpoint,
+# bucket and region here, then hand the container TELIUM_S3_ACCESS_KEY_ID and
+# TELIUM_S3_SECRET_ACCESS_KEY through an env_file, the way tunnel.env carries
+# TUNNEL_TOKEN to cloudflared. The bucket needs PutObject, GetObject,
+# DeleteObject and ListBucket and nothing else. docs/backup.md has the settings
+# for R2, S3, B2 and MinIO.
+[backup.remote]
+enabled = false
+# endpoint = "https://<account-id>.r2.cloudflarestorage.com"
+# bucket = "telium-staging-backups"
+# region = "auto"
+
+[rate_limit]
+# Forwarded client addresses are ignored unless the immediate peer is listed
+# here, and the immediate peer is always the tunnel: every request on this box
+# arrives from cloudflared over the private network. Without this line the whole
+# internet shares one rate-limit budget, because it all has one source address.
+#
+# The address is fixed in compose.yml rather than assigned, which is the only
+# reason it can be written down here -- and the list has to be exactly this one
+# address. Widening it to the subnet would mean trusting the server container to
+# describe its own callers.
+trusted_proxies = ["172.31.240.2"]
+
+[registration]
+# Staging, and the first account created on a fresh server becomes its admin.
+# Open it, make your account, then set this to false -- the hostname is public.
+open = true
+
+[voice]
+# The instance-wide SFU. One region, applied to every call on this server that
+# is not a guild's own custom one -- there is no per-user setting and this is
+# not one: a client asks for `auto` and is told this.
+#
+# It is deliberately not behind the tunnel. cloudflared carries HTTP(S) and
+# nothing else, and an SFU is a UDP mixer, so a media host reached through it
+# would connect and then carry no media. sfu.telium.chat is a separate box with
+# its own public address (DNS-only in Cloudflare, not proxied): the client dials
+# it directly for media, and this server's only involvement is the signed join
+# token the client spends at `{sfu}/session` -- an HTTPS request, which is the
+# one part of this that the tunnel is fine for.
+default_region = "staging"
+
+[[voice.regions]]
+name = "staging"
+# Scheme and host, no path: `/session`, `/health` and `/control` are appended.
+sfu = "https://sfu.telium.chat"
+# `turn` and `pubkey_hint` are deliberately absent.
+#
+# TURN: a region's relay is only ever handed to a client alongside credentials
+# minted from `voice.turn_secret`, and there is no secret on this box -- so a
+# `turn` line here would be inert, and would draw the startup warning that says
+# so. The SFU's own embedded relay is not that relay: LiveKit mints its own
+# per-participant TURN credentials into the token it hands the client, which
+# never passes through us.
+#
+# pubkey_hint: nothing reads it. The SFU verifies *this* server's signature,
+# either from an origin it was configured with or by fetching
+# https://staging.telium.chat/_telium/v1/keys, and no client checks an SFU key.
+#
+# What does have to be true on the SFU side, and cannot be set from here: that
+# sfu.telium.chat trusts `staging.telium.chat` as an origin -- a
+# `[[trust.origins]]` entry for it, or `public = true`. Without that the SFU
+# answers every /session with 403 and calls fail where they used to mesh.

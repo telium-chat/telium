@@ -1,0 +1,56 @@
+-- What a hosting subscription's failures were, and not only what its last
+-- fetch was (docs/hosting.md).
+--
+-- 0043 gave `hosting_catalogs` one column for trouble: `error`, written when a
+-- fetch was not adopted and set back to NULL the moment one was. That is the
+-- right shape for deciding whether to list a catalogue's providers -- the held
+-- copy is either usable or it is not -- and it is the wrong shape for the only
+-- question an operator ever actually asks about a catalogue, which is "is this
+-- working?".
+--
+-- It is the wrong shape because the interesting failures are not the permanent
+-- ones. A subscription that is broken now says so in `error` and always did. A
+-- subscription that fails three fetches out of four and succeeds on the fourth
+-- has had `error` cleared by the time anybody looks, reports `active` in the
+-- console, lists its providers happily, and is on course to lapse the first
+-- week its publisher takes a long weekend -- and nothing anywhere on this
+-- server remembers that it has been failing for a month. The retry schedule
+-- knows (`catalog_retry_secs` fires against it constantly) and then forgets.
+-- An operator can only find out by watching the logs at the moment it happens.
+--
+-- So the last failure is kept alongside the last success rather than instead of
+-- it. `error` keeps its old meaning exactly -- the *current* state of the
+-- subscription, NULL when the last fetch was adopted -- and the three columns
+-- below are history that survives a later success:
+--
+--   * `failed_at` is when the last refusal happened, so it can be put beside
+--     `fetched_at` and read as a pair. "Last succeeded ten minutes ago, last
+--     failed nine minutes ago" is a sentence that describes a flapping
+--     subscription, and neither half of it says that on its own.
+--   * `last_error` is that refusal's own words. The publisher's side of the
+--     story, kept verbatim: a rollback names both serials, a bad field names
+--     the provider and the field, and paraphrasing any of it into a status word
+--     would throw away the part that says what to do next.
+--   * `failure_kind` is which *class* of failure it was, from
+--     `hosting::Failure` -- 'misconfigured', 'unreachable', 'key_mismatch' or
+--     'rejected'. A free-text error cannot be counted, coloured or sorted on,
+--     and the console needs all three: a pinned key that no longer matches the
+--     publisher's is not the same emergency as a host that is down, wants a
+--     different sentence, and must not be drawn in the same red box.
+--
+-- `consecutive_failures` is the cheap version of a history table. A full log of
+-- every attempt per subscription would answer more questions, and would also be
+-- an unbounded table fed by a timer forever, for a feature whose entire
+-- operator surface is one pane. A counter that resets on success answers the
+-- question that pane actually asks -- "has this failed once or has it failed
+-- two hundred times?" -- which is the difference between a publisher's deploy
+-- and a subscription that has been dead since the config was written.
+--
+-- Nullable with no backfill, and deliberately: a server upgrading into this has
+-- no record of its past failures and inventing one would be worse than the dash
+-- the console draws for a fact it does not have. The first fetch after the
+-- upgrade fills them in if there is anything to fill in.
+ALTER TABLE hosting_catalogs ADD COLUMN failed_at INTEGER;
+ALTER TABLE hosting_catalogs ADD COLUMN last_error TEXT;
+ALTER TABLE hosting_catalogs ADD COLUMN failure_kind TEXT;
+ALTER TABLE hosting_catalogs ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0;

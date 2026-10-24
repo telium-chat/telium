@@ -1,0 +1,7 @@
+/target
+/telium.toml
+/telium.db*
+/media
+/backups
+/mfa.key
+/backup.key

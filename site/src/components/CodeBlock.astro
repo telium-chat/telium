@@ -1,0 +1,81 @@
+---
+import Icon from './Icon.astro'
+
+interface Props {
+  /* Lines are passed as data rather than as slotted markup so the copy button
+     has something exact to put on the clipboard — copying `innerText` off a
+     rendered block is how prompts and comments end up pasted into a shell. */
+  lines: readonly string[]
+  label?: string
+  copy?: string
+}
+
+const { lines, label, copy } = Astro.props
+const payload = copy ?? lines.filter((line) => line && !line.startsWith('#')).join('\n')
+---
+
+<div class="panel overflow-hidden">
+  <div class="code-head flex items-center justify-between gap-4 px-3.5 py-2">
+    <span class="eyebrow">{label ?? 'Shell'}</span>
+    <button
+      type="button"
+      class="copy-button icon-btn -mr-1 inline-flex items-center gap-1.5 px-2 py-1 text-[12px]"
+      data-copy={payload}
+    >
+      <span class="copy-idle inline-flex items-center gap-1.5">
+        <Icon name="copy" size={13} />
+        Copy
+      </span>
+      <span class="copy-done hidden items-center gap-1.5 text-accent">
+        <Icon name="check" size={13} />
+        Copied
+      </span>
+    </button>
+  </div>
+
+  <pre class="overflow-x-auto px-3.5 py-3.5 font-mono text-[13px] leading-[1.75]"><code>{
+    lines.map((line, index) => (
+      <>
+        {line.startsWith('#') ? (
+          <span class="text-muted">{line}</span>
+        ) : line ? (
+          <><span class="text-muted select-none">$ </span>{line}</>
+        ) : null}
+        {index < lines.length - 1 ? '\n' : null}
+      </>
+    ))
+  }</code></pre>
+</div>
+
+<script>
+  /* One listener for every code block on the page. The button is only useful
+     with JS, but it is also only ever an accelerator — the text it copies is
+     right there, selectable, in the block above it. */
+  document.addEventListener('click', async (event) => {
+    const button = (event.target as HTMLElement)?.closest<HTMLElement>('.copy-button')
+    if (!button) return
+
+    try {
+      await navigator.clipboard.writeText(button.dataset.copy ?? '')
+    } catch {
+      return // Insecure context or a denied permission; leave the label alone.
+    }
+
+    const idle = button.querySelector<HTMLElement>('.copy-idle')
+    const done = button.querySelector<HTMLElement>('.copy-done')
+    idle?.classList.add('hidden')
+    done?.classList.replace('hidden', 'inline-flex')
+    setTimeout(() => {
+      done?.classList.replace('inline-flex', 'hidden')
+      idle?.classList.remove('hidden')
+    }, 1600)
+  })
+</script>
+
+<style>
+  /* A rule under the block's own label, in the same colour the tables use. The
+     block is a fill, so this is the only line it draws. */
+  .code-head {
+    border-bottom: 1px solid var(--color-separator);
+  }
+</style>

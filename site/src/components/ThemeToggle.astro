@@ -1,0 +1,76 @@
+---
+import Icon from './Icon.astro'
+---
+
+{/* Three states, not two. "System" is the default and has to stay reachable —
+    a toggle that only flips light/dark quietly overrides the visitor's OS
+    setting forever the first time they touch it. The button cycles
+    system → light → dark and names its current state to screen readers. */}
+<button
+  id="theme-toggle"
+  type="button"
+  class="icon-btn size-9"
+  aria-label="Theme: system"
+  title="Theme: system"
+>
+  <span data-theme-icon="system" class="contents"><Icon name="monitor" size={16} /></span>
+  <span data-theme-icon="light" class="contents"><Icon name="sun" size={16} /></span>
+  <span data-theme-icon="dark" class="contents"><Icon name="moon" size={16} /></span>
+</button>
+
+<style>
+  /* Only the icon matching the stored mode is drawn. Done in CSS keyed off the
+     root attribute so the correct glyph is present at first paint, alongside
+     the blocking script in the head — no icon swap visible after hydration. */
+  [data-theme-icon] {
+    display: none;
+  }
+  :global(html[data-theme-mode='system']) [data-theme-icon='system'],
+  :global(html[data-theme-mode='light']) [data-theme-icon='light'],
+  :global(html[data-theme-mode='dark']) [data-theme-icon='dark'] {
+    display: contents;
+  }
+  /* Before the mode attribute lands, assume system rather than showing nothing. */
+  :global(html:not([data-theme-mode])) [data-theme-icon='system'] {
+    display: contents;
+  }
+</style>
+
+<script>
+  type Mode = 'system' | 'light' | 'dark'
+  const ORDER: Mode[] = ['system', 'light', 'dark']
+  const KEY = 'telium-theme'
+  const root = document.documentElement
+  const media = matchMedia('(prefers-color-scheme: dark)')
+
+  const readMode = (): Mode => {
+    const stored = localStorage.getItem(KEY)
+    return stored === 'light' || stored === 'dark' ? stored : 'system'
+  }
+
+  const apply = (mode: Mode) => {
+    root.dataset.themeMode = mode
+    root.dataset.theme = mode === 'system' ? (media.matches ? 'dark' : 'light') : mode
+    const button = document.getElementById('theme-toggle')
+    if (button) {
+      const label = `Theme: ${mode}`
+      button.setAttribute('aria-label', label)
+      button.setAttribute('title', label)
+    }
+  }
+
+  apply(readMode())
+
+  // Following the OS live only makes sense while the visitor is actually on
+  // system; an explicit choice should survive them changing their desktop.
+  media.addEventListener('change', () => {
+    if (readMode() === 'system') apply('system')
+  })
+
+  document.getElementById('theme-toggle')?.addEventListener('click', () => {
+    const next = ORDER[(ORDER.indexOf(readMode()) + 1) % ORDER.length]!
+    if (next === 'system') localStorage.removeItem(KEY)
+    else localStorage.setItem(KEY, next)
+    apply(next)
+  })
+</script>

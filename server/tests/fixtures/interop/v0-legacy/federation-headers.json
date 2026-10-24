@@ -1,0 +1,4 @@
+{
+  "authorization": "<signature>",
+  "content-type": "application/json"
+}

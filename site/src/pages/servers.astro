@@ -1,0 +1,203 @@
+---
+import Base from '../layouts/Base.astro'
+import Icon from '../components/Icon.astro'
+import ServerTable from '../components/ServerTable.astro'
+import {
+  generatedAt,
+  recommendationReason,
+  recommendationServers,
+} from '../lib/servers'
+import { URLS } from '../config'
+
+const checked = generatedAt
+  ? new Date(generatedAt).toLocaleString('en-GB', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: 'UTC',
+    })
+  : null
+---
+
+<Base
+  title="Homeservers"
+  description="Choose the server where your Telium account will live. Browse open homeservers with region, uptime, and browser-measured latency."
+>
+  <section class="page pt-14 pb-10 sm:pt-20">
+    {/* The same two-column band header every section of the landing page uses:
+        eyebrow and heading on the left, the paragraph set against it on the
+        right. Stacked in one narrow column it left the right half of a 1440px
+        page empty and read as a different template from the rest of the
+        site. */}
+    <div class="grid gap-6 lg:grid-cols-[minmax(0,.8fr)_minmax(0,1.2fr)] lg:items-end">
+      <div>
+        <p class="eyebrow">Directory</p>
+        <h1 class="h2 mt-3 max-w-[20ch]">Choose where your account lives.</h1>
+      </div>
+      <p class="max-w-[60ch] text-[15.5px] leading-relaxed text-muted lg:justify-self-end">
+        Your homeserver is the server that keeps your account and private messages. It does not
+        decide which communities you can join, and you can move later. Pick one near you and pay
+        attention to who runs it.
+      </p>
+    </div>
+  </section>
+
+  <section class="page pb-16">
+    <ServerTable autosort="latency" />
+
+    <details class="disclosure mt-6 py-4 text-[13px] leading-relaxed text-muted">
+      <summary class="disclosure-summary">
+        <Icon name="chevron-down" size={15} />
+        Automatic signup recommendations
+      </summary>
+      <div class="prose-measure mt-3 space-y-3">
+        <p>
+          Directory listing and automatic beginner recommendations are separate. Operators have to opt
+          in both here and on their running homeserver, then pass the published health and maturation
+          rules. Selection happens locally in the client from a signed list; being eligible is not an
+          endorsement by Telium.
+        </p>
+
+        {recommendationServers.length === 0 ? (
+          <p>
+            No listed operator is currently asking to receive automatic beginner referrals. The
+            directory remains fully usable for manual server choice.
+          </p>
+        ) : (
+          <ul class="space-y-3 pt-1">
+            {recommendationServers.map((server) => {
+              const decision = server.probe.recommendation
+              const reasons = decision?.reasons ?? []
+              return (
+                <li class="panel-inset p-3">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <span>
+                      <strong class="font-medium text-foreground">{server.name}</strong>{' '}
+                      <span class="font-mono text-[12px]">{server.domain}</span>
+                    </span>
+                    {decision?.eligible ? (
+                      <span class="eligibility-badge eligibility-yes">
+                        Eligible · weight {decision.weight}
+                      </span>
+                    ) : (
+                      <span class="eligibility-badge eligibility-no">
+                        Not eligible
+                      </span>
+                    )}
+                  </div>
+                  {!decision ? (
+                    <p class="mt-1.5 text-[12.5px] text-muted">
+                      Waiting for the next hourly probe to evaluate recommendation eligibility.
+                    </p>
+                  ) : reasons.length > 0 ? (
+                    <ul class="mt-1.5 list-disc space-y-0.5 pl-5 text-[12.5px] text-muted">
+                      {reasons.map((reason) => <li>{recommendationReason(reason)}</li>)}
+                    </ul>
+                  ) : (
+                    <p class="mt-1.5 text-[12.5px] text-muted">
+                      Registry opt-in, live acceptance, compatibility, observed age and health checks all pass.
+                    </p>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </div>
+    </details>
+
+    <details class="disclosure mt-6 py-4 text-[13px] leading-relaxed text-muted">
+      <summary class="disclosure-summary">
+        <Icon name="chevron-down" size={15} />
+        How these numbers work
+      </summary>
+      <div class="prose-measure mt-3 space-y-2">
+        <p>
+          Latency is measured from your browser, so each server sees your IP address. Turn it off
+          below and the column stays empty.
+        </p>
+        <p>
+          Uptime is our record of hourly checks over 30 days. Accounts are a range declared by the
+          operator. Registration, version, roles, upload limits and recommendation eligibility come
+          from the hourly probe plus the public registry. {checked && <>Last checked {checked} UTC.</>}
+        </p>
+      </div>
+    </details>
+
+    <div class="probe-controls mt-8 flex flex-wrap items-center justify-between gap-x-8 gap-y-4 pt-6">
+      <label class="flex cursor-pointer items-center gap-2.5 text-[13.5px] select-none">
+        <input type="checkbox" data-probe-toggle checked class="size-3.5 accent-[var(--color-accent)]" />
+        Measure latency from my browser
+      </label>
+
+      <a href={URLS.registry} class="inline-flex items-center gap-1.5 rounded text-[13.5px] text-link hover:underline">
+        Run a server? List it here
+        <Icon name="arrow-up-right" size={14} />
+      </a>
+    </div>
+  </section>
+</Base>
+
+<style>
+  /* Two rules around a disclosure, in the shared separator colour. A `<details>`
+     that opens into a page needs a top and a bottom edge to say where it ends;
+     it is a band, not a card, so it gets rules rather than a fill. */
+  .disclosure,
+  .probe-controls {
+    border-top: 1px solid var(--color-separator);
+  }
+
+  .disclosure {
+    border-bottom: 1px solid var(--color-separator);
+  }
+
+  /* The browser's own disclosure triangle is the one piece of chrome on this
+     page drawn by the platform rather than by us, and it looks it — a solid
+     black wedge next to type set at 13px. The client turns a disclosure with
+     the same chevron it uses everywhere else, so this does too, and the whole
+     summary becomes the target rather than just the words. */
+  .disclosure-summary {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    list-style: none;
+    color: var(--color-foreground);
+    font-weight: 500;
+  }
+
+  .disclosure-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  /* `:global` because the chevron is rendered by `Icon`, and Astro's scope
+     attribute stops at this file's own elements. */
+  .disclosure-summary :global(svg) {
+    flex: none;
+    color: var(--color-muted);
+    transition: transform var(--dur-2) var(--ease);
+  }
+
+  .disclosure[open] .disclosure-summary :global(svg) {
+    transform: rotate(180deg);
+  }
+
+  .eligibility-badge {
+    border-radius: 4px;
+    padding: 0.125rem 0.375rem;
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  /* Eligible and not-eligible are both fills, for the reason the directory's
+     badges are: an outline beside a fill reads as a different kind of thing
+     rather than the other value of the same thing. */
+  .eligibility-yes {
+    background: var(--color-accent-soft);
+    color: var(--color-accent-soft-foreground);
+  }
+
+  .eligibility-no {
+    background: color-mix(in oklab, var(--color-foreground) 9%, transparent);
+    color: var(--color-muted);
+  }
+</style>

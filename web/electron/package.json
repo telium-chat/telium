@@ -1,0 +1,134 @@
+{
+  "name": "telium-desktop",
+  "productName": "Telium",
+  "desktopName": "chat.telium.Telium.desktop",
+  "version": "0.1.0",
+  "description": "Telium desktop shell",
+  "private": true,
+  "main": "desktop-main.cjs",
+  "scripts": {
+    "dev": "node scripts/build-wine-rpc-bridge.mjs && node dev.cjs",
+    "build:linux": "TELIUM_REQUIRE_WINE_BRIDGE=1 node scripts/build-wine-rpc-bridge.mjs && electron-builder --linux AppImage --x64 --publish never",
+    "build:windows": "electron-builder --win nsis --x64 --publish never"
+  },
+  "dependencies": {
+    "@jellybrick/dbus-next": "^0.11.4",
+    "arrpc": "github:OpenAsar/arrpc#d4ce31f313eaf864f46576ee98fbf88c9ef47036",
+    "electron-updater": "6.8.11"
+  },
+  "devDependencies": {
+    "electron": "44.9.3",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "chat.telium.desktop",
+    "productName": "Telium",
+    "asar": true,
+    "asarUnpack": [
+      "rich-presence-worker.mjs",
+      "rich-presence-name.mjs",
+      "mpris-source.mjs",
+      "wine-rpc-bridge.mjs",
+      "wine-rpc-container-bridge.mjs",
+      "node_modules/**/*",
+      "windows-media-source.mjs",
+      "windows-rpc-primary.mjs"
+    ],
+    "files": [
+      "desktop-main.cjs",
+      "main.cjs",
+      "page-zoom.cjs",
+      "renderer-crash.cjs",
+      "relay.cjs",
+      "relay-guard.cjs",
+      "desktop-updater.cjs",
+      "linux-desktop-integration.cjs",
+      "windows-desktop-integration.cjs",
+      "screen-share-audio.cjs",
+      "preload.cjs",
+      "updater.cjs",
+      "publisher.json",
+      "rich-presence.cjs",
+      "rich-presence-local-art.cjs",
+      "rich-presence-worker.mjs",
+      "rich-presence-name.mjs",
+      "mpris-source.mjs",
+      "wine-rpc-bridge.mjs",
+      "wine-rpc-container-bridge.mjs",
+      "renderer/**/*",
+      "build/icon.png",
+      "tray-lifecycle.cjs",
+      "assets/*.base64",
+      "windows-media-source.mjs",
+      "windows-rpc-primary.mjs"
+    ],
+    "directories": {
+      "output": "../dist-electron"
+    },
+    "toolsets": {
+      "appimage": "1.0.3"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "telium-chat",
+        "repo": "telium"
+      }
+    ],
+    "linux": {
+      "syncDesktopName": true,
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Network;InstantMessaging",
+      "icon": "build/icon.png",
+      "extraResources": [
+        {
+          "from": "vendor/rpc-bridge/bridge.exe",
+          "to": "wine-rpc/bridge.exe"
+        },
+        {
+          "from": "wine-rpc-bridge/LICENSE-rpc-bridge.txt",
+          "to": "wine-rpc/LICENSE-rpc-bridge.txt"
+        }
+      ]
+    },
+    "artifactName": "Telium_${arch}.${ext}",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "Telium_Setup_${arch}.${ext}",
+      "extraResources": [
+        {
+          "from": "windows-media-helper/target/x86_64-pc-windows-gnu/release/telium-windows-media.exe",
+          "to": "windows-media/telium-windows-media.exe"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Telium"
+    }
+  },
+  "optionalDependencies": {
+    "@vencord/venmic": "^7.2.3"
+  },
+  "overrides": {
+    "cmake-js": "^8.0.0"
+  }
+}

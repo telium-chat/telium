@@ -1,0 +1,37 @@
+---
+/* Lucide, inlined at build time from `lucide-static`.
+ *
+ * Reading the SVG off disk rather than pulling an icon component library keeps
+ * the runtime at zero — an icon on a static page is markup, not a component —
+ * and lets one place enforce the client's defaults: an 18px box on a 24-unit
+ * grid at stroke-width 1.75 (web/src/components/icons.jsx). Icons inherit
+ * `currentColor`, so they re-tint with the theme for free.
+ */
+import { loadIcon } from '../lib/icon'
+
+interface Props {
+  name: string
+  size?: number
+  strokeWidth?: number
+  class?: string
+}
+
+const { name, size = 18, strokeWidth = 1.75, class: className = '' } = Astro.props
+const inner = loadIcon(name)
+---
+
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width={size}
+  height={size}
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width={strokeWidth}
+  stroke-linecap="round"
+  stroke-linejoin="round"
+  aria-hidden="true"
+  focusable="false"
+  class={className}
+  set:html={inner}
+/>

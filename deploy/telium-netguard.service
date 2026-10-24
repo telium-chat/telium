@@ -1,0 +1,21 @@
+# The firewall rules that decide what the tunnel can reach. See netguard.sh for
+# what they are and why.
+#
+# `PartOf=docker.service` is the load-bearing line: Docker rebuilds its own
+# chains when the daemon starts, and DOCKER-USER can come back empty. Tying this
+# to the daemon means the fence is re-erected every time the thing it fences
+# is restarted, rather than silently staying down until the next reboot.
+
+[Unit]
+Description=Fence the telium docker network to itself and the internet
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/telium/netguard.sh
+
+[Install]
+WantedBy=multi-user.target docker.service

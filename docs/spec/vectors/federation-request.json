@@ -1,0 +1,83 @@
+{
+  "family": "federation-request",
+  "produced_by": "federation::signing_payload / federation::auth_header / federation::verify_request",
+  "query_string_is_covered": false,
+  "rule": "Build the JSON object {body_hash, destination, method, origin, path, timestamp} — sorted, no whitespace — where `method` is upper-cased, `body_hash` is the lowercase hex BLAKE3 of the request body (of the empty string when there is none), `timestamp` is milliseconds since the Unix epoch, `origin` is the server the request is from and `destination` the server it is addressed to. Sign those bytes. The header is `X-Telium-Federation ` followed by comma-separated `name=value` pairs with no quoting.",
+  "vectors": [
+    {
+      "authorization_header": "X-Telium-Federation origin=home.example,destination=guilds.example,key=ed25519:spec-primary,ts=1767225600000,sig=_F_8Zm9ThK0BTNmiVa7xQbYPbgSFtGO-08KS2NDvIqQr4m60iJZdKh6LxBiffXGW5BBOxL3vJ57-QHH3OlS3Dg",
+      "canonical": {
+        "hex": "7b22626f64795f68617368223a2261663133343962396635663961316136613034303464656133366463633934393962636232356339616463313132623763633961393363616534316633323632222c2264657374696e6174696f6e223a226775696c64732e6578616d706c65222c226d6574686f64223a22474554222c226f726967696e223a22686f6d652e6578616d706c65222c2270617468223a222f5f74656c69756d2f76312f6b657973222c2274696d657374616d70223a313736373232353630303030307d",
+        "length": 202,
+        "utf8": "{\"body_hash\":\"af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262\",\"destination\":\"guilds.example\",\"method\":\"GET\",\"origin\":\"home.example\",\"path\":\"/_telium/v1/keys\",\"timestamp\":1767225600000}"
+      },
+      "key": {
+        "algorithm": "ed25519",
+        "key_id": "ed25519:spec-primary",
+        "public_b64u": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+        "seed_b64u": "ERERERERERERERERERERERERERERERERERERERERERE"
+      },
+      "name": "get-empty-body",
+      "note": "A GET has no body, so `body_hash` is BLAKE3 of the empty string. It is still present: the member is never omitted.",
+      "request": {
+        "body_utf8": "",
+        "destination": "guilds.example",
+        "method": "GET",
+        "origin": "home.example",
+        "path": "/_telium/v1/keys",
+        "timestamp": 1767225600000
+      },
+      "signature_b64u": "_F_8Zm9ThK0BTNmiVa7xQbYPbgSFtGO-08KS2NDvIqQr4m60iJZdKh6LxBiffXGW5BBOxL3vJ57-QHH3OlS3Dg"
+    },
+    {
+      "authorization_header": "X-Telium-Federation origin=home.example,destination=guilds.example,key=ed25519:spec-primary,ts=1767225600000,sig=vNNYGzUruALHDv_jRcAxJZN0szhBcUgI3qA03GHDhJCKeartMB65X0CS5unohOEBHbzxeIohLR6FDFkaDKt_Bw",
+      "canonical": {
+        "hex": "7b22626f64795f68617368223a2238366365356530366439613061336566366332333035373038386633653761633338633434646136626637646162623962363664373836306630616163346333222c2264657374696e6174696f6e223a226775696c64732e6578616d706c65222c226d6574686f64223a22504f5354222c226f726967696e223a22686f6d652e6578616d706c65222c2270617468223a222f5f74656c69756d2f76312f6d656469612f617574686f72697a65222c2274696d657374616d70223a313736373232353630303030307d",
+        "length": 214,
+        "utf8": "{\"body_hash\":\"86ce5e06d9a0a3ef6c23057088f3e7ac38c44da6bf7dabb9b66d7860f0aac4c3\",\"destination\":\"guilds.example\",\"method\":\"POST\",\"origin\":\"home.example\",\"path\":\"/_telium/v1/media/authorize\",\"timestamp\":1767225600000}"
+      },
+      "key": {
+        "algorithm": "ed25519",
+        "key_id": "ed25519:spec-primary",
+        "public_b64u": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+        "seed_b64u": "ERERERERERERERERERERERERERERERERERERERERERE"
+      },
+      "name": "post-json-body",
+      "note": "The body is hashed, not signed directly, so the signature is a fixed size whatever the body is — which is what lets a five-minute migration upload be covered by one signature.",
+      "request": {
+        "body_utf8": "{\"hash\":\"abc123\"}",
+        "destination": "guilds.example",
+        "method": "POST",
+        "origin": "home.example",
+        "path": "/_telium/v1/media/authorize",
+        "timestamp": 1767225600000
+      },
+      "signature_b64u": "vNNYGzUruALHDv_jRcAxJZN0szhBcUgI3qA03GHDhJCKeartMB65X0CS5unohOEBHbzxeIohLR6FDFkaDKt_Bw"
+    },
+    {
+      "authorization_header": "X-Telium-Federation origin=home.example,destination=guilds.example,key=ed25519:spec-primary,ts=1767225600000,sig=REWYSzGiOTlXgXcfKOHl_Hl_lpnvCHEQ7785NuZnGRD2Dfz2vX4ONtQA7JUMCTX1R6o3Kt0RrmBm1jM1AktPCQ",
+      "canonical": {
+        "hex": "7b22626f64795f68617368223a2261663133343962396635663961316136613034303464656133366463633934393962636232356339616463313132623763633961393363616534316633323632222c2264657374696e6174696f6e223a226775696c64732e6578616d706c65222c226d6574686f64223a22474554222c226f726967696e223a22686f6d652e6578616d706c65222c2270617468223a222f5f74656c69756d2f76312f6865616c7468222c2274696d657374616d70223a313736373232353630303030307d",
+        "length": 204,
+        "utf8": "{\"body_hash\":\"af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262\",\"destination\":\"guilds.example\",\"method\":\"GET\",\"origin\":\"home.example\",\"path\":\"/_telium/v1/health\",\"timestamp\":1767225600000}"
+      },
+      "key": {
+        "algorithm": "ed25519",
+        "key_id": "ed25519:spec-primary",
+        "public_b64u": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+        "seed_b64u": "ERERERERERERERERERERERERERERERERERERERERERE"
+      },
+      "name": "lowercase-method-is-upper-cased",
+      "note": "The method is upper-cased before it enters the payload. A signer that signs `get` and a verifier that receives `GET` disagree, and this is the vector that says which side is right.",
+      "request": {
+        "body_utf8": "",
+        "destination": "guilds.example",
+        "method": "get",
+        "origin": "home.example",
+        "path": "/_telium/v1/health",
+        "timestamp": 1767225600000
+      },
+      "signature_b64u": "REWYSzGiOTlXgXcfKOHl_Hl_lpnvCHEQ7785NuZnGRD2Dfz2vX4ONtQA7JUMCTX1R6o3Kt0RrmBm1jM1AktPCQ"
+    }
+  ]
+}

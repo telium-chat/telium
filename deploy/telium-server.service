@@ -1,0 +1,188 @@
+# The native service path: one binary, one config file, no container runtime.
+#
+# The container in deploy/compose.yml is the supported default and this is the
+# supported alternative, not a discouraged one. Some boxes have no Docker and
+# are not going to get one, some operators already run everything under systemd
+# and want one place to look, and a homeserver is a single static binary with a
+# SQLite file -- which is precisely the shape systemd is good at. What this unit
+# does is give that path the same properties the container has by construction:
+# an unprivileged user, a writable data directory and nothing else writable, no
+# capabilities, and a shutdown that is bounded rather than killed.
+#
+#   install -Dm755 telium-server /usr/local/bin/telium-server
+#   useradd --system --home-dir /var/lib/telium --shell /usr/sbin/nologin telium
+#   install -d -o telium -g telium -m 750 /var/lib/telium
+#   install -d -o telium -g telium -m 700 /var/backups/telium
+#   install -d -m 755 /etc/telium
+#   install -o telium -g telium -m 600 telium.toml /etc/telium/telium.toml
+#   install -Dm644 telium-server.service /etc/systemd/system/telium-server.service
+#   systemctl daemon-reload && systemctl enable --now telium-server
+#
+# See docs/production.md for the reverse proxy in front of it and for what has
+# to be on a volume that survives the box.
+#
+# Updates on this path come from `deploy/update-native.sh` and its unit and
+# timer -- the container path's updater, aimed at the native artifact: it
+# stages the release's static binary, checks its sha256 against the manifest,
+# runs the new binary's own `check` against this config, takes a backup, swaps
+# with one atomic rename and restarts this unit. Three more lines:
+#
+#   install -Dm755 update-native.sh /usr/local/sbin/telium-update-native
+#   install -Dm644 telium-update-native.service telium-update-native.timer /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now telium-update-native.timer
+#
+# docs/updates.md has the whole story, including what a pin and a window mean
+# here and how to turn any of it off.
+
+[Unit]
+Description=Telium homeserver
+Documentation=https://github.com/telium-chat/telium/blob/main/docs/production.md
+# Both, because either may be the one that is present. `network-online.target`
+# alone is a no-op on a box where nothing pulls it in, and the server binds a
+# specific address at startup rather than retrying, so starting before the
+# address exists is a start that fails.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+
+# The identity. Not root, and not a shared "www-data" that half the box already
+# runs as: this account exists so that the answer to "what else can read the
+# federation signing key" is "nothing".
+User=telium
+Group=telium
+
+# Fail early and say why, rather than starting and discovering it at the first
+# request. `check` parses the config, validates it, and audits it for settings
+# that work perfectly and should not be on in production -- open registration
+# with nobody named as an administrator, a plaintext public_base_url, a
+# world-readable key file. It exits non-zero only on the dangerous ones, so a
+# warning does not stop the service; `--strict` if you would rather it did.
+ExecStartPre=/usr/local/bin/telium-server --config /etc/telium/telium.toml check
+ExecStart=/usr/local/bin/telium-server --config /etc/telium/telium.toml serve
+
+# SIGTERM is the right signal and the server handles it: it closes its gateway
+# sockets itself, so clients reconnect immediately instead of holding a socket
+# that still looks healthy, then bounds what remains.
+KillSignal=SIGTERM
+KillMode=mixed
+
+# Longer than the server's own `shutdown.grace_secs` (15s by default), and that
+# ordering is the whole point. systemd's default here is 90s, which is safe but
+# means a wedged process holds a reboot for a minute and a half; too low and
+# SIGKILL arrives before the server has finished its own bounded wait, which
+# turns a clean shutdown into a killed one with no log line explaining it.
+# Raise this if you raise `shutdown.grace_secs`.
+TimeoutStopSec=30
+
+# It comes back. A homeserver that stays down after one bad night is a
+# homeserver whose users go somewhere else. `RestartSec` is not zero because a
+# crash loop against a broken config should not also be a fork bomb, and the
+# burst limits below stop it retrying forever without anybody noticing: five
+# failures in five minutes and it stays down, which is when a human is actually
+# needed.
+Restart=on-failure
+RestartSec=5s
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Where the data lives. Both are systemd-managed so the directories exist with
+# the right owner and mode on a fresh box without an install script having to
+# remember: /var/lib/telium for the SQLite database, uploaded media, the caches
+# and the cold archive, /var/backups/telium for the backups and the backup key.
+#
+# Separate on purpose, and this is not a tidiness preference. A backup written
+# inside the data directory is on the same disk, in the same volume, and gets
+# deleted by the same accident. The config audit reports that arrangement as
+# dangerous for exactly that reason.
+StateDirectory=telium
+StateDirectoryMode=0750
+WorkingDirectory=/var/lib/telium
+
+# The secrets, handed over by systemd rather than written into the config file.
+#
+# Uncomment and point at real files to use them. A credential appears to the
+# service at $CREDENTIALS_DIRECTORY/<name>, readable only by this unit, and the
+# config refers to it as "${file:...}" -- see the top of telium.example.toml.
+# This is the boring version of secret injection: no agent, no sidecar, no
+# external manager, and it works the same way for compose (Docker secrets are
+# files too) and for a hand-rolled install (any file with the right mode).
+#
+# LoadCredential=backup-key:/etc/telium/secrets/backup.key
+# LoadCredential=smtp-password:/etc/telium/secrets/smtp
+
+# ---- hardening -------------------------------------------------------------
+#
+# These are the container's guarantees restated for a native install. Each one
+# is here because it closes something specific, not because a hardening guide
+# listed it.
+
+# Nothing this process can do can gain it privileges it did not start with,
+# including through a setuid binary it manages to execute.
+NoNewPrivileges=true
+
+# The filesystem is read-only apart from the directories above. A homeserver
+# writes its database, its media and its backups; it has no business writing
+# anywhere else, and the day something convinces it to try, this is what turns
+# that into an error instead of a foothold.
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/telium
+PrivateTmp=true
+
+# No capabilities at all. The server binds 8448, which is above 1024 and needs
+# none; if you bind it to 443 directly instead of putting a reverse proxy in
+# front, add AmbientCapabilities=CAP_NET_BIND_SERVICE here and nothing else --
+# and read docs/production.md first, because a homeserver terminating its own
+# TLS is a different set of problems.
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# The rest of the box, made invisible. Kernel tunables, kernel modules, cgroup
+# hierarchy, other users' processes, the raw devices: none of it is reachable
+# from anything this server legitimately does.
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectProc=invisible
+ProcSubset=pid
+PrivateDevices=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+
+# Only the address families it actually uses. AF_UNIX is in the list because
+# the runtime needs it for local plumbing, not because the server listens on a
+# socket file.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# The system-call allowlist. @system-service is systemd's own set for exactly
+# this kind of daemon; the subtractions are the families a network service
+# never needs and that show up in every exploit chain that gets this far.
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @obsolete @mount @debug @swap
+SystemCallArchitectures=native
+SystemCallErrorNumber=EPERM
+
+# ---- limits ----------------------------------------------------------------
+
+# Every connected client holds a socket, and a gateway connection is a
+# connection that by design never closes. The default of 1024 is a ceiling a
+# modest server reaches while still looking healthy, and what it looks like
+# when it does is "accept: too many open files" in the log and clients that
+# cannot connect for no visible reason.
+LimitNOFILE=65536
+
+# Logs go to the journal, which is where an operator is already looking. The
+# server writes one line per event and does not need a file of its own.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

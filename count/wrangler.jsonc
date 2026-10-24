@@ -1,0 +1,17 @@
+{
+  "name": "telium-count",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-09-26",
+  "kv_namespaces": [
+    {
+      "binding": "COUNT",
+      // The project's live namespace, created once with `wrangler kv namespace create COUNT`.
+      // A fork deploying its own collector creates its own and swaps this id.
+      "id": "64d828bb5c0b4f50b64ce69155f40727"
+    }
+  ]
+  // The public route (count.telium.chat) is bound to this worker in the
+  // Cloudflare dashboard for the telium.chat zone. The stats token is
+  // `wrangler secret put STATS_TOKEN`. Never enable request logging on this
+  // worker -- see ../README.md.
+}

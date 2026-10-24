@@ -1,0 +1,17 @@
+-- One spelling for a server name in the claims table.
+--
+-- A claim's source is written by hand: a local account types the name of the
+-- server it is expecting a guild from. The origin on a signed request has
+-- already been reduced to one spelling -- trimmed, lowercased, no trailing dot
+-- -- and the push route compares the two exactly, so a claim opened for
+-- `A.Test` or `example.com.` was refused for naming a different source than the
+-- server it was opened for. The route now normalises on the way in; this is the
+-- rows that were written before it did.
+--
+-- It matters for more than the refusal. A receipt written again for a log row
+-- from before there was a column to record the token in falls back to matching
+-- the claim on its subject, and that join has the log's source -- always
+-- normalised, it comes from the request envelope -- on one side. Left
+-- unnormalised here, the join finds nothing, the claim stays good, and the same
+-- subject can be imported a second time under a fresh migration id.
+UPDATE import_claims SET source = rtrim(lower(trim(source)), '.');

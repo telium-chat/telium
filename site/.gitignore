@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.astro/
+
+# Scratch homeserver for scripts/capture/run.mjs: its own config, its own
+# database, its own media. Recreated from nothing every run.
+.capture/

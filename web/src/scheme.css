@@ -1,0 +1,50 @@
+:root[data-scheme] {
+  --link: var(--accent);
+  --focus: var(--accent);
+}
+
+:root[data-scheme][data-theme="dark"] {
+  --accent-hover-l: 79%;
+  --accent-hover-c: 0.85;
+  --accent-ink-l: 20%;
+  --accent-ink-c: 0.35;
+  --accent-wash-l: 34%;
+  --accent-wash-c: 0.42;
+  --accent-wash-ink-l: 84%;
+  --accent-wash-ink-c: 0.6;
+}
+
+:root[data-scheme][data-theme="light"] {
+  --accent-hover-l: 30%;
+  --accent-hover-c: 0.95;
+  --accent-ink-l: 99%;
+  --accent-ink-c: 0.07;
+  --accent-wash-l: 92.5%;
+  --accent-wash-c: 0.3;
+  --accent-wash-ink-l: 38.5%;
+  --accent-wash-ink-c: 1;
+}
+
+:root[data-scheme] {
+  --accent-hover: var(--accent);
+  --accent-foreground: var(--background);
+  --accent-soft: color-mix(in oklch, var(--accent) 22%, var(--background));
+  --accent-soft-foreground: var(--accent);
+  --accent-solid-foreground: #ffffff;
+}
+
+:root[data-scheme][data-theme="light"] {
+  --accent-foreground: #ffffff;
+}
+
+@supports (color: oklch(from red l c h)) {
+  :root[data-scheme] {
+    --accent-hover: oklch(from var(--accent) var(--accent-hover-l) calc(c * var(--accent-hover-c)) h);
+    --accent-foreground: oklch(from var(--accent) var(--accent-ink-l) calc(c * var(--accent-ink-c)) h);
+    --accent-soft: oklch(from var(--accent) var(--accent-wash-l) calc(c * var(--accent-wash-c)) h);
+    --accent-soft-foreground: oklch(
+      from var(--accent) var(--accent-wash-ink-l) calc(c * var(--accent-wash-ink-c)) h
+    );
+    --accent-solid-foreground: oklch(from var(--accent-solid) 99% min(c, 0.01) h);
+  }
+}

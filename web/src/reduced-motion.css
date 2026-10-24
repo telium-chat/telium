@@ -1,0 +1,76 @@
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 0s;
+    --dur-2: 0s;
+    --dur-3: 0s;
+    --dur-4: 0s;
+  }
+
+  .page-in,
+  .rise-in,
+  .shell-in,
+  .banner-in,
+  .stage__cur[data-enter],
+  .stage__prev,
+  .swap__cur[data-enter],
+  .swap__prev,
+  .skeleton,
+  .speaking,
+  .message-enter,
+  .reaction-pill,
+  .rich-tooltip {
+    animation: none;
+  }
+  .rail-pill[data-travel] {
+    animation: none;
+  }
+  .folder-body,
+  .folder-slab {
+    transition: none;
+  }
+  .stage__prev,
+  .swap__prev {
+    display: none;
+  }
+
+  .overlay-in,
+  .sheet-in,
+  .kumo-tooltip-popup,
+  .backdrop-fade {
+    transition: none;
+  }
+
+  .animate-panel-slide-start,
+  .animate-panel-slide-end,
+  .animate-sheet-in,
+  .animate-fade-in {
+    animation: none;
+  }
+
+  .auth-handoff {
+    animation: none;
+  }
+
+  .boot-mark__outer,
+  .boot-mark__inner {
+    animation: none;
+  }
+  .boot-mark {
+    animation: boot-breathe 1.6s ease-in-out infinite alternate;
+  }
+  @keyframes boot-breathe {
+    from { opacity: 1; }
+    to { opacity: 0.5; }
+  }
+
+  .msg-row.msg-flash {
+    animation: none;
+    background-color: color-mix(in oklab, var(--accent) 30%, transparent);
+  }
+
+  .reaction-pill,
+  .rich-tooltip,
+  .embed__play::before {
+    transition: none;
+  }
+}

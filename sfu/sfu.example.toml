@@ -1,0 +1,117 @@
+# telium-sfu configuration (Section 7: the SFU is a dumb regional pipe).
+# The guild server's voice.regions[].sfu URL points here.
+
+# HTTP listen address for the SFU's control/auth surface:
+#   GET  /health   — guild server liveness probes
+#   POST /session  — verify Telium join token -> mint LiveKit JWT (M2)
+#   POST /control  — signed control commands (M3)
+bind = "127.0.0.1:7890"
+
+[livekit]
+# How telium-sfu obtains a LiveKit instance.
+#   "spawn"    — write livekit.yaml and launch `binary` ourselves.
+#   "external" — use a LiveKit you run separately (rented VPS / donated box).
+mode = "spawn"
+# Base URL of LiveKit's RoomService / signal endpoints. Derived from the
+# spawned process in "spawn" mode; used as-is in "external" mode.
+url = "http://127.0.0.1:7880"
+# Browser-facing signaling URL. Set this to your HTTPS LiveKit hostname in
+# production; /session will hand clients the equivalent wss:// URL.
+public_url = ""
+# Server-to-server auth with LiveKit. In "spawn" mode these are auto-generated
+# (and written into the generated livekit.yaml) when left empty.
+api_key = ""
+api_secret = ""
+binary = "livekit-server"      # resolved on PATH in spawn mode
+config_dir = "."              # where telium-sfu writes livekit.yaml + runtime state
+
+[livekit.rtc]
+port_range_start = 50000      # UDP media range LiveKit advertises to clients
+port_range_end = 60000
+tcp_port = 7881               # TCP fallback when UDP is blocked (not behind TLS)
+use_external_ip = false       # true on cloud hosts behind NAT (STUN-discovers public IP)
+
+[livekit.turn]
+# Embedded TURN: LiveKit relays clients that cannot do direct UDP.
+# v1 uses a UDP relay (no cert). TLS TURN on 443 is production hardening and
+# additionally requires domain + cert_file + key_file.
+enabled = true
+udp_port = 3478
+# tls_port = 5349
+# domain = "turn.example.com"
+# cert_file = "/path/to/turn.crt"
+# key_file = "/path/to/turn.key"
+
+[livekit.room]
+# LiveKit rooms auto-create on first join, named `telium_{channel_id}`, and
+# tear down after they empty.
+empty_timeout = 300           # seconds before an empty room is removed
+max_participants = 0          # 0 = unlimited; channel user_limit still enforced at guild
+
+[trust]
+# How telium-sfu verifies the Ed25519-signed Telium tokens the guild issues
+# (join tokens via /session, control commands via /control).
+discovery = true              # fetch each origin's key from its own /_telium/v1/keys
+cache_ttl_secs = 86400        # how long a discovered key is cached between refreshes
+
+# Public SFU: when true, the SFU discovers and trusts ANY guild server that
+# publishes keys via federation well-known discovery (by domain). A guild admin
+# can then just paste this SFU's domain into their guild's voice region and it
+# works — no origin list, no key exchange. Rooms are namespaced by the verified
+# origin, so discovered guilds stay isolated from one another. Leave false to only
+# serve the origins listed below (strict mode).
+public = false
+
+# Relax the address rules for public-mode discovery. MUST stay false on any SFU
+# reachable from the Internet.
+#
+# In public mode the origin the SFU dials comes out of an *unauthenticated*
+# /session or /control body, and it is dialled before any signature is checked
+# — the lookup is how the SFU gets the key to check with. Discovery is therefore
+# HTTPS-only to public addresses: a stranger must not be able to make the SFU
+# connect to 127.0.0.1, to the LiveKit API, to this dashboard, to the operator's
+# LAN, or to cloud instance metadata on 169.254.169.254. Turning this on removes
+# all of that. It exists for development and closed-LAN test rigs where every
+# homeserver is plaintext on loopback. Configured [[trust.origins]] below are
+# unaffected: those are addresses the operator typed, and may always be private.
+allow_insecure_discovery = false
+
+# Trusted guild origins this SFU accepts tokens/commands from. The simplest, and
+# recommended, setup is discovery: give the guild server's `server_name` and the
+# base URL it is reachable at, and the SFU fetches + self-verifies its key — no
+# key copy-paste, and it follows key rotation automatically. Add one block per
+# guild server you serve (a single SFU can back many — see §2).
+[[trust.origins]]
+server_name = "your.server.name"           # MUST equal the guild server's `server_name`
+discovery_url = "https://your.server.name"  # SFU GETs {discovery_url}/_telium/v1/keys
+
+# To pin a key instead of discovering it, drop `discovery_url` and set these
+# (from `telium-server keys --config <server.toml>`):
+# key_id = "ed25519:abc123"
+# public_key_b64 = "BASE64_ED25519_PUBLIC_KEY"
+
+[limits]
+# Per-participant publish ceiling, in bits per second. Every join token the
+# guild signs carries the guild's own `max_bitrate` (its channel/voice
+# setting); /session rejects a token without a positive one and clamps it to
+# this value, so a greedy or misconfigured guild cannot ask a shared region
+# for more than it is willing to carry. The clamped figure is handed to the
+# client (as the /session `max_bitrate` and the participant attribute
+# `telium.max_bitrate`), which sizes its encoders and simulcast ladder to fit.
+max_bitrate = 8000000
+# Media-plane backstop. LiveKit has no per-participant bitrate cap of its own,
+# so every `poll_interval_secs` the SFU lists each active room and mutes, at
+# the SFU, any video track whose declared simulcast layers add up to more than
+# the publisher's ceiling (largest first, until the rest fits). What a client
+# actually sends beyond what it declared is not visible to RoomService and is
+# bounded only by the client's own encoder caps; see README §15.
+enforce = true
+poll_interval_secs = 15
+
+[admin]
+# The one-command installer enables this automatically. Keep it on localhost
+# once nginx is configured; nginx exposes it at https://<sfu-domain>/admin.
+enabled = false
+bind = "127.0.0.1:7891"
+state_dir = "./state"
+helper_path = "/usr/local/libexec/telium-sfu-admin-helper"

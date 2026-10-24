@@ -1,0 +1,773 @@
+# Telium reference server. Every value here is the default; delete anything you
+# do not want to override. `telium-server init` writes this file for you.
+
+# The domain that appears in user ids (@you:example.org) and guild aliases.
+# This is an identity, not a hostname — it can be delegated (see public_base_url).
+server_name = "localhost"
+# Where clients actually reach this server; published at /.well-known/telium/server.
+public_base_url = "http://localhost:8448"
+bind = "127.0.0.1:8448"
+database_url = "sqlite://telium.db?mode=rwc"
+media_dir = "media"
+
+# How loud the startup audit (`telium-server check`) is: auto, production or
+# development. Changes no behaviour.
+profile = "auto"
+
+# Any string value may be "${env:NAME}" or "${file:/path}" (whole value only).
+# An unresolvable reference is fatal. See docs/secrets.md.
+
+# Three roles, one binary. Turn any of them off to split the deployment; the
+# code paths between them are the same either way.
+[roles]
+identity = true
+guild = true
+media = true
+# Forward "Protect my IP" users' guild traffic (docs/network-privacy.md).
+# Needs identity = true. Costs bandwidth; the relay sees address and volume.
+relay = false
+
+# Relay budgets, ignored unless roles.relay = true.
+[relay]
+max_concurrent_per_account = 4
+max_concurrent_total = 256
+# Per tunnel, both directions.
+max_tunnel_bytes = 268435456
+# Rolling 24 hours per account, persisted. 4 GiB.
+daily_bytes_per_account = 4294967296
+idle_timeout_secs = 120
+max_lifetime_secs = 21600
+# Distinct destination servers per account per hour.
+destinations_per_hour = 40
+opens_burst = 20
+opens_per_minute = 30
+ports = [443]
+# Empty means any server with a valid discovery document.
+allow = []
+# Checked before allow.
+deny = []
+# Also bounds how long a failed lookup is cached.
+discovery_cache_secs = 600
+# Log account and destination of every tunnel. Published in discovery.
+log_destinations = false
+
+# Section 6: hosting media is a setting, not an obligation. A server that says
+# `default = "disabled"` is still a first-class Telium server — its users just
+# attach through another origin, and the client runs the origin-setup flow on
+# their first upload instead of showing an error.
+[media_policy]
+default = "enabled"          # enabled | quota | disabled
+quota_bytes = 1073741824     # used when default = "quota", and for allowlisted users
+allowlist = []               # user ids that always get tier-1 upload
+blocklist = []               # user ids that never do
+# Avatars and banners are small and always allowed, so a media-disabled server
+# does not leave its own users without a profile picture.
+profile_asset_carveout_bytes = 524288
+max_file_bytes = 104857600
+
+# The curated registry feed this server offers its users: conforming tier-2
+# origins they can upload through instead of here. A recommendation, not an
+# allowlist -- an account may still name any host that implements the media
+# protocol. Operators who set default = "disabled" above want this populated.
+# [[media_registry.hosts]]
+# origin = "files.example.org"
+# name = "Example Files"
+# description = "2 GB per file, kept for a year."
+# max_file_bytes = 2147483648
+# abuse_contact = "abuse@example.org"
+
+# Gofile uploads are client-direct. Web browsers cannot attach Gofile's
+# accountToken cookie to its free download endpoint, so by default the server
+# offers a streaming compatibility path for *playback only*. It does not store
+# the file, but the playback bandwidth does transit this server. Set false if
+# you prefer web users to open Gofile directly instead. Electron desktop and
+# Tauri Android keep their direct client-to-Gofile playback path either way.
+[media_registry]
+gofile_playback_proxy = true
+# Curated origin feeds that guilds on this server subscribe to (docs/media.md):
+# how often a verified feed is fetched again, how soon a failed fetch is
+# retried, and how long one fetch may take. `feed_validity_secs` is how long the
+# signed feed this server publishes from its own `hosts` stays valid; a
+# subscriber stops treating those hosts as vouched for once it lapses.
+# feed_refresh_secs = 3600
+# feed_retry_secs = 600
+# feed_timeout_secs = 10
+# feed_validity_secs = 604800
+
+# Curators this server points its guilds at, published as a signed directory at
+# /_telium/v1/media/curators (docs/media.md, "Finding a curator"). Listing one
+# here says "we know of these", not "these are approved": nothing in a directory
+# admits an origin anywhere, because pinning the key beside an entry stays a
+# guild moderator's explicit act. Entries that are not well formed — a feed URL
+# that is not HTTPS, a key that is not a base64 Ed25519 key — are dropped rather
+# than published, because this server signs what it publishes.
+# [[media_registry.curators]]
+# name = "Example Curators"
+# feed_url = "https://curator.example.org/_telium/v1/media/registry/feed"
+# key = "BASE64-ED25519-PUBLIC-KEY"
+# description = "Hosts that answer takedowns within a day."
+# contact = "curators@example.org"
+
+# Directories this server reads, so its moderators see other people's curators
+# and not only this operator's. `key` is required: an unsigned directory, or one
+# signed by a key nobody pinned, is not fetched at all. `label` is what your
+# moderators see in place of whatever the document calls itself.
+# [[media_registry.curator_directories]]
+# url = "https://friend.example.org/_telium/v1/media/curators"
+# key = "BASE64-ED25519-PUBLIC-KEY"
+# label = "friend.example.org"
+
+# Watching something together inside a call (docs/watch-together.md). A session
+# puts a video service's own player in the client, which means the people who
+# open it connect to that service directly and it learns their addresses. They
+# are told which host before anything loads and have to agree, per session --
+# but an operator who does not want that offered at all says so here, and the
+# call then offers screen share instead, which contacts nobody.
+#
+# `providers` narrows the services the client already implements; it cannot add
+# one, because each needs an adapter that speaks that provider's own control
+# protocol. Leave it out for all of them.
+# [media_registry.watch_together]
+# enabled = true
+# providers = ["youtube", "vimeo", "file"]
+
+# Tier 3 upload add-ons. These entries are public provider configuration; do
+# not put provider account tokens here. Current `main` exposes the Gofile
+# adapter; its upload bytes go directly from the client to Gofile. Unsupported
+# provider names are not advertised merely because an operator writes a row
+# here. Remove the entry to stop offering Gofile to accounts on this server.
+# [[media_registry.external_hosts]]
+# id = "gofile"
+# provider = "gofile"
+# name = "Gofile"
+# domain = "gofile.io"
+# upload_url = "https://upload.gofile.io/uploadfile"
+# description = "Guest files are temporary and are normally kept for about ten days."
+# browser_direct = true
+
+# Managed guild hosting (docs/hosting.md). The client's "create a guild" flow
+# offers this server -- self-hosted, today's behaviour -- alongside whatever
+# companies this operator is willing to name. Telium moves no money, stores no
+# payment credential and creates no account anywhere: the flow ends at the
+# provider's own signup page in a new tab. Listing nobody is the default and
+# leaves the flow exactly as it was.
+[hosting]
+enabled = true
+# Catalogues fetched on their own schedule; a provider's prices change on the
+# timescale of a pricing page, not a moderation decision. `catalog_validity_secs`
+# is how long the catalogue this server publishes from `providers` below stays
+# valid -- a subscriber lists nothing from it once it lapses.
+# catalog_refresh_secs = 21600
+# catalog_retry_secs = 900
+# catalog_timeout_secs = 10
+# catalog_validity_secs = 604800
+
+# A signed catalogue this server subscribes to. `key` is the publisher's
+# Ed25519 public key, base64, and it is the only key the document is ever
+# checked against: a catalogue that names a key for itself is not trusted to.
+# Fetching is the same SSRF-safe path as every other signed feed -- https only,
+# no redirects, no internal addresses, size-capped.
+# [[hosting.catalogs]]
+# url = "https://catalog.example.org/_telium/v1/hosting/catalog"
+# key = "base64-ed25519-public-key"
+# label = "Community catalog"
+
+# The operator's own curated providers. These are published as this server's
+# signed catalogue at /_telium/v1/hosting/catalog, so another operator can pin
+# the key from /_telium/v1/hosting/publication and subscribe to this list.
+# Every field is validated before it is shown or published: links must be
+# https, text is bounded, prices and limits must be in range.
+# [[hosting.providers]]
+# id = "aurora"
+# name = "Aurora Guilds"
+# base_url = "https://guilds.aurora.example"
+# signup_url = "https://guilds.aurora.example/signup"
+# terms_url = "https://guilds.aurora.example/terms"
+# privacy_url = "https://guilds.aurora.example/privacy"
+# contact = "hello@aurora.example"
+# description = "Managed Telium servers, run in the EU."
+# regions = ["eu-west", "eu-north"]
+# public_key = "base64-ed25519-public-key"   # the provider's own server key
+#
+# `price_minor` is minor units of `currency` (500 EUR-cents = 5.00 EUR), an
+# integer because a price rendered from a float needs a rounding rule nobody
+# wrote down. A limit left out means the provider did not state one, which the
+# client says rather than inventing a number.
+# [[hosting.providers.plans]]
+# id = "small"
+# name = "Small"
+# price_minor = 500
+# currency = "EUR"
+# period = "monthly"          # free | monthly | yearly | metered
+# member_cap = 500
+# storage_bytes = 21474836480
+# media_quota_bytes = 10737418240
+# notes = "Daily backups included."
+
+# Sections 6 and 9: an origin hosting strangers' content for the public owes the
+# world upload scanning, a takedown workflow and a contact. The scanning hook runs
+# on every upload whether or not a list is configured — that is deliberate, and it
+# is what "in the reference server from day one" means. Configure a list and it
+# starts refusing; configure none and it costs a hash of bytes you already hashed.
+[moderation]
+# BLAKE3 digests inline, for the handful you add by hand after a takedown.
+upload_hash_blocklist = []
+# Who to contact about content hosted here; published in /_telium/v1/capabilities.
+# abuse_contact = "abuse@example.org"
+blocklist_feeds = []
+report_retention_days = 365
+
+# Real lists arrive as files of hex digests, so point at them rather than pasting
+# them. One digest per line; `#` comments; anything after the digest is ignored.
+# A list that cannot be read fails startup — a scanner you think is armed and is
+# not is worse than no scanner.
+# [[moderation.upload_hash_lists]]
+# name      = "example-list"   # named so a refusal in the report queue says which
+# algorithm = "sha256"         # blake3 | sha256 | sha1 — the list author's choice
+# path      = "/var/lib/telium/example-list.txt"
+
+[sessions]
+home_session_ttl_secs = 2592000
+# Identity assertions are deliberately short-lived: they exist only to be
+# exchanged for a local guild session.
+assertion_ttl_secs = 300
+# How long a guild session lives before the client must present a fresh
+# assertion. This is the window in which a home-server revocation takes effect.
+guild_session_ttl_secs = 3600
+revalidate_interval_secs = 600
+signing_key_validity_secs = 7776000
+
+# Key that seals TOTP secrets (docs/secrets.md). Keep it out of the backups.
+# Losing it means `telium-server mfa reset-all`.
+[mfa]
+key_file = "mfa.key"
+# Old keys for rows sealed before a rotation; `telium-server mfa rekey`, then empty.
+# previous_key_files = ["mfa.key.2026-01"]
+
+# docs/server-ownership.md.
+[ownership]
+# Wait before an `admin recover` claim takes effect, unless no usable admin
+# exists. 0 is allowed.
+recovery_delay_secs = 86400
+
+[registration]
+open = true
+min_password_len = 8
+
+# Two questions about distributed account-home onboarding that look alike and
+# are not the same. `accepting` and `referral_weight` are about strangers coming
+# in; `suggest_alternatives` is about the people already here going out. An
+# operator can honestly want either without the other.
+[registration.recommendations]
+# Inbound. Automatic beginner account-home referrals are a separate consent from
+# open registration. This is off by default. To participate, the same domain must
+# also opt in under `recommendations.opt_in` in telium.chat's public homeserver
+# registry; either side can therefore pause referrals independently.
+accepting = false
+# Relative admission preference, not a capacity claim. The public catalogue
+# clamps the effective value to its documented range (currently 1-3), so a huge
+# number here cannot monopolize signups.
+referral_weight = 1
+# Outbound: what this server's own signup form does. Somebody who opened the
+# client this server hands out and pressed Get started has already said where
+# they want their account, so by default it is made here and they are not asked
+# again. Turn this on to have the client offer a signed community recommendation
+# instead -- the posture the project's own server takes, and the right one for a
+# deployment that exists to point elsewhere. Either way "change server" stays on
+# screen, so nobody is locked to this domain; only the default moves.
+suggest_alternatives = false
+
+# Section 10's floor: a scheduled backup that runs without being thought about.
+# Snapshots are consistent (SQLite VACUUM INTO) and restoring one is a file copy.
+# Section 10's floor: a scheduled backup that runs without being thought
+# about, and a restore that is one command. Each run writes one encrypted
+# `telium-<stamp>.tbk` to `dir` (a consistent database snapshot plus the cold
+# and media stores), then copies it to the bucket below if one is configured.
+# Operator guide: docs/backup.md.
+[backup]
+enabled = true
+# Put this where the data is not. An archive inside the directory it is an
+# archive of survives a single corrupt file and nothing else -- not the volume
+# being removed, not the disk, not the box -- and the server says so at startup
+# and on the admin screen (`placement`: inside, same-device, separate). A second
+# mount is the floor; the bucket below is the only one of the three that
+# outlives the machine.
+dir = "backups"
+# Every interval, and the first one at startup unless an archive newer than one
+# interval already exists -- so a new server is not left with nothing to restore
+# from for the length of its first interval.
+interval_secs = 21600
+# How many archives to keep on this disk.
+keep = 8
+# Log loudly, and show the admin screen a warning, once the newest archive --
+# or the newest successful upload, if a remote is configured -- is older than
+# this.
+stale_after_secs = 172800
+# Whether `media_dir` (attachments, avatars, emoji, stickers) goes into the
+# archive. The `cache/` and `camo/` subdirectories never do; they are copies of
+# other servers' bytes and are re-fetched on demand.
+include_media = true
+# Every archive is sealed under the 32-byte key in this file, and cannot be
+# read without it. `telium-server backup keygen` creates it (mode 0600); the
+# server creates one at startup if none exists and says so in the log.
+# TELIUM_BACKUP_KEY in the environment overrides the file. Copy the key
+# somewhere that is not this machine: a bucket full of archives is worthless
+# without it. Keep it with the archives rather than with the data, for the same
+# reason -- archives that outlive the data store, sealed under a key that did
+# not, are unreadable by anyone. The admin screen reports that case as
+# `key_stranded`.
+key_file = "backup.key"
+
+# Old keys that still open older archives. Never used to seal.
+# previous_key_files = ["backup.key.2026-01"]
+
+# Rehearse a recovery of the newest archive (`telium-server backup drill`).
+drill = true
+drill_interval_secs = 86400
+# Warn when the last passing drill is older than this.
+drill_stale_after_secs = 259200
+# Back up right before applying schema migrations.
+pre_migration_backup = true
+# Refuse to migrate if that backup fails.
+require_backup_before_migration = false
+
+# An S3-compatible bucket the archives are copied to after every run. Works
+# with AWS S3, Cloudflare R2, Backblaze B2, MinIO and anything else that
+# speaks the S3 API with Signature Version 4.
+[backup.remote]
+enabled = false
+# AWS: "https://s3.<region>.amazonaws.com". R2: "https://<account>.r2.cloudflarestorage.com".
+# MinIO: "http://minio.internal:9000".
+endpoint = "https://s3.amazonaws.com"
+bucket = ""
+# Part of the request signature; "us-east-1" is right for AWS in that region
+# and for most non-AWS providers ("auto" for R2).
+region = "us-east-1"
+# Key prefix inside the bucket. Empty means "telium/<server_name>/".
+prefix = ""
+# TELIUM_S3_ACCESS_KEY_ID and TELIUM_S3_SECRET_ACCESS_KEY in the environment
+# override these, so the secret need not live in this file.
+access_key_id = ""
+secret_access_key = ""
+# "https://endpoint/bucket/key" rather than "https://bucket.endpoint/key".
+# Works everywhere, MinIO included; AWS accepts both.
+path_style = true
+# How many archives to keep in the bucket. Separate from the local `keep`:
+# bucket space is cheap and the bucket is the copy that has to survive the box.
+keep = 8
+# Per-request timeout for small requests; uploads and downloads get more in
+# proportion to their size.
+timeout_secs = 60
+
+# Off by default: moving history is the operator's decision. See
+# docs/operator-guide.md, "Cold history and archiving".
+[archive]
+enabled = false
+# "local" writes segments to `dir` on this disk. "s3" writes them to the
+# bucket below instead; `dir` still names the key prefix.
+store = "local"
+dir = "cold"
+horizon_days = 365
+keep_hot_messages = 10000
+batch = 5000
+sweep_interval_secs = 3600
+
+# Same shape as [backup.remote], and only read when archive.store = "s3".
+[archive.s3]
+enabled = false
+endpoint = "https://s3.amazonaws.com"
+bucket = ""
+region = "us-east-1"
+prefix = ""
+access_key_id = ""
+secret_access_key = ""
+path_style = true
+timeout_secs = 60
+
+# "local" writes uploaded media under `media_dir`, as before. "s3" writes it to
+# the bucket below instead; `media_dir` still names the key prefix. An
+# S3-backed origin skips the local orphan sweep, which relies on filesystem
+# mtimes -- expired-object cleanup is unaffected, since it deletes by row.
+[media_store]
+store = "local"
+
+# Same shape as [backup.remote] and [archive.s3], and only read when
+# media_store.store = "s3".
+[media_store.s3]
+enabled = false
+endpoint = "https://s3.amazonaws.com"
+bucket = ""
+region = "us-east-1"
+prefix = ""
+access_key_id = ""
+secret_access_key = ""
+path_style = true
+timeout_secs = 60
+
+# Every key here has a default; the ones worth knowing about are the timeout and
+# the cooling-off window.
+[federation]
+enabled = true
+# How long an ordinary call to another server may take, end to end. Sized for a
+# small request and a quick answer -- a migration push is not one of those and
+# carries its own, much longer, allowance, so this does not need raising to move
+# a guild.
+request_timeout_secs = 15
+# How long a scheduled migration waits before it runs, during which any
+# logged-in device can call it off.
+migration_delay_secs = 86400
+
+[limits]
+# Default body cap; the gap allowed between body chunks, in seconds.
+max_request_bytes = 2097152
+request_body_timeout_secs = 30
+max_message_len = 4000
+max_guilds_per_user = 200
+max_emoji_per_guild = 250
+max_stickers_per_guild = 60
+max_sync_store_bytes = 1048576
+max_attachments_per_message = 10
+# Pending stranger DM requests per account; overflow is silently declined.
+max_message_requests = 100
+# Presence is the primary fanout bomb; coalescing it is not optional at scale.
+presence_coalesce_secs = 30
+# Emoji and sticker uploads are decoded and re-encoded here rather than stored
+# as sent (docs/media.md, "Expression normalization"). These are the box each
+# kind is scaled down to fit -- never up -- and the budgets a decode may spend.
+emoji_max_dimension = 128
+sticker_max_dimension = 320
+# The most pixels one source frame may declare before the upload is refused
+# without decoding anything: 4096 x 4096.
+expression_max_source_pixels = 16777216
+# The most source pixels an animation may have across all its frames; each is
+# decoded and resampled, so this bounds the work an upload can cost. A large
+# canvas lowers the effective frame cap to what fits in it.
+expression_max_total_pixels = 268435456
+expression_max_frames = 250
+expression_max_duration_ms = 30000
+# Past the frame or duration cap: keep what fits and drop the rest, or refuse
+# the upload.
+expression_drop_excess_frames = true
+
+# Section 7. With no `[[voice.regions]]` configured, calls use peer-to-peer
+# mesh. To advertise an SFU as the default for guilds, add a region using the
+# real public URL of an SFU you operate, and set `default_region` to its name.
+# Do not leave a sample or placeholder URL here: any configured address may be
+# advertised to clients. Clients also need somewhere to learn their public
+# address from; use your own STUN or coturn if preferred, or empty the list when
+# every participant is on one network.
+[voice]
+stun_servers = ["stun:stun.l.google.com:19302"]
+mesh_max_participants = 4
+# Example only; uncomment and replace both values to enable your SFU:
+# default_region = "local"
+# [[voice.regions]]
+# name = "local"
+# sfu = "https://sfu.your-domain.example"
+
+# The relay. STUN only tells a client its own public address; it does not carry
+# media, and there are pairs of networks -- symmetric NAT on either side, most
+# corporate and some mobile networks -- where knowing both addresses still buys
+# no path between them. For those calls a TURN server relays the media, and
+# without one the call simply fails. The client can say only that it found no
+# media path, because from where it stands that is the whole of what happened.
+#
+# Two settings, and the relay is offered only when both are present:
+#
+#   turn        the relay's `host:port`, as clients should dial it. It must be
+#               reachable from the public internet on UDP. This is a real
+#               constraint and not a formality: a relay behind an HTTP-only
+#               ingress -- a Cloudflare Tunnel, an nginx vhost, a PaaS that
+#               terminates TLS for you -- cannot be reached at all, because
+#               none of those carry UDP. TURN needs its own ports.
+#   turn_secret the shared secret, matching coturn's `static-auth-secret`. The
+#               server mints short-lived credentials from it (coturn's
+#               `use-auth-secret` REST scheme: the username is
+#               `<expiry>:<user_id>` and the password its HMAC-SHA1), so no
+#               long-lived TURN password is ever handed to a client.
+#
+# Setting one without the other does nothing at all, silently -- the server
+# warns about this at startup.
+#
+# Worth knowing before deciding to skip it: a relay is not only about awkward
+# NATs. A participant whose privacy posture is `relay` (docs/calls.md) needs
+# their *own* home's TURN to hold that posture. Without one their client asks
+# to be routed through an SFU instead, and if the server has no SFU either,
+# their client refuses the call rather than fall back to exposing their
+# address. So on a server with neither, that posture is unusable.
+#
+# turn = "turn.example.com:3478"
+# turn_secret = "a long random string, the same one coturn is given"
+# turn_ttl_secs = 3600
+
+# FCM and APNs need the app publisher's credentials. Web Push and UnifiedPush
+# need nothing here.
+[push]
+
+[push.fcm]
+enabled = false
+# Must match the service-account JSON.
+# project_id = "telium-android"
+# service_account_file = "/etc/telium/fcm-service-account.json"
+# Test/staging overrides; https only unless federation.allow_http.
+# base_url = "https://fcm.staging.example"
+# token_url = "https://oauth2.staging.example/token"
+
+[push.apns]
+enabled = false
+# team_id = "ABCDE12345"
+# key_id = "FGHIJ67890"
+# bundle_id = "chat.telium.ios"
+# key_file = "/etc/telium/apns-key.p8"
+# "production" or "sandbox".
+environment = "production"
+# Test/staging override; overrides environment.
+# base_url = "https://apns.staging.example"
+
+# The bundled web client. Comment `dir` out to run headless: the API and the
+# gateway are unaffected either way, and any other client speaks the same
+# protocol. The path is relative to the process's working directory.
+#
+# This is the *built* client, not its source: run `bun run build` in `web/` and
+# point at the `dist` it produces.
+[web]
+dir = "../web/dist"
+# Where people open this server's web client, if that is not `public_base_url`
+# (a client hosted on its own domain, or behind a different proxy). Published as
+# `client` in /.well-known/telium/server; with `dir` set and this left out, the
+# client is taken to be at `public_base_url`. Another server's client sends a
+# person here to receive an account move without copying a code by hand
+# (docs/migration.md, "The guided flow"), so leave it unset if there is no page.
+# client_url = "https://chat.example.com"
+
+# Public browser-side GIF provider configuration. The API key is an
+# application credential, not a server secret: clients contact KLIPY directly.
+# The key below is the public reference key, deliberately shipped (docs/secrets.md).
+[klipy]
+enabled = true
+api_key = "PUJfq1nYPGGO7gjwx7wqjGJwOzld1FZiyP35kiBa2wnQ6mRD7JrJnfA0mKfLrHKh"
+api_base_url = "https://api.klipy.com/api/v1"
+media_hosts = ["klipy.com", "static.klipy.com", "static.klipy.co", "media.klipy.com"]
+
+# Outbound email: recovery-address confirmation and security warnings
+# (docs/migration.md, "Migration alerts").
+#
+# "none", the default, sends nothing and hides the recovery_email capability.
+# "webhook" POSTs
+#   { "to": ..., "from": ..., "subject": ..., "text": ... }
+# as JSON to webhook_url, with webhook_token as a bearer token when it is set,
+# and leaves SMTP to whatever listens there: a relay, a function, a mail API's
+# inbound hook. Non-2xx is a failed send; 5xx is retried twice.
+# Bounces: POST /_telium/v1/admin/mail/bounce {"email", "kind": "hard"|"soft"}.
+[mail]
+mode = "none"
+# webhook_url = "https://mail-relay.internal.example/send"
+# webhook_token = "change-me"
+# from = "noreply@chat.example"   # default: noreply@<server_name>
+
+
+# Request throttling. Forwarded client IPs are ignored unless the immediate TCP
+# peer is explicitly trusted below; this prevents clients from minting fresh
+# anonymous buckets with a fake X-Forwarded-For header.
+[rate_limit]
+enabled = true
+read_burst = 200
+read_per_sec = 20.0
+write_burst = 60
+write_per_sec = 5.0
+auth_burst = 10
+auth_per_sec = 0.25
+# Server-to-server traffic, counted per socket rather than per account. One peer
+# relays for everyone on it, so this is sized for a server, not a person.
+federation_burst = 240
+federation_per_sec = 40.0
+# Guild search, in cost units rather than requests (routes/social.rs::search_cost).
+search_burst = 600
+search_per_sec = 20.0
+trusted_proxies = []
+
+
+# Per-socket gateway limits (docs/operator-guide.md#rate-limits).
+[gateway]
+# Queued events before the socket is closed with 4010.
+outbox_depth = 400
+# Sockets per account (close 4011).
+max_connections_per_account = 6
+# Upgraded sockets not yet identified (close 4013).
+max_pending_sockets = 2048
+max_frame_bytes = 65536
+# Client frames per account; heartbeats exempt.
+frames_per_sec = 10.0
+frame_burst = 120
+typing_per_sec = 0.5
+typing_burst = 5
+
+
+# Warm standby (Section 10). Two separate consents, deliberately not one
+# switch, and a pair is configured by each side naming the other -- neither
+# server can enrol the other.
+#
+# `standbys` is who may stream this server's database. That is the whole of it,
+# so it is the larger trust; it is also what installs the write-logging
+# triggers, which a server with no standby should not be paying for.
+# `replicate` is whose database this server holds a copy of, which costs disk
+# and bandwidth and gets served read-only at /_telium/standby/{origin} when the
+# original stops answering.
+#
+# Empty on both sides by default: nothing here happens to a server that has not
+# asked for it. See ../docs/warm-standby.md.
+[failover]
+standbys = []
+replicate = []
+dir = "replicas"
+# Seconds of lag is seconds of data loss in a failure, so the poll is short.
+poll_secs = 5
+batch = 500
+keep_acked_secs = 1800
+# How behind a copy may be before clients reading it are told it is behind,
+# rather than merely told it is a copy.
+stale_after_secs = 300
+media_batch = 200
+# How often a primary asks its standbys whether one of them has taken over.
+# Slower on purpose: the question is only interesting after an outage, and the
+# answer that matters most is the one checked once at startup.
+demotion_poll_secs = 30
+# Disk cap for one bootstrap snapshot from the primary. 100 GiB.
+max_snapshot_bytes = 107374182400
+
+# Staying current (../docs/operator-guide.md, "Staying current"). A Telium
+# homeserver updates itself by default -- that half is deploy/update.sh and a
+# systemd timer -- and this section is the half the server owns: knowing which
+# build it is running, learning what the current one is, and saying so when the
+# gap grows. It installs nothing, restarts nothing and writes no file. It
+# decides what goes in a log and what an administrator is shown.
+[updates]
+# The whole privacy story, and a real switch rather than a gesture.
+#
+# On, this server GETs one public file over HTTPS every few hours and compares
+# it against a commit compiled into the binary. The request carries a bare
+# `telium-server` User-Agent -- no version, no server name, no query string, no
+# credential -- so whoever serves that file learns an IP address and a time,
+# which is what they learn from any request for any file.
+#
+# Off, nothing is fetched and this server never raises the subject again: no
+# log lines, no notice to administrators, no "unknown" to nag about. An
+# air-gapped deployment and a privacy-strict one are both legitimate, and an
+# operator who has answered this question should not be asked it twice a day
+# forever.
+check = true
+# Where the list of published releases lives. CI appends to this file when a
+# `server-v<version>` tag is pushed, so it is the honest answer to "what is
+# current" rather than a number somebody maintains by hand. Point it at your own
+# copy if you mirror the repository, or at your own build pipeline's equivalent.
+manifest_url = "https://raw.githubusercontent.com/telium-chat/telium/main/deploy/releases.json"
+# Six hours. A release is not urgent to *learn about* in the minute it happens
+# -- the box's own timer is already pulling every minute -- so this is a
+# background fact, checked at the rate a background fact deserves.
+check_interval_secs = 21600
+retry_secs = 1800
+timeout_secs = 10
+# When being behind stops being ordinary and starts being worth saying loudly.
+#
+# Days since the first release this build missed, not days since the build was
+# made: a server that missed one release in January and nothing since has been
+# out of date since January, and measuring from the build date would let it
+# quietly reset itself every time somebody rebuilt the same commit.
+#
+# Under `stale_after_days` the server mentions it once at startup and leaves it
+# there -- an operator one patch behind on a Tuesday is not in an incident, and
+# software that shouts at them then is software they learn to ignore before the
+# day it matters. Past `urgent_after_days`, or the moment a release marked
+# security-relevant has been missed, it is impossible to overlook.
+stale_after_days = 14
+urgent_after_days = 45
+
+# Counting the world's Telium servers, and nothing else (docs/privacy.md).
+#
+# The project would like two numbers it cannot read out of a repository:
+# roughly how many servers exist, and roughly how many people use them in
+# total. This section is the entire answer. Once a day the server sends one
+# HTTPS POST carrying a random id and the number of enabled accounts. No
+# version, no server name, no user, guild or message data -- the count of
+# people is not the people. The id is random rather than derived from
+# anything, so the collector cannot connect it to this server's name or its
+# federation identity. What the collector learns beyond the body is an IP
+# address and a time, which it learns from any request for anything.
+[usage]
+# The whole privacy story, and a real switch rather than a gesture.
+#
+# On, one two-number report leaves this server a day. Off, nothing is sent
+# and nothing is stored for sending later, and this server never raises the
+# subject again. An air-gapped deployment and a privacy-strict one are both
+# legitimate, and an operator who has answered this question should not be
+# asked it twice a day forever.
+report = true
+# Where the daily report goes. Point it at a fleet-internal counter of your
+# own if you would rather the number stop at your edge.
+count_url = "https://count.telium.chat/ping"
+# A day. Neither number moves on an hour's timescale in any way that matters,
+# and a census that rang every doorbell hourly would be spending operator
+# goodwill on nothing.
+interval_secs = 86400
+# How long one report may take.
+timeout_secs = 10
+
+# What the operator console measures, and for how long it remembers it.
+#
+# Every counter here is an aggregate over events. None of them has a user, a
+# conversation, a channel or a peer account as a dimension, and none of them
+# reads a message body -- DM content is end-to-end encrypted and the numbers on
+# the dashboard are not an exception to that. What an operator gets is the shape
+# of the load, not a description of anybody's day.
+#
+# Turning this off costs the server nothing except the ability to answer "is it
+# slow, or is it just me" at three in the morning.
+[metrics]
+enabled = true
+# One history row per interval. In between, everything lives in memory as
+# atomics, so the cost of measuring a request is two adds.
+interval_secs = 60
+# Two weeks at a row a minute is about twenty thousand rows. Small enough that
+# the smallest box anyone runs this on can carry it, long enough that last
+# weekend is still answerable on Monday.
+retention_days = 14
+# Total media bytes, database size and cold-segment size are the only numbers
+# here that cost a table scan, so they are sampled on their own slower clock.
+# Buckets in between record them as absent rather than repeating the last value.
+storage_interval_secs = 900
+# GET /metrics (docs/observability.md). Off by default.
+scrape_enabled = false
+# Bearer token; TELIUM_METRICS_SCRAPE_TOKEN overrides. Use it behind a proxy.
+scrape_token = ""
+# Also accepted during a rotation; TELIUM_METRICS_SCRAPE_TOKEN_PREVIOUS overrides.
+scrape_token_previous = ""
+# TCP peer addresses admitted without a token. Replaces the default.
+scrape_allow = ["127.0.0.1", "::1"]
+
+# Housekeeping retention (docs/data-lifecycle.md). There is no message retention.
+[retention]
+erasure_journal_days = 90
+# 0 keeps tombstones forever.
+tombstone_days = 365
+remote_cache_days = 30
+exports_per_day = 3
+delivered_notice_days = 14
+# 0 keeps guild audit entries forever.
+audit_log_days = 730
+
+# Startup database checks (docs/data-lifecycle.md).
+[integrity]
+# off, quick or full. TELIUM_DB_INTEGRITY overrides for one run.
+startup_check = "quick"
+foreign_key_check = true
+# false starts anyway and salvages what it can.
+refuse_start_on_corruption = true
+
+
+# SIGTERM: refuse new sockets, close gateway sockets with 4005, wait settle_ms,
+# then give HTTP requests grace_secs. The supervisor must wait longer.
+[shutdown]
+# 1-300.
+grace_secs = 15
+# 0-5000.
+settle_ms = 250

@@ -1,0 +1,307 @@
+---
+const products = [
+  { key: 'telium', name: 'Telium', note: 'community chat + movable homeservers', telium: true },
+  { key: 'discord', name: 'Discord', note: 'centralized community platform', telium: false },
+  { key: 'matrix', name: 'Matrix / Element', note: 'federated protocol + client', telium: false },
+  { key: 'stoat', name: 'Stoat', note: 'formerly Revolt', telium: false },
+  { key: 'fluxer', name: 'Fluxer', note: 'open-source community chat', telium: false },
+] as const
+
+type State = 'yes' | 'no' | 'partial' | 'neutral'
+type Value = { state: State; label: string; detail?: string }
+
+const rows: {
+  label: string
+  hint: string
+  values: Record<(typeof products)[number]['key'], Value>
+}[] = [
+  {
+    label: 'Open source',
+    hint: 'Can the core chat stack be inspected and forked?',
+    values: {
+      telium: { state: 'yes', label: 'Yes', detail: 'Apache-2.0' },
+      discord: { state: 'no', label: 'No', detail: 'Proprietary service' },
+      matrix: { state: 'yes', label: 'Yes', detail: 'Open protocol and implementations' },
+      stoat: { state: 'yes', label: 'Yes', detail: 'Open-source stack' },
+      fluxer: { state: 'yes', label: 'Yes', detail: 'AGPL-3.0' },
+    },
+  },
+  {
+    label: 'Self-host a server',
+    hint: 'Can you run the service on infrastructure you control?',
+    values: {
+      telium: { state: 'yes', label: 'Yes', detail: 'Single Telium server program' },
+      discord: { state: 'no', label: 'No', detail: 'Discord operates the network' },
+      matrix: { state: 'yes', label: 'Yes', detail: 'Many homeserver choices' },
+      stoat: { state: 'yes', label: 'Yes', detail: 'Web/PWA works best for self-hosting today' },
+      fluxer: { state: 'yes', label: 'Yes', detail: 'Docker-based self-hosting' },
+    },
+  },
+  {
+    label: 'Independent servers interoperate',
+    hint: 'Can separately operated servers participate in the same network?',
+    values: {
+      telium: { state: 'yes', label: 'Yes', detail: 'Accounts can join communities on other servers' },
+      discord: { state: 'no', label: 'No', detail: 'One centrally operated network' },
+      matrix: { state: 'yes', label: 'Yes', detail: 'Full homeserver federation' },
+      stoat: { state: 'no', label: 'No', detail: 'Stoat says federation is not currently supported' },
+      fluxer: { state: 'partial', label: 'Not today', detail: 'Self-hosting exists; federation is not a current feature' },
+    },
+  },
+  {
+    label: 'Move your account to another provider',
+    hint: 'Can your identity move without simply starting a second account?',
+    values: {
+      telium: { state: 'yes', label: 'Built in', detail: 'Account migration is part of the protocol' },
+      discord: { state: 'neutral', label: 'Not applicable', detail: 'There are no independent Discord providers' },
+      matrix: { state: 'partial', label: 'Not generally', detail: 'Portable identity remains an unsolved everyday path' },
+      stoat: { state: 'no', label: 'No general path', detail: 'Self-hosted instances are separate' },
+      fluxer: { state: 'no', label: 'No general path', detail: 'Independent instances do not interoperate today' },
+    },
+  },
+  {
+    label: 'End-to-end encrypted private text',
+    hint: 'Are private text conversations unreadable to the service carrying them?',
+    values: {
+      telium: { state: 'yes', label: 'Yes', detail: 'Direct messages and group DMs' },
+      discord: { state: 'no', label: 'No', detail: 'Discord explicitly keeps text outside E2EE' },
+      matrix: { state: 'yes', label: 'Yes', detail: 'Element supports E2EE rooms and DMs' },
+      stoat: { state: 'neutral', label: 'Not advertised', detail: 'Current public material does not claim text E2EE' },
+      fluxer: { state: 'no', label: 'Not yet', detail: 'Fluxer says DM E2EE is planned' },
+    },
+  },
+  {
+    label: 'Voice, video and screenshare',
+    hint: 'Can a community handle live conversation without leaving the product?',
+    values: {
+      telium: { state: 'yes', label: 'Yes', detail: 'Built in' },
+      discord: { state: 'yes', label: 'Yes', detail: 'Built in; calls use E2EE' },
+      matrix: { state: 'yes', label: 'Yes', detail: 'Element supports calls and screen sharing' },
+      stoat: { state: 'yes', label: 'Yes', detail: 'Video and screen share shipped July 2026' },
+      fluxer: { state: 'yes', label: 'Yes', detail: 'Built in' },
+    },
+  },
+]
+
+const sources = [
+  { label: 'Discord', href: 'https://discord.com/blog/every-voice-and-video-call-on-discord-is-now-end-to-end-encrypted' },
+  { label: 'Matrix', href: 'https://matrix.org/foundation/about/' },
+  { label: 'Element', href: 'https://www.matrix.org/ecosystem/clients/element/' },
+  { label: 'Matrix portability', href: 'https://matrix.org/blog/2024/03/why-matrix-org/' },
+  { label: 'Stoat', href: 'https://developers.stoat.chat/faq/' },
+  { label: 'Fluxer self-hosting', href: 'https://docs.fluxer.app/operator/get-started/' },
+  { label: 'Fluxer privacy', href: 'https://fluxer.app/privacy' },
+] as const
+---
+
+<section class="band overflow-hidden" id="compare">
+  <div class="page">
+    <div class="reveal grid gap-6 lg:grid-cols-[minmax(0,.8fr)_minmax(0,1.2fr)] lg:items-end">
+      <div>
+        <p class="eyebrow">How we compare</p>
+        <h2 class="h2 mt-3 max-w-[15ch]">Different architecture. Different trade-offs.</h2>
+      </div>
+      <p class="max-w-[62ch] text-[15px] leading-relaxed text-muted lg:justify-self-end">
+        Telium is not trying to win a checklist. The difference is the combination: community-style
+        chat, servers you can run yourself, cross-server participation, and a built-in way to move
+        your account later.
+      </p>
+    </div>
+
+    <div class="comparison-shell panel reveal mt-10 overflow-hidden">
+      <p class="scroll-hint flex items-center gap-1.5 px-5 py-2.5 text-[12px] text-muted sm:hidden" aria-hidden="true">
+        Swipe to see Discord, Matrix, Stoat and Fluxer
+        <span class="scroll-hint-arrow">→</span>
+      </p>
+      <div class="table-scroll overflow-x-auto">
+        <table class="comparison-table w-full min-w-[980px] table-fixed border-collapse text-left">
+          <caption class="sr-only">
+            Comparison of Telium, Discord, Matrix with Element, Stoat, and Fluxer.
+          </caption>
+          <colgroup>
+            <col class="w-[220px]" />
+            {products.map(() => <col class="w-[170px]" />)}
+          </colgroup>
+          <thead>
+            <tr class="comparison-head-row">
+              <th scope="col" class="feature-head sticky left-0 z-20 px-5 py-5 align-bottom">
+                <span class="eyebrow">What matters</span>
+              </th>
+              {
+                products.map((product) => (
+                  <th
+                    scope="col"
+                    class:list={[
+                      'px-4 py-5 align-bottom',
+                      product.telium && 'comparison-telium',
+                    ]}
+                  >
+                    <strong class:list={['block text-[15px] font-semibold', product.telium && 'text-accent-soft-foreground']}>
+                      {product.name}
+                    </strong>
+                    <span class="mt-1 block text-[11.5px] font-normal leading-snug text-muted">{product.note}</span>
+                  </th>
+                ))
+              }
+            </tr>
+          </thead>
+          <tbody>
+            {
+              rows.map((row) => (
+                <tr class="comparison-row">
+                  <th
+                    scope="row"
+                    class="feature-cell sticky left-0 z-10 px-5 py-5 align-top"
+                  >
+                    <strong class="block text-[13.5px] font-medium leading-snug">{row.label}</strong>
+                    <span class="mt-1.5 block text-[11.5px] font-normal leading-relaxed text-muted">{row.hint}</span>
+                  </th>
+                  {
+                    products.map((product) => {
+                      const value = row.values[product.key]
+                      return (
+                        <td
+                          class:list={[
+                            'px-4 py-5 align-top',
+                            product.telium && 'comparison-telium',
+                          ]}
+                        >
+                          <span class="inline-flex items-center gap-2 text-[13px] font-medium">
+                            <span class:list={['status-dot', `status-${value.state}`]}></span>
+                            {value.label}
+                          </span>
+                          {value.detail && (
+                            <span class="mt-1.5 block text-[11.5px] leading-relaxed text-muted">{value.detail}</span>
+                          )}
+                        </td>
+                      )
+                    })
+                  }
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <div class="comparison-sources flex flex-wrap items-center justify-between gap-3 px-5 py-3 text-[11.5px] text-muted">
+        <span>Checked against current public product documentation in August 2026.</span>
+        <span class="flex flex-wrap gap-x-3 gap-y-1">
+          <span>Sources:</span>
+          {
+            sources.map((source) => (
+              <a href={source.href} rel="noreferrer" class="text-link hover:underline">{source.label}</a>
+            ))
+          }
+        </span>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<style>
+  /* Rules, not boxes: the table's own row separators. A shell that is a fill
+     needs no outline, so what used to be a tinted 1px border plus a 70px purple
+     drop shadow under the whole panel is gone and only the internal rules stay. */
+  .comparison-head-row {
+    border-bottom: 1px solid var(--color-separator);
+  }
+
+  .comparison-row {
+    border-bottom: 1px solid var(--color-separator);
+  }
+
+  .comparison-row:last-child {
+    border-bottom: 0;
+  }
+
+  .scroll-hint {
+    border-bottom: 1px solid var(--color-separator);
+  }
+
+  .comparison-sources {
+    border-top: 1px solid var(--color-separator);
+  }
+
+  .comparison-table th,
+  .comparison-table td {
+    vertical-align: top;
+  }
+
+  /* The frozen first column has to be opaque, because the other five scroll
+     underneath it. It takes the panel's own fill, and the 1px rule marking the
+     scroll boundary stays a `box-shadow` for a mechanical reason rather than a
+     decorative one: `border-collapse` drops a border on a `position: sticky`
+     cell, and a shadow with no blur and no offset is the only 1px line that
+     survives there. */
+  .feature-head,
+  .feature-cell {
+    background: var(--color-surface);
+    box-shadow: 1px 0 0 var(--color-separator);
+  }
+
+  /* Our own column, marked by fill rather than by two vertical borders and an
+     8% accent wash. `--accent-soft` is the client's quietest accent surface and
+     is the same idea as a selected row there. */
+  .comparison-telium {
+    background: color-mix(in oklab, var(--color-accent-soft) 60%, var(--color-surface));
+  }
+
+  .status-dot {
+    width: 0.48rem;
+    height: 0.48rem;
+    flex: none;
+    border-radius: 999px;
+    background: var(--color-muted);
+  }
+
+  /* The four states were told apart by hue and by a 4px halo each. The halo was
+     the shadow rule's last hiding place on this page and it never survived on a
+     tinted cell anyway; hue and the label beside it carry the meaning. */
+  .status-yes { background: var(--color-success); }
+  .status-no { background: var(--color-danger); }
+  .status-partial { background: var(--color-warning); }
+  .status-neutral { background: var(--color-muted); opacity: 0.7; }
+
+  @media (max-width: 640px) {
+    .comparison-shell {
+      margin-inline: -0.5rem;
+    }
+  }
+
+  .scroll-hint-arrow {
+    display: inline-block;
+    animation: scroll-hint-nudge 1.4s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .scroll-hint-arrow {
+      animation: none;
+    }
+  }
+
+  @keyframes scroll-hint-nudge {
+    0%, 100% { transform: translateX(0); }
+    50% { transform: translateX(3px); }
+  }
+
+  .scroll-hint[data-dismissed] {
+    display: none;
+  }
+</style>
+
+<script>
+  const shell = document.querySelector('.comparison-shell')
+  const scroller = shell?.querySelector<HTMLElement>('.table-scroll')
+  const label = shell?.querySelector<HTMLElement>('.scroll-hint')
+  if (scroller && label) {
+    const update = () => {
+      const atEnd = scroller.scrollLeft + scroller.clientWidth >= scroller.scrollWidth - 4
+      label.toggleAttribute('data-dismissed', atEnd)
+    }
+    update()
+    scroller.addEventListener('scroll', update, { passive: true })
+    addEventListener('resize', update, { passive: true })
+  }
+</script>

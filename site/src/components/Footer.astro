@@ -1,0 +1,86 @@
+---
+import { URLS } from '../config'
+import Wordmark from './Wordmark.astro'
+
+const columns = [
+  {
+    title: 'Use Telium',
+    links: [
+      { label: 'Open Telium', href: URLS.client, external: true },
+      { label: 'Download apps', href: '/download' },
+      { label: 'Choose a homeserver', href: '/servers' },
+    ],
+  },
+  {
+    title: 'Learn more',
+    links: [
+      { label: 'People behind Telium', href: '/people' },
+      { label: 'Documentation and self-hosting', href: URLS.docs, external: true },
+      { label: 'Source and releases', href: URLS.github, external: true },
+    ],
+  },
+]
+---
+
+<footer class="site-footer mt-32">
+  <div class="mx-auto max-w-[1120px] px-5 py-14 sm:px-8">
+    <div class="flex flex-col gap-12 sm:flex-row sm:justify-between">
+      <div class="max-w-[24rem]">
+        <Wordmark size={24} />
+        <p class="mt-4 text-[13.5px] leading-relaxed text-muted">
+          Open-source group chat for communities that want a server they can choose, trust, and
+          leave when they need to.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-2 gap-x-10 gap-y-8 sm:gap-x-14">
+        {
+          columns.map((column) => (
+            <div>
+              <h2 class="eyebrow">{column.title}</h2>
+              <ul class="mt-3.5 space-y-2.5">
+                {column.links.map((link) => (
+                  <li>
+                    <a
+                      href={link.href}
+                      class="rounded text-[13.5px] text-muted transition-colors hover:text-foreground"
+                      {...(link.external ? { rel: 'noreferrer' } : {})}
+                    >
+                      {link.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+
+    <div
+      class="footer-legal mt-14 flex flex-col gap-3 pt-6 text-[12.5px] text-muted sm:flex-row sm:items-center sm:justify-between"
+    >
+      {/* A claim the build has to keep, not a slogan: there is no analytics
+          script on this site, the fonts are served from this origin, and
+          nothing here contacts a third party. If that ever stops being true,
+          this line comes out first. */}
+      <p>No analytics. No third-party fonts. No trackers.</p>
+      <p>
+        <a href={URLS.license} rel="noreferrer" class="rounded transition-colors hover:text-foreground"
+          >Apache-2.0</a
+        >
+        <span aria-hidden="true" class="mx-2 opacity-40">·</span>
+        <span>© {new Date().getFullYear()} Telium contributors</span>
+      </p>
+    </div>
+  </div>
+</footer>
+
+<style>
+  /* The footer is the page's last band, so it separates itself the way every
+     other band does — a rule in the shared separator colour, nothing else. */
+  .site-footer,
+  .footer-legal {
+    border-top: 1px solid var(--color-separator);
+  }
+</style>

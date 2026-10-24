@@ -1,0 +1,281 @@
+.presence {
+  --presence-plate: clamp(
+    9px,
+    min(
+      calc(var(--presence-avatar, 36px) * 0.32),
+      calc(8.8px + var(--presence-avatar, 36px) * 0.07)
+    ),
+    17px
+  );
+
+  --presence-ring-width: clamp(2px, calc(var(--presence-avatar, 36px) * 0.05), 4px);
+
+  --presence-inset: calc(
+    var(--presence-avatar, 36px) * 0.1464
+    - (var(--presence-plate) + var(--presence-ring-width) * 2) / 2
+  );
+
+  position: absolute;
+  inset-inline-end: var(--presence-inset);
+  bottom: var(--presence-inset);
+
+  box-sizing: content-box;
+  display: grid;
+  width: var(--presence-plate);
+  height: var(--presence-plate);
+  padding: var(--presence-ring-width);
+  border-radius: 999px;
+
+  background: var(--presence-ring, var(--background));
+
+  pointer-events: none;
+}
+
+.presence-glyph,
+.presence-typing {
+  grid-area: 1 / 1;
+}
+
+.presence-glyph {
+  justify-self: end;
+  width: var(--presence-plate);
+  height: var(--presence-plate);
+  fill: currentColor;
+}
+
+.presence[data-status="online"] { color: var(--success); }
+.presence[data-status="idle"] { color: var(--warning); }
+.presence[data-status="dnd"] { color: var(--danger); }
+.presence[data-status="offline"] { color: var(--muted); }
+
+.presence[data-status="unknown"] { color: var(--success); }
+
+.account-card {
+  margin: -4px -4px 4px;
+  overflow: hidden;
+  border-radius: var(--radius-2xl) var(--radius-2xl) var(--radius) var(--radius);
+  background: var(--surface);
+
+  --presence-ring: var(--surface);
+}
+
+.account-card__banner {
+  height: 56px;
+  background: var(--accent);
+}
+
+.account-card__body {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+.account-card__avatar {
+  flex: none;
+  margin-top: -32px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.account-card__text {
+  min-width: 0;
+  padding-bottom: 2px;
+}
+
+.account-card__name {
+  overflow: hidden;
+  font-size: var(--text-base);
+  font-weight: 600;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-card__handle,
+.account-card__status {
+  overflow: hidden;
+  font-size: var(--text-2xs);
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-note__glyph {
+  display: inline-block;
+  width: 1.05em;
+  height: 1.05em;
+  margin-inline-end: 0.3em;
+  vertical-align: -0.2em;
+  color: var(--success-ink);
+}
+
+.activity-note__verb {
+  font-weight: 600;
+  color: var(--success-ink);
+}
+
+.activity-card {
+  --activity-card-fill: var(--surface);
+  display: flex;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-card);
+  background: var(--activity-card-fill);
+  color: var(--foreground);
+}
+
+.pc .activity-card { --activity-card-fill: var(--surface-secondary); }
+.pc__right .activity-card { --activity-card-fill: var(--surface); }
+
+.activity-card__art {
+  position: relative;
+  flex: none;
+  width: 88px;
+  height: 88px;
+}
+
+.activity-card__cover {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-2xl);
+  object-fit: cover;
+
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+
+.activity-card__cover--empty {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.activity-card__cover-glyph {
+  width: 30px;
+  height: 30px;
+}
+
+.activity-card__badge {
+  position: absolute;
+  inset-inline-end: -5px;
+  bottom: -5px;
+  box-sizing: content-box;
+  width: 22px;
+  height: 22px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--activity-card-fill);
+  object-fit: cover;
+}
+
+.activity-card__text {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.activity-card__verb {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1.5;
+  text-transform: uppercase;
+  color: var(--success-ink);
+}
+
+.activity-card__verb-glyph {
+  flex: none;
+  width: 13px;
+  height: 13px;
+}
+
+.activity-card__name,
+.activity-card__detail,
+.activity-card__state {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-card__name {
+  margin-top: 2px;
+  font-size: var(--text-base);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.activity-card__detail {
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.activity-card__state {
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.activity-card__progress {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: var(--text-2xs);
+  color: var(--muted);
+}
+
+.activity-card__time {
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-card__track {
+  overflow: hidden;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--foreground) 12%, transparent);
+}
+
+.activity-card__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--foreground);
+}
+
+.activity-card__clock {
+  margin-top: 5px;
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.activity-card__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.activity-card__button {
+  padding: 4px 10px;
+  border-radius: var(--radius-row);
+  background: color-mix(in oklab, var(--foreground) 9%, transparent);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--foreground);
+  transition: background-color var(--dur-1) var(--ease);
+}
+
+.activity-card__button:hover {
+  background: color-mix(in oklab, var(--foreground) 16%, transparent);
+}
+
+.activity-card__button:focus-visible {
+  @apply focus-ring;
+}

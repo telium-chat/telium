@@ -1,0 +1,709 @@
+---
+import Icon from './Icon.astro'
+import { defaultOrder, SIZE_LABEL, SIZE_RANK, formatBytes, roleList, type Server } from '../lib/servers'
+
+interface Props {
+  /* The landing page shows a few rows as a taste; /servers shows the lot with
+     controls. Same markup either way so there is one table to get right. */
+  limit?: number
+  controls?: boolean
+  /* Re-sort by latency once the browser has measured it. Only the full
+     directory does this — reordering three preview rows under someone reading
+     the landing page would be motion for its own sake. */
+  autosort?: 'latency'
+  class?: string
+}
+
+const { limit, controls = true, autosort, class: className = '' } = Astro.props
+
+const rows: Server[] = (limit ? defaultOrder.filter((s) => s.probe.registration_open === true) : defaultOrder).slice(
+  0,
+  limit ?? undefined,
+)
+
+/* Every column sorts, so there is no `sortable` flag to carry. `align` is
+   only ever "is this a number", which decides both the cell alignment and
+   which side of the label the sort arrow sits on. */
+const columns = [
+  { key: 'name', label: 'Server', align: 'left' },
+  { key: 'region', label: 'Region', align: 'left' },
+  { key: 'size', label: 'Accounts', align: 'right' },
+  { key: 'uptime', label: 'Uptime', align: 'right' },
+  { key: 'latency', label: 'Latency', align: 'right' },
+] as const
+---
+
+<div class={`server-table ${className}`} data-server-table data-autosort={autosort}>
+  {
+    controls && (
+      <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <label class="relative flex-1 sm:max-w-xs">
+          <span class="sr-only">Filter servers</span>
+          <span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted">
+            <Icon name="search" size={15} />
+          </span>
+          <input
+            type="search"
+            data-filter-text
+            placeholder="Filter by name, domain or region"
+            autocomplete="off"
+            class="field w-full py-2 pr-3 pl-9 text-[13.5px] placeholder:text-muted"
+          />
+        </label>
+
+        <div class="flex items-center gap-4">
+          <label class="flex cursor-pointer items-center gap-2 text-[13.5px] text-muted select-none">
+            <input
+              type="checkbox"
+              data-filter-open
+              checked
+              class="size-3.5 accent-[var(--color-accent)]"
+            />
+            Open registration only
+          </label>
+          <span class="tnum text-[13px] text-muted" data-result-count aria-live="polite" />
+        </div>
+      </div>
+    )
+  }
+
+  <table class="w-full border-collapse text-left">
+    <caption class="sr-only">
+      Community Telium homeservers, with region, declared account range, measured uptime and
+      latency from your browser.
+    </caption>
+    <thead>
+      <tr class="head-row">
+        {
+          columns.map((column) => (
+            <th
+              scope="col"
+              class:list={[
+                'eyebrow py-2.5 font-medium whitespace-nowrap',
+                column.align === 'right' && 'text-right',
+                column.key === 'region' && 'hidden md:table-cell',
+                column.key === 'size' && 'hidden lg:table-cell',
+                column.key === 'uptime' && 'hidden sm:table-cell',
+              ]}
+              aria-sort={column.key === 'name' ? 'ascending' : 'none'}
+              data-column={column.key}
+            >
+              <button type="button" class="sort-button" data-sort={column.key}>
+                <span>{column.label}</span>
+                <span class="sort-arrow" aria-hidden="true">
+                  <Icon name="chevron-up" size={12} />
+                </span>
+              </button>
+            </th>
+          ))
+        }
+        <th scope="col" class="w-8"><span class="sr-only">Details</span></th>
+      </tr>
+    </thead>
+
+    <tbody>
+      {
+        rows.map((server) => {
+          const { probe } = server
+          const roles = roleList(probe.roles)
+          const features = probe.features
+            ? Object.entries(probe.features)
+                .filter(([, on]) => on)
+                .map(([name]) => name)
+            : []
+          const detailId = `detail-${server.domain.replace(/\./g, '-')}`
+
+          return (
+            <>
+              <tr
+                class="group body-row align-middle"
+                data-row
+                data-domain={server.domain}
+                data-name={server.name.toLowerCase()}
+                data-region={`${server.region.label} ${server.region.code}`.toLowerCase()}
+                data-open={probe.registration_open === true ? 'true' : 'false'}
+                data-size={SIZE_RANK[server.size_band]}
+                data-uptime={probe.uptime_30d ?? ''}
+              >
+                <td class="py-3.5 pr-4">
+                  <div class="flex items-center gap-2">
+                    <span class="font-medium">{server.name}</span>
+                    {probe.registration_open === true && (
+                      <span class="badge badge-open" title="Registration is open">
+                        Open
+                      </span>
+                    )}
+                    {probe.registration_open === false && (
+                      <span class="badge badge-closed" title="Registration is closed">
+                        Closed
+                      </span>
+                    )}
+                    {!probe.ok && (
+                      <span class="badge badge-down" title={probe.error ?? 'Unreachable'}>
+                        Unreachable
+                      </span>
+                    )}
+                    {probe.moved_to && <span class="badge badge-moved">Moved</span>}
+                    {probe.sunset && <span class="badge badge-moved">Sunsetting</span>}
+                  </div>
+                  <div class="mt-0.5 font-mono text-[12.5px] text-muted">{server.domain}</div>
+                  {controls && (
+                    <p class="mt-1.5 max-w-[46ch] text-[13px] leading-snug text-muted md:hidden">
+                      {server.description}
+                    </p>
+                  )}
+                </td>
+
+                <td class="hidden py-3.5 pr-4 text-[13.5px] text-muted md:table-cell" data-label="Region">
+                  {server.region.label}
+                </td>
+
+                <td
+                  class="tnum hidden py-3.5 pr-4 text-right text-[13.5px] text-muted lg:table-cell"
+                  data-label="Accounts"
+                >
+                  <span title="Declared by the operator — Telium exposes no account count to verify it against.">
+                    {SIZE_LABEL[server.size_band]}
+                  </span>
+                </td>
+
+                <td
+                  class="tnum hidden py-3.5 pr-4 text-right text-[13.5px] sm:table-cell"
+                  data-label="Uptime"
+                >
+                  {probe.uptime_30d === null ? (
+                    <span class="text-muted">—</span>
+                  ) : (
+                    <span class:list={[probe.uptime_30d < 99 && 'text-warning']}>
+                      {probe.uptime_30d.toFixed(1)}%
+                    </span>
+                  )}
+                </td>
+
+                <td class="tnum py-3.5 text-right text-[13.5px]" data-label="Latency">
+                  <span data-latency class="text-muted">—</span>
+                </td>
+
+                <td class="py-3.5 text-right">
+                  <button
+                    type="button"
+                    class="detail-toggle icon-btn size-7"
+                    aria-expanded="false"
+                    aria-controls={detailId}
+                  >
+                    <span class="sr-only">Details for {server.name}</span>
+                    <span class="detail-chevron"><Icon name="chevron-down" size={15} /></span>
+                  </button>
+                </td>
+              </tr>
+
+              <tr class="detail-row body-row" id={detailId} hidden data-detail>
+                <td colspan="6" class="px-0 pb-5">
+                  <div class="panel-inset grid gap-x-10 gap-y-4 p-4 sm:grid-cols-2">
+                    <div class="sm:col-span-2">
+                      <p class="max-w-[62ch] text-[13.5px] leading-relaxed text-muted">
+                        {server.description}
+                      </p>
+                    </div>
+
+                    <dl class="grid grid-cols-[auto_1fr] gap-x-5 gap-y-1.5 text-[13px]">
+                      <dt class="text-muted">Operator</dt>
+                      <dd>
+                        <a
+                          href={server.operator.contact}
+                          rel="noreferrer nofollow"
+                          class="rounded text-link hover:underline"
+                        >
+                          {server.operator.name}
+                        </a>
+                      </dd>
+
+                      <dt class="text-muted">Roles</dt>
+                      <dd>{roles.length ? roles.join(', ') : '—'}</dd>
+
+                      <dt class="text-muted">Max upload</dt>
+                      <dd class="tnum">{formatBytes(probe.max_file_bytes)}</dd>
+                    </dl>
+
+                    <dl class="grid grid-cols-[auto_1fr] gap-x-5 gap-y-1.5 text-[13px]">
+                      <dt class="text-muted">Version</dt>
+                      <dd class="font-mono">{probe.server_version ?? '—'}</dd>
+
+                      <dt class="text-muted">Protocol</dt>
+                      <dd class="font-mono">{probe.protocol_version ?? '—'}</dd>
+
+                      <dt class="text-muted">Listed</dt>
+                      <dd class="tnum">{server.added}</dd>
+                    </dl>
+
+                    {features.length > 0 && (
+                      <div class="sm:col-span-2">
+                        {/* A label, not a heading. The other groups in this
+                            panel are <dl>s with <dt> labels; making this one an
+                            <h3> would put a heading two levels below the page
+                            title into the outline once per row, for a list of
+                            feature flags nobody navigates by. */}
+                        <p class="eyebrow mb-2" id={`${detailId}-features`}>Advertised features</p>
+                        <ul class="flex flex-wrap gap-1.5" aria-labelledby={`${detailId}-features`}>
+                          {features.map((feature) => (
+                            <li class="feature-flag px-1.5 py-0.5 font-mono text-[11.5px] text-muted">
+                              {feature.replace(/_/g, ' ')}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {probe.moved_to && (
+                      <p class="text-[13px] text-warning sm:col-span-2">
+                        This server has moved to <span class="font-mono">{probe.moved_to}</span>.
+                      </p>
+                    )}
+                    {probe.sunset && (
+                      <p class="text-[13px] text-warning sm:col-span-2">
+                        Scheduled to shut down on <span class="tnum">{probe.sunset}</span>. Accounts
+                        can migrate to another homeserver before then.
+                      </p>
+                    )}
+
+                    <div class="sm:col-span-2">
+                      <a
+                        href={`https://${server.domain}`}
+                        rel="noreferrer nofollow"
+                        class="inline-flex items-center gap-1.5 rounded text-[13px] text-link hover:underline"
+                      >
+                        Visit {server.domain}
+                        <Icon name="arrow-up-right" size={14} />
+                      </a>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            </>
+          )
+        })
+      }
+    </tbody>
+  </table>
+
+  {
+    controls && (
+      <p
+        data-empty
+        hidden
+        class="body-row block py-10 text-center text-[13.5px] text-muted"
+      >
+        No servers match that filter.
+      </p>
+    )
+  }
+</div>
+
+<style>
+  /* Sort affordance is invisible until the script says the table can sort, so a
+     page without JavaScript never shows a control that does nothing. */
+  .server-table.landing-preview thead th:first-child,
+  .server-table.landing-preview tr[data-row] > td:first-child {
+    padding-left: 1rem;
+  }
+  .server-table.landing-preview thead th:last-child,
+  .server-table.landing-preview tr[data-row] > td:last-child {
+    padding-right: 0.75rem;
+  }
+  .server-table.landing-preview .detail-row > td {
+    padding-right: 1rem;
+    padding-left: 1rem;
+  }
+
+  /* Rules between rows, which is what a table is made of. They are the only
+     1px lines the directory draws — the panels around it are fills. */
+  .head-row,
+  .body-row {
+    border-bottom: 1px solid var(--color-separator);
+  }
+
+  /* Filled and edgeless, the shape every input in the client wears. The resting
+     fill is the secondary button's, so the filter box and a button beside it
+     would be the same colour and the same corner. It previously also set
+     `focus:outline-none` and re-drew focus as a border colour change, which is
+     a focus ring a high-contrast user cannot see; the page's one inset ring
+     handles it now. */
+  .field {
+    border: 0;
+    border-radius: var(--radius-row);
+    background: var(--color-surface-secondary);
+    color: var(--color-foreground);
+  }
+
+  .feature-flag {
+    border-radius: 4px;
+    background: color-mix(in oklab, var(--color-foreground) 8%, transparent);
+  }
+
+  .sort-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    cursor: default;
+  }
+  [data-enhanced] .sort-button {
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  /* The header's sort control is a run of text, not a box, so its ring goes
+     outside it like a link's. */
+  [data-enhanced] .sort-button:focus-visible {
+    outline-offset: 2px;
+  }
+  [data-enhanced] .sort-button:hover {
+    color: var(--color-foreground);
+  }
+  .sort-arrow {
+    opacity: 0;
+    transition: opacity 120ms var(--ease-rise), transform 120ms var(--ease-rise);
+  }
+  [data-enhanced] th[aria-sort='ascending'] .sort-arrow {
+    opacity: 1;
+  }
+  [data-enhanced] th[aria-sort='descending'] .sort-arrow {
+    opacity: 1;
+    transform: rotate(180deg);
+  }
+  /* Numeric columns read better with the label against the numbers and the
+     arrow outboard of it. `text-right` is the class the header applies; there
+     is no `align` attribute on these cells to match on. */
+  th.text-right .sort-button {
+    flex-direction: row-reverse;
+  }
+
+  .badge {
+    display: inline-block;
+    border-radius: 4px;
+    padding: 0.0625rem 0.3125rem;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.45;
+    letter-spacing: 0.01em;
+  }
+  .badge-open {
+    background: var(--color-accent-soft);
+    color: var(--color-accent-soft-foreground);
+  }
+  /* Every badge is a fill. "Closed" and "Moved" used to be outlines, which on
+     a row of otherwise-filled badges read as a different kind of object rather
+     than as a different value of the same one. */
+  .badge-closed {
+    background: color-mix(in oklab, var(--color-foreground) 9%, transparent);
+    color: var(--color-muted);
+  }
+  .badge-down {
+    background: var(--color-danger-soft);
+    color: var(--color-danger-soft-foreground);
+  }
+  .badge-moved {
+    background: color-mix(in oklab, var(--color-warning) 18%, transparent);
+    color: var(--color-warning);
+  }
+
+  .detail-chevron {
+    display: block;
+    transition: transform 160ms var(--ease-rise);
+  }
+  [aria-expanded='true'] .detail-chevron {
+    transform: rotate(180deg);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .detail-chevron,
+    .sort-arrow {
+      transition: none;
+    }
+  }
+</style>
+
+<script>
+  /* Progressive enhancement only. Every row, every declared value and every
+     probed value is already in the HTML above — this adds sorting, filtering,
+     the detail panels, and the one number the server genuinely cannot know:
+     how far away it is from the person reading the page. */
+
+  const LATENCY_KEY = 'telium-latency'
+  const PROBE_KEY = 'telium-probe'
+  const CACHE_TTL_MS = 5 * 60 * 1000
+  const SAMPLES = 3
+  const CONCURRENCY = 6
+  const TIMEOUT_MS = 5000
+
+  type Cache = Record<string, { ms: number | null; at: number }>
+
+  const readCache = (): Cache => {
+    try {
+      return JSON.parse(sessionStorage.getItem(LATENCY_KEY) ?? '{}')
+    } catch {
+      return {}
+    }
+  }
+  const writeCache = (cache: Cache) => {
+    try {
+      sessionStorage.setItem(LATENCY_KEY, JSON.stringify(cache))
+    } catch {
+      /* private mode, quota — a missing cache costs a re-probe, nothing more */
+    }
+  }
+
+  const probingEnabled = () => localStorage.getItem(PROBE_KEY) !== 'off'
+
+  /* One round trip, measured off the Resource Timing entry rather than wall
+     clock, so the number excludes the time our own event loop spent busy.
+     `duration` stays readable for opaque cross-origin responses even without
+     Timing-Allow-Origin, which is what makes the no-cors fallback work at all. */
+  const sample = async (domain: string): Promise<number | null> => {
+    const url = `https://${domain}/_telium/v1/health?p=${Math.random().toString(36).slice(2)}`
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+    const started = performance.now()
+    try {
+      try {
+        await fetch(url, { signal: controller.signal, cache: 'no-store' })
+      } catch {
+        // Almost always CORS. The request still went out and still got timed.
+        await fetch(url, { mode: 'no-cors', signal: controller.signal, cache: 'no-store' })
+      }
+      const entry = performance.getEntriesByName(url).at(-1) as PerformanceResourceTiming | undefined
+      const measured = entry?.duration && entry.duration > 0 ? entry.duration : performance.now() - started
+      return Math.round(measured)
+    } catch {
+      return null
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /* Minimum of a few samples, not the mean. Network round trips have a long
+     right tail — a queued packet or a busy tab inflates a sample but nothing
+     ever makes one arrive faster than the real path allows, so the smallest
+     observation is the closest estimate of the actual distance. */
+  const measure = async (domain: string): Promise<number | null> => {
+    const results: number[] = []
+    for (let i = 0; i < SAMPLES; i++) {
+      const ms = await sample(domain)
+      /* A first sample that fails failed at the transport — no DNS record, no
+         route, no listener — and two more attempts will fail the same way,
+         slowly. Give up on the row instead of holding the pool for the whole
+         timeout three times over. */
+      if (ms === null) break
+      results.push(ms)
+    }
+    return results.length ? Math.min(...results) : null
+  }
+
+  const pool = async <T,>(items: T[], limit: number, worker: (item: T) => Promise<void>) => {
+    let cursor = 0
+    await Promise.all(
+      Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (cursor < items.length) await worker(items[cursor++]!)
+      }),
+    )
+  }
+
+  const initTable = (root: HTMLElement) => {
+    root.setAttribute('data-enhanced', '')
+
+    const rows = Array.from(root.querySelectorAll<HTMLTableRowElement>('[data-row]'))
+    const tbody = root.querySelector('tbody')
+    const empty = root.querySelector<HTMLElement>('[data-empty]')
+    const count = root.querySelector<HTMLElement>('[data-result-count]')
+    const textInput = root.querySelector<HTMLInputElement>('[data-filter-text]')
+    const openInput = root.querySelector<HTMLInputElement>('[data-filter-open]')
+    if (!tbody) return
+
+    const detailFor = (row: HTMLTableRowElement) =>
+      row.nextElementSibling as HTMLTableRowElement | null
+
+    // --- detail panels ------------------------------------------------------
+    root.querySelectorAll<HTMLButtonElement>('.detail-toggle').forEach((button) => {
+      button.addEventListener('click', () => {
+        const row = button.closest<HTMLTableRowElement>('[data-row]')
+        const detail = row && detailFor(row)
+        if (!detail) return
+        const open = button.getAttribute('aria-expanded') === 'true'
+        button.setAttribute('aria-expanded', String(!open))
+        detail.hidden = open
+      })
+    })
+
+    // --- filtering ----------------------------------------------------------
+    const applyFilters = () => {
+      const needle = (textInput?.value ?? '').trim().toLowerCase()
+      const openOnly = openInput?.checked ?? false
+      let visible = 0
+
+      for (const row of rows) {
+        const haystack = `${row.dataset.name ?? ''} ${row.dataset.domain ?? ''} ${row.dataset.region ?? ''}`
+        const matchesText = !needle || haystack.includes(needle)
+        const matchesOpen = !openOnly || row.dataset.open === 'true'
+        const show = matchesText && matchesOpen
+
+        row.hidden = !show
+        const detail = detailFor(row)
+        if (detail) {
+          // Collapse on hide, so a filtered-out row does not come back expanded.
+          if (!show) {
+            detail.hidden = true
+            row.querySelector('.detail-toggle')?.setAttribute('aria-expanded', 'false')
+          } else if (row.querySelector('.detail-toggle')?.getAttribute('aria-expanded') !== 'true') {
+            detail.hidden = true
+          }
+        }
+        if (show) visible++
+      }
+
+      if (empty) empty.hidden = visible > 0
+      if (count) count.textContent = `${visible} of ${rows.length}`
+    }
+
+    textInput?.addEventListener('input', applyFilters)
+    openInput?.addEventListener('change', applyFilters)
+    applyFilters()
+
+    // --- sorting ------------------------------------------------------------
+    const latency = new Map<string, number | null>()
+
+    const valueOf = (row: HTMLTableRowElement, key: string): string | number => {
+      switch (key) {
+        case 'name':
+          return row.dataset.name ?? ''
+        case 'region':
+          return row.dataset.region ?? ''
+        case 'size':
+          return Number(row.dataset.size ?? -1)
+        case 'uptime':
+          return row.dataset.uptime === '' ? -1 : Number(row.dataset.uptime)
+        case 'latency': {
+          const ms = latency.get(row.dataset.domain ?? '')
+          // Unmeasured and unreachable both sort last, in either direction.
+          return ms === null || ms === undefined ? Number.POSITIVE_INFINITY : ms
+        }
+        default:
+          return ''
+      }
+    }
+
+    let sortKey = 'name'
+    let ascending = true
+
+    const sort = (key: string, direction?: boolean) => {
+      ascending = direction ?? (key === sortKey ? !ascending : key === 'name' || key === 'region' || key === 'latency')
+      sortKey = key
+
+      const ordered = [...rows].sort((a, b) => {
+        const left = valueOf(a, key)
+        const right = valueOf(b, key)
+        let result: number
+        if (typeof left === 'string' || typeof right === 'string') {
+          result = String(left).localeCompare(String(right))
+        } else {
+          // Infinity - Infinity is NaN, which would scramble the comparator.
+          result = left === right ? 0 : left < right ? -1 : 1
+        }
+        return ascending ? result : -result
+      })
+
+      // Move each row and its detail panel together, in order.
+      for (const row of ordered) {
+        const detail = detailFor(row)
+        tbody.appendChild(row)
+        if (detail) tbody.appendChild(detail)
+      }
+
+      root.querySelectorAll<HTMLElement>('th[data-column]').forEach((th) => {
+        th.setAttribute(
+          'aria-sort',
+          th.dataset.column === key ? (ascending ? 'ascending' : 'descending') : 'none',
+        )
+      })
+    }
+
+    root.querySelectorAll<HTMLButtonElement>('[data-sort]').forEach((button) => {
+      button.addEventListener('click', () => sort(button.dataset.sort!))
+    })
+
+    // --- latency ------------------------------------------------------------
+    /* Three states, not two. A dash means "we asked and got nothing"; the same
+       dash with no tooltip means "we never asked", which is what the cell says
+       before probing starts and what it must go back to when the visitor turns
+       probing off. Telling them the servers did not respond, when we deliberately
+       did not contact them, would be the one dishonest number on the page. */
+    const paint = (domain: string, ms?: number | null) => {
+      const cell = root.querySelector<HTMLElement>(`[data-domain="${CSS.escape(domain)}"] [data-latency]`)
+      if (!cell) return
+      if (ms === undefined || ms === null) {
+        cell.textContent = '—'
+        cell.classList.add('text-muted')
+        if (ms === null) cell.title = 'No response'
+        else cell.removeAttribute('title')
+        return
+      }
+      cell.textContent = `${ms} ms`
+      cell.removeAttribute('title')
+      cell.classList.toggle('text-muted', ms > 250)
+    }
+
+    const runProbes = async () => {
+      if (!probingEnabled()) return
+      const cache = readCache()
+      const now = Date.now()
+      const pending: string[] = []
+
+      for (const row of rows) {
+        const domain = row.dataset.domain!
+        const hit = cache[domain]
+        if (hit && now - hit.at < CACHE_TTL_MS) {
+          latency.set(domain, hit.ms)
+          paint(domain, hit.ms)
+        } else {
+          pending.push(domain)
+        }
+      }
+
+      await pool(pending, CONCURRENCY, async (domain) => {
+        const ms = await measure(domain)
+        latency.set(domain, ms)
+        cache[domain] = { ms, at: Date.now() }
+        paint(domain, ms)
+      })
+
+      writeCache(cache)
+
+      // Latency is the most useful ordering once it exists, but re-sorting under
+      // someone who has already chosen a column would be rude.
+      if (sortKey === 'name' && ascending && root.dataset.autosort === 'latency') sort('latency', true)
+    }
+
+    // Probing is a network fan-out; there is no reason for it to compete with
+    // first paint.
+    if ('requestIdleCallback' in window) requestIdleCallback(() => void runProbes(), { timeout: 2000 })
+    else setTimeout(() => void runProbes(), 400)
+
+    // --- privacy switch -----------------------------------------------------
+    const toggle = document.querySelector<HTMLInputElement>('[data-probe-toggle]')
+    if (toggle) {
+      toggle.checked = probingEnabled()
+      toggle.addEventListener('change', () => {
+        localStorage.setItem(PROBE_KEY, toggle.checked ? 'on' : 'off')
+        if (toggle.checked) void runProbes()
+        else {
+          latency.clear()
+          sessionStorage.removeItem(LATENCY_KEY)
+          for (const row of rows) paint(row.dataset.domain!)
+        }
+      })
+    }
+  }
+
+  document.querySelectorAll<HTMLElement>('[data-server-table]').forEach(initTable)
+</script>

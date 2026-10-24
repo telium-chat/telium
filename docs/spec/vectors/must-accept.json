@@ -1,0 +1,48 @@
+{
+  "cases": [
+    {
+      "artifact": {
+        "a_member_added_in_a_later_release": {
+          "nested": true
+        },
+        "key_id": "ed25519:spec-primary",
+        "kind": "spec",
+        "signature": "cDed3YUdLVeFxYco5gTgbpbTSu5EOzreeFsWfsBCWqSEMTBPVBBBtw5aVBjh4M6jRLAnOFi9FQ_dTLg7DG5RBA",
+        "value": 1
+      },
+      "name": "signed-json/unknown-member-is-signed-and-must-verify",
+      "rule": "Serialise and verify the document as received, unknown members included. Do not filter, do not normalise, do not reject.",
+      "why": "Adding a member is an explicitly compatible change. An implementation that rejects unknown members turns every future additive change into a network partition, and the partition appears on the day somebody else deploys."
+    },
+    {
+      "artifact": {
+        "evaluate_at": 1767225600000,
+        "token": "eyJhX2NsYWltX2Zyb21fYV9sYXRlcl9yZWxlYXNlIjoiaWdub3JlZCwgYnV0IHNpZ25lZCIsImF1ZGllbmNlIjoiZ3VpbGRzLmV4YW1wbGUiLCJkZXZpY2VfaWQiOiJkZXYtMDFKQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJkZXZpY2VfcHVia2V5IjoiRjh0NS15dEJJUEt4N0dYa0dZMXVDTEtPZ1RfckFlU2tBSU9iaGVHQWdNNCIsImRpc3BsYXlfbmFtZSI6IkFsaWNlIiwiZXhwIjoxNzY3MjI1OTAwMDAwLCJpYXQiOjE3NjcyMjU2MDAwMDAsIm9yaWdpbiI6ImhvbWUuZXhhbXBsZSIsInByb2ZpbGVfdmVyc2lvbiI6NywidXNlcl9pZCI6IkBhbGljZTpob21lLmV4YW1wbGUifQ.i5HmaSNekciK4Dj9NGLFJH5T0YuRJrpsxjp6Bzi-mbnLb4TWmCY6yFHDxKOM1Bu4DBq-Va0-ow2Knjv7Xf-ZBA.ed25519:spec-primary"
+      },
+      "name": "assertion/unknown-claim-is-ignored-not-rejected",
+      "rule": "Parse the claims leniently; verify the signature strictly over every byte received.",
+      "why": "The two halves pull in opposite directions and both are required. An implementation that is lenient in the parser and lenient in the verifier has no security; one that is strict in both has no forward compatibility."
+    },
+    {
+      "artifact": {
+        "original": {
+          "key_id": "ed25519:spec-primary",
+          "kind": "spec",
+          "signature": "bnlRLd8lvpebTinuLTNOvhMVmE4NPQU7HDOWhC-kyz5WwwpV49Qg3QY8gr9sUuYE-nGNlRW_oNhyFpLsWd5NAQ"
+        },
+        "relabelled": {
+          "key_id": "ed25519:some-other-label",
+          "kind": "spec",
+          "signature": "bnlRLd8lvpebTinuLTNOvhMVmE4NPQU7HDOWhC-kyz5WwwpV49Qg3QY8gr9sUuYE-nGNlRW_oNhyFpLsWd5NAQ"
+        }
+      },
+      "name": "signed-json/key_id-is-outside-the-signed-bytes",
+      "rule": "`key_id` and `signature` are stripped before the bytes are formed. `key_id` is therefore unauthenticated routing metadata: use it to select a key, then let the signature decide.",
+      "why": "An implementation that includes `key_id` in the signed bytes produces documents no Telium server can verify, and the error it gets back says only 'invalid signature'."
+    }
+  ],
+  "frozen_at": 1767225600000,
+  "kind": "must-accept",
+  "note": "Over-strictness is a compatibility bug with the same blast radius as under-strictness, and it is the one a careful implementer introduces on purpose.",
+  "time_dependent": "Cases carrying `evaluate_at` are frozen so this file is byte-stable. Evaluate them with your clock set to that instant, or re-mint the artifact with the same offsets from your own now."
+}

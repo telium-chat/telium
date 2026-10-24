@@ -1,0 +1,44 @@
+name: Feature idea
+description: Something Telium does not do that you wish it did.
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Telium is decentralized: the client, the homeserver and the federation
+        protocol are separate pieces, and an idea may live in any of them. It
+        helps to say which -- or just describe what you were trying to do and
+        let the reader work that out.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposed-idea
+    attributes:
+      label: Proposed idea
+      description: What you would like to happen. "How" is useful but optional.
+    validations:
+      required: true
+  # Optional, and the same field name as the bug template on purpose: the
+  # client's deep-linked reports carry an Environment section whatever the
+  # kind, and knowing which build lacks the thing being asked for saves a
+  # round of questions.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Optional. The Build line from the footer of the settings screen.
+      placeholder: |
+        - Build: `0.1.0 · 1a2b3c4 · desktop · 2026-01-01T00:00:00Z`
+  # Same field name as the bug template, same reason: if the reporter chose to
+  # attach diagnostics -- occasionally it is evidence for the idea, not just
+  # for a bug -- the sections should read the same wherever they land.
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Optional. The output of the client's *Copy diagnostics* button, already shaped for a public issue.

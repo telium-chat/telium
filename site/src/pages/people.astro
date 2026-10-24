@@ -1,0 +1,750 @@
+---
+import { Buffer } from 'node:buffer'
+import Base from '../layouts/Base.astro'
+import Icon from '../components/Icon.astro'
+import { contributorGroups, featuredContributorCount } from '../data/contributors'
+
+const inlineAvatar = async (url: string) => {
+  try {
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'telium.chat site build' },
+    })
+    if (!response.ok) return null
+
+    const contentType = (response.headers.get('content-type') ?? '').split(';')[0]
+    if (!contentType.startsWith('image/')) return null
+
+    const bytes = Buffer.from(await response.arrayBuffer())
+    if (bytes.length > 512_000) return null
+
+    return `data:${contentType};base64,${bytes.toString('base64')}`
+  } catch {
+    return null
+  }
+}
+
+const groups = await Promise.all(
+  contributorGroups.map(async (group) => ({
+    ...group,
+    contributors: await Promise.all(
+      group.contributors.map(async (person) => ({
+        ...person,
+        avatar: await inlineAvatar(person.avatarUrl),
+      })),
+    ),
+  })),
+)
+
+const featuredPeople = groups.flatMap((group) => group.contributors).slice(0, 3)
+---
+
+<Base
+  title="People"
+  description="Meet the people shaping Telium across product, engineering, reliability, and the web."
+>
+  <section class="credits-page">
+    <div class="credits-shell">
+      <header class="credits-hero">
+        <div class="source-pill">
+          <Icon name="users" size={15} />
+          <span>Open source contributors</span>
+        </div>
+
+        <h1>The people behind <span class="gradient-text">Telium</span></h1>
+        <p>
+          Telium is built by people working across engineering, product, reliability, and community
+          work. Different skills, one project — a better way to connect.
+        </p>
+
+        <div class="stats" aria-label="Contributor summary">
+          <div class="stat">
+            <Icon name="users" size={22} />
+            <div>
+              <strong>{featuredContributorCount}</strong>
+              <span>Featured contributors</span>
+            </div>
+          </div>
+          <span class="stat-divider" aria-hidden="true"></span>
+          <div class="stat">
+            <Icon name="globe" size={21} />
+            <div>
+              <strong>Open</strong>
+              <span>Git history</span>
+            </div>
+          </div>
+          <span class="stat-divider" aria-hidden="true"></span>
+          <div class="stat">
+            <Icon name="heart" size={21} />
+            <div>
+              <strong>One</strong>
+              <span>Open source project</span>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div class="category-grid">
+        {
+          groups.map((group) => (
+            <section class:list={['category-panel', `tone-${group.tone}`]}>
+              <header class="category-header">
+                <div class="category-heading">
+                  <span class="category-icon" aria-hidden="true">
+                    <Icon name={group.icon} size={22} />
+                  </span>
+                  <div>
+                    <h2>{group.title}</h2>
+                    <p>{group.description}</p>
+                  </div>
+                </div>
+                <span class="count-pill">
+                  {group.contributors.length > 0
+                    ? `${group.contributors.length} ${group.contributors.length === 1 ? 'contributor' : 'contributors'}`
+                    : 'Git history'}
+                </span>
+              </header>
+
+              <div class="member-grid">
+                {
+                  group.contributors.map((person) => (
+                    <article class="member-card">
+                      <div class="member-heading">
+                        <div class="avatar" aria-hidden="true">
+                          {person.avatar ? (
+                            <img src={person.avatar} alt="" width="52" height="52" />
+                          ) : (
+                            <span>{person.initials}</span>
+                          )}
+                        </div>
+                        <div class="identity">
+                          <h3>{person.name}</h3>
+                        </div>
+                        <a
+                          class="github-link"
+                          href={person.href}
+                          rel="noreferrer"
+                          aria-label={`View ${person.name} on GitHub`}
+                        >
+                          <Icon name="github" size={16} />
+                        </a>
+                      </div>
+
+                      <span class="pill role-pill">{person.role}</span>
+
+                      <div class="contribution">
+                        <span>Major contribution</span>
+                        <p>{person.majorContribution}</p>
+                      </div>
+
+                      <a class="profile-link" href={person.href} rel="noreferrer">
+                        @{person.handle}
+                        <Icon name="arrow-up-right" size={11} />
+                      </a>
+                    </article>
+                  ))
+                }
+
+                {
+                  group.contributors.length === 0 && (
+                    <a
+                      class="history-card"
+                      href="https://github.com/telium-chat/telium/graphs/contributors"
+                      rel="noreferrer"
+                    >
+                      <span class="history-icon"><Icon name="git-branch" size={17} /></span>
+                      <span>
+                        <strong>Complete contribution history</strong>
+                        <small>See every contributor and commit on GitHub.</small>
+                      </span>
+                      <Icon name="arrow-up-right" size={13} class="history-arrow" />
+                    </a>
+                  )
+                }
+              </div>
+            </section>
+          ))
+        }
+      </div>
+
+      <a
+        class="more-strip"
+        href="https://github.com/telium-chat/telium/graphs/contributors"
+        rel="noreferrer"
+      >
+        <span class="more-icon"><Icon name="users" size={20} /></span>
+        <span class="more-copy">
+          <strong>And many more contributors <span aria-hidden="true">→</span></strong>
+          <small>See everyone who has helped Telium move forward.</small>
+        </span>
+        <span class="more-avatars" aria-hidden="true">
+          {featuredPeople.map((person) =>
+            person.avatar ? (
+              <img src={person.avatar} alt="" width="28" height="28" />
+            ) : (
+              <i>{person.initials}</i>
+            ),
+          )}
+          <i>+</i>
+        </span>
+      </a>
+
+      <footer class="credits-footer">
+        <a href="/" class="footer-brand" aria-label="Telium home">
+          <strong class="gradient-text">Telium</strong>
+          <span aria-hidden="true"></span>
+          <small>Open chats. Brighter together.</small>
+        </a>
+        <p>Built by people, for everyone. <Icon name="heart" size={13} /></p>
+      </footer>
+    </div>
+  </section>
+</Base>
+
+<style>
+  /* This page had its own design system: four hues where the site spends one,
+     a 1px outline around every object, and a type scale running from 8.6px to
+     14.7px against the 13-16px the rest of the site is set in. The structure
+     below is untouched — same hero, same four panels, same cards, same closing
+     strip — but it is now drawn in the site's tokens, at the site's sizes, and
+     separated by fill steps rather than by borders. */
+  .credits-page {
+    color: var(--color-foreground);
+  }
+
+  /* The site's measure, not a second one. It was 1540px wide, which put this
+     page's content on a different grid from every other page's 1120px. */
+  .credits-shell {
+    width: 100%;
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 0;
+  }
+
+  @media (min-width: 640px) {
+    .credits-shell {
+      padding-inline: 2rem;
+    }
+  }
+
+  .credits-hero {
+    width: min(920px, 100%);
+    margin: 0 auto;
+    text-align: center;
+  }
+
+  .source-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 2.25rem;
+    padding: 0 0.85rem;
+    border-radius: 999px;
+    background: var(--color-surface);
+    color: var(--color-muted);
+    font-size: 0.8125rem;
+    font-weight: 500;
+  }
+
+  .credits-hero h1 {
+    margin: 1.25rem 0 0;
+    font-size: clamp(2.8rem, 2rem + 3.5vw, 4.5rem);
+    line-height: 1.02;
+    font-weight: 650;
+    letter-spacing: -0.05em;
+    text-wrap: balance;
+  }
+
+  .credits-hero > p {
+    max-width: 62ch;
+    margin: 1.25rem auto 0;
+    color: var(--color-muted);
+    font-size: 1.0625rem;
+    line-height: 1.6;
+    text-wrap: pretty;
+  }
+
+  .stats {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1.65rem;
+    margin-top: 2.25rem;
+  }
+
+  .stat {
+    display: flex;
+    min-width: 142px;
+    align-items: center;
+    gap: 0.7rem;
+    color: var(--color-accent);
+    text-align: left;
+  }
+
+  .stat strong,
+  .stat span {
+    display: block;
+  }
+
+  .stat strong {
+    color: var(--color-foreground);
+    font-size: 1.0625rem;
+    line-height: 1.2;
+    font-weight: 600;
+  }
+
+  .stat span {
+    margin-top: 0.2rem;
+    color: var(--color-muted);
+    font-size: 0.8125rem;
+    line-height: 1.3;
+  }
+
+  .stat-divider {
+    width: 1px;
+    height: 2.25rem;
+    background: var(--color-separator);
+  }
+
+  /* `align-items: start` because two of these four groups have no featured
+     contributors and carry a single link card instead. Grid's default stretch
+     made those panels as tall as the populated one beside them, so the page
+     showed two columns of empty fill the height of a member card. A panel is
+     as tall as what is in it. */
+  .category-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 1rem;
+    margin-top: 2.75rem;
+  }
+
+  /* A panel is a fill and a corner, the same one the landing page uses.
+     `--group-accent` survives as a variable but every tone now resolves to the
+     one accent: four hues on a credits page is four claims about what matters.
+     The groups are already told apart by their own icon and title, which is
+     where that distinction belongs. `ContributorGroup.tone` is consequently no
+     longer read for colour. */
+  .category-panel {
+    --group-accent: var(--color-accent);
+    min-height: 250px;
+    border-radius: var(--radius-card);
+    background: var(--color-surface);
+    overflow: hidden;
+  }
+
+  .category-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    min-height: 77px;
+    padding: 1.15rem 1.25rem 1rem;
+    border-bottom: 1px solid var(--color-separator);
+  }
+
+  .category-heading {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .category-icon {
+    display: grid;
+    width: 2.2rem;
+    height: 2.2rem;
+    flex: 0 0 auto;
+    place-items: center;
+    color: var(--group-accent);
+  }
+
+  .category-heading h2 {
+    margin: 0;
+    color: var(--color-foreground);
+    font-size: 1.0625rem;
+    line-height: 1.25;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+  }
+
+  .category-heading p {
+    margin: 0.3rem 0 0;
+    color: var(--color-muted);
+    font-size: 0.8125rem;
+    line-height: 1.45;
+  }
+
+  .count-pill {
+    flex: 0 0 auto;
+    margin-top: 0.15rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 999px;
+    color: var(--color-accent-soft-foreground);
+    background: var(--color-accent-soft);
+    font-size: 0.75rem;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .member-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 320px));
+    justify-content: start;
+    align-items: start;
+    gap: 0.75rem;
+    padding: 1rem 1.25rem 1.25rem;
+  }
+
+  .member-card,
+  .history-card {
+    width: 100%;
+    max-width: 320px;
+    min-width: 0;
+    align-self: start;
+    border-radius: var(--radius-row);
+  }
+
+  /* A card inside a panel takes the next fill step in, which is exactly what
+     `panel-inset` is on the rest of the site. */
+  .member-card {
+    padding: 1rem;
+    background: var(--color-surface-secondary);
+  }
+
+  .member-heading {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.8rem;
+  }
+
+  .avatar {
+    display: grid;
+    width: 3.25rem;
+    height: 3.25rem;
+    overflow: hidden;
+    place-items: center;
+    border-radius: 999px;
+    color: var(--color-accent-soft-foreground);
+    background: var(--color-accent-soft);
+    font-size: 0.8125rem;
+    font-weight: 600;
+  }
+
+  .avatar img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .identity {
+    min-width: 0;
+  }
+
+  .identity h3 {
+    margin: 0;
+    overflow: hidden;
+    color: var(--color-foreground);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* The role sits under the whole heading row rather than inside the name's
+     column. In that column it had the card's width less a 52px avatar and a
+     29px link to live in — about a hundred pixels — so "Founder / project lead"
+     wrapped to two lines inside its own pill and pushed into the avatar beside
+     it. Out here it has the full card. */
+  .role-pill {
+    display: inline-block;
+    margin-top: 0.6rem;
+    line-height: 1.4;
+  }
+
+  .github-link {
+    display: grid;
+    width: 1.8rem;
+    height: 1.8rem;
+    place-items: center;
+    border-radius: 0.4rem;
+    color: var(--color-muted);
+    transition: color var(--dur-2) var(--ease), background-color var(--dur-2) var(--ease);
+  }
+
+  .github-link:hover {
+    color: var(--color-foreground);
+    background: color-mix(in oklab, var(--color-foreground) 9%, transparent);
+  }
+
+  .contribution {
+    margin-top: 0.85rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--color-separator);
+  }
+
+  /* The site's eyebrow, to the same contract as `@utility eyebrow` — mono,
+     uppercase, tracked out. It was 9.1px of sans; the label above a paragraph
+     is not the place to go below the page's smallest readable size. */
+  .contribution span {
+    display: block;
+    color: var(--color-muted);
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .contribution p {
+    margin: 0.4rem 0 0;
+    color: var(--color-foreground);
+    font-size: 0.84375rem;
+    line-height: 1.55;
+  }
+
+  .profile-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-top: 0.75rem;
+    color: var(--color-muted);
+    font-size: 0.8125rem;
+    transition: color var(--dur-2) var(--ease);
+  }
+
+  .profile-link:hover {
+    color: var(--color-foreground);
+  }
+
+  /* The one dashed edge on the site, and it is carrying meaning a fill step
+     cannot: this card is a placeholder for a group with no listed contributors,
+     so it has to read as an empty slot rather than as a person. */
+  .history-card {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.7rem;
+    min-height: 78px;
+    padding: 0.85rem;
+    border: 1px dashed var(--color-border);
+    color: var(--color-muted);
+    background: transparent;
+    transition: background-color var(--dur-2) var(--ease);
+  }
+
+  .history-card:hover {
+    background: var(--color-surface-secondary);
+  }
+
+  /* Two of the four groups have nobody featured, so the placeholder is the
+     whole of their panel. Held to a single card's width it sat in the left
+     half of a panel twice as wide, which reads as a layout fault rather than
+     as an empty slot. Alone, it takes the row. */
+  .history-card:only-child {
+    grid-column: 1 / -1;
+    max-width: none;
+  }
+
+  .history-icon {
+    display: grid;
+    width: 2rem;
+    height: 2rem;
+    place-items: center;
+    border-radius: 0.5rem;
+    color: var(--color-accent-soft-foreground);
+    background: var(--color-accent-soft);
+  }
+
+  .history-card strong,
+  .history-card small {
+    display: block;
+  }
+
+  .history-card strong {
+    color: var(--color-foreground);
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+
+  .history-card small {
+    margin-top: 0.25rem;
+    color: var(--color-muted);
+    font-size: 0.8125rem;
+    line-height: 1.45;
+  }
+
+  .history-arrow {
+    color: var(--color-muted);
+  }
+
+  .more-strip {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.8rem;
+    width: min(570px, 100%);
+    margin: 2rem auto 0;
+    padding: 0.85rem 1rem;
+    border-radius: var(--radius-row);
+    background: var(--color-surface);
+    transition: background-color var(--dur-2) var(--ease);
+  }
+
+  .more-strip:hover {
+    background: var(--color-surface-secondary);
+  }
+
+  .more-icon {
+    display: grid;
+    width: 2rem;
+    height: 2rem;
+    place-items: center;
+    color: var(--color-accent);
+  }
+
+  .more-copy strong,
+  .more-copy small {
+    display: block;
+  }
+
+  .more-copy strong {
+    color: var(--color-foreground);
+    font-size: 0.9375rem;
+    font-weight: 600;
+  }
+
+  .more-copy small {
+    margin-top: 0.2rem;
+    color: var(--color-muted);
+    font-size: 0.8125rem;
+  }
+
+  .more-avatars {
+    display: flex;
+    align-items: center;
+    padding-left: 0.5rem;
+  }
+
+  /* The ring around each stacked avatar is the strip's own fill, so the overlap
+     reads as separation rather than as an outline. It has to follow the strip
+     on hover, or a pale halo appears around every face. */
+  .more-avatars i,
+  .more-avatars img {
+    width: 1.75rem;
+    height: 1.75rem;
+    margin-left: -0.42rem;
+    border: 2px solid var(--color-surface);
+    border-radius: 999px;
+    transition: border-color var(--dur-2) var(--ease);
+  }
+
+  .more-strip:hover .more-avatars i,
+  .more-strip:hover .more-avatars img {
+    border-color: var(--color-surface-secondary);
+  }
+
+  .more-avatars img {
+    display: block;
+    object-fit: cover;
+  }
+
+  .more-avatars i {
+    display: grid;
+    place-items: center;
+    background: var(--color-accent-soft);
+    color: var(--color-accent-soft-foreground);
+    font-size: 0.6875rem;
+    font-style: normal;
+    font-weight: 600;
+  }
+
+  /* The page's own sign-off, which is page content and not site chrome: the
+     site footer still follows it. It used to stand in for that footer, which
+     meant this page quietly shipped without the footer navigation or the
+     licence line. */
+  .credits-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 2.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--color-separator);
+    color: var(--color-muted);
+  }
+
+  .footer-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+  }
+
+  .footer-brand strong {
+    font-size: 1rem;
+    font-weight: 600;
+  }
+
+  .footer-brand > span {
+    width: 1px;
+    height: 0.9rem;
+    background: var(--color-separator);
+  }
+
+  .footer-brand small,
+  .credits-footer p {
+    margin: 0;
+    font-size: 0.8125rem;
+  }
+
+  .credits-footer p {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  .credits-footer p svg {
+    color: var(--color-accent);
+  }
+
+  @media (max-width: 980px) {
+    .category-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  @media (max-width: 680px) {
+    .stats {
+      flex-wrap: wrap;
+      gap: 1rem 1.2rem;
+    }
+
+    .stat-divider {
+      display: none;
+    }
+
+    .category-header {
+      flex-direction: column;
+    }
+
+    .member-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .member-card,
+    .history-card {
+      max-width: 320px;
+    }
+
+    .more-avatars {
+      display: none;
+    }
+
+    .credits-footer {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+  }
+</style>

@@ -1,0 +1,21 @@
+.pin-card__body {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 10;
+  overflow: hidden;
+}
+
+.pin-card__unpin {
+  position: absolute;
+  top: 6px;
+  inset-inline-end: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-1) var(--ease);
+}
+
+.pin-card:hover .pin-card__unpin,
+.pin-card__unpin:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}

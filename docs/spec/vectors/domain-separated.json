@@ -1,0 +1,113 @@
+{
+  "family": "domain-separated",
+  "identity_id_rule": "`tid:` followed by the lowercase hex SHA-256 of the bytes `telium-identity-id:v1\\0` concatenated with the raw 32-byte Ed25519 public key. Note the trailing NUL in the domain tag: it is part of the hashed bytes.",
+  "produced_by": "routes::identity_continuity::{anchor_payload, rotation_payload, recovery_policy_payload} / migration::grant_payload",
+  "rule": "Each payload is a UTF-8 string built by joining a constant domain tag and the named fields with U+007C VERTICAL LINE, except `migration_grant`, which is a sorted JSON object like the signed-json family but signed by a device key and never carrying a `signature` member. Signatures are Ed25519, verified strictly, base64url with no padding.",
+  "vectors": [
+    {
+      "identity_key_b64u": "F8t5-ytBIPKx7GXkGY1uCLKOgT_rAeSkAIObheGAgM4",
+      "immutable_id": "tid:fa9b735514e14c1e8b0c9a61e5a36bc262f82d91a90a2de96009c7b33e070dae",
+      "name": "immutable-id",
+      "note": "Not a signature: the derivation of a `tid:` from an identity key. Get this wrong and every signature below is made over the wrong subject."
+    },
+    {
+      "canonical": {
+        "hex": "74656c69756d2d6964656e746974792d616e63686f723a76317c40616c6963653a686f6d652e6578616d706c657c7469643a666139623733353531346531346331653862306339613631653561333662633236326638326439316139306132646539363030396337623333653037306461657c463874352d79744249504b783747586b47593175434c4b4f67545f724165536b41494f6268654741674d34",
+        "length": 158,
+        "utf8": "telium-identity-anchor:v1|@alice:home.example|tid:fa9b735514e14c1e8b0c9a61e5a36bc262f82d91a90a2de96009c7b33e070dae|F8t5-ytBIPKx7GXkGY1uCLKOgT_rAeSkAIObheGAgM4"
+      },
+      "fields": {
+        "identity_key": "F8t5-ytBIPKx7GXkGY1uCLKOgT_rAeSkAIObheGAgM4",
+        "immutable_id": "tid:fa9b735514e14c1e8b0c9a61e5a36bc262f82d91a90a2de96009c7b33e070dae",
+        "user_id": "@alice:home.example"
+      },
+      "key": {
+        "algorithm": "ed25519",
+        "key_id": "device",
+        "public_b64u": "F8t5-ytBIPKx7GXkGY1uCLKOgT_rAeSkAIObheGAgM4",
+        "seed_b64u": "MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM"
+      },
+      "name": "identity-anchor",
+      "note": "A new identity root binding an account name to a key. Signed by the identity key itself.",
+      "signature_b64u": "O92VMluzprIl4tGEMT161uB_BJ40D1p-oBDI3z5sHO1PVCIeH0MMIX7rlcyRxkschVZYwspL6p5NE2HuEQ8iBA"
+    },
+    {
+      "canonical": {
+        "hex": "74656c69756d2d6964656e746974792d726f746174653a76317c7469643a666139623733353531346531346331653862306339613631653561333662633236326638326439316139306132646539363030396337623333653037306461657c317c463874352d79744249504b783747586b47593175434c4b4f67545f724165536b41494f6268654741674d347c6f4a716c3948706e575941762d56583433433071464b584a6e534f2d6c5f686b456e5f354f445256705041",
+        "length": 184,
+        "utf8": "telium-identity-rotate:v1|tid:fa9b735514e14c1e8b0c9a61e5a36bc262f82d91a90a2de96009c7b33e070dae|1|F8t5-ytBIPKx7GXkGY1uCLKOgT_rAeSkAIObheGAgM4|oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA"
+      },
+      "fields": {
+        "immutable_id": "tid:fa9b735514e14c1e8b0c9a61e5a36bc262f82d91a90a2de96009c7b33e070dae",
+        "new_key": "oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA",
+        "previous_key": "F8t5-ytBIPKx7GXkGY1uCLKOgT_rAeSkAIObheGAgM4",
+        "sequence": 1
+      },
+      "key": {
+        "algorithm": "ed25519",
+        "key_id": "successor",
+        "public_b64u": "oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA",
+        "seed_b64u": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI"
+      },
+      "name": "identity-rotation",
+      "note": "Signed by the NEW key, over the sequence and both keys. `sequence` is the rotation count, and it is in the payload so a replayed rotation cannot be reordered.",
+      "signature_b64u": "9sCxHqNABudfH6OuPyvOwParbHuVf5NjH-pqivhtPudVjez-0cLKjAQdXJF-pqYQOpdg6C-OsHbwwOoMly7XBw"
+    },
+    {
+      "canonical": {
+        "hex": "74656c69756d2d6964656e746974792d7265636f766572792d706f6c6963793a76317c7469643a666139623733353531346531346331653862306339613631653561333662633236326638326439316139306132646539363030396337623333653037306461657c317c307c5b322c5b5b2240626f623a686f6d652e6578616d706c65222c227469643a3030222c2242424242225d2c5b22407a6f653a686f6d652e6578616d706c65222c227469643a6666222c225a5a5a5a225d5d5d",
+        "length": 189,
+        "utf8": "telium-identity-recovery-policy:v1|tid:fa9b735514e14c1e8b0c9a61e5a36bc262f82d91a90a2de96009c7b33e070dae|1|0|[2,[[\"@bob:home.example\",\"tid:00\",\"BBBB\"],[\"@zoe:home.example\",\"tid:ff\",\"ZZZZ\"]]]"
+      },
+      "fields": {
+        "guardians_as_given": [
+          {
+            "identity_key": "ZZZZ",
+            "immutable_id": "tid:ff",
+            "user_id": "@zoe:home.example"
+          },
+          {
+            "identity_key": "BBBB",
+            "immutable_id": "tid:00",
+            "user_id": "@bob:home.example"
+          }
+        ],
+        "identity_sequence": 0,
+        "immutable_id": "tid:fa9b735514e14c1e8b0c9a61e5a36bc262f82d91a90a2de96009c7b33e070dae",
+        "threshold": 2,
+        "version": 1
+      },
+      "key": {
+        "algorithm": "ed25519",
+        "key_id": "device",
+        "public_b64u": "F8t5-ytBIPKx7GXkGY1uCLKOgT_rAeSkAIObheGAgM4",
+        "seed_b64u": "MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM"
+      },
+      "name": "recovery-policy",
+      "note": "The guardians are SORTED before they are serialised — by immutable_id, then user_id, then identity_key — and they are given here deliberately out of order so the vector proves it. An implementation that preserves the caller's order produces a policy nobody else can verify.",
+      "signature_b64u": "G11li8-v0fqCtY0Kbyx0FdrtB2OuSoarn2b0br1mfsdEO3rt8gwqOE6nQCxFSmTjrffJFAeMRf5b5swyBasuBA"
+    },
+    {
+      "canonical": {
+        "hex": "7b22637265617465645f6174223a313736373232353630303030302c2264657374696e6174696f6e223a226e65772e6578616d706c65222c22696d706f72745f746f6b656e5f68617368223a2261653462383062343737393763616638363239326231373730343338623666663830313236623031373436383166623566363238316233393633663131356631222c226b696e64223a226d6967726174696f6e5f6772616e74222c227375626a656374223a2240616c6963653a686f6d652e6578616d706c65227d",
+        "length": 200,
+        "utf8": "{\"created_at\":1767225600000,\"destination\":\"new.example\",\"import_token_hash\":\"ae4b80b47797caf86292b1770438b6ff80126b0174681fb5f6281b3963f115f1\",\"kind\":\"migration_grant\",\"subject\":\"@alice:home.example\"}"
+      },
+      "fields": {
+        "created_at": 1767225600000,
+        "destination": "new.example",
+        "import_token": "import-token-deadbeef",
+        "subject": "@alice:home.example"
+      },
+      "key": {
+        "algorithm": "ed25519",
+        "key_id": "device",
+        "public_b64u": "F8t5-ytBIPKx7GXkGY1uCLKOgT_rAeSkAIObheGAgM4",
+        "seed_b64u": "MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM"
+      },
+      "name": "migration-grant",
+      "note": "A device authorising its account's move. `import_token_hash` is the lowercase hex BLAKE3 of the import token — the token itself is never signed, so a grant leaked from a log does not leak the token.",
+      "signature_b64u": "Kbuy6htigmpPWPLeYQu-R4jOa14eT-7LHMk4kY8uFqm_LT5voTGWSgjDX10jLavOY0czrUACKrhE-nW2omPMCA"
+    }
+  ]
+}

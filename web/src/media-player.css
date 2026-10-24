@@ -1,0 +1,92 @@
+.media-player-frame:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  border: 0;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: #000;
+}
+
+.media-player-frame:fullscreen video {
+  width: 100%;
+  height: calc(100vh - 48px);
+  max-height: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  object-fit: contain;
+}
+
+.media-player-frame:fullscreen .media-player-controls {
+  flex: 0 0 auto;
+  background: color-mix(in oklab, var(--background) 92%, transparent);
+}
+
+.media-player-range {
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0,
+    var(--accent) var(--media-range-progress, 0%),
+    color-mix(in oklab, var(--color-muted) 52%, transparent) var(--media-range-progress, 0%),
+    color-mix(in oklab, var(--color-muted) 52%, transparent) 100%
+  );
+}
+
+.media-player-range::-webkit-slider-runnable-track {
+  height: 0.25rem;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.media-player-range::-webkit-slider-thumb {
+  width: 0.75rem;
+  height: 0.75rem;
+  margin-top: -0.25rem;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.media-player-range::-moz-range-track,
+.media-player-range::-moz-range-progress {
+  height: 0.25rem;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.media-player-range::-moz-range-thumb {
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .media-player-range::-webkit-slider-thumb {
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+
+  .media-player-range:hover::-webkit-slider-thumb,
+  .media-player-range:focus-visible::-webkit-slider-thumb {
+    opacity: 1;
+  }
+
+  .media-player-range::-moz-range-thumb {
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+
+  .media-player-range:hover::-moz-range-thumb,
+  .media-player-range:focus-visible::-moz-range-thumb {
+    opacity: 1;
+  }
+}

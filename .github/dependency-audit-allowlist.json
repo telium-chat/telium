@@ -1,0 +1,49 @@
+{
+  "about": [
+    "Advisories this repository has looked at and decided not to act on yet.",
+    "",
+    "Every entry is a dated decision, not a mute. `scripts/audit-gate.mjs` fails",
+    "the build when an entry passes its `expires` date, so tolerating an advisory",
+    "costs a review on a schedule rather than costing nothing forever. That is the",
+    "whole point of the file: a `--ignore` flag on a command line records no",
+    "reasoning, no author and no end date, and within a year nobody can tell",
+    "whether it is still true.",
+    "",
+    "Fields, all required, all strings:",
+    "  id         the advisory identifier -- RUSTSEC-YYYY-NNNN, or the GHSA id",
+    "  ecosystem  \"cargo\" or \"npm\"",
+    "  package    the package the advisory is against, so a re-used id cannot",
+    "             silently widen the exemption to a different dependency",
+    "  reason     why this was judged tolerable. Prose, and long enough to be a",
+    "             justification rather than a restatement of the title -- the gate",
+    "             rejects anything under 80 characters. Write it for the person",
+    "             who has to decide whether to extend it.",
+    "  reviewed   the date the reasoning below was established (YYYY-MM-DD)",
+    "  expires    the date it must be re-established (YYYY-MM-DD)",
+    "  reviewer   who made the call",
+    "",
+    "To add one, fix the advisory first. Add an entry only when there is no fixed",
+    "release, or when upgrading is genuinely not possible yet. See",
+    "docs/supply-chain.md."
+  ],
+  "advisories": [
+    {
+      "id": "RUSTSEC-2023-0071",
+      "ecosystem": "cargo",
+      "package": "rsa",
+      "reason": "The Marvin timing side-channel in rsa 0.9.x has no fixed release; RustSec has listed the advisory as unresolved since November 2023 and upstream has no patched version to move to. It is exempt here because the crate is not compiled into anything this repository ships: rsa reaches server/Cargo.lock through sqlx-mysql only, and sqlx is declared with features = [\"runtime-tokio\", \"sqlite\", \"migrate\"], so the MySQL driver is never built. `cargo tree --target all -e normal,build,dev -i rsa` prints nothing on any target, which is the check to repeat when this entry comes up for renewal. cargo audit reports it regardless because it reads the lockfile rather than the build graph, and a lockfile records every crate the resolver considered, compiled or not. If a future change ever enables sqlx's mysql feature, this exemption stops being true on the same day and must be removed rather than extended.",
+      "reviewed": "2026-09-20",
+      "expires": "2027-03-20",
+      "reviewer": "@67plays"
+    },
+    {
+      "id": "RUSTSEC-2026-0387",
+      "ecosystem": "cargo",
+      "package": "crypto-bigint",
+      "reason": "The timing variability is fixed only in crypto-bigint 0.7.6, which arrives with elliptic-curve 0.14 and p256 0.14. server reaches crypto-bigint 0.5.5 through elliptic-curve 0.13, which opaque-ke 4.0.1 (its latest stable release) still requires; the opaque-ke line built on elliptic-curve 0.14 is pre-release only (4.1.0-pre.2). Moving the password login stack onto a pre-release is a bigger risk than this advisory. Renew by checking whether opaque-ke has a stable release on elliptic-curve 0.14; once it does, upgrade opaque-ke and p256 together and delete this entry.",
+      "reviewed": "2026-10-23",
+      "expires": "2027-01-23",
+      "reviewer": "@67plays"
+    }
+  ]
+}

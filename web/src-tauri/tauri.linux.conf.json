@@ -1,0 +1,10 @@
+{
+  "build": {
+    "beforeBuildCommand": "bun run build && bun run tauri:prepare-linux-media"
+  },
+  "bundle": {
+    "resources": {
+      "resources/gstreamer-1.0/": "gstreamer-1.0/"
+    }
+  }
+}

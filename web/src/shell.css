@@ -1,0 +1,253 @@
+.nav-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding-block: 4px;
+  padding-inline: 8px;
+  border-radius: var(--radius-row);
+  font-size: var(--text-base);
+  line-height: var(--text-base--line-height);
+  text-align: start;
+  transition:
+    background-color var(--dur-1) var(--ease),
+    color var(--dur-1) var(--ease);
+}
+
+.nav-row--indent {
+  padding-inline-start: 28px;
+}
+
+.nav-row--fit {
+  width: auto;
+  max-width: 100%;
+}
+
+.nav-row--tight {
+  gap: 4px;
+  min-height: 24px;
+  padding-block: 2px;
+}
+
+.nav-row--touch {
+  min-height: 48px;
+  padding-block: 6px;
+}
+
+.nav-row--muted {
+  opacity: 0.45;
+  transition:
+    background-color var(--dur-1) var(--ease),
+    color var(--dur-1) var(--ease),
+    opacity var(--dur-1) var(--ease);
+}
+
+.nav-row--muted:hover,
+.nav-row--muted:focus-visible {
+  opacity: 1;
+}
+
+.nav-row--person {
+  height: 2.5rem;
+}
+
+.nav-note {
+  display: block;
+  overflow: hidden;
+  height: 0.9375rem;
+  font-size: var(--text-xs);
+  line-height: 0.9375rem;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.nav-note:empty {
+  display: none;
+}
+
+.nav-note .emoji {
+  width: 1.15em;
+  height: 1.15em;
+  margin: 0 0.05em;
+  vertical-align: -0.22em;
+}
+
+.badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  --badge-size: var(--badge-size-override, 16px);
+  height: var(--badge-size);
+  min-width: var(--badge-size);
+  padding-inline: calc(var(--badge-size) / 4);
+  border-radius: 999px;
+  background-color: var(--badge);
+  color: var(--badge-foreground);
+  font-family: var(--font-sans);
+  font-size: calc(var(--badge-size) * 0.6875);
+  font-weight: 700;
+  line-height: var(--badge-size);
+  letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums lining-nums;
+  -webkit-font-smoothing: antialiased;
+  box-shadow: 0 0 0 var(--badge-ring-width, 1.5px) var(--badge-ring, transparent);
+}
+
+.badge--quiet {
+  background-color: var(--foreground);
+  color: var(--strip);
+}
+
+.rail-tile {
+  position: relative;
+  flex: none;
+}
+
+.rail-tile__face {
+  border-radius: var(--radius-3xl);
+}
+
+.rail-tile__face--round {
+  border-radius: 999px;
+}
+
+.rail-pill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  inset-inline-start: -10px;
+  margin-block: auto;
+  width: 4px;
+  height: 0;
+  border-radius: 999px;
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  background-color: var(--foreground);
+  pointer-events: none;
+
+  --rail-pill-tall: 40px;
+
+  --rail-pill-dur: var(--dur-2);
+  --rail-pill-ease: var(--ease);
+  --rail-pill-delay: 0s;
+  transition: height var(--rail-pill-dur) var(--rail-pill-ease) var(--rail-pill-delay);
+}
+
+.rail-pill[data-state="unread"] {
+  height: 8px;
+  --rail-pill-dur: var(--dur-3);
+  --rail-pill-ease: cubic-bezier(0.22, 1.5, 0.36, 1);
+}
+
+.rail-tile:hover .rail-pill {
+  height: 20px;
+  --rail-pill-dur: var(--dur-1);
+  --rail-pill-delay: calc(var(--dur-1) * 0.55);
+}
+
+.rail-tile:focus-within .rail-pill {
+  height: 20px;
+  --rail-pill-dur: var(--dur-1);
+  --rail-pill-delay: 0s;
+}
+
+.rail-tile .rail-pill[data-state="active"] {
+  height: var(--rail-pill-tall);
+  --rail-pill-dur: var(--dur-3);
+  --rail-pill-ease: var(--ease-rise);
+  --rail-pill-delay: 0s;
+}
+
+.rail-pill[data-travel] {
+  animation:
+    rail-pill-travel var(--rail-travel-dur, var(--dur-3)) var(--ease) both,
+    rail-pill-smear var(--rail-travel-dur, var(--dur-3)) ease-in-out both;
+}
+
+@keyframes rail-pill-travel {
+  from {
+    height: var(--rail-pill-tall);
+    translate: 0 var(--rail-travel-from, 0px);
+  }
+  to {
+    height: var(--rail-pill-tall);
+    translate: 0 0;
+  }
+}
+
+@keyframes rail-pill-smear {
+  0% { scale: 1 1; }
+  34% { scale: 1 var(--rail-travel-smear, 1); }
+  100% { scale: 1 1; }
+}
+
+.rail-pill[data-handoff] {
+  transition: none;
+  animation: none;
+}
+
+.banner-stack {
+  flex: none;
+  max-height: 25vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+button.no-press:not(:disabled):active,
+[role="button"].no-press:not([aria-disabled="true"]):active {
+  filter: none;
+}
+
+button:not(:disabled):not(.no-press):active :is(img, canvas, .avatar):not(.avatar *),
+[role="button"]:not([aria-disabled="true"]):not(.no-press):active :is(img, canvas, .avatar):not(.avatar *) {
+  filter: brightness(calc(1 / var(--press)));
+}
+
+.avatar img,
+.avatar canvas {
+  -webkit-user-drag: none;
+}
+
+:root,
+:root[data-theme="light"] {
+  --role-l-min: 0.28;
+  --role-l-max: 0.48;
+  --role-c-max: 0.16;
+  --role-wash-l: 0.945;
+  --role-wash-c: 0.07;
+}
+
+:root.dark,
+:root[data-theme="dark"] {
+  --role-l-min: 0.74;
+  --role-l-max: 0.95;
+  --role-c-max: 0.18;
+  --role-wash-l: 0.315;
+  --role-wash-c: 0.075;
+}
+
+.role-ink {
+  --role-ink: var(--role);
+  --role-wash: color-mix(in oklch, var(--role) 18%, var(--surface-secondary));
+  color: var(--role-ink);
+}
+
+@supports (color: oklch(from red l c h)) {
+  .role-ink {
+    --role-ink: oklch(from var(--role) clamp(var(--role-l-min), l, var(--role-l-max)) min(c, var(--role-c-max)) h);
+    --role-wash: oklch(from var(--role) var(--role-wash-l) min(c, var(--role-wash-c)) h);
+  }
+}
+
+.role-fill {
+  background-color: var(--role-wash);
+}
+
+.md .mention.role-ink,
+.md .mention.self.role-ink {
+  color: var(--role-ink);
+  background-color: var(--role-wash);
+}

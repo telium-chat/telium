@@ -1,0 +1,137 @@
+.folder-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition:
+    grid-template-rows 260ms var(--ease-rise),
+    opacity 160ms var(--ease-rise);
+  opacity: 0;
+}
+.folder-body > * {
+  overflow: hidden;
+  min-height: 0;
+}
+.folder-body[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.folder-slab {
+  transition:
+    background-color 260ms var(--ease-rise),
+    box-shadow 260ms var(--ease-rise),
+    padding 260ms var(--ease-rise);
+}
+
+.overlay-in {
+  transition:
+    opacity 180ms var(--ease-rise),
+    transform 300ms var(--ease-rise);
+}
+.overlay-in[data-starting-style] {
+  opacity: 0;
+  transform: translateY(10px) scale(0.98);
+}
+@starting-style {
+  .overlay-in {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+.overlay-in[data-ending-style] {
+  opacity: 0;
+  transform: scale(0.98);
+  transition-duration: 150ms;
+}
+
+.sheet-in {
+  transition:
+    opacity 260ms var(--ease-rise),
+    transform 260ms var(--ease-rise);
+}
+.sheet-in[data-starting-style] {
+  opacity: 0;
+  transform: translateY(20px);
+}
+@starting-style {
+  .sheet-in {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+}
+.sheet-in[data-ending-style] {
+  opacity: 0;
+  transform: translateY(12px);
+  transition-duration: 180ms;
+}
+
+.backdrop-fade {
+  transition: opacity 200ms var(--ease-rise);
+}
+.backdrop-fade[data-starting-style],
+.backdrop-fade[data-ending-style] {
+  opacity: 0;
+}
+.backdrop-fade[data-ending-style] {
+  transition-duration: 150ms;
+}
+@starting-style {
+  .backdrop-fade {
+    opacity: 0;
+  }
+}
+
+[data-base-ui-portal] {
+  position: relative;
+  z-index: 1000;
+}
+
+[data-base-ui-portal]:has(> [role="region"][aria-live]) {
+  z-index: 2000;
+}
+
+.telium-tabs-indicator {
+  opacity: 1;
+  scale: 1;
+}
+@starting-style {
+  .telium-tabs-indicator {
+    opacity: 0;
+    scale: 0.9 1;
+  }
+}
+
+.kumo-tooltip-popup {
+  max-width: min(320px, calc(100vw - 16px));
+  border-radius: 6px;
+  background: #171a1e;
+  padding: 6px 10px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1rem;
+  color: #fff;
+  outline: 1px solid rgb(255 255 255 / 0.1);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.4);
+  transform-origin: var(--transform-origin);
+  transition: opacity 100ms ease-out, transform 100ms var(--ease-rise);
+}
+
+.kumo-tooltip-popup[data-starting-style],
+.kumo-tooltip-popup[data-ending-style] {
+  opacity: 0;
+  transform: translateY(2px) scale(0.97);
+}
+@starting-style {
+  .kumo-tooltip-popup {
+    opacity: 0;
+    transform: translateY(2px) scale(0.97);
+  }
+}
+
+.kumo-tooltip-popup .fill-kumo-base {
+  fill: #171a1e;
+}
+
+.kumo-tooltip-popup .fill-kumo-arrow-edge,
+.kumo-tooltip-popup .fill-kumo-arrow-stroke {
+  fill: rgb(255 255 255 / 0.1);
+}

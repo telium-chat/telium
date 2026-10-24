@@ -1,0 +1,77 @@
+{
+  "family": "identity-assertion",
+  "issuer_field_order": [
+    "user_id",
+    "device_id",
+    "device_pubkey",
+    "audience",
+    "origin",
+    "profile_version",
+    "display_name",
+    "avatar_ref",
+    "iat",
+    "exp"
+  ],
+  "produced_by": "crypto::issue_assertion / crypto::verify_assertion",
+  "rule": "The token is `base64url(payload) '.' base64url(signature) '.' key_id`, all base64url with no padding. The signature covers the payload bytes exactly as they appear in the token, before base64 decoding is undone — NOT a re-serialisation of the parsed claims. A verifier decodes, verifies over those bytes, then parses.",
+  "vectors": [
+    {
+      "canonical": {
+        "hex": "7b22757365725f6964223a2240616c6963653a686f6d652e6578616d706c65222c226465766963655f6964223a226465762d30314a4141414141414141414141414141414141414141414141222c226465766963655f7075626b6579223a22463874352d79744249504b783747586b47593175434c4b4f67545f724165536b41494f6268654741674d34222c2261756469656e6365223a226775696c64732e6578616d706c65222c226f726967696e223a22686f6d652e6578616d706c65222c2270726f66696c655f76657273696f6e223a372c22646973706c61795f6e616d65223a22416c696365222c226176617461725f726566223a226d656469613a2f2f686f6d652e6578616d706c652f616263313233222c22696174223a313736373232353630303030302c22657870223a313736373232353930303030307d",
+        "length": 318,
+        "utf8": "{\"user_id\":\"@alice:home.example\",\"device_id\":\"dev-01JAAAAAAAAAAAAAAAAAAAAAAA\",\"device_pubkey\":\"F8t5-ytBIPKx7GXkGY1uCLKOgT_rAeSkAIObheGAgM4\",\"audience\":\"guilds.example\",\"origin\":\"home.example\",\"profile_version\":7,\"display_name\":\"Alice\",\"avatar_ref\":\"media://home.example/abc123\",\"iat\":1767225600000,\"exp\":1767225900000}"
+      },
+      "claims": {
+        "audience": "guilds.example",
+        "avatar_ref": "media://home.example/abc123",
+        "device_id": "dev-01JAAAAAAAAAAAAAAAAAAAAAAA",
+        "device_pubkey": "F8t5-ytBIPKx7GXkGY1uCLKOgT_rAeSkAIObheGAgM4",
+        "display_name": "Alice",
+        "exp": 1767225900000,
+        "iat": 1767225600000,
+        "origin": "home.example",
+        "profile_version": 7,
+        "user_id": "@alice:home.example"
+      },
+      "key": {
+        "algorithm": "ed25519",
+        "key_id": "ed25519:spec-primary",
+        "public_b64u": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+        "seed_b64u": "ERERERERERERERERERERERERERERERERERERERERERE"
+      },
+      "name": "with-avatar",
+      "note": "Full claim set.",
+      "signature_b64u": "9TkFu61fdvX1ggZlAeQmrJMhj4KGy9T4ZrUWWGCe41yXcpZBFHsPGNqcTAvXjFgKA1yOxs_BHxaf17YGqs0wDQ",
+      "token": "eyJ1c2VyX2lkIjoiQGFsaWNlOmhvbWUuZXhhbXBsZSIsImRldmljZV9pZCI6ImRldi0wMUpBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSIsImRldmljZV9wdWJrZXkiOiJGOHQ1LXl0QklQS3g3R1hrR1kxdUNMS09nVF9yQWVTa0FJT2JoZUdBZ000IiwiYXVkaWVuY2UiOiJndWlsZHMuZXhhbXBsZSIsIm9yaWdpbiI6ImhvbWUuZXhhbXBsZSIsInByb2ZpbGVfdmVyc2lvbiI6NywiZGlzcGxheV9uYW1lIjoiQWxpY2UiLCJhdmF0YXJfcmVmIjoibWVkaWE6Ly9ob21lLmV4YW1wbGUvYWJjMTIzIiwiaWF0IjoxNzY3MjI1NjAwMDAwLCJleHAiOjE3NjcyMjU5MDAwMDB9.9TkFu61fdvX1ggZlAeQmrJMhj4KGy9T4ZrUWWGCe41yXcpZBFHsPGNqcTAvXjFgKA1yOxs_BHxaf17YGqs0wDQ.ed25519:spec-primary"
+    },
+    {
+      "canonical": {
+        "hex": "7b22757365725f6964223a2240616c6963653a686f6d652e6578616d706c65222c226465766963655f6964223a226465762d30314a4141414141414141414141414141414141414141414141222c226465766963655f7075626b6579223a22463874352d79744249504b783747586b47593175434c4b4f67545f724165536b41494f6268654741674d34222c2261756469656e6365223a226775696c64732e6578616d706c65222c226f726967696e223a22686f6d652e6578616d706c65222c2270726f66696c655f76657273696f6e223a372c22646973706c61795f6e616d65223a22416c696365222c22696174223a313736373232353630303030302c22657870223a313736373232353930303030307d",
+        "length": 275,
+        "utf8": "{\"user_id\":\"@alice:home.example\",\"device_id\":\"dev-01JAAAAAAAAAAAAAAAAAAAAAAA\",\"device_pubkey\":\"F8t5-ytBIPKx7GXkGY1uCLKOgT_rAeSkAIObheGAgM4\",\"audience\":\"guilds.example\",\"origin\":\"home.example\",\"profile_version\":7,\"display_name\":\"Alice\",\"iat\":1767225600000,\"exp\":1767225900000}"
+      },
+      "claims": {
+        "audience": "guilds.example",
+        "device_id": "dev-01JAAAAAAAAAAAAAAAAAAAAAAA",
+        "device_pubkey": "F8t5-ytBIPKx7GXkGY1uCLKOgT_rAeSkAIObheGAgM4",
+        "display_name": "Alice",
+        "exp": 1767225900000,
+        "iat": 1767225600000,
+        "origin": "home.example",
+        "profile_version": 7,
+        "user_id": "@alice:home.example"
+      },
+      "key": {
+        "algorithm": "ed25519",
+        "key_id": "ed25519:spec-primary",
+        "public_b64u": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+        "seed_b64u": "ERERERERERERERERERERERERERERERERERERERERERE"
+      },
+      "name": "no-avatar",
+      "note": "`avatar_ref` is omitted, not null, when the account has no avatar.",
+      "signature_b64u": "HqMMPXTZLYSGd2w0zQuXf-KPaRyPqERRt3C6_dxzAwpvpKNFl5M58lebE2IE957-EeJCdR-6g-nGhL0_SN5IDw",
+      "token": "eyJ1c2VyX2lkIjoiQGFsaWNlOmhvbWUuZXhhbXBsZSIsImRldmljZV9pZCI6ImRldi0wMUpBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSIsImRldmljZV9wdWJrZXkiOiJGOHQ1LXl0QklQS3g3R1hrR1kxdUNMS09nVF9yQWVTa0FJT2JoZUdBZ000IiwiYXVkaWVuY2UiOiJndWlsZHMuZXhhbXBsZSIsIm9yaWdpbiI6ImhvbWUuZXhhbXBsZSIsInByb2ZpbGVfdmVyc2lvbiI6NywiZGlzcGxheV9uYW1lIjoiQWxpY2UiLCJpYXQiOjE3NjcyMjU2MDAwMDAsImV4cCI6MTc2NzIyNTkwMDAwMH0.HqMMPXTZLYSGd2w0zQuXf-KPaRyPqERRt3C6_dxzAwpvpKNFl5M58lebE2IE957-EeJCdR-6g-nGhL0_SN5IDw.ed25519:spec-primary"
+    }
+  ],
+  "verification_is_order_sensitive": false
+}

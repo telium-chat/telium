@@ -1,0 +1,352 @@
+name: Build desktop Windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'desktop-v*'
+  pull_request:
+    paths:
+      - '.github/workflows/build-windows.yml'
+      - 'web/electron/**'
+      - 'web/scripts/build-electron-renderer.mjs'
+      - 'web/src/views/user-settings/DesktopPane.jsx'
+      - 'web/src/views/user-settings/ActivityPane.jsx'
+      - 'web/package.json'
+      - 'web/vite.config.js'
+
+permissions:
+  contents: read
+
+concurrency:
+  # Shared with build-appimage.yml on a release tag. Both workflows dispatch on
+  # the same tag and each signs a manifest carrying only its own platform; the
+  # second must read the first's uploaded manifest to merge into it, so the two
+  # cannot run at once. Pull requests keep the per-workflow behaviour.
+  group: ${{ startsWith(github.ref, 'refs/tags/desktop-v') && format('desktop-release-{0}', github.ref) || format('{0}-{1}', github.workflow, github.event.pull_request.number || github.ref) }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/desktop-v') }}
+
+env:
+  VITE_TELIUM_RECOMMENDATION_PUBLIC_KEY: ${{ vars.TELIUM_RECOMMENDATION_PUBLIC_KEY }}
+  VITE_TELIUM_RECOMMENDATION_URL: ${{ vars.TELIUM_RECOMMENDATION_URL }}
+  # The same publisher wiring as build-appimage.yml: the update URL and public
+  # key are build inputs frozen into the client, and a Windows build without
+  # them ships unconfigured -- it never checks, by design, rather than
+  # checking something it cannot verify.
+  VITE_TELIUM_UPDATE_PUBLIC_KEY: ${{ vars.TELIUM_RELEASE_PUBLIC_KEY }}
+  VITE_TELIUM_UPDATE_URL: ${{ vars.TELIUM_UPDATE_URL }}
+
+jobs:
+  build:
+    name: Windows x86_64 NSIS
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      # The Windows packager runs in a root container below. A failed historical
+      # run can therefore have left an output directory owned by root, which
+      # makes actions/checkout unable to clean the self-hosted workspace. Repair
+      # that state before checkout so this workflow is self-healing.
+      - name: Repair workspace ownership
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          host_uid="$(id -u)"
+          host_gid="$(id -g)"
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            alpine:3.21 \
+            sh -c "chown -R $host_uid:$host_gid /workspace"
+
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('web/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install Windows cross-compiler
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64
+
+      - name: Check Windows cross-compiler
+        run: |
+          command -v x86_64-w64-mingw32-gcc >/dev/null || {
+            echo "::error::The runner needs gcc-mingw-w64-x86-64 for the Windows media helper."
+            exit 1
+          }
+
+      - name: Build Windows media helper
+        run: |
+          cargo build \
+            --manifest-path electron/windows-media-helper/Cargo.toml \
+            --release \
+            --target x86_64-pc-windows-gnu
+          file electron/windows-media-helper/target/x86_64-pc-windows-gnu/release/telium-windows-media.exe \
+            | grep -q 'PE32+ executable'
+
+      - name: Install web dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Electron desktop dependencies
+        run: bun run desktop:install
+
+      - name: Test cross-platform desktop integration
+        run: |
+          node --test \
+            electron/windows-desktop-integration.test.cjs \
+            electron/windows-media-source.test.mjs \
+            electron/windows-rpc-primary.test.mjs \
+            electron/desktop-updater.test.cjs \
+            electron/updater.test.cjs \
+            electron/tray-lifecycle.test.cjs
+
+      # The tag is the version, for both files. `build-electron-renderer.mjs`
+      # copies `web/package.json`'s version into `electron/package.json` (which
+      # electron-builder stamps into the installer), and Vite bakes the same
+      # number into the renderer bundle. Setting only one of them would let a
+      # build claim a version its own bundle disagrees with, and the updater
+      # compares exactly those two numbers.
+      - name: Set desktop release version from tag
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        env:
+          DESKTOP_VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${DESKTOP_VERSION#desktop-v}"
+          node -e '
+            const fs = require("node:fs");
+            const version = process.argv[1];
+            if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
+              throw new Error(`desktop release tag does not contain a valid version: ${version}`);
+            }
+            for (const path of ["package.json", "electron/package.json"]) {
+              const pkg = JSON.parse(fs.readFileSync(path, "utf8"));
+              pkg.version = version;
+              fs.writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);
+            }
+          ' "$VERSION"
+
+      - name: Stage Electron renderer
+        run: node scripts/build-electron-renderer.mjs
+
+      # electron-builder needs Wine to edit Windows executable resources and
+      # compile NSIS when the host is Linux. Keep that dependency in a container
+      # instead of mutating the long-lived self-hosted runner. The EXIT trap is
+      # important: even a failed package must return generated files and caches
+      # to the runner user or the next checkout can be unable to clean them.
+      - name: Build Windows NSIS installer
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.cache/electron" "$HOME/.cache/electron-builder"
+          docker run --rm \
+            -e CI=true \
+            -e ELECTRON_CACHE=/root/.cache/electron \
+            -e ELECTRON_BUILDER_CACHE=/root/.cache/electron-builder \
+            -v "$PWD:/project" \
+            -v "$HOME/.cache/electron:/root/.cache/electron" \
+            -v "$HOME/.cache/electron-builder:/root/.cache/electron-builder" \
+            -w /project/electron \
+            electronuserland/builder:wine \
+            bash -euo pipefail -c '
+              host_uid="$(stat -c %u /project)"
+              host_gid="$(stat -c %g /project)"
+              cleanup() {
+                chown -R "$host_uid:$host_gid" \
+                  /project/dist-electron \
+                  /project/electron/build \
+                  /root/.cache/electron \
+                  /root/.cache/electron-builder \
+                  2>/dev/null || true
+              }
+              trap cleanup EXIT
+              ./node_modules/.bin/electron-builder --win nsis --x64 --publish never
+            '
+
+      - name: Verify Windows package and updater metadata
+        run: |
+          set -euo pipefail
+          APP="dist-electron/win-unpacked/Telium.exe"
+          INSTALLER="dist-electron/Telium_Setup_x64.exe"
+          MEDIA_HELPER="dist-electron/win-unpacked/resources/windows-media/telium-windows-media.exe"
+          test -s "$APP"
+          test -s "$MEDIA_HELPER"
+          test -s "$INSTALLER"
+          test -s dist-electron/latest.yml
+          file "$APP" | grep -q 'PE32+ executable'
+          file "$MEDIA_HELPER" | grep -q 'PE32+ executable'
+          grep -q 'Telium_Setup_x64.exe' dist-electron/latest.yml
+
+      # The Windows half of the client release manifest -- the same signed
+      # document the AppImage workflow builds, carrying this workflow's
+      # installer under `desktop-windows-x86_64` (the key a Windows client
+      # looks for; see `artifactKey` in `web/src/lib/updates.js`). The signer
+      # merges same-version entries rather than replacing them, so whichever
+      # workflow signs second converges the release onto both platforms. The
+      # shared concurrency group keeps the two from running at once, which is
+      # what makes "the first one's manifest is already uploaded" true. Runs on
+      # a tag push as well as a manual dispatch, so the signed half of a release
+      # is not a step somebody has to remember.
+      - name: Build and sign the client release manifest
+        if: (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/desktop-v')) && vars.RELEASE_SIGNING_ENABLED == 'true'
+        working-directory: ${{ github.workspace }}
+        env:
+          # As everywhere this seed travels: through the environment of one
+          # step and never through argv.
+          TELIUM_RELEASE_SIGNING_KEY: ${{ secrets.TELIUM_RELEASE_SIGNING_KEY }}
+          TELIUM_RELEASE_PUBLIC_KEY: ${{ vars.TELIUM_RELEASE_PUBLIC_KEY }}
+          TELIUM_RELEASE_KEY_ID: ${{ vars.TELIUM_RELEASE_KEY_ID }}
+          UPDATE_URL: ${{ vars.TELIUM_UPDATE_URL }}
+          DOWNLOAD_BASE: ${{ vars.TELIUM_UPDATE_DOWNLOAD_BASE }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          INSTALLER="web/dist-electron/Telium_Setup_x64.exe"
+          test -s "$INSTALLER"
+          if [[ "$GITHUB_REF" == refs/tags/desktop-v* ]]; then
+            VERSION="${GITHUB_REF_NAME#desktop-v}"
+          else
+            VERSION="$(node -p "require('./web/package.json').version")"
+          fi
+          # See the AppImage half for why the tag is appended to the base
+          # rather than inserted after a slash, and why a base that still ends
+          # in `desktop-v` is normalised here.
+          BASE="${DOWNLOAD_BASE%/}"
+          BASE="${BASE%/desktop-v}"
+          TAG="desktop-v$VERSION"
+          # See the AppImage half: same-tag manifest first (the other
+          # platform's half of this release), then the published one (the
+          # history), and `gh` because a private repository serves release
+          # assets only to an authenticated caller.
+          rm -rf /tmp/telium-previous && mkdir -p /tmp/telium-previous
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --pattern client-releases.json --dir /tmp/telium-previous --clobber \
+            || true
+          if [ -s /tmp/telium-previous/client-releases.json ]; then
+            cp /tmp/telium-previous/client-releases.json /tmp/telium-previous-manifest.json
+          elif curl -fsSL --max-time 20 "$UPDATE_URL" -o /tmp/telium-previous-manifest.json; then
+            :
+          else
+            gh release download --repo "$GITHUB_REPOSITORY" \
+              --pattern client-releases.json --dir /tmp/telium-previous --clobber \
+              && cp /tmp/telium-previous/client-releases.json /tmp/telium-previous-manifest.json \
+              || true
+          fi
+          node scripts/sign-client-manifest.mjs build \
+            --out web/dist-electron/client-releases.json \
+            --version "$VERSION" \
+            --previous /tmp/telium-previous-manifest.json \
+            --artifact "desktop-windows-x86_64=$INSTALLER=$BASE/$TAG/$(basename "$INSTALLER")"
+          node scripts/sign-client-manifest.mjs sign web/dist-electron/client-releases.json
+
+      # As with the AppImage workflow, pull requests prove that the package can
+      # be built without retaining a large binary for every commit. A manual
+      # run is the explicit "give me something to install" path.
+      - name: Upload Windows installer
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/desktop-v')
+        continue-on-error: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: telium-windows-x86_64-nsis
+          path: |
+            web/dist-electron/Telium_Setup_x64.exe
+            web/dist-electron/latest.yml
+            web/dist-electron/client-releases.json
+            web/dist-electron/client-releases.json.sig
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish Windows desktop release
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      # The mirror step at the end of this job runs a script from this
+      # repository, so the tree has to be here. The artifact lands in
+      # `release/` after checkout, so the two do not collide.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: telium-windows-x86_64-nsis
+          path: release
+
+      # The same create-or-upload as the AppImage release job, for the same
+      # reason: a re-run against an existing tag must land its files rather
+      # than die on "release already exists". The two jobs carry disjoint file
+      # names, so the clobber only ever replaces a file this workflow wrote.
+      - name: Publish GitHub release and updater metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#desktop-v}"
+          # `Telium_Setup_x64.exe` is the installer's only name (see
+          # `build.win.artifactName` in web/electron/package.json), so the
+          # website's `releases/download/desktop-latest/Telium_Setup_x64.exe`
+          # button and the signed manifest's tag-scoped URL address the same
+          # file.
+          # The checksum is written from inside `release/`, so the line names
+          # the file the way a person who downloaded it has it on disk. Hashing
+          # `release/Telium_Setup_x64.exe` from the repo root records that path
+          # in the file, and `sha256sum -c SHA256SUMS-windows-x86_64` then fails
+          # for everybody who did not happen to unpack into a `release/`
+          # directory. The AppImage half already has this right.
+          ( cd release && sha256sum Telium_Setup_x64.exe > SHA256SUMS-windows-x86_64 )
+          # `--latest`, and the re-assert after it, are explained in the
+          # AppImage half: clients built before `desktop-latest` existed read
+          # `releases/latest`, so a desktop release has to keep owning it.
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Telium $VERSION" \
+            --generate-notes \
+            --latest \
+            --verify-tag \
+          || gh release upload "$GITHUB_REF_NAME" release/* --clobber --repo "$GITHUB_REPOSITORY"
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --latest
+
+      # See the AppImage release job: the website button and the updater both
+      # make unauthenticated requests, and a private repository answers 404 to
+      # them no matter how correct the release is.
+      - name: Check the assets are reachable without a GitHub session
+        run: |
+          set -euo pipefail
+          URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/Telium_Setup_x64.exe"
+          CODE="$(curl -sS -o /dev/null -w '%{http_code}' -L --max-time 30 "$URL" || true)"
+          echo "anonymous GET $URL -> $CODE"
+          if [ "$CODE" != "200" ]; then
+            echo "::warning title=Downloads are not public::$URL answered $CODE without authentication. While the repository is private, release assets are served only to signed-in users, so the website's download button and every client's updater will fail for everyone else."
+          fi
+
+      # The Windows half of the rolling download pointer. Both release jobs run
+      # this and it mirrors only the files present in their directory, so the
+      # two together converge `desktop-latest` on the full set; see the
+      # AppImage job for why the pointer exists at all.
+      - name: Point the rolling desktop download at this release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          COMMIT="$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_REF_NAME" --jq .sha)"
+          bash scripts/publish-desktop-latest.sh \
+            --tag "$GITHUB_REF_NAME" \
+            --dir release \
+            --commit "$COMMIT"

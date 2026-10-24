@@ -1,0 +1,53 @@
+.telium-check {
+  --color-kumo-contrast: var(--accent);
+  --text-color-kumo-inverse: var(--accent-foreground);
+}
+
+.telium-switch {
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  corner-shape: round;
+  background-color: var(--surface-tertiary);
+  box-shadow: none;
+  transition: background-color var(--dur-2) var(--ease);
+}
+
+.telium-switch[data-checked] {
+  background-color: var(--accent-solid);
+}
+
+.telium-switch > div {
+  top: 3px;
+  bottom: 3px;
+  inset-inline-start: 3px;
+  width: 14px;
+  border-radius: 999px;
+  corner-shape: round;
+  background-color: var(--surface);
+  box-shadow: none;
+  transition:
+    inset-inline-start var(--dur-2) var(--ease),
+    background-color var(--dur-2) var(--ease);
+}
+
+.telium-switch[data-checked] > div {
+  inset-inline-start: 19px;
+  background-color: var(--accent-solid-foreground);
+}
+
+.telium-switch-row [role="switch"] { justify-self: end; }
+
+.bot-cap {
+  border-radius: var(--radius-card);
+  background: var(--surface-secondary);
+  padding: 0.625rem 0.75rem 0.6875rem;
+}
+
+.bot-cap[data-danger="true"] {
+  background: color-mix(in oklch, var(--danger) 11%, var(--surface-secondary));
+}
+
+.bot-cap[data-locked="true"] {
+  opacity: 0.62;
+}

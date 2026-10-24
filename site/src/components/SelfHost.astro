@@ -1,0 +1,63 @@
+---
+import Icon from './Icon.astro'
+import CodeBlock from './CodeBlock.astro'
+import { URLS } from '../config'
+
+const commands = [
+  '# One program. Keeps everything in a file — nothing else to install.',
+  'telium-server init --config telium.toml',
+  'telium-server --config telium.toml',
+] as const
+
+const links = [
+  { href: URLS.github, label: 'Source and releases', icon: 'github' },
+  { href: URLS.mediaSpec, label: 'Media protocol', icon: 'hard-drive' },
+  { href: URLS.migrationSpec, label: 'Migration protocol', icon: 'arrow-left-right' },
+] as const
+---
+
+<section class="band" id="self-host">
+  <div class="page">
+    <div class="grid gap-10 lg:grid-cols-2 lg:gap-16">
+      <div class="reveal min-w-0">
+        <p class="eyebrow">Run your own</p>
+        <h2 class="h2 mt-3 max-w-[16ch]">Host it yourself in an afternoon.</h2>
+
+        <p class="prose-measure mt-6 text-[15.5px] leading-relaxed text-muted">
+          One program, one config file, and no database to set up — it keeps everything in a single
+          file on disk. A spare machine in a closet is enough to host accounts, communities and
+          uploads for you and your friends. A big community can split those three jobs across
+          separate machines later, running the same program, and nobody on the outside can tell.
+        </p>
+
+        <ul class="mt-7 flex flex-wrap gap-x-6 gap-y-2.5">
+          {
+            links.map((link) => (
+              <li>
+                <a
+                  href={link.href}
+                  class="inline-flex items-center gap-2 rounded text-[14px] text-link hover:underline"
+                >
+                  <Icon name={link.icon} size={15} />
+                  {link.label}
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+
+      <!-- min-w-0: without it a grid item takes its automatic minimum size from
+           the longest command in the block below, and the whole page grows a
+           horizontal scrollbar on a phone despite the pre scrolling on its own. -->
+      <div class="reveal min-w-0 lg:pt-14">
+        <CodeBlock lines={commands} label="Homeserver" />
+        <p class="mt-4 text-[13px] leading-relaxed text-muted">
+          <code class="font-mono">init</code> writes out a config file with every setting in it,
+          explained and already set to something sensible. Scheduled backups are on before you touch
+          anything.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>

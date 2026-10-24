@@ -1,0 +1,19 @@
+@utility focus-ring {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+:where(
+  a, button, summary,
+  [role="button"], [role="link"], [role="tab"], [role="option"],
+  [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"],
+  [role="checkbox"], [role="switch"], [role="radio"]
+):focus-visible {
+  @apply focus-ring;
+  --tw-ring-shadow: 0 0 #0000;
+}
+
+:where(a:not([class*="rounded"])):focus-visible,
+.focus-outside:focus-visible {
+  outline-offset: 2px;
+}

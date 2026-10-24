@@ -1,0 +1,96 @@
+---
+import '../styles/global.css'
+import { SITE } from '../config'
+import Header from '../components/Header.astro'
+import Footer from '../components/Footer.astro'
+
+/* The shell, and there is no way to switch any of it off.
+ *
+ * There used to be a `minimalChrome` flag, and the People page set it because
+ * it ends in a sign-off of its own. What that flag actually did was remove the
+ * header, so the one page on the site listing the people who built it was the
+ * one page with no way back to the rest of it and no theme toggle. Splitting it
+ * into `header` and `footer` props made that particular mistake harder, which
+ * is not the same as making it impossible — the next page to want a custom
+ * ending would have reached for the same lever.
+ *
+ * So the levers are gone. Every page gets the header, the navigation, the theme
+ * toggle and the footer, and a page that wants to close in its own words does
+ * it in its own content, above the footer, where the People page now does.
+ */
+interface Props {
+  title?: string
+  description?: string
+  /* The landing page is the site's front door and wants no title prefix; every
+     other page says where it is first. */
+  bare?: boolean
+}
+
+const { title, description = SITE.tagline, bare = false } = Astro.props
+
+const pageTitle = title && !bare ? `${title} · ${SITE.name}` : (title ?? `${SITE.name} — ${SITE.tagline}`)
+const canonical = new URL(Astro.url.pathname, Astro.site ?? `https://${SITE.domain}`)
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{pageTitle}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical.href} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="alternate icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" href="/brand/telium-app-icon-light-1024.png" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical.href} />
+    <meta property="og:image" content={new URL('/og.png', canonical).href} />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <!-- Both themes declared so the browser paints its own chrome correctly
+         before our stylesheet has an opinion. -->
+    <meta name="theme-color" content="#eee8f5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1c1825" media="(prefers-color-scheme: dark)" />
+
+    {/* Blocking, deliberately. Resolving the theme after first paint is how a
+        dark-mode page flashes white at someone at two in the morning; four
+        lines in the head is the whole fix. The client stores an explicit
+        preference and defaults to dark — a public page has no business
+        overriding the visitor's OS setting, so the default here is `system`. */}
+    <script is:inline>
+      (() => {
+        try {
+          const stored = localStorage.getItem('telium-theme')
+          const mode = stored === 'light' || stored === 'dark' ? stored : 'system'
+          document.documentElement.dataset.themeMode = mode
+          document.documentElement.dataset.theme =
+            mode === 'system'
+              ? matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light'
+              : mode
+        } catch {
+          document.documentElement.dataset.themeMode = 'system'
+          document.documentElement.dataset.theme = 'light'
+        }
+      })()
+    </script>
+  </head>
+
+  <body class="min-h-screen antialiased">
+    <a
+      href="#main"
+      class="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-lg focus:bg-surface-secondary focus:px-3 focus:py-2 focus:text-sm"
+      >Skip to content</a
+    >
+    <Header />
+    <main id="main">
+      <slot />
+    </main>
+    <Footer />
+  </body>
+</html>

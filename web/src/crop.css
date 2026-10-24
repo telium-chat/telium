@@ -1,0 +1,156 @@
+:root {
+  --crop-scrim: rgb(26 18 48 / 0.52);
+  --crop-edge: rgb(255 255 255 / 0.72);
+}
+
+:root.dark,
+:root[data-theme="dark"] {
+  --crop-scrim: rgb(14 10 26 / 0.68);
+  --crop-edge: rgb(255 255 255 / 0.55);
+}
+
+.crop-stage {
+  --crop-aspect: 1;
+  --crop-gutter: 18px;
+
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 100%;
+  height: min(46vh, 320px);
+  padding: var(--crop-gutter);
+  /* Must stay `hidden`: `scrollbar-width: thin` would draw a real scrollbar on any overflow. */
+  overflow: hidden;
+  border-radius: var(--radius-2xl);
+  background: var(--background);
+  container-type: size;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.crop-stage[data-shape="wide"] {
+  height: min(34vh, 232px);
+}
+
+.crop-stage[data-ready="true"] { cursor: grab; }
+.crop-stage[data-ready="true"]:active { cursor: grabbing; }
+
+.crop-stage:focus-visible {
+  @apply focus-ring;
+}
+
+.crop-frame {
+  position: relative;
+  width: 100%;
+  width: min(100cqw, 100cqh * var(--crop-aspect));
+  aspect-ratio: var(--crop-aspect);
+  border-radius: var(--radius-2xl);
+  opacity: 0;
+  transition: opacity var(--dur-3) var(--ease);
+}
+
+.crop-stage[data-ready="true"] .crop-frame { opacity: 1; }
+
+.crop-stage[data-shape="circle"] .crop-frame { border-radius: 50%; }
+.crop-stage[data-shape="squircle"] .crop-frame { border-radius: 40%; }
+
+.crop-image {
+  position: absolute;
+  top: 0;
+  inset-inline-start: 0;
+  max-width: none;
+  -webkit-user-drag: none;
+}
+
+.crop-window {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 1px var(--crop-edge),
+    0 0 0 9999px var(--crop-scrim);
+}
+
+.crop-zoom {
+  display: flex;
+  align-self: center;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--muted);
+}
+
+.crop-zoom:has(.crop-zoom__slider:disabled) { opacity: 0.45; }
+
+.crop-zoom__mark { flex: none; }
+
+.crop-zoom__slider {
+  --crop-zoom-fill: 0%;
+
+  appearance: none;
+  -webkit-appearance: none;
+  width: min(240px, 100%);
+  height: 16px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.crop-zoom__slider:disabled { cursor: default; }
+
+.crop-zoom__slider:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+  border-radius: 999px;
+}
+
+/* WebKit and Gecko each drop a rule with an unknown selector, hence two rules. */
+.crop-zoom__slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--accent) var(--crop-zoom-fill),
+    var(--surface-tertiary) var(--crop-zoom-fill)
+  );
+}
+
+.crop-zoom__slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  /* (4px rail - 14px thumb) / 2: WebKit positions the thumb from the track top. */
+  margin-top: -5px;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: scale var(--dur-1) var(--ease);
+}
+
+.crop-zoom__slider:active::-webkit-slider-thumb { scale: var(--press); }
+
+.crop-zoom__slider::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--surface-tertiary);
+}
+
+.crop-zoom__slider::-moz-range-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.crop-zoom__slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: scale var(--dur-1) var(--ease);
+}
+
+.crop-zoom__slider:active::-moz-range-thumb { scale: var(--press); }

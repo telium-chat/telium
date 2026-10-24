@@ -1,0 +1,262 @@
+---
+import Icon from './Icon.astro'
+import { URLS } from '../config'
+---
+
+<section class="hero page relative pt-14 pb-12 sm:pt-20 sm:pb-16 lg:pt-24 lg:pb-20">
+  <div class="hero-mark-wrap" aria-hidden="true">
+    <img
+      src="/brand/telium-mark-gradient.svg"
+      alt=""
+      width="700"
+      height="700"
+      class="hero-mark"
+      decoding="async"
+    />
+  </div>
+
+  <div class="relative z-10 grid items-center gap-12 lg:grid-cols-[minmax(0,1.04fr)_minmax(360px,.96fr)] lg:gap-14">
+    <div>
+      <h1 class="display rise-in max-w-[12ch]">
+        Group chat, <span class="gradient-text">without the lock-in.</span>
+      </h1>
+
+      <p class="lead rise-in mt-6 max-w-[54ch]" style="animation-delay: 70ms">
+        Text, voice, video, screenshare, and private messages — on a server you choose, with the
+        option to move later.
+      </p>
+
+      <div class="rise-in mt-8 flex flex-wrap items-center gap-3" style="animation-delay: 120ms">
+        <a href={URLS.client} class="btn btn-primary btn-lg">
+          Open Telium
+          <Icon name="arrow-right" size={17} />
+        </a>
+        <a href={URLS.download} class="btn btn-secondary btn-lg">Download the app</a>
+      </div>
+
+      <div class="rise-in mt-8 flex flex-wrap gap-x-6 gap-y-3 text-[13px] text-muted" style="animation-delay: 170ms">
+        <span class="inline-flex items-center gap-2"><Icon name="users" size={14} /> Community-first</span>
+        <span class="inline-flex items-center gap-2"><Icon name="arrow-left-right" size={14} /> Accounts can move</span>
+        <span class="inline-flex items-center gap-2"><Icon name="lock-keyhole" size={14} /> Encrypted DMs</span>
+      </div>
+    </div>
+
+    <div class="rise-in relative mx-auto w-full max-w-[520px]" style="animation-delay: 110ms" aria-hidden="true">
+      <div class="network-card panel relative overflow-hidden p-5 sm:p-6">
+        <div>
+          <p class="eyebrow">Your network</p>
+          <p class="mt-1 text-[14px] font-medium">One identity. More than one home.</p>
+        </div>
+
+        <div class="relative mt-8 h-[260px] sm:h-[300px]">
+          <svg
+            class="network-connectors absolute inset-0 z-0 h-full w-full"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            <line x1="18" y1="39" x2="84" y2="15" vector-effect="non-scaling-stroke" />
+            <line x1="18" y1="39" x2="84" y2="56" vector-effect="non-scaling-stroke" />
+            <line x1="18" y1="39" x2="29" y2="88" vector-effect="non-scaling-stroke" />
+          </svg>
+
+          <div class="node node-account">
+            <span class="node-icon"><Icon name="users" size={17} /></span>
+            <span>
+              <strong>Your account</strong>
+              <small>home.example</small>
+            </span>
+          </div>
+
+          <div class="node node-guild-a">
+            <span class="node-dot"></span>
+            <span>
+              <strong>Friends</strong>
+              <small>guilds.example</small>
+            </span>
+          </div>
+
+          <div class="node node-guild-b">
+            <span class="node-dot"></span>
+            <span>
+              <strong>Project room</strong>
+              <small>community.example</small>
+            </span>
+          </div>
+
+          <div class="node node-move">
+            <span class="node-icon node-icon-soft"><Icon name="arrow-left-right" size={16} /></span>
+            <span>
+              <strong>Move later</strong>
+              <small>without starting over</small>
+            </span>
+          </div>
+        </div>
+
+        <div class="network-summary grid grid-cols-3 gap-2 pt-4 text-center">
+          <div><strong class="block text-[13px]">Text + files</strong><span class="text-[11px] text-muted">everyday chat</span></div>
+          <div><strong class="block text-[13px]">Voice + video</strong><span class="text-[11px] text-muted">live rooms</span></div>
+          <div><strong class="block text-[13px]">Screenshare</strong><span class="text-[11px] text-muted">built in</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .hero {
+    isolation: isolate;
+  }
+
+  /* The page's two glows live on `body` and are fixed to the viewport, so the
+     hero no longer fades its own corners on top of them. What is left here is
+     the mark itself, a flat watermark at low opacity — brand rather than
+     lighting, which is why it survived when the glows and the halo did not. */
+  .hero-mark-wrap {
+    position: absolute;
+    z-index: 0;
+    width: clamp(28rem, 45vw, 43rem);
+    aspect-ratio: 1;
+    right: clamp(-13rem, -10vw, -7rem);
+    top: 50%;
+    transform: translateY(-51%) rotate(-9deg);
+    pointer-events: none;
+    opacity: 0.13;
+    filter: saturate(0.9);
+  }
+
+  .hero-mark {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Purple carries on a dark page and turns to mud on a pale one, so the light
+     theme spends much less of it — the same call the page glows make. */
+  :root[data-theme='light'] .hero-mark-wrap {
+    opacity: 0.075;
+    filter: saturate(0.8);
+  }
+
+  /* Flat, square to the page, and lit by nothing. It was on a `perspective()`
+     rotation with an 80px drop shadow and an inset white hairline, which is
+     three ways of saying "this floats" about a diagram that is not a window.
+     The fill step does it instead. */
+  .network-card {
+    background: var(--color-surface);
+  }
+
+  .network-connectors {
+    pointer-events: none;
+  }
+
+  .network-connectors line {
+    stroke: color-mix(in oklab, var(--color-accent) 42%, var(--color-border));
+    stroke-width: 1px;
+    stroke-linecap: round;
+  }
+
+  /* A node is the next fill step in, not a bordered glass chip. Inside a panel
+     that is already `--surface`, `--surface-secondary` is the step that reads,
+     and it needs no outline, no 28px shadow and no backdrop blur to sit on the
+     connector lines behind it. */
+  .node {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    min-width: 142px;
+    border-radius: var(--radius-row);
+    background: var(--color-surface-secondary);
+    padding: 0.65rem 0.75rem;
+  }
+
+  .node strong,
+  .node small {
+    display: block;
+    line-height: 1.25;
+  }
+  .node strong {
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .node small {
+    margin-top: 3px;
+    font-size: 10px;
+    color: var(--color-muted);
+  }
+
+  .node-icon {
+    display: grid;
+    place-items: center;
+    width: 2rem;
+    height: 2rem;
+    flex: none;
+    border-radius: 0.5rem;
+    color: var(--color-accent-solid-foreground);
+    background: var(--color-accent-solid);
+  }
+
+  .node-icon-soft {
+    color: var(--color-accent-soft-foreground);
+    background: var(--color-accent-soft);
+  }
+
+  .node-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    flex: none;
+    border-radius: 999px;
+    background: var(--color-accent);
+  }
+
+  .node-account,
+  .node-guild-a,
+  .node-guild-b,
+  .node-move {
+    z-index: 1;
+  }
+
+  .node-account { left: 4%; top: 29%; }
+  .node-guild-a { right: 2%; top: 5%; }
+  .node-guild-b { right: 0; top: 46%; }
+  .node-move { left: 12%; bottom: 1%; }
+
+  .network-summary {
+    border-top: 1px solid var(--color-separator);
+  }
+
+  @media (max-width: 900px) {
+    .hero-mark-wrap {
+      width: min(38rem, 94vw);
+      right: -30vw;
+      top: 68%;
+      opacity: 0.095;
+      transform: translateY(-50%) rotate(-10deg);
+    }
+
+    :root[data-theme='light'] .hero-mark-wrap {
+      opacity: 0.055;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .hero-mark-wrap {
+      width: 30rem;
+      right: -15rem;
+      top: 73%;
+      opacity: 0.075;
+    }
+
+    :root[data-theme='light'] .hero-mark-wrap {
+      opacity: 0.045;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .node { min-width: 124px; padding: 0.55rem 0.6rem; }
+    .node-guild-a { right: -2%; }
+    .node-guild-b { right: -3%; }
+    .node-move { left: 3%; }
+  }
+</style>

@@ -1,0 +1,668 @@
+name: Build desktop AppImage
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'desktop-v*'
+  pull_request:
+    paths:
+      - '.github/workflows/build-appimage.yml'
+      - 'server/src/auth.rs'
+      - 'server/src/gateway/hub.rs'
+      - 'server/src/gateway/mod.rs'
+      - 'server/src/notifications.rs'
+      - 'server/src/routes/push/**'
+      - 'server/migrations/*notification*.sql'
+      - 'server/tests/notifications.rs'
+      - 'server/tests/notification_push_auth.rs'
+      # The signer and the updater it feeds are tested in this job, so a
+      # change to either should run it.
+      - 'scripts/sign-client-manifest.mjs'
+      - 'scripts/sign-client-manifest.test.mjs'
+      - 'scripts/sign-release-manifest.mjs'
+      - 'scripts/sign-release-manifest.test.mjs'
+      - 'web/electron/**'
+      - 'web/scripts/build-electron-renderer.mjs'
+      - 'web/src/**'
+      - 'web/package.json'
+      - 'web/vite.config.js'
+
+permissions:
+  contents: read
+  # For the step that asks which files this pull request touched.
+  pull-requests: read
+
+# One run of this workflow per pull request. Without this, a rebase or a
+# follow-up commit left the superseded run queued, and on a single self-hosted
+# runner that is not a wasted minute somewhere else -- it is the front of the
+# queue, held by a build of a commit nobody is waiting for any more, while the
+# run someone is waiting for sits behind it. Every other workflow here already
+# says this; these three were the ones that did not.
+concurrency:
+  # Two workflows cut one desktop release: this one and build-windows.yml, both
+  # dispatched on the same tag. They must not run at the same time, because
+  # each reads the previous release's manifest before signing and a manifest
+  # that has not been uploaded yet cannot be read. Sharing one group across
+  # both workflows serialises them on a release tag; the second run then sees
+  # the first platform's entry and merges its own into it. Pull requests keep
+  # the per-workflow behaviour, including cancelling a superseded run.
+  group: ${{ startsWith(github.ref, 'refs/tags/desktop-v') && format('desktop-release-{0}', github.ref) || format('{0}-{1}', github.workflow, github.event.pull_request.number || github.ref) }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/desktop-v') }}
+
+env:
+  # Public verification material, not a secret. Empty until rollout is enabled;
+  # the client then fails closed to explicit server choice. The URL is optional
+  # so packaged clients can use a mirror of the same signed catalogue.
+  VITE_TELIUM_RECOMMENDATION_PUBLIC_KEY: ${{ vars.TELIUM_RECOMMENDATION_PUBLIC_KEY }}
+  VITE_TELIUM_RECOMMENDATION_URL: ${{ vars.TELIUM_RECOMMENDATION_URL }}
+
+  # Where a packaged client looks for news of a newer packaged client, and the
+  # key it will demand that news be signed with. Both are baked into the build
+  # rather than asked of a homeserver at runtime, and `docs/updates.md` argues
+  # that at length: a Telium homeserver is not the publisher of the client
+  # somebody connects to it with, and a client that took an update URL from a
+  # server it connected to would be handing every operator on the network the
+  # ability to run code on its users' machines.
+  #
+  # Both are empty until a human sets the repository variables, and empty is a
+  # named state rather than a soft one: `publisherState()` returns `unkeyed`,
+  # no request is made at all, and nothing can be installed. A build produced
+  # by this workflow today therefore ships a working updater that is switched
+  # off, which is the only honest thing to ship while the key does not exist.
+  VITE_TELIUM_UPDATE_PUBLIC_KEY: ${{ vars.TELIUM_RELEASE_PUBLIC_KEY }}
+  VITE_TELIUM_UPDATE_URL: ${{ vars.TELIUM_UPDATE_URL }}
+
+jobs:
+  build:
+    name: Linux x86_64 AppImage
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      # Every `uses:` below names a commit, not a tag. A tag is a mutable
+      # pointer that the action's owner -- or anyone who takes their account
+      # -- can move onto new code, and this repository's runs would then
+      # execute it without a diff, a review, or a notification. The trailing
+      # comment is the release that commit was, so the pin is still readable;
+      # `docs/supply-chain.md` explains how to move one forward.
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install desktop build and run dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dbus gcc-mingw-w64-x86-64 xvfb \
+            libglib2.0-0t64 libgtk-3-0t64 libnss3 libatk-bridge2.0-0t64 \
+            libcups2t64 libasound2t64 libxkbcommon0
+
+      - name: Check the runner can build and run a desktop app
+        run: |
+          missing=()
+          for tool in dbus-run-session x86_64-w64-mingw32-gcc xvfb-run; do
+            command -v "$tool" >/dev/null || missing+=("$tool")
+          done
+          # ldconfig lives in /sbin, which a non-login runner shell may not
+          # have on PATH; without this the check reports a tooling gap as
+          # every library missing.
+          libs="$(PATH="$PATH:/sbin:/usr/sbin" ldconfig -p)"
+          for soname in libglib-2.0.so.0 libgtk-3.so.0 libpango-1.0.so.0 libcairo.so.2 \
+                        libatk-1.0.so.0 libatk-bridge-2.0.so.0 libatspi.so.0 \
+                        libnss3.so libnspr4.so libcups.so.2 libasound.so.2 \
+                        libxkbcommon.so.0 libXcomposite.so.1 libXdamage.so.1 libXfixes.so.3; do
+            grep -qF "$soname " <<<"$libs" || missing+=("$soname")
+          done
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "::error::This runner is missing ${missing[*]} -- the install step above should have provided them."
+            exit 1
+          fi
+          # What the machine actually is, written into the run summary.
+          #
+          # There is one runner and it takes one job at a time, so the question
+          # that decides how this repository's CI behaves is how many jobs the
+          # box could take at once -- and that is a question about its cores,
+          # its memory and its free disk. Nobody should have to open a shell on
+          # it to find out, and asking the runner is a better answer than
+          # asking the host: this reports the machine that is really building,
+          # every time it builds, and it keeps reporting if the box is ever
+          # moved or resized.
+          {
+            echo "### Runner"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| cores | $(nproc) |"
+            echo "| memory | $(free -h | awk '/^Mem:/ {print $2 " total, " $7 " available"}') |"
+            echo "| disk (work) | $(df -h --output=size,avail "$RUNNER_WORKSPACE" | tail -1 | awk '{print $1 " total, " $2 " free"}') |"
+            echo "| kernel | $(uname -r) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Whether the Rust steps below have anything to do.
+      # ---------------------------------------------------------------------
+      # They are here for the two `server/src/gateway` files in this workflow's
+      # path filter, and they are the most expensive thing in the job: a
+      # toolchain, a cache restore and a link come to 57 of the 102 seconds a
+      # warm run takes. Almost every run that reaches them was triggered by a
+      # change under `web/src/` and has not touched a line of Rust.
+      #
+      # That is a bigger saving than it sounds, because this repository builds
+      # on one self-hosted runner that takes one job at a time. A minute here
+      # is a minute every other queued job waits, so the job's own duration and
+      # the queue's depth are the same number.
+      #
+      # Asked of the API rather than of a diff, so the checkout above keeps its
+      # shallow fetch. A manual dispatch has no pull request to ask about and
+      # runs them.
+      - name: Does this change reach the server?
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != 'pull_request' ]; then
+            echo 'server=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/pulls/${{ github.event.number }}/files" \
+            -q '.[].filename')"
+          if printf '%s\n' "$changed" | grep -q '^server/'; then
+            echo 'server=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'server=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch @ 2026-09-03
+        if: steps.scope.outputs.server == 'true'
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.scope.outputs.server == 'true'
+        with:
+          workspaces: server
+          cache-on-failure: true
+
+      # `node --test` below runs the MPRIS suites, so Node stays; bun is here
+      # as the package manager and script runner.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.0
+
+      # setup-bun caches only the bun executable, so the package cache that
+      # setup-node's `cache: npm` used to manage has to be its own step.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('web/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install web dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run affected desktop web tests
+        run: bun run test -- src/test/screen-share.test.js src/test/linux-screen-share-audio-flow.test.js src/test/voice.test.js src/test/rich-presence.test.js src/test/native-music-presence.test.js src/test/rich-presence-name.test.js src/test/wine-rpc-bridge.test.js src/test/wine-rpc-container-bridge.test.js src/test/updates.test.js
+
+      # Both halves of the release-signing story, run on every build of a
+      # client that will one day trust it.
+      #
+      # `sign-client-manifest.test.mjs` is the one that matters here: it loads
+      # `web/electron/updater.cjs` -- the code that replaces this AppImage with
+      # a downloaded one -- and drives it through a forged manifest, a flipped
+      # signature byte, a replayed statement, a corrupted artifact and an
+      # unconfigured key. The last of those is the case worth naming: with no
+      # key pinned the updater must not fetch at all, and the test asserts the
+      # fetch count is zero rather than asserting that nothing was installed,
+      # because "downloaded it and then decided not to" is a different and
+      # much worse program.
+      #
+      # They run before the fifteen minutes of Electron packaging below rather
+      # than after, because a signer that no longer verifies its own output is
+      # a reason not to build a client at all.
+      - name: Test the release manifest signers
+        run: node --test ../scripts/sign-client-manifest.test.mjs ../scripts/sign-release-manifest.test.mjs
+
+      - name: Run rich presence server tests
+        if: steps.scope.outputs.server == 'true'
+        run: |
+          cargo test --manifest-path ../server/Cargo.toml rich_activity_envelope_is_unpacked_for_fanout
+          cargo test --manifest-path ../server/Cargo.toml activity_start_is_immediate_but_churn_still_waits
+          cargo test --manifest-path ../server/Cargo.toml clearing_activity_skips_the_coalescing_window
+
+      - name: Run notification federation server tests
+        if: steps.scope.outputs.server == 'true'
+        run: cargo test --manifest-path ../server/Cargo.toml --test notifications --test notification_push_auth
+
+      - name: Install Electron desktop dependencies
+        run: bun run desktop:install
+
+      # The tag is the version, for both files. `build-electron-renderer.mjs`
+      # copies `web/package.json`'s version into `electron/package.json` (which
+      # electron-builder stamps into the AppImage), and Vite bakes the same
+      # number into the renderer bundle. Setting only one of them would let a
+      # build claim a version its own bundle disagrees with, and the updater
+      # compares exactly those two numbers.
+      - name: Set desktop release version from tag
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        env:
+          DESKTOP_VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${DESKTOP_VERSION#desktop-v}"
+          node -e '
+            const fs = require("node:fs");
+            const version = process.argv[1];
+            if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
+              throw new Error(`desktop release tag does not contain a valid version: ${version}`);
+            }
+            for (const path of ["package.json", "electron/package.json"]) {
+              const pkg = JSON.parse(fs.readFileSync(path, "utf8"));
+              pkg.version = version;
+              fs.writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);
+            }
+          ' "$VERSION"
+
+      - name: Test Linux native desktop sources
+        run: |
+          node --test electron/desktop-updater.test.cjs electron/updater.test.cjs electron/linux-desktop-integration.test.cjs electron/screen-share-audio.test.cjs electron/tray-lifecycle.test.cjs electron/renderer-crash.test.cjs electron/mpris-source.test.mjs electron/rich-presence-local-art.test.cjs electron/packaging.test.cjs electron/page-zoom.test.cjs
+          dbus-run-session -- node --test electron/mpris-source.integration.test.mjs
+
+      - name: Build Electron AppImage
+        run: bun run desktop:build:linux
+
+      - name: Verify AppImage update metadata and FUSE-independent runtime
+        run: |
+          set -euo pipefail
+          APPIMAGE="$(find dist-electron -maxdepth 1 -name '*.AppImage' -print -quit)"
+          test -n "$APPIMAGE"
+          test -s dist-electron/latest-linux.yml
+          grep -q '^ *blockMapSize:' dist-electron/latest-linux.yml
+          if ldd "$APPIMAGE" 2>&1 | grep -q 'libfuse.so.2'; then
+            echo '::error::The AppImage runtime still has a dynamic FUSE 2 dependency.'
+            exit 1
+          fi
+
+      - name: Verify packaged venmic addon
+        run: |
+          ADDON="$(find dist-electron/linux-unpacked/resources/app.asar.unpacked/node_modules/@vencord/venmic/prebuilds -name 'node-napi-v7.node' -path '*linux-x64*' -print -quit)"
+          test -n "$ADDON"
+          if ldd "$ADDON" | grep -q 'not found'; then
+            if ldd "$ADDON" | grep 'not found' | grep -Evq 'lib(pipewire-0\.3|pulse)\.so\.0'; then
+              ldd "$ADDON"
+              exit 1
+            fi
+            echo "packaged-venmic=present; runtime load skipped because this headless runner has no PipeWire/PulseAudio client libraries"
+          else
+            node -e "const v=require('./electron/node_modules/@vencord/venmic'); if(typeof v.PatchBay!=='function') process.exit(1)"
+            echo "packaged-venmic=loadable"
+          fi
+
+      - name: Prepare packaged Electron smoke-test runtime
+        run: |
+          set -euo pipefail
+          docker build -t telium-appimage-smoke:bookworm - <<'EOF'
+          FROM node:22-bookworm-slim
+          RUN apt-get update \
+           && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                ca-certificates \
+                dbus \
+                libasound2 \
+                libatk-bridge2.0-0 \
+                libatk1.0-0 \
+                libatspi2.0-0 \
+                libcairo2 \
+                libcups2 \
+                libdrm2 \
+                libgbm1 \
+                libglib2.0-0 \
+                libgtk-3-0 \
+                libnotify4 \
+                libnss3 \
+                libpango-1.0-0 \
+                libx11-xcb1 \
+                libxcb1 \
+                libxcomposite1 \
+                libxdamage1 \
+                libxext6 \
+                libxfixes3 \
+                libxi6 \
+                libxkbcommon0 \
+                libxrandr2 \
+                libxss1 \
+                libxtst6 \
+                xauth \
+                xdg-utils \
+                xvfb \
+           && rm -rf /var/lib/apt/lists/*
+          WORKDIR /workspace
+          EOF
+
+      - name: Verify packaged Electron runtime dependencies
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD:/workspace:ro" \
+            telium-appimage-smoke:bookworm \
+            bash -euo pipefail -c '
+              BINARY="dist-electron/linux-unpacked/telium-desktop"
+              test -x "$BINARY"
+              missing="$(ldd "$BINARY" | awk '\''/not found/ {print $1}'\'')"
+              if [[ -n "$missing" ]]; then
+                echo "::error::The packaged Electron binary still has unresolved shared-library dependencies in the smoke-test runtime:"
+                printf "%s\n" "$missing"
+                exit 1
+              fi
+              echo "All packaged Electron shared-library dependencies are available in the smoke-test runtime."
+            '
+
+      - name: Verify packaged Chromium supports LiveKit
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          TELIUM_DESKTOP_SMOKE=1 \
+            xvfb-run -a ./dist-electron/linux-unpacked/telium-desktop --no-sandbox
+
+      - name: Verify packaged arRPC and Wine bridge start
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          APPIMAGE="$(find dist-electron -maxdepth 1 -name '*.AppImage' -print -quit)"
+          test -n "$APPIMAGE"
+          APPIMAGE_EXTRACT_AND_RUN=1 \
+            TELIUM_RICH_PRESENCE_SMOKE=1 \
+            xvfb-run -a "$APPIMAGE" --no-sandbox
+
+      - name: Verify packaged MPRIS discovery
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          APPIMAGE="$(find dist-electron -maxdepth 1 -name '*.AppImage' -print -quit)"
+          test -n "$APPIMAGE"
+          export APPIMAGE APPIMAGE_EXTRACT_AND_RUN=1 TELIUM_MPRIS_SMOKE=1
+          dbus-run-session -- bash -euo pipefail -c '
+            node electron/mpris-smoke-service.mjs > /tmp/telium-mpris-service.log 2>&1 &
+            SERVICE_PID=$!
+            cleanup() {
+              kill "$SERVICE_PID" 2>/dev/null || true
+              wait "$SERVICE_PID" 2>/dev/null || true
+            }
+            trap cleanup EXIT
+            for _ in $(seq 1 50); do
+              if grep -q "telium-mpris-smoke-service=ready" /tmp/telium-mpris-service.log; then
+                break
+              fi
+              if ! kill -0 "$SERVICE_PID" 2>/dev/null; then
+                cat /tmp/telium-mpris-service.log
+                exit 1
+              fi
+              sleep .1
+            done
+            grep -q "telium-mpris-smoke-service=ready" /tmp/telium-mpris-service.log
+            xvfb-run -a "$APPIMAGE" --no-sandbox
+          '
+
+      # A pull request wants to know that the AppImage builds and runs, which
+      # the three steps above have just established. It does not also need
+      # 125MB of binary kept for a fortnight to prove it. Uploading on every
+      # run filled the account's artifact storage with 18GB of near-identical
+      # builds -- a hundred and fifty of them from three days of iterating --
+      # and the upload then failed the job it was the last step of, which is a
+      # confusing way to be told you are out of disk. The build that somebody
+      # wants to hold in their hand is the one they asked for by name.
+      # A checksum, and an honest account of what it is worth.
+      #
+      # It is NOT an authenticity signature. It is generated by the same job
+      # that built the file, travels in the same artifact bundle, and anyone
+      # who could replace the AppImage could replace the SUMS file beside it.
+      # As a defence against a hostile CI run it is worth nothing at all, and
+      # this comment exists so that nobody reads the file's presence as more
+      # than it is.
+      #
+      # What it is actually good for, and why it is here anyway:
+      #
+      #   * A 125MB download that half-arrives is the normal failure, not the
+      #     interesting one, and this is how somebody finds out before spending
+      #     an afternoon debugging a truncated binary.
+      #   * It also lands in the step summary, which outlives the artifact.
+      #     Artifacts expire in seven days; the run's summary does not. Six
+      #     weeks later, "is the AppImage I am holding the one from run 412"
+      #     is answerable, which it currently is not.
+      #   * It is the hook a real signature attaches to. When a release key
+      #     exists -- see the release-manifest signing in release-server.yml --
+      #     signing this one small file covers the whole artifact.
+      #
+      # `sha256sum` output format is deliberate rather than pretty-printed: it
+      # is what `sha256sum -c <file>` consumes, so verification is a command
+      # somebody already knows rather than one this project has to document.
+      # Named per platform: the Windows release job publishes its own checksum
+      # file beside this one, and two jobs writing `SHA256SUMS` to the same
+      # release means the second clobbers the first.
+      - name: Checksum the AppImage
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/desktop-v')
+        working-directory: web/dist-electron
+        run: |
+          set -euo pipefail
+          sha256sum -- *.AppImage > SHA256SUMS-linux-x86_64
+          {
+            echo "### AppImage checksums"
+            echo
+            echo "Verify with \`sha256sum -c SHA256SUMS-linux-x86_64\` in the unpacked artifact directory."
+            echo
+            echo '```'
+            cat SHA256SUMS-linux-x86_64
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The document that turns this build into an update somebody's client
+      # will actually take (docs/updates.md).
+      #
+      # It is built here, in the job that produced the AppImage, and it hashes
+      # the file on disk. That is the whole point: the digest is the only thing
+      # binding "the publisher signed this release" to "these exact bytes", and
+      # a digest supplied as an argument would be a digest somebody typed --
+      # the signature would then cover a claim about a file nothing in the
+      # pipeline ever read.
+      #
+      # It runs on a tag push as well as a manual dispatch. It used to be
+      # dispatch-only, on the theory that the tag's own push published
+      # unsigned and a dispatch followed to sign. That made the signed half of
+      # a release a step somebody had to remember, and 0.1.1 shipped with no
+      # manifest at all: every installed client checked a URL that answered
+      # 404. The tag push is the release; signing is part of it.
+      #
+      # Gated on `RELEASE_SIGNING_ENABLED` for the same reason as the server
+      # manifest, which is worth restating because this half has teeth the
+      # other half does not. `deploy/releases.json` moves a number on an admin
+      # screen. This document names a URL that a client will download and
+      # execute. A pipeline that emitted it unsigned, or signed with a
+      # placeholder, would be publishing the shape of a guarantee without the
+      # guarantee -- and every client that fetched it would report `forged`, a
+      # word that must only ever mean somebody is lying.
+      #
+      # `--previous` is fetched rather than carried in the repository because
+      # the artifacts of older releases are files this run has never seen and
+      # cannot hash; carrying the list forward is how a client four releases
+      # behind can still be told that one of the four it missed was a security
+      # release. A fetch that fails degrades that answer and does not fail the
+      # release.
+      - name: Build and sign the client release manifest
+        if: (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/desktop-v')) && vars.RELEASE_SIGNING_ENABLED == 'true'
+        working-directory: .
+        env:
+          # As in release-server.yml: the seed reaches node:crypto through the
+          # environment of one step and never through argv, which every other
+          # process on this long-lived self-hosted runner can read.
+          TELIUM_RELEASE_SIGNING_KEY: ${{ secrets.TELIUM_RELEASE_SIGNING_KEY }}
+          TELIUM_RELEASE_PUBLIC_KEY: ${{ vars.TELIUM_RELEASE_PUBLIC_KEY }}
+          TELIUM_RELEASE_KEY_ID: ${{ vars.TELIUM_RELEASE_KEY_ID }}
+          UPDATE_URL: ${{ vars.TELIUM_UPDATE_URL }}
+          DOWNLOAD_BASE: ${{ vars.TELIUM_UPDATE_DOWNLOAD_BASE }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          APPIMAGE="$(find web/dist-electron -maxdepth 1 -name '*.AppImage' -print -quit)"
+          test -n "$APPIMAGE"
+          # On a tag the tag is the version, and it is the one electron-builder
+          # stamped into the bundle. A dispatch from a branch has no tag to
+          # read, so it falls back to the package version.
+          if [[ "$GITHUB_REF" == refs/tags/desktop-v* ]]; then
+            VERSION="${GITHUB_REF_NAME#desktop-v}"
+          else
+            VERSION="$(node -p "require('./web/package.json').version")"
+          fi
+          # The artifact URL is tag-scoped, not version-scoped in the path
+          # alone: a GitHub release asset lives at
+          # /releases/download/<tag>/<asset>, and the tag is `desktop-v0.1.1`,
+          # not `desktop-v/0.1.1`. A base that already ends with `desktop-v`
+          # (the value this repository used before 0.1.2) is accepted and
+          # normalised so a stale variable cannot build a URL that 404s.
+          BASE="${DOWNLOAD_BASE%/}"
+          BASE="${BASE%/desktop-v}"
+          TAG="desktop-v$VERSION"
+          # The previous manifest, for two different jobs. Same-tag first: the
+          # other platform's half of *this* release, which is what the merge
+          # needs. Then the published manifest, which is where the older
+          # releases live and where the history comes from.
+          #
+          # `gh` rather than `curl` for both: GitHub serves a private
+          # repository's release assets only to an authenticated caller, and
+          # the workflow token is one. Once the repository is public the curl
+          # succeeds and the `gh` path is just a fallback.
+          rm -rf /tmp/telium-previous && mkdir -p /tmp/telium-previous
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --pattern client-releases.json --dir /tmp/telium-previous --clobber \
+            || true
+          if [ -s /tmp/telium-previous/client-releases.json ]; then
+            cp /tmp/telium-previous/client-releases.json /tmp/telium-previous-manifest.json
+          elif curl -fsSL --max-time 20 "$UPDATE_URL" -o /tmp/telium-previous-manifest.json; then
+            :
+          else
+            gh release download --repo "$GITHUB_REPOSITORY" \
+              --pattern client-releases.json --dir /tmp/telium-previous --clobber \
+              && cp /tmp/telium-previous/client-releases.json /tmp/telium-previous-manifest.json \
+              || true
+          fi
+          node scripts/sign-client-manifest.mjs build \
+            --out web/dist-electron/client-releases.json \
+            --version "$VERSION" \
+            --previous /tmp/telium-previous-manifest.json \
+            --artifact "desktop-linux-x86_64-appimage=$APPIMAGE=$BASE/$TAG/$(basename "$APPIMAGE")"
+          node scripts/sign-client-manifest.mjs sign web/dist-electron/client-releases.json
+
+      - name: Upload AppImage
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/desktop-v')
+        continue-on-error: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: telium-linux-x86_64-appimage
+          path: |
+            web/dist-electron/*.AppImage
+            web/dist-electron/SHA256SUMS-linux-x86_64
+            web/dist-electron/client-releases.json
+            web/dist-electron/client-releases.json.sig
+            web/dist-electron/latest-linux.yml
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish desktop release
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      # The mirror step at the end of this job runs a script from this
+      # repository, so the tree has to be here. The artifact lands in
+      # `release/` after checkout, so the two do not collide.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: telium-linux-x86_64-appimage
+          path: release
+
+      - name: Publish GitHub release and updater metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#desktop-v}"
+          # The artifact name is stable across releases (`Telium_x86_64.AppImage`
+          # -- see `build.artifactName` in web/electron/package.json), so one
+          # file serves both readers: `releases/download/desktop-latest/<name>`
+          # for the website's download button, and the signed manifest's
+          # immutable `/releases/download/desktop-v<version>/<name>` URL. The
+          # name is not what makes that URL immutable -- the tag is -- and the
+          # rolling copy below is made from this one rather than built twice.
+          #
+          # The create-or-upload is for a re-run against an existing tag: a
+          # release that already exists must have its assets replaced rather
+          # than the job dying on "release already exists". The signed set is
+          # the one that has to win, so its upload clobbers.
+          #
+          # `--latest` is explicit rather than left to GitHub's date-and-version
+          # guess. Clients built before `desktop-latest` existed have
+          # `releases/latest/download/client-releases.json` baked into them and
+          # cannot be changed, so that pointer has to keep landing on a desktop
+          # release forever. The Android and server workflows set
+          # `--latest=false` for the same reason: it is what lets their releases
+          # be normal releases instead of prereleases marked purely to stay out
+          # of the way.
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Telium $VERSION" \
+            --generate-notes \
+            --latest \
+            --verify-tag \
+          || gh release upload "$GITHUB_REF_NAME" release/* --clobber --repo "$GITHUB_REPOSITORY"
+          # A re-run of an older tag may have been created before this flag
+          # existed, so the pointer is re-asserted on every publish.
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --latest
+
+      # The one property this release exists to have, checked as an outsider:
+      # can somebody who is not signed in to GitHub download it? Both the
+      # website's button and the client updater use a plain, unauthenticated
+      # request. While the repository is private every such request answers
+      # 404, and the release looks fine to anyone testing in a signed-in
+      # browser. A warning rather than a failure, because repository
+      # visibility is a decision this job cannot make.
+      - name: Check the assets are reachable without a GitHub session
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#desktop-v}"
+          URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/Telium_x86_64.AppImage"
+          CODE="$(curl -sS -o /dev/null -w '%{http_code}' -L --max-time 30 "$URL" || true)"
+          echo "anonymous GET $URL -> $CODE"
+          if [ "$CODE" != "200" ]; then
+            echo "::warning title=Downloads are not public::$URL answered $CODE without authentication. While the repository is private, release assets are served only to signed-in users, so the website's download button and every client's updater will fail for everyone else."
+          fi
+
+      # One URL the download page can name once and never edit again.
+      #
+      # GitHub's `releases/latest` is a single slot shared by every train in
+      # the repository, so it cannot be the per-product pointer a download
+      # button needs: a server or Android release taking it would 404 both
+      # desktop buttons. `desktop-latest` is this train's own pointer, and the
+      # script keeps it out of the Latest slot with `--latest=false`.
+      #
+      # The script ignores a run of an older tag, so re-cutting a backport
+      # cannot move the download page backwards. The commit is resolved
+      # through the API rather than taken from `GITHUB_SHA`, because an
+      # annotated tag's SHA is the tag object, not the commit.
+      - name: Point the rolling desktop download at this release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          COMMIT="$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_REF_NAME" --jq .sha)"
+          bash scripts/publish-desktop-latest.sh \
+            --tag "$GITHUB_REF_NAME" \
+            --dir release \
+            --commit "$COMMIT"

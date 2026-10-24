@@ -1,0 +1,174 @@
+# The staging stack. Lives at /opt/telium/compose.yml on the box; kept here so
+# that what is running is reviewable in the same place as what is built.
+#
+# Two services on one small private network, and that network is the security
+# story. A tunnel token is a remotely-configured thing: whoever holds the
+# Cloudflare account decides what hostname maps to what address, and cloudflared
+# obeys. So the question is not "what did we point it at" -- it is "what can it
+# reach at all". Here the answer is the two addresses below and the public
+# internet. Not the host's loopback, where sshd and qbittorrent live. Not the
+# other compose project on this box. Not the LAN. See netguard.sh for the half
+# of that which Docker does not do by itself.
+
+name: telium
+
+networks:
+  telium:
+    name: telium
+    ipam:
+      config:
+        # Fixed, and deliberately tiny: sixteen addresses, three of them used.
+        # A fixed subnet is what lets `trusted_proxies` in telium.toml name the
+        # tunnel by address instead of guessing at whatever Docker handed out
+        # this week, and what lets the firewall rules match on a stable range.
+        - subnet: 172.31.240.0/28
+
+services:
+  server:
+    # The rolling release tag, moved only by the highest `server-v*` release.
+    # `update.sh` pulls this on its timer and restarts the container when the
+    # digest changes; a pin in update.conf overrides it with a specific
+    # `server-v<version>` tag or digest.
+    #
+    # A tag rather than a digest because this is the channel, and a channel has
+    # to be able to move. The digest that landed is recorded in
+    # `deploy/releases.json` and on the release page, which is how you say
+    # "that exact build" afterwards.
+    image: ghcr.io/telium-chat/telium:server-latest
+    restart: unless-stopped
+
+    # A backstop, not the mechanism, and it has to be longer than the bound the
+    # server sets for itself.
+    #
+    # On SIGTERM the server closes its own gateway sockets immediately and then
+    # gives in-flight HTTP requests up to `shutdown.grace_secs` -- fifteen
+    # seconds by default -- before exiting anyway (`shutdown_signal` in
+    # server/src/main.rs). In the ordinary case nothing is in flight and the
+    # process is gone in well under a second.
+    #
+    # This was 5s, which was shorter than the server's own worst case, so the
+    # "backstop" was the common path the moment anything was mid-request: the
+    # server never got to finish or to log that it had run out of time, it just
+    # received SIGKILL. A cap that fires before the thing it is capping has
+    # finished is not a cap, it is a race.
+    #
+    # Twenty seconds: the server's default fifteen plus room for the close
+    # frames, the settle, and a loaded box being slow. Raise it alongside
+    # `shutdown.grace_secs` if you raise that; the ordering is what matters, not
+    # the numbers. The cost of the higher ceiling is bounded and is paid only
+    # when a request really is still running -- `voice_states.reclaim_until`
+    # holds a voice seat for fifteen seconds across a restart, so a slow
+    # shutdown can still cost a call, but a killed one costs the request as
+    # well and tells nobody why.
+    stop_grace_period: 20s
+
+    # Anyone who can merge to main can put code in this container. That is what
+    # auto-deploy means and no arrangement of files prevents it. What these do
+    # is decide how far that code can reach: not to root, not to a writable
+    # system, not to new privileges, and -- most of all -- not to the Docker
+    # socket, which is not mounted here and must never be. A mounted
+    # docker.sock is root on the host wearing a container as a disguise.
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+
+    # The off-box backup's credentials, when there are any. Commented because
+    # there are not: [backup.remote] in telium.toml is off and this repository
+    # cannot hold the keys that would turn it on. Uncomment together with that
+    # section, and write /opt/telium/backup.env the way tunnel.env is written --
+    # TELIUM_S3_ACCESS_KEY_ID and TELIUM_S3_SECRET_ACCESS_KEY, mode 600, never
+    # committed. Compose refuses to start if an env_file is listed and missing,
+    # which is why this is a comment rather than an optional file.
+    # env_file:
+    #   - backup.env
+
+    volumes:
+      - /opt/telium/telium.toml:/etc/telium/telium.toml:ro
+
+      # The live data: the SQLite database, uploaded media and the cold
+      # archive. This is the thing that gets lost.
+      - telium-data:/var/lib/telium
+
+      # The backups, and deliberately not in the volume above.
+      #
+      # They were, until this line existed, and on 2026-09-18 the deployment
+      # was re-provisioned: `telium_telium-data` was created empty at 00:08:32
+      # and everything the server had ever held went with the volume it
+      # replaced. `backup.dir` pointed inside that volume, so every archive it
+      # had written went with it -- which turned out to be none, a separate bug
+      # fixed in the same change, but the count is not the point. An archive
+      # stored inside the thing it is an archive of survives file-level
+      # corruption and nothing else, and corruption is the least likely way any
+      # of this is ever lost.
+      #
+      # A host bind mount survives `docker volume rm`, a redeploy, and a
+      # `compose down -v`. It does not survive the disk or the box, so it is a
+      # floor rather than an answer; [backup.remote] in telium.toml is the
+      # answer and needs credentials this repository cannot hold. If the box
+      # ever grows a second disk, make /srv/telium-backups a mount point on it
+      # and nothing here changes.
+      #
+      # Created by hand at install time, owned by uid 10001, mode 700 -- see
+      # README.md. Docker would create it as root:root and the server, which is
+      # not root, would fail every run with a permission error.
+      - /srv/telium-backups:/var/backups/telium
+
+    # No `ports:`. Nothing is published to the host at all -- not even on
+    # loopback -- because the only client that needs to reach this is sitting on
+    # the same private network. A port published to 127.0.0.1 is reachable by
+    # every process on the box; this is reachable by one container.
+    networks:
+      telium:
+        ipv4_address: 172.31.240.3
+
+    # A staging box that fills its disk with logs is a staging box that stops
+    # being useful at 3am for a reason nobody guesses on the first try.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  tunnel:
+    # Pinned. `latest` on the thing holding the front door is an auto-update
+    # with extra steps.
+    image: cloudflare/cloudflared:2026.9.1
+    restart: unless-stopped
+
+    # Its own service rather than a host daemon, so that a deploy which breaks
+    # the server leaves the tunnel up: a 502 you can read beats a hostname that
+    # has stopped resolving. `depends_on` orders the start and nothing more --
+    # the tunnel is expected to outlive the thing behind it.
+    depends_on:
+      - server
+
+    # TUNNEL_TOKEN, and nothing else. Kept out of this file so the file can be
+    # committed; see README.md for how it gets onto the box.
+    env_file:
+      - tunnel.env
+
+    command: tunnel --no-autoupdate --loglevel info run
+
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    networks:
+      telium:
+        ipv4_address: 172.31.240.2
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  telium-data:

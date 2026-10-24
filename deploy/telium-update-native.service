@@ -1,0 +1,33 @@
+[Unit]
+Description=Update the native Telium server if the channel has moved
+Documentation=https://github.com/telium-chat/telium/blob/main/deploy/README.md
+# Both, because either may be the one that is present -- the same pairing the
+# server unit uses, for the same reason: `network-online.target` alone is a
+# no-op on a box where nothing pulls it in.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# Root, and that is not an oversight to be tightened later: this unit
+# replaces /usr/local/bin/telium-server, which the telium user must not be
+# able to write, and restarts the unit that runs it. What keeps this honest
+# is not the uid but the chain the script enforces -- nothing is executed
+# until the release manifest names it and its bytes match the sha256 the
+# manifest published, and the manifest itself can be pinned to a publisher
+# key the operator chose. The container path draws the same line in a
+# different place: its updater is root too, and what it trusts is a digest.
+ExecStart=/usr/local/sbin/telium-update-native
+
+# Download, digest check, a backup taken with the server still serving, a
+# swap and a restart: none of it is fast on a small box with a slow uplink,
+# and a timer that kills its own updater mid-swap is a self-inflicted wound.
+# The script holds a lock, so an overrun tick skips rather than interleaves.
+TimeoutStartSec=1800
+
+# The journal is the operator's view of what every tick did, and the script
+# is silent when nothing moved -- so an empty recent history is the healthy
+# state here exactly as it is for the container path.
+StandardOutput=journal
+StandardError=journal

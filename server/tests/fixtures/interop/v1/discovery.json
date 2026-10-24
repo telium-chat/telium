@@ -1,0 +1,47 @@
+{
+  "server_name": "new.example",
+  "client": "https://new.example",
+  "api": "https://new.example",
+  "fallback": null,
+  "authority": null,
+  "keys": {
+    "server_name": "new.example",
+    "signer": "new.example",
+    "authority": null,
+    "current_key_id": "ed25519:1",
+    "verify_keys": {
+      "ed25519:1": {
+        "key": "3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29",
+        "valid_from": 1735689600000,
+        "valid_until": 4102444800000
+      }
+    },
+    "generated_at": 1767225600000,
+    "key_id": "ed25519:1",
+    "signature": "ZnJvemVuLXNpZ25hdHVyZS1ub3QtdmVyaWZpZWQtYnktdGhpcy1zdWl0ZQ"
+  },
+  "gateway": "wss://new.example/gateway/v1",
+  "protocol_version": "v1",
+  "protocol": {
+    "version": 1,
+    "min_supported": 1,
+    "capabilities": [
+      "federation.curator_feeds",
+      "migrate.handoff",
+      "migrate.try_again",
+      "onboarding.recommendations",
+      "relocation.announce",
+      "sync.sealed"
+    ]
+  },
+  "moved_to": null,
+  "sunset": null,
+  "relocation": null,
+  "onboarding": {
+    "recommendations": {
+      "accepting": false,
+      "referral_weight": 1,
+      "suggest_alternatives": false
+    }
+  }
+}

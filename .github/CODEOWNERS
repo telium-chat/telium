@@ -1,0 +1,129 @@
+# Who has to look at a change before it lands.
+#
+# This file on its own does nothing. GitHub reads it to *request* reviews
+# automatically, and that is all it does until somebody turns on "Require
+# review from Code Owners" in the branch protection rule for `main`. Both
+# halves are needed and only one of them lives in the repository; the other is
+# item 3 of the checklist in `docs/supply-chain.md`. A CODEOWNERS file with no
+# rule behind it is a list of people who get notified, which is worth having
+# and is not a control.
+#
+# WHY THESE PATHS AND NOT EVERY PATH
+#
+# The temptation is to write `* @67plays` and be done. That is a worse control
+# than this one, for a reason that has nothing to do with trust: a rule that
+# fires on every pull request stops being read. When the CODEOWNERS review is
+# the same ceremony for a typo in a comment as for a change to signature
+# verification, the reviewer learns that the ceremony carries no information,
+# and the one that mattered gets the same glance as the four hundred that did
+# not. The paths below are the ones where a mistake is silent, permanent, or
+# both -- where "it passed CI and looked fine" is not evidence, because the
+# failure mode of the code is that it keeps working while being wrong.
+#
+# Everything else in this repository is reviewed the ordinary way. That is not
+# a statement that the rest does not matter; it is a statement that attention
+# is finite and this is where it buys the most.
+#
+# A note on ownership by one person: @67plays owns the repository and writes
+# most of it, and GitHub does not let an author approve their own pull request.
+# So for @67plays's own changes this file does not produce a second pair of
+# eyes -- it produces a blocked merge until somebody else looks, or an
+# administrator override. That is the honest state of a project with one
+# maintainer, and the useful half is the other direction: a change to any path
+# below by @20plays, @resslr, or anyone added later cannot merge without the
+# owner having seen it. As the project grows, the fix is to add a second owner
+# to these lines, not to delete them.
+
+# ---------------------------------------------------------------------------
+# Release infrastructure
+#
+# The paths from which a compromised change reaches every deployment at once.
+# Everything else on this list can hurt the servers running this code; this
+# section can hurt the servers that have not installed it yet, because it is
+# what decides what "installing it" means. A workflow file is executable code
+# that runs on a machine holding registry credentials, and a change to one is a
+# change to what that machine does with them.
+# ---------------------------------------------------------------------------
+/.github/                       @67plays
+/.github/workflows/             @67plays
+/.github/CODEOWNERS             @67plays
+/Dockerfile                     @67plays
+/.dockerignore                  @67plays
+/deploy/                        @67plays
+/scripts/                       @67plays
+
+# The advisory allowlist deserves its own line even though `/.github/` already
+# covers it, because a diff to this file is always a decision to tolerate a
+# known vulnerability and should never be read as configuration noise. See
+# `scripts/audit-gate.mjs`.
+/.github/dependency-audit-allowlist.json  @67plays
+
+# ---------------------------------------------------------------------------
+# Cryptography and identity
+#
+# Code whose bugs do not announce themselves. A verification function that
+# returns `true` too often passes every test written against valid input, ships,
+# and is discovered by whoever was looking for it rather than by anybody here.
+# ---------------------------------------------------------------------------
+/server/src/crypto.rs           @67plays
+/server/src/auth.rs             @67plays
+/server/src/routes/opaque.rs    @67plays
+/server/src/routes/identity/    @67plays
+/server/src/routes/identity_continuity.rs @67plays
+/server/src/revocation.rs       @67plays
+/telium-protocol/               @67plays
+/server/src/updates.rs          @67plays
+
+# ---------------------------------------------------------------------------
+# Federation
+#
+# The trust boundary with other people's servers. Every byte that arrives here
+# was written by somebody who does not answer to this project, and the code
+# that decides whether to believe it is the code that decides whether a remote
+# server can act as one of this server's users.
+# ---------------------------------------------------------------------------
+/server/src/federation/         @67plays
+/server/src/gateway/            @67plays
+/server/src/perms.rs            @67plays
+/server/src/memberships.rs      @67plays
+/server/src/ratelimit.rs        @67plays
+/server/src/security_headers.rs @67plays
+/sfu/                           @67plays
+
+# ---------------------------------------------------------------------------
+# Migration and relocation
+#
+# Data moving between servers, and schema moving under live data. The thing
+# that makes these different from ordinary code is that they are not
+# idempotent and they are not reversible: a migration that drops the wrong
+# column has already dropped it by the time anybody reads the log line, and no
+# amount of rolling the binary back brings it back.
+# ---------------------------------------------------------------------------
+/server/migrations/             @67plays
+/server/src/migration.rs        @67plays
+/server/src/migration/          @67plays
+/server/src/relocation.rs       @67plays
+/server/src/db.rs               @67plays
+
+# ---------------------------------------------------------------------------
+# Backup and continuity
+#
+# The code that is exercised for real exactly once, on the worst day anybody
+# involved will have. It is reviewed here because it has no other feedback
+# loop: a backup path that silently writes nothing looks identical from the
+# outside to one that works, right up until somebody needs it.
+# ---------------------------------------------------------------------------
+/server/src/backup/             @67plays
+/server/src/objectstore.rs      @67plays
+/server/src/cold.rs             @67plays
+
+# ---------------------------------------------------------------------------
+# Security-facing documents
+#
+# Not code, and on this list anyway. SECURITY.md is the promise made to
+# somebody who found a vulnerability and is deciding whether to tell us
+# privately or publish; a quiet edit to the reporting instructions is a quiet
+# edit to that promise.
+# ---------------------------------------------------------------------------
+/SECURITY.md                    @67plays
+/docs/supply-chain.md           @67plays

@@ -1,0 +1,1 @@
+{"main-capability":{"identifier":"main-capability","description":"Capabilities for the Telium main window","local":true,"windows":["main"],"permissions":["core:default","opener:allow-open-url","opener:allow-default-urls"]}}

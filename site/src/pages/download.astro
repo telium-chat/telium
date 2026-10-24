@@ -1,0 +1,422 @@
+---
+import Base from '../layouts/Base.astro'
+import Icon from '../components/Icon.astro'
+import { OBTAINIUM_URL, URLS } from '../config'
+
+const desktopPlatforms = [
+  {
+    id: 'windows',
+    name: 'Windows',
+    os: 'Windows 10 / 11 (64-bit)',
+    badge: '.exe',
+    badgeType: 'active',
+    icon: 'windows',
+    action: {
+      type: 'download',
+      label: 'Download for Windows',
+      sublabel: 'Direct download (.exe)',
+      href: URLS.downloads.windows,
+      filename: 'Telium_Setup_x64.exe',
+    },
+  },
+  {
+    id: 'linux',
+    name: 'Linux',
+    os: 'Universal x86_64',
+    badge: '.AppImage',
+    badgeType: 'active',
+    icon: 'linux',
+    action: {
+      type: 'download',
+      label: 'Download AppImage',
+      sublabel: 'Direct download (.AppImage)',
+      href: URLS.downloads.linux,
+      filename: 'Telium_x86_64.AppImage',
+    },
+  },
+  {
+    id: 'macos',
+    name: 'macOS',
+    os: 'Apple Silicon & Intel',
+    badge: 'Planned',
+    badgeType: 'planned',
+    icon: 'macos',
+    action: {
+      type: 'planned',
+      label: 'Planned',
+      sublabel: 'Coming soon',
+    },
+  },
+]
+
+const mobilePlatforms = [
+  {
+    id: 'android',
+    name: 'Android',
+    os: 'Android 8.0+ (ARM64)',
+    badge: 'Preview',
+    badgeType: 'preview',
+    icon: 'android',
+    // The APK is published by `build-android-arm64.yml` on an `android-v*`
+    // tag, and mirrored onto a rolling `android-latest` release so this URL
+    // does not have to change when the version does.
+    action: {
+      type: 'download',
+      label: 'Download APK',
+      sublabel: 'Preview build · sideload (.apk)',
+      href: URLS.downloads.android,
+      filename: 'Telium_arm64.apk',
+    },
+    // Said here rather than buried on the release page, because this is the
+    // page that hands somebody a file.
+    note: 'Still in development. Not ready to be your only way to use Telium.',
+    // Obtainium installs from the release feed and updates in place, which is
+    // the closest Android gets to the desktop app's self-update. Offered
+    // beside the direct download rather than instead of it: sideloading one
+    // file is what most people want, and this is for the ones who would
+    // rather not do it again every release.
+    obtainium: OBTAINIUM_URL,
+  },
+  {
+    id: 'ios',
+    name: 'iOS',
+    os: 'iPhone & iPad',
+    badge: 'Planned',
+    badgeType: 'planned',
+    icon: 'ios',
+    action: {
+      type: 'planned',
+      label: 'Planned',
+      sublabel: 'Coming soon',
+    },
+    // Present on every mobile card so `note` is one field rather than a
+    // property some entries have and others do not.
+    note: '',
+    obtainium: '',
+  },
+]
+
+// Named rather than built from the badge type inline, so a new state is a
+// build error in the markup below instead of a pill with no styling behind it.
+const badgeClass = (type: string) =>
+  type === 'planned' ? 'pill-planned'
+    : type === 'preview' ? 'pill-preview'
+      : 'pill-active'
+---
+
+<Base
+  title="Download Telium"
+  description="Download the Telium app for Windows, Linux, Android, macOS, and iOS. Direct downloads for desktop and mobile."
+>
+  <section class="page pt-14 pb-10 sm:pt-20">
+    <div class="reveal grid gap-6 lg:grid-cols-[minmax(0,.9fr)_minmax(0,1.1fr)] lg:items-end">
+      <div>
+        <p class="eyebrow">Apps & Downloads</p>
+        <h1 class="h2 mt-3 max-w-[18ch]">Get Telium on your devices.</h1>
+      </div>
+      <p class="max-w-[58ch] text-[15.5px] leading-relaxed text-muted lg:justify-self-end">
+        The desktop app unlocks features the browser can’t reach — game and music rich presence,
+        cleaner low-latency screen sharing with system audio, and native desktop notifications.
+      </p>
+    </div>
+  </section>
+
+  <!-- Desktop apps -->
+  <section class="page pb-12">
+    <div class="reveal mb-6 flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <Icon name="monitor" size={18} class="text-accent" />
+        <h2 class="text-[17px] font-semibold tracking-[-0.01em]">Desktop Apps</h2>
+      </div>
+      <span class="text-[12.5px] text-muted">Windows, Linux, macOS</span>
+    </div>
+
+    <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+      {
+        desktopPlatforms.map((platform) => (
+          <article class="platform-card panel reveal relative flex flex-col justify-between p-6 sm:p-7 text-center">
+            <span
+              class:list={[
+                'pill absolute right-5 top-5 sm:right-6 sm:top-6 text-[11px] font-mono font-medium',
+                badgeClass(platform.badgeType),
+              ]}
+            >
+              {platform.badge}
+            </span>
+
+            <div class="pt-2">
+              <div class="platform-icon-wrap mx-auto">
+                {platform.icon === 'windows' && (
+                  <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true">
+                    <path d="M3 5.478L10.5 4.391V11.25H3V5.478ZM3 12.75H10.5V19.609L3 18.522V12.75ZM11.75 4.217L21 3V11.25H11.75V4.217ZM11.75 12.75H21V21L11.75 19.783V12.75Z"/>
+                  </svg>
+                )}
+                {platform.icon === 'linux' && (
+                  <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true">
+                    <path d="M12.504 1.5c-3.156.27-4.685 2.219-4.832 5.176-.02.404-.047.881-.047 1.34 0 .762.039 1.48.094 2.129C6.467 11.039 5.5 12.76 5.5 14.75c0 1.62.628 3.09 1.656 4.156-.37 1.05-.933 1.996-1.656 2.781-.31.336-.098.883.344.906 1.472.08 2.825-.36 3.969-1.156.71.21 1.46.344 2.25.344.75 0 1.47-.12 2.156-.312 1.144.796 2.497 1.236 3.969 1.156.442-.023.654-.57.344-.906-.723-.785-1.286-1.731-1.656-2.781 1.028-1.066 1.656-2.536 1.656-4.156 0-1.99-.967-3.711-2.203-4.584.055-.649.094-1.367.094-2.129 0-.459-.027-.936-.047-1.34-.147-2.957-1.676-4.906-4.832-5.176-.32-.027-.635-.027-.952 0z"/>
+                  </svg>
+                )}
+                {platform.icon === 'macos' && (
+                  <Icon name="apple" size={24} />
+                )}
+              </div>
+
+              <div class="mt-4">
+                <h3 class="text-[1.25rem] font-semibold tracking-[-0.015em]">{platform.name}</h3>
+                <p class="text-[12px] font-mono text-muted mt-0.5">{platform.os}</p>
+              </div>
+            </div>
+
+            <div class="mt-7 pt-5 border-t border-separator">
+              {platform.action.type === 'download' ? (
+                <div>
+                  <a
+                    href={platform.action.href}
+                    download={platform.action.filename}
+                    class="btn btn-primary w-full gap-2"
+                  >
+                    <Icon name="download" size={16} />
+                    <span>{platform.action.label}</span>
+                  </a>
+                  <p class="mt-2 text-center text-[11.5px] text-muted">{platform.action.sublabel}</p>
+                </div>
+              ) : (
+                <div>
+                  <button
+                    type="button"
+                    disabled
+                    aria-disabled="true"
+                    class="btn btn-secondary btn-disabled w-full gap-2"
+                  >
+                    <Icon name="clock" size={15} />
+                    <span>{platform.action.label}</span>
+                  </button>
+                  <p class="mt-2 text-center text-[11.5px] text-muted">{platform.action.sublabel}</p>
+                </div>
+              )}
+            </div>
+          </article>
+        ))
+      }
+    </div>
+  </section>
+
+  <!-- Mobile apps -->
+  <section class="page pb-14">
+    <div class="reveal mb-6 flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <Icon name="smartphone" size={18} class="text-accent" />
+        <h2 class="text-[17px] font-semibold tracking-[-0.01em]">Mobile Apps</h2>
+      </div>
+      <span class="text-[12.5px] text-muted">Android, iOS</span>
+    </div>
+
+    <div class="grid gap-5 sm:grid-cols-2">
+      {
+        mobilePlatforms.map((platform) => (
+          <article class="platform-card panel reveal relative flex flex-col justify-between p-6 sm:p-7 text-center">
+            <span
+              class:list={[
+                'pill absolute right-5 top-5 sm:right-6 sm:top-6 text-[11px] font-mono font-medium',
+                badgeClass(platform.badgeType),
+              ]}
+            >
+              {platform.badge}
+            </span>
+
+            <div class="pt-2">
+              <div class="platform-icon-wrap mx-auto">
+                {platform.icon === 'android' && (
+                  <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true">
+                    <path d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.551 0 .9993.4482.9993.9993.0001.5511-.4483.9997-.9993.9997m-11.046 0c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993 0 .5511-.4482.9997-.9993.9997m11.4045-6.02l1.9973-3.4592a.416.416 0 00-.1521-.5676.416.416 0 00-.5676.1521l-2.0223 3.503C15.5902 8.4116 13.8533 8.081 12 8.081s-3.5902.3306-5.1367.8687L4.841 5.4467a.4161.4161 0 00-.5677-.1521.4157.4157 0 00-.1521.5676l1.9973 3.4592C2.6889 11.1867.3432 14.6589 0 18.761h24c-.3432-4.1021-2.6889-7.5743-6.1185-9.4396"/>
+                  </svg>
+                )}
+                {platform.icon === 'ios' && (
+                  <Icon name="apple" size={24} />
+                )}
+              </div>
+
+              <div class="mt-4">
+                <h3 class="text-[1.25rem] font-semibold tracking-[-0.015em]">{platform.name}</h3>
+                <p class="text-[12px] font-mono text-muted mt-0.5">{platform.os}</p>
+              </div>
+            </div>
+
+            <div class="mt-7 pt-5 border-t border-separator">
+              {platform.action.type === 'download' ? (
+                <div>
+                  <a
+                    href={platform.action.href}
+                    download={platform.action.filename}
+                    class="btn btn-primary w-full gap-2"
+                  >
+                    <Icon name="download" size={16} />
+                    <span>{platform.action.label}</span>
+                  </a>
+                  <p class="mt-2 text-center text-[11.5px] text-muted">{platform.action.sublabel}</p>
+                </div>
+              ) : (
+                <div>
+                  <button
+                    type="button"
+                    disabled
+                    aria-disabled="true"
+                    class="btn btn-secondary btn-disabled w-full gap-2"
+                  >
+                    <Icon name="clock" size={15} />
+                    <span>{platform.action.label}</span>
+                  </button>
+                  <p class="mt-2 text-center text-[11.5px] text-muted">{platform.action.sublabel}</p>
+                </div>
+              )}
+
+              {/* A banner rather than a second button: the direct download is
+                  still the main action, and this is the option for somebody
+                  who would rather not sideload a file every release. An
+                  anchor, so it works as a link and takes focus like one. */}
+              {platform.obtainium && (
+                <a
+                  href={platform.obtainium}
+                  rel="noreferrer"
+                  class="obtainium-banner mt-3 flex w-full items-center gap-3 rounded-lg border border-border bg-surface-secondary p-3 text-left"
+                >
+                  <span class="obtainium-icon shrink-0">
+                    <Icon name="refresh-cw" size={16} />
+                  </span>
+                  <span class="min-w-0">
+                    <span class="block text-[12.5px] font-medium text-foreground">
+                      Get it on Obtainium
+                    </span>
+                    <span class="block text-[11.5px] leading-relaxed text-muted">
+                      Automatic updates from the release feed
+                    </span>
+                  </span>
+                </a>
+              )}
+
+              {/* Only the Android card carries one. It sits below the button
+                  rather than above it because it describes what you are
+                  getting, not a reason to withhold it -- but it has to be
+                  read before installing, so it is not hidden in the release
+                  notes either. */}
+              {platform.note && (
+                <div class="mt-4 flex items-start gap-2 rounded-lg border border-warning/25 bg-warning/5 p-3 text-left">
+                  <Icon name="triangle-alert" size={14} class="mt-0.5 shrink-0 text-warning" />
+                  <p class="text-[11.5px] leading-relaxed text-muted">{platform.note}</p>
+                </div>
+              )}
+            </div>
+          </article>
+        ))
+      }
+    </div>
+  </section>
+
+  <!-- Web alternative & release integrity section -->
+  <section class="page pb-20">
+    <div class="panel-inset reveal p-6 sm:p-8">
+      <div class="grid gap-6 md:grid-cols-[1fr_auto] md:items-center">
+        <div>
+          <div class="flex items-center gap-2 text-accent font-medium text-[13px]">
+            <Icon name="globe" size={16} />
+            <span>Browser-based web client</span>
+          </div>
+          <h3 class="text-[1.3rem] font-semibold mt-1.5 tracking-[-0.015em]">
+            Prefer not to install anything?
+          </h3>
+          <p class="mt-2 text-[14px] leading-relaxed text-muted max-w-[54ch]">
+            Run Telium directly in Firefox, Chromium, or Safari with full support for voice,
+            video, screen sharing, and end-to-end encrypted messaging.
+          </p>
+        </div>
+
+        <a href={URLS.client} class="btn btn-secondary btn-lg md:self-center gap-2">
+          <span>Open Web App</span>
+          <Icon name="arrow-right" size={16} />
+        </a>
+      </div>
+
+      <div class="mt-6 pt-5 border-t border-separator flex flex-wrap items-center justify-between gap-3 text-[12px] text-muted">
+        <span>Open source Apache-2.0 licensed software.</span>
+        <a
+          href={URLS.releases}
+          class="inline-flex items-center gap-1.5 text-accent hover:underline"
+          rel="noreferrer"
+        >
+          <span>View all releases and checksums on GitHub</span>
+          <Icon name="arrow-right" size={12} />
+        </a>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .platform-card {
+    transition: background-color var(--dur-3) var(--ease);
+  }
+
+  .platform-card:hover {
+    background: var(--color-surface-secondary);
+  }
+
+  .platform-icon-wrap {
+    display: grid;
+    place-items: center;
+    width: 3.25rem;
+    height: 3.25rem;
+    border-radius: 0.75rem;
+    background: var(--color-surface-secondary);
+    color: var(--color-foreground);
+    transition: background-color var(--dur-2) var(--ease);
+  }
+
+  .platform-card:hover .platform-icon-wrap {
+    background: var(--color-surface);
+  }
+
+  .pill-active {
+    background: color-mix(in oklab, var(--color-accent-soft) 80%, transparent);
+    color: var(--color-accent-soft-foreground);
+  }
+
+  .pill-planned {
+    background: color-mix(in oklab, var(--color-foreground) 8%, transparent);
+    color: var(--color-muted);
+  }
+
+  /* Downloadable, and not finished. Distinct from both `active` (this is the
+     release you want) and `planned` (there is nothing to download), because
+     the Android card is neither. */
+  .pill-preview {
+    background: color-mix(in oklab, var(--color-warning) 18%, transparent);
+    color: var(--color-warning);
+  }
+
+  /* The Obtainium row. A hover that lifts the fill rather than moving the row,
+     matching the platform cards above it. */
+  .obtainium-banner {
+    transition:
+      background-color var(--dur-2) var(--ease),
+      border-color var(--dur-2) var(--ease);
+  }
+
+  .obtainium-banner:hover {
+    background: var(--color-surface);
+    border-color: var(--color-border-secondary);
+  }
+
+  .obtainium-icon {
+    display: grid;
+    place-items: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    color: var(--color-accent);
+  }
+
+  .obtainium-banner:hover .obtainium-icon {
+    background: var(--color-surface-secondary);
+  }
+</style>

@@ -1,0 +1,814 @@
+name: Server release
+
+# One tag, one build, one release.
+#
+# The server used to be published on every push to `main`: an image tagged
+# `main`, a tarball per commit on a rolling GitHub release, and an entry per
+# commit in `deploy/releases.json`. That was a nightly channel, and it made
+# "what is the current release?" a question with no answer a person could say
+# out loud.
+#
+# Now a `server-v<major>.<minor>.<patch>` tag is the only thing that builds,
+# publishes, or updates. There is exactly one artifact per release because there
+# is exactly one build per tag, which is also why nothing here has to worry
+# about a rebuild producing a different digest: there is no second build to
+# disagree with.
+#
+# This still only publishes. It does not deploy: the box polls the registry and
+# updates itself, and the arrow points from the server to GitHub, never back.
+# That is the whole security property and it is worth keeping -- a GitHub
+# account compromised tomorrow can publish a bad image, which is bad, but it
+# cannot open a shell on a machine, which is worse.
+#
+# WHAT A TAG HAS TO SATISFY
+#
+#   1. `server-vX.Y.Z`, no suffix, no leading `v`.
+#   2. Its commit is on `main`.
+#   3. `server/Cargo.toml` at that commit says the same version. The version is
+#      compiled in -- `telium-server version`, the startup log, every backup
+#      archive and `schema_provenance` read it -- so a tag that disagrees with
+#      the source is a release that cannot name itself.
+#   4. The commit has a successful `unit-tests` run. A release is the one place
+#      the required gate must not be skipped; `skip_checks` exists for a repair
+#      and has to be asked for explicitly.
+#
+# `workflow_dispatch` takes a tag so a failed run can be retried without
+# re-tagging, and `dry_run` runs every step up to the build and stops before
+# anything is published.
+
+on:
+  push:
+    tags:
+      - 'server-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release (server-vX.Y.Z)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Build and validate, but publish nothing'
+        required: false
+        type: boolean
+        default: false
+      skip_checks:
+        description: 'Release even if unit-tests is not green on the commit'
+        required: false
+        type: boolean
+        default: false
+
+# `packages: write` is scoped to this repository's own package by the token
+# GitHub mints for the run. `contents: write` is for the versioned release and
+# for one file: `deploy/releases.json`, the list every homeserver reads to learn
+# whether it is behind. It has to be written by whatever actually publishes a
+# release, or it is a promise nobody keeps.
+#
+# `checks: read` is here for one call: the step that requires a green
+# `unit-tests` run reads the commit's check-runs. Naming any scope at all sets
+# every unnamed one to `none`, so leaving it out would make that lookup fail
+# with a 403 rather than finding a missing run -- and a release that cannot
+# read the gate is a release that cannot honour it.
+permissions:
+  contents: write
+  packages: write
+  checks: read
+
+# One run per tag. A re-dispatch of the same tag must not race the original
+# into the same release. `github.event.inputs` rather than `inputs` because this
+# is a workflow-level field: the `inputs` context is only promised inside a
+# job's steps, while the event payload is available everywhere.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # Full history, for three things: proving the tag's commit is on `main`,
+      # diffing against the previous release to decide whether rollback is
+      # possible, and the commit-back at the end. The runner is self-hosted and
+      # keeps its workspace, so this is one deep fetch ever.
+      #
+      # Every `uses:` below names a commit, not a tag. A tag is a mutable
+      # pointer that the action's owner -- or anyone who takes their account --
+      # can move onto new code, and this repository's runs would then execute it
+      # without a diff, a review, or a notification. The trailing comment is the
+      # release that commit was, so the pin is still readable;
+      # `docs/supply-chain.md` explains how to move one forward.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          # `fetch-depth: 0` already brings tags, but the rollback step reads the
+          # tag list to find the previous release and `git for-each-ref` reads
+          # the tag message for the trailers. Naming it means a future change to
+          # the depth does not quietly remove the only copy of both.
+          fetch-tags: true
+          # On a tag push this is the tag; on a dispatch it is the tag input.
+          # Explicit rather than relying on the default, because the default for
+          # a dispatch is a branch and the whole run is about one tag.
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+
+      # The release-record step is Node, and GitHub's JavaScript actions carry
+      # their own runtime but do not put `node` on PATH for shell steps on a
+      # self-hosted runner.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      # Named and stateful, which matters more here than on a hosted runner:
+      # the Dockerfile's cargo cache is a BuildKit cache mount, and a cache
+      # mount lives in the builder rather than in an exported layer.
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        with:
+          name: telium
+          keep-state: true
+
+      # The publisher is ordinary code in this repository, so it gets the same
+      # treatment as any other: its decisions are tested, and the test runs here
+      # because this workflow is the thing that runs it. A version compared as a
+      # string is how every box ends up stuck on the older release forever, and
+      # the job's own run would not notice.
+      - name: Test the release decisions
+        run: node --test scripts/release-server.test.mjs
+
+      # Resolve the tag through the API rather than `github.sha`, because an
+      # annotated tag's SHA is the tag object, not the commit. The commit is
+      # what everything else in this job is about.
+      - id: tag
+        name: Validate the tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          COMMIT="$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)"
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+
+          # Shape and ordering rules live in the tested script; this is the one
+          # place they are applied to the real tag.
+          TAGS="$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/server-v" \
+            --jq '.[].ref' | sed 's#^refs/tags/##')"
+          printf '%s\n' "$TAGS" > /tmp/server-tags
+          INSPECT="$(node scripts/release-server.mjs inspect --tag "$TAG" --tags "$TAGS")"
+          # Read into a shell variable and forward it, rather than referring to
+          # `steps.tag.outputs.version` below: an expression naming the step's
+          # own output is evaluated when the workflow is parsed, so it would be
+          # empty here. That exact mistake failed every run of the workflow this
+          # one replaces, before a single step could start.
+          VERSION="$(printf '%s\n' "$INSPECT" | sed -n 's/^version=//p')"
+          printf '%s\n' "$INSPECT" >> "$GITHUB_OUTPUT"
+
+          # The release must be on the branch it claims to release from. A tag
+          # on an unmerged commit would publish code nobody reviewed.
+          git fetch --quiet origin main
+          if ! git merge-base --is-ancestor "$COMMIT" origin/main; then
+            echo "::error::$TAG points at ${COMMIT:0:12}, which is not on main."
+            echo "Merge the version bump first, then tag the merge commit."
+            exit 1
+          fi
+
+          # The tag and the compiled-in version have to agree. `server/Cargo.toml`
+          # is what `CARGO_PKG_VERSION` becomes, and a mismatch means the
+          # released binary would report a version its release does not name.
+          SOURCE_VERSION="$(git show "$COMMIT:server/Cargo.toml" 2>/dev/null | sed -n 's/^version = "\(.*\)"$/\1/p' | head -1 || true)"
+          if [ -z "$SOURCE_VERSION" ]; then
+            echo "::error::could not read server/Cargo.toml at ${COMMIT:0:12}; refusing to release a commit whose version cannot be checked."
+            exit 1
+          fi
+          if [ "$SOURCE_VERSION" != "$VERSION" ]; then
+            echo "::error::$TAG names version $VERSION but server/Cargo.toml says ${SOURCE_VERSION:-<unreadable>}."
+            echo "Run scripts/bump-server-version.sh $VERSION and merge it before tagging."
+            exit 1
+          fi
+          echo "tag $TAG -> $COMMIT, version $SOURCE_VERSION, on main"
+
+      # A release is the one place the required gate must not be skipped. The
+      # check is looked up by name because that name is what branch protection
+      # requires, so a release can never be the first thing to notice that the
+      # gate did not run.
+      - id: checks
+        name: Require a green unit-tests run
+        if: inputs.skip_checks != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          COMMIT="${{ steps.tag.outputs.commit }}"
+          # The gate runs on the push to main, so it may still be finishing when
+          # the tag arrives. Wait for it rather than failing on a race, but not
+          # forever: ten minutes is longer than the suite takes and short enough
+          # that a genuinely missing run is found while somebody is watching.
+          for attempt in $(seq 1 40); do
+            conclusion="$(gh api \
+              "repos/$GITHUB_REPOSITORY/commits/$COMMIT/check-runs?per_page=100" \
+              --jq '[.check_runs[] | select(.name == "unit-tests")] | sort_by(.started_at) | last | .conclusion // "missing"')"
+            case "$conclusion" in
+              success)
+                echo "unit-tests is green on ${COMMIT:0:12}"
+                exit 0
+                ;;
+              failure|cancelled|timed_out|action_required)
+                echo "::error::unit-tests concluded '$conclusion' on ${COMMIT:0:12}; refusing to release."
+                exit 1
+                ;;
+            esac
+            echo "attempt $attempt/40: unit-tests is '$conclusion' on ${COMMIT:0:12}; waiting"
+            sleep 15
+          done
+          echo "::error::no successful unit-tests run on ${COMMIT:0:12} after ten minutes."
+          echo "Merge the version bump and let the gate pass, then re-run this workflow."
+          echo "If the gate cannot run, dispatch with skip_checks and say why in the release notes."
+          exit 1
+
+      # What the image will say it is when asked. The build context has no
+      # `.git` -- it is excluded, because a directory that moves on every commit
+      # would invalidate the source layer on every commit -- so the commit and
+      # its timestamp are handed to the build rather than discovered by it. The
+      # commit *time*, not the build time, is what a release is dated by.
+      - id: build-id
+        name: What build is this
+        env:
+          COMMIT: ${{ steps.tag.outputs.commit }}
+        run: |
+          set -euo pipefail
+          {
+            echo "commit=$COMMIT"
+            echo "commit_time=$(git log -1 --format=%ct "$COMMIT")"
+            echo "build_time=$(date -u +%s)"
+          } >> "$GITHUB_OUTPUT"
+
+      # What the release says about itself, put on the image as labels.
+      #
+      # The trailers are read from the annotated tag message first and the commit
+      # body second. The tag is where an operator writes them, in the same
+      # command that cuts the release, so a trailer cannot be lost by a squash
+      # merge of the bump commit.
+      #
+      # Labels rather than a fetch of the release manifest, because
+      # `deploy/update.sh` has the image in its hands already and reading a
+      # label needs nothing but docker -- no network call, no JSON parser, no
+      # second source of truth that can be unreachable at the moment it matters.
+      - id: release-notes
+        name: Read the release trailers
+        env:
+          COMMIT: ${{ steps.tag.outputs.commit }}
+        run: |
+          set -euo pipefail
+          # An annotated tag carries a message; a lightweight one does not, and
+          # in that case the commit body is all there is. `|| true` because
+          # `git tag -l` is quiet about a tag that has no annotation.
+          TAG_MESSAGE="$(git for-each-ref "refs/tags/$TAG" --format='%(contents)' || true)"
+          BODY="$(git log -1 --format=%B "$COMMIT")"
+          NOTES_TEXT="${TAG_MESSAGE:-$BODY}"
+          [ -n "$(printf '%s' "$NOTES_TEXT" | tr -d '[:space:]')" ] || NOTES_TEXT="$BODY"
+          printf '%s' "$NOTES_TEXT" > /tmp/tag-message
+
+          breaking=false
+          if printf '%s' "$NOTES_TEXT" | grep -qiE '^Breaking-change:[ \t]*(yes|true)[ \t]*$'; then
+            breaking=true
+          fi
+          # `|| true` on the pipeline, not just on the assignment: `set -o
+          # pipefail` makes a `grep` that matched nothing exit 1, and with
+          # `set -e` that kills the step. A release with no upgrade notes is the
+          # ordinary case, not an error -- the first real run of this workflow
+          # failed here, on a tag that simply had nothing to say.
+          notes="$(printf '%s' "$NOTES_TEXT" | grep -iE '^Upgrade-notes:' | head -1 | sed -E 's/^[Uu]pgrade-[Nn]otes:[ \t]*//' | cut -c1-400 || true)"
+          security=false
+          if printf '%s' "$NOTES_TEXT" | grep -qiE '^Security-relevant:[ \t]*(yes|true)[ \t]*$'; then
+            security=true
+          fi
+          {
+            echo "breaking=$breaking"
+            echo "notes=$notes"
+            echo "security=$security"
+          } >> "$GITHUB_OUTPUT"
+
+      # Whether a release can be undone by starting the previous binary is a
+      # fact about the diff, not an opinion: a release that added a migration
+      # moved the database forward, and one that changed STATE_FORMAT_VERSION
+      # changed what the stored values mean. Either makes the old binary refuse
+      # the database -- which is the designed behaviour, and means the undo is
+      # the pre-upgrade backup rather than a downgrade. This is stability gate
+      # B5 answered per release instead of by hand.
+      - id: rollback
+        name: Decide whether this release can be rolled back
+        env:
+          COMMIT: ${{ steps.tag.outputs.commit }}
+        run: |
+          set -euo pipefail
+          PREVIOUS="$(git tag -l 'server-v*' | grep -vx "$TAG" | sort -V | tail -1 || true)"
+          if [ -z "$PREVIOUS" ]; then
+            echo "this is the first server release; every release after it will be compared to it"
+            MIGRATIONS=no
+            STATE_FORMAT=no
+            PREVIOUS=""
+          else
+            MIGRATIONS="$(git diff --name-only "$PREVIOUS..$COMMIT" -- 'server/migrations/' | head -1)"
+            if [ -n "$MIGRATIONS" ]; then MIGRATIONS=yes; else MIGRATIONS=no; fi
+            if git diff "$PREVIOUS..$COMMIT" -- server/src/db.rs | grep -q 'STATE_FORMAT_VERSION'; then
+              STATE_FORMAT=yes
+            else
+              STATE_FORMAT=no
+            fi
+          fi
+          {
+            echo "previous=$PREVIOUS"
+            echo "migrations_added=$MIGRATIONS"
+            echo "state_format_changed=$STATE_FORMAT"
+          } >> "$GITHUB_OUTPUT"
+          node scripts/release-server.mjs rollback \
+            --migrations-added "$MIGRATIONS" --state-format-changed "$STATE_FORMAT" \
+            >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Three tags on one digest. The version is the release. `sha-<commit>` is
+      # how you say "that one" afterwards, when the channel has already moved
+      # and the question is which build was running at the time. `server-latest`
+      # is the rolling address for new installs, and only the highest version
+      # may move it -- re-running an old release repairs it without handing new
+      # installs an older build.
+      #
+      # The commit tag is written as `raw` from the commit resolved above rather
+      # than with the action's `type=sha`, because that type reads `github.sha`:
+      # on a tag push those agree, but on a dispatch `github.sha` is the head of
+      # the default branch, and a release labelled with whatever `main` happened
+      # to be is wrong about the one fact this tag exists to record.
+      - id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=server-v${{ steps.tag.outputs.version }}
+            type=raw,value=sha-${{ steps.build-id.outputs.commit }}
+            type=raw,value=server-latest,enable=${{ steps.tag.outputs.moves_latest }}
+
+      - id: push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          push: ${{ inputs.dry_run != true }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            chat.telium.release.breaking=${{ steps.release-notes.outputs.breaking }}
+            chat.telium.release.notes=${{ steps.release-notes.outputs.notes }}
+          build-args: |
+            TELIUM_BUILD_COMMIT=${{ steps.build-id.outputs.commit }}
+            TELIUM_BUILD_COMMIT_TIME=${{ steps.build-id.outputs.commit_time }}
+            TELIUM_BUILD_TIME=${{ steps.build-id.outputs.build_time }}
+          # The Rust dependency tree is the expensive half of this build and it
+          # changes only when a lockfile does.
+          cache-from: type=gha
+          # `ignore-error` because the export runs *after* the push, and a
+          # failure there is a failure to save time on the next build rather
+          # than a failure to publish. A build that has already shipped should
+          # not report as broken.
+          cache-to: type=gha,mode=max,ignore-error=true
+          # An SBOM and a provenance attestation, both produced by BuildKit
+          # itself and pushed to GHCR beside the image as part of the same
+          # manifest list. The SBOM is what shipped, not what was resolved: it
+          # is generated from the image's filesystem, so it covers the Debian
+          # packages in the base layer as well as the Rust crates. `mode=max`
+          # records the workflow, the commit, the builder and the materials, so
+          # "where did this image come from" is answerable from the image itself
+          # months later.
+          sbom: true
+          provenance: mode=max
+
+      # The same release, built for boxes that have no Docker.
+      #
+      # A homeserver is one static binary and one SQLite file, which is
+      # precisely the shape systemd is good at. Statically linked against musl
+      # rather than reusing the image's glibc binary, because the image's binary
+      # needs bookworm's glibc or newer and that silently excludes an Ubuntu
+      # 22.04 host -- exactly the failure an "easy update" must not have. Two
+      # architectures, because the boxes that most want this path are the small
+      # ones: x86_64 for the VPS majority, aarch64 for the Raspberry Pi class.
+      # 32-bit arm is left out on purpose -- no target-support story worth
+      # defending and almost no audience that can run this server comfortably.
+      #
+      # The cross toolchains come from musl.cc and are pinned by sha256 the way
+      # every `uses:` is pinned by commit: the checksum is the trust anchor, and
+      # a moved tarball fails the build rather than compiling.
+      #
+      # The volumes are named because this runner keeps its state: the
+      # dependency tree costs the same here as in the image build, and there is
+      # no reason to pay it twice. The outputs are chowned back to the runner
+      # user, because a root-owned `.native/` left behind by the container would
+      # be the next step's problem and the cleanup after it.
+      - id: native
+        name: Build the native artifacts
+        env:
+          COMMIT: ${{ steps.build-id.outputs.commit }}
+          COMMIT_TIME: ${{ steps.build-id.outputs.commit_time }}
+          BUILD_TIME: ${{ steps.build-id.outputs.build_time }}
+        run: |
+          set -euo pipefail
+          # Without CARGO_TARGET_DIR, cargo puts build output next to the
+          # manifest -- /src/server/target, inside the checkout the runner
+          # reuses, written as root -- and the /target volume below is silently
+          # dead weight. The install inside the container already looks in
+          # /target; this is what makes that path true.
+          docker run --rm \
+            -v "$PWD:/src" -w /src \
+            -v telium-native-cargo-registry:/usr/local/cargo/registry \
+            -v telium-native-cargo-target:/target \
+            -e TELIUM_BUILD_COMMIT="$COMMIT" \
+            -e TELIUM_BUILD_COMMIT_TIME="$COMMIT_TIME" \
+            -e TELIUM_BUILD_TIME="$BUILD_TIME" \
+            -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+            -e CARGO_TARGET_DIR=/target \
+            rust:1-slim-bookworm bash -euc '
+              # The image is Debian slim: no curl, and nothing else that
+              # fetches. The first thing this script does with the network is
+              # the toolchain download below, so curl has to be here first.
+              apt-get update -qq
+              apt-get install -y -qq --no-install-recommends curl >/dev/null
+              # The downloads happen in a scratch directory and stay there: the
+              # subshell keeps their `cd` from leaking into the build below,
+              # which addresses everything relative to the checkout. This exact
+              # leak is what killed the first real run of the rewrite -- cargo
+              # was asked for `server/Cargo.toml` while standing in
+              # /tmp/toolchains -- so the containment is load-bearing, not style.
+              (
+                mkdir -p /tmp/toolchains && cd /tmp/toolchains
+                # <tarball> <sha256 it must have>. Move one forward by
+                # downloading the new tarball, computing its checksum, and
+                # replacing the line -- with a note saying why, the way an
+                # action pin carries its release.
+                for entry in \
+                  "x86_64-linux-musl-cross.tgz c5d410d9f82a4f24c549fe5d24f988f85b2679b452413a9f7e5f7b956f2fe7ea" \
+                  "aarch64-linux-musl-cross.tgz c909817856d6ceda86aa510894fa3527eac7989f0ef6e87b5721c58737a06c38"
+                do
+                  set -- $entry
+                  curl -fsSL --retry 3 -o "$1" "https://musl.cc/$1"
+                  echo "$2  $1" | sha256sum --check -
+                  tar -xzf "$1"
+                done
+              )
+              export PATH="/tmp/toolchains/x86_64-linux-musl-cross/bin:/tmp/toolchains/aarch64-linux-musl-cross/bin:$PATH"
+              export RUSTFLAGS="-C target-feature=+crt-static"
+              for arch in x86_64 aarch64; do
+                triple="${arch}-unknown-linux-musl"
+                gcc="${arch}-linux-musl-gcc"
+                rustup target add "$triple"
+                # The env-var names cargo reads are the triple with hyphens
+                # folded to underscores, uppercased -- fold first, uppercase
+                # second, because `${triple^^}` would happily hand cargo an env
+                # name full of hyphens and the default host linker instead,
+                # which fails three minutes later in link-land.
+                u="${triple//-/_}"
+                export "CC_$u=$gcc"
+                export "AR_$u=${arch}-linux-musl-ar"
+                export "CARGO_TARGET_${u^^}_LINKER=$gcc"
+                cargo build --release --locked --manifest-path server/Cargo.toml \
+                  --target "$triple"
+                # `-D`, not bare `-m`: install does not create missing parent
+                # directories in file-copy form, and nothing else makes the
+                # per-architecture staging directory.
+                install -Dm755 "/target/$triple/release/telium-server" \
+                  "/src/.native/stage/$arch/telium-server"
+              done
+              chown -R "$HOST_UID:$HOST_GID" /src/.native
+            '
+          # Two members at the root, no wrapper directory: the updater unpacks
+          # into a staging directory it created for the purpose, and a name it
+          # does not have to guess at is one less thing to get wrong. The
+          # checksum files are in `sha256sum -c` format, so an operator can
+          # verify a manual download with the tool they already have.
+          #
+          # The asset name is stable within a release -- `telium-server-linux-
+          # x86_64.tar.gz` -- because the release itself is immutable and
+          # version-scoped: the tag is the identity, so the file inside it does
+          # not need the commit in its name. That is what lets `server-latest`
+          # mirror it with `--clobber` and lets the docs name one path.
+          for arch in x86_64 aarch64; do
+            ASSET="telium-server-linux-${arch}.tar.gz"
+            cp server/telium.example.toml ".native/stage/$arch/"
+            tar -C ".native/stage/$arch" -czf ".native/$ASSET" telium-server telium.example.toml
+            ( cd .native && sha256sum "$ASSET" > "$ASSET.sha256" )
+          done
+          rm -rf .native/stage
+          # One file an operator can check both architectures against with a
+          # single command, in the format `sha256sum -c` expects.
+          ( cd .native && sha256sum telium-server-linux-*.tar.gz > SHA256SUMS-server )
+
+      - name: Stop before publishing
+        if: inputs.dry_run == true
+        run: |
+          echo "### Dry run" >> "$GITHUB_STEP_SUMMARY"
+          echo "Validated $TAG and built both artifacts. Nothing was published." >> "$GITHUB_STEP_SUMMARY"
+          echo "dry run: stopping before publish"
+
+      # The release itself. Immutable by construction: the tag names a commit,
+      # the assets are uploaded once, and nothing in this repository ever writes
+      # to this release again. That is the difference between it and the rolling
+      # page it replaces, whose assets were pruned as new builds landed.
+      #
+      # `--latest=false` is a statement about which release is the newest
+      # *desktop* one, not a claim that a server release is unfit: clients built
+      # before `desktop-latest` existed read `releases/latest` and cannot be
+      # changed, so the desktop train owns that slot.
+      - id: publish
+        name: Publish the release
+        if: inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ steps.build-id.outputs.commit }}
+          VERSION: ${{ steps.tag.outputs.version }}
+          PREVIOUS: ${{ steps.rollback.outputs.previous }}
+          ROLLBACKABLE: ${{ steps.rollback.outputs.rollbackable }}
+          ROLLBACK_REASON: ${{ steps.rollback.outputs.rollback_reason }}
+          SECURITY: ${{ steps.release-notes.outputs.security }}
+          BREAKING: ${{ steps.release-notes.outputs.breaking }}
+          UPGRADE_NOTES: ${{ steps.release-notes.outputs.notes }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          NOTES="$(mktemp)"
+          {
+            echo "Telium Server $VERSION."
+            echo
+            echo "Built once, from \`${COMMIT:0:12}\` on \`main\`. There is one artifact per"
+            echo "release: this tag's image and these tarballs are what every box moves to,"
+            echo "and nothing is rebuilt for them."
+            echo
+            if [ "$SECURITY" = "true" ]; then
+              echo "> **This release is flagged security-relevant.** A box that misses it"
+              echo "> reports it as urgent immediately, not after the usual delay."
+              echo
+            fi
+            if [ "$BREAKING" = "true" ]; then
+              echo "> **This release needs a person.** An unattended box pulls it, stages"
+              echo "> it and waits; \`update.sh --now\` takes it when you have read the notes."
+              echo
+            fi
+            if [ -n "$UPGRADE_NOTES" ]; then
+              echo "**Upgrade notes:** $UPGRADE_NOTES"
+              echo
+            fi
+            echo "### Artifacts"
+            echo
+            echo "- Container image: \`ghcr.io/$GITHUB_REPOSITORY:server-v$VERSION\` (\`$DIGEST\`)"
+            echo "- Native x86_64 and aarch64 tarballs, with \`SHA256SUMS-server\`"
+            echo
+            echo "### Rollback"
+            echo
+            if [ "$ROLLBACKABLE" = "true" ]; then
+              echo "This release can be rolled back by starting the previous binary: $ROLLBACK_REASON."
+            else
+              echo "This release **cannot be rolled back** by starting the previous binary:"
+              echo "$ROLLBACK_REASON. The undo is the pre-upgrade backup; see"
+              echo "[docs/upgrade.md](https://github.com/$GITHUB_REPOSITORY/blob/main/docs/upgrade.md)."
+            fi
+            echo
+            echo "### Updating"
+            echo
+            echo "Servers update themselves from the release channel. \`deploy/update.sh\`"
+            echo "(container) and \`deploy/update-native.sh\` (native) both read"
+            echo "[deploy/releases.json](https://github.com/$GITHUB_REPOSITORY/blob/main/deploy/releases.json)"
+            echo "and move to the highest release. See"
+            echo "[docs/updates.md](https://github.com/$GITHUB_REPOSITORY/blob/main/docs/updates.md)."
+            if [ -n "$PREVIOUS" ]; then
+              echo
+              echo "**Full changelog:** [\`$PREVIOUS...$TAG\`](https://github.com/$GITHUB_REPOSITORY/compare/$PREVIOUS...$TAG)"
+            fi
+          } > "$NOTES"
+
+          # Re-running a release replaces its assets rather than being refused
+          # for names that already exist, which is what makes a repair possible.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" .native/telium-server-linux-*.tar.gz .native/*.sha256 .native/SHA256SUMS-server \
+              --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "Telium Server $VERSION" --notes-file "$NOTES" --latest=false
+          else
+            gh release create "$TAG" \
+              .native/telium-server-linux-*.tar.gz .native/*.sha256 .native/SHA256SUMS-server \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Telium Server $VERSION" \
+              --notes-file "$NOTES" \
+              --verify-tag \
+              --latest=false
+          fi
+          echo "published $TAG"
+          {
+            echo "### Published"
+            echo
+            echo "**Telium Server $VERSION** at \`$TAG\`"
+            echo
+            echo '```'
+            echo "ghcr.io/$GITHUB_REPOSITORY:server-v$VERSION"
+            echo "$DIGEST"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # One URL that never moves, so the docs and any installer can name a path
+      # without knowing the version. Only the highest version may move it, which
+      # is the same rule `desktop-latest` and `android-latest` follow.
+      #
+      # The versioned release is still where the manifest's artifact URLs point,
+      # so a box that pinned a release downloads immutable bytes even if it
+      # fetched the manifest from the pointer.
+      - name: Point server-latest at this release
+        if: inputs.dry_run != true && steps.tag.outputs.moves_latest == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.tag.outputs.version }}
+          COMMIT: ${{ steps.tag.outputs.commit }}
+        run: |
+          set -euo pipefail
+          NOTES="$(mktemp)"
+          cat > "$NOTES" <<'EOF'
+          This release is a stable download address, not a version.
+
+          It carries the newest server build — the native x86_64 and aarch64
+          tarballs, their checksums, and `SHA256SUMS-server`. The tag never moves;
+          each `server-v*` release copies its files here.
+
+          **It is not where you choose a version from.** Release notes, the image
+          digest and older versions live on the versioned `server-v*` releases,
+          and `deploy/releases.json` names those tag-scoped URLs, so a server that
+          updates from here still downloads immutable bytes. See the
+          [release list](https://github.com/telium-chat/telium/releases).
+          EOF
+          if gh release view server-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload server-latest .native/telium-server-linux-*.tar.gz .native/*.sha256 .native/SHA256SUMS-server \
+              --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit server-latest --repo "$GITHUB_REPOSITORY" \
+              --title "Telium Server — latest" --notes-file "$NOTES" --latest=false
+          else
+            gh release create server-latest \
+              .native/telium-server-linux-*.tar.gz .native/*.sha256 .native/SHA256SUMS-server \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$COMMIT" \
+              --title "Telium Server — latest" \
+              --notes-file "$NOTES" \
+              --latest=false
+          fi
+          echo "server-latest now points at $VERSION"
+
+      # The honest answer to "what is the current release?", written by the job
+      # that just published it and committed back to `main` where every
+      # homeserver reads it over plain HTTPS without a token.
+      #
+      # The entry is keyed on the commit -- that is what a running binary
+      # reports -- with the version attached as the name a person reads. The
+      # protocol window is read from the protocol crate's own constants at the
+      # commit being released, so the number a release announces and the number
+      # its code enforces cannot drift.
+      - id: record
+        name: Record the release
+        if: inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ steps.build-id.outputs.commit }}
+          COMMIT_TIME: ${{ steps.build-id.outputs.commit_time }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          VERSION: ${{ steps.tag.outputs.version }}
+          SECURITY: ${{ steps.release-notes.outputs.security }}
+          BREAKING: ${{ steps.release-notes.outputs.breaking }}
+          UPGRADE_NOTES: ${{ steps.release-notes.outputs.notes }}
+        run: |
+          set -euo pipefail
+          # The run is on a tag ref (detached). The manifest lives on `main`, so
+          # the commit-back happens on a branch checkout of it.
+          git fetch --quiet origin main
+          git checkout --quiet -B main origin/main
+
+          # Rebase before editing: the manifest is machine-written, and another
+          # run may have committed since the checkout.
+          git config user.name  'telium-release'
+          git config user.email 'telium-release@users.noreply.github.com'
+
+          # The window, read from the released commit rather than from the
+          # working tree. The checkout is on `main` at this point -- that is
+          # where the manifest lives -- and `main` may have moved past the tag
+          # since it was cut, so reading the file from disk could announce the
+          # protocol window of a *later* commit than the one being released.
+          # A crate that does not declare these leaves both fields off the
+          # entry, which every consumer already treats as "not stated".
+          #
+          # `[[:space:]]`, not `\s`: this is a POSIX BRE, where `\s` is a
+          # literal `s` and the expression would silently match nothing.
+          constant() {
+            git show "$COMMIT:telium-protocol/src/compat.rs" 2>/dev/null \
+              | sed -n "s/^pub const $1:[[:space:]]*u32[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p" \
+              | head -1 || true
+          }
+          PROTOCOL="$(constant PROTOCOL_VERSION)"
+          MIN_PROTOCOL="$(constant MIN_SUPPORTED_PROTOCOL_VERSION)"
+
+          # Artifact URLs are version-scoped on purpose: a release's download
+          # must never be replaced or pruned out from under a box that pinned it.
+          BASE="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
+          SHA_X86="$(sed -n 's/^\([0-9a-f]*\)  telium-server-linux-x86_64\.tar\.gz$/\1/p' .native/SHA256SUMS-server)"
+          SHA_ARM="$(sed -n 's/^\([0-9a-f]*\)  telium-server-linux-aarch64\.tar\.gz$/\1/p' .native/SHA256SUMS-server)"
+          SIZE_X86="$(stat -c %s .native/telium-server-linux-x86_64.tar.gz)"
+          SIZE_ARM="$(stat -c %s .native/telium-server-linux-aarch64.tar.gz)"
+
+          TRAILERS="$(cat /tmp/tag-message)"
+          node scripts/release-server.mjs record \
+            --tag "$TAG" \
+            --commit "$COMMIT" \
+            --released-at "$COMMIT_TIME" \
+            --summary "$(git log -1 --format=%s "$COMMIT")" \
+            --image "$DIGEST" \
+            --protocol "${PROTOCOL:-}" \
+            --min-protocol "${MIN_PROTOCOL:-}" \
+            --trailers "$TRAILERS" \
+            --artifact-x86_64-url "$BASE/telium-server-linux-x86_64.tar.gz" \
+            --artifact-x86_64-sha256 "$SHA_X86" \
+            --artifact-x86_64-size "$SIZE_X86" \
+            --artifact-aarch64-url "$BASE/telium-server-linux-aarch64.tar.gz" \
+            --artifact-aarch64-sha256 "$SHA_ARM" \
+            --artifact-aarch64-size "$SIZE_ARM" \
+            --manifest deploy/releases.json
+
+          if git diff --quiet -- deploy/releases.json; then
+            echo "already recorded"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      # `deploy/releases.json` is committed to `main` and served from
+      # raw.githubusercontent.com with no token, which means anyone who can
+      # write to this repository can rewrite the release list and no reader can
+      # tell. The signature moves that trust from "whoever can push" to
+      # "whoever holds the key", and the key is not in the repository.
+      #
+      # It signs after the manifest is written and before it is committed, so
+      # the signature covers the bytes that actually land on `main`.
+      - name: Sign the release manifest
+        if: steps.record.outputs.changed == 'true' && vars.RELEASE_SIGNING_ENABLED == 'true'
+        env:
+          # The seed never reaches a command line -- argv is readable by every
+          # other process on the machine, and this runner is self-hosted and
+          # long-lived. It goes into the environment of one step and into
+          # node:crypto, and nowhere else.
+          TELIUM_RELEASE_SIGNING_KEY: ${{ secrets.TELIUM_RELEASE_SIGNING_KEY }}
+          TELIUM_RELEASE_PUBLIC_KEY: ${{ vars.TELIUM_RELEASE_PUBLIC_KEY }}
+          TELIUM_RELEASE_KEY_ID: ${{ vars.TELIUM_RELEASE_KEY_ID }}
+        run: node scripts/sign-release-manifest.mjs sign deploy/releases.json
+
+      # A signature covers the exact bytes of the manifest. If signing is off and
+      # the manifest changed, the `.sig` committed with the previous release now
+      # covers different bytes -- and a server that pinned the public key would
+      # refuse the new manifest as `unverified`, which is fail-closed but stops
+      # every pinned box from updating. Committing no signature is honest;
+      # committing a stale one is a lie the verifier will catch. So the stale
+      # file is removed here, and the commit step stages the deletion.
+      - name: Drop a signature this change would invalidate
+        if: steps.record.outputs.changed == 'true' && vars.RELEASE_SIGNING_ENABLED != 'true'
+        run: |
+          set -euo pipefail
+          if [ -f deploy/releases.json.sig ]; then
+            rm -f deploy/releases.json.sig
+            echo "removed the stale deploy/releases.json.sig; this manifest is published unsigned"
+          fi
+
+      - name: Commit the release record
+        if: steps.record.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          COMMIT: ${{ steps.build-id.outputs.commit }}
+        run: |
+          set -euo pipefail
+          # `-A` so a signature the step above removed is staged as a deletion.
+          # Each path is passed only when git knows about it, because `git add`
+          # on a path that is neither present nor tracked fails the step
+          # outright -- which is exactly the state signing-off leaves behind.
+          paths=()
+          for p in deploy/releases.json deploy/releases.json.sig; do
+            if [ -e "$p" ] || git ls-files --error-unmatch -- "$p" >/dev/null 2>&1; then
+              paths+=("$p")
+            fi
+          done
+          # Guarded, because `git add -A --` with no path is `git add -A` over
+          # the whole tree -- which would sweep the untracked `.native/`
+          # tarballs into the commit.
+          if [ ${#paths[@]} -eq 0 ]; then
+            echo "::error::neither deploy/releases.json nor its signature exists; refusing to commit"
+            exit 1
+          fi
+          git add -A -- "${paths[@]}"
+          git commit -m "Record server $VERSION at ${COMMIT:0:12}"
+          # A rebase retry, because the gate that runs on the push to main may
+          # itself have committed -- and a machine-written list must not lose an
+          # entry to a race with another machine.
+          for attempt in 1 2 3; do
+            if git push; then exit 0; fi
+            echo "push rejected (attempt $attempt); rebasing onto origin/main and retrying"
+            git pull --rebase --autostash origin main
+          done
+          echo "::error::could not commit the release record after three attempts"
+          exit 1

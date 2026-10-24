@@ -1,0 +1,70 @@
+::selection {
+  background-color: color-mix(in oklab, var(--accent) 26%, transparent);
+}
+:root {
+  accent-color: var(--accent);
+  color-scheme: light;
+}
+:root.dark,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+input,
+textarea {
+  caret-color: var(--accent);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+button .select-all,
+a .select-all {
+  user-select: auto;
+}
+
+@utility reveal {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.group:hover .reveal,
+.group:focus-within .reveal,
+.msg-row:hover .reveal,
+.msg-row:focus-within .reveal,
+.reveal:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  .reveal,
+  .touch-visible-action {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+}
+
+.mobile-shell .media-player-controls button {
+  min-width: 2.5rem;
+  min-height: 2.5rem;
+}
+
+.mobile-shell .media-player-controls input[type="range"] {
+  min-height: 2rem;
+}
+
+@media (hover: none) {
+  .mobile-fullscreen-dialog .touch-visible-action {
+    opacity: 1 !important;
+  }
+}
+
+body.compact .msg-row {
+  padding-top: 0.125rem;
+  padding-bottom: 0.125rem;
+}
+body.compact .msg-row + .msg-row.grouped {
+  margin-top: 0;
+}

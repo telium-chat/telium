@@ -1,0 +1,22 @@
+[Unit]
+Description=Check for a new native Telium release every five minutes
+Documentation=https://github.com/telium-chat/telium/blob/main/deploy/README.md
+
+[Timer]
+# A couple of minutes after boot, then every five minutes.
+#
+# The container timer runs every sixty seconds because a pull with nothing to
+# fetch is a single registry request. This check is one HTTPS GET of a file on
+# a CDN plus a local invocation of the server binary, and five minutes is
+# still "by the time you have noticed" while staying polite to the hosts it
+# asks. A merge is live on this box within minutes either way; the difference
+# between one minute and five is not one a human can perceive, and the check
+# being cheap is not a reason to make it frequent -- it is a reason there is
+# no need to.
+OnBootSec=120s
+OnUnitActiveSec=300s
+AccuracySec=30s
+Unit=telium-update-native.service
+
+[Install]
+WantedBy=timers.target

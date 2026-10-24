@@ -1,0 +1,18 @@
+---
+import Base from '../layouts/Base.astro'
+import { URLS } from '../config'
+---
+
+<Base title="Not found" description="That page does not exist.">
+  <section class="page flex min-h-[58vh] flex-col justify-center py-20">
+    <p class="eyebrow">404</p>
+    <h1 class="h2 mt-3">That page isn’t here.</h1>
+    <p class="prose-measure mt-4 text-[15.5px] leading-relaxed text-muted">
+      It may have moved, or it may never have existed. Both happen.
+    </p>
+    <div class="mt-8 flex flex-wrap gap-3">
+      <a href="/" class="btn btn-primary">Back to the start</a>
+      <a href={URLS.servers} class="btn btn-secondary">Browse homeservers</a>
+    </div>
+  </section>
+</Base>

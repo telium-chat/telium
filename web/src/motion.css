@@ -1,0 +1,136 @@
+:root {
+  --ease-rise: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+
+  --dur-1: 90ms;
+  --dur-2: 140ms;
+  --dur-3: 200ms;
+  --dur-4: 280ms;
+}
+
+button:not(:disabled):active,
+[role="button"]:not([aria-disabled="true"]):active {
+  filter: brightness(var(--press));
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes sheet-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 200ms var(--ease-rise) both;
+}
+
+.animate-sheet-in {
+  animation: sheet-in 280ms var(--ease-rise) both;
+}
+
+.page-in {
+  animation: rise-in 320ms var(--ease-rise) both;
+}
+
+.rise-in {
+  animation: rise-in 260ms var(--ease-rise) both;
+}
+
+.banner-in {
+  grid-template-rows: 1fr;
+  animation: banner-in 280ms var(--ease-rise) both;
+}
+
+@keyframes banner-in {
+  from { grid-template-rows: 0fr; opacity: 0; }
+  to { grid-template-rows: 1fr; opacity: 1; }
+}
+
+.auth-handoff {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  overflow: hidden;
+  pointer-events: none;
+  animation: auth-handoff 380ms var(--ease-rise) both;
+}
+
+@keyframes auth-handoff {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* Opacity only: movement would put a scrollbar on the page. */
+.shell-in {
+  animation: shell-in 420ms var(--ease-rise) both;
+}
+
+@keyframes shell-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.boot-mark path {
+  opacity: 0;
+  animation: fade-in var(--dur-4) var(--ease) both;
+  animation-delay: calc(var(--i) * 70ms);
+}
+.boot-mark__outer,
+.boot-mark__inner {
+  transform-box: view-box;
+  transform-origin: 256px 256px;
+}
+.boot-mark__outer { animation: boot-turn 3.2s linear infinite; }
+.boot-mark__inner { animation: boot-turn 4.4s linear infinite reverse; }
+
+@keyframes boot-turn {
+  to { transform: rotate(360deg); }
+}
+
+.boot-loader__label {
+  animation: fade-in var(--dur-4) var(--ease) 600ms both;
+}
+
+.boot-cover {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  animation: fade-in var(--dur-3) var(--ease) both;
+}
+
+.boot-cover--leaving {
+  pointer-events: none;
+  animation: auth-handoff var(--dur-4) var(--ease) both;
+}

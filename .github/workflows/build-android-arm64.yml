@@ -1,0 +1,529 @@
+name: Build Android ARM64 APK
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      # Android has its own tag because it is its own build and its own release
+      # train. A change that only touches `web/src-tauri` or the Android shell
+      # has no desktop equivalent, and a desktop-only change does not need a
+      # Gradle build behind it. `desktop-v*` still means the Electron app; this
+      # means the APK.
+      - 'android-v*'
+  pull_request:
+    paths:
+      - "build-android.sh"
+      - "scripts/ensure_android_gradle.py"
+      - "web/src-tauri/**"
+      - "web/src/lib/android-*.js"
+      - "web/src/lib/dm-notification-hints.js"
+      - "web/src/views/user-settings/NotificationsPane.jsx"
+      - "web/src/test/android-*.test.js"
+      - ".github/workflows/build-android-arm64.yml"
+
+permissions:
+  contents: read
+
+# One run of this workflow per pull request. Without this, a rebase or a
+# follow-up commit left the superseded run queued, and on a single self-hosted
+# runner that is not a wasted minute somewhere else -- it is the front of the
+# queue, held by a build of a commit nobody is waiting for any more, while the
+# run someone is waiting for sits behind it. Every other workflow here already
+# says this; these three were the ones that did not.
+#
+# A release tag is the exception, for the same reason as the desktop
+# workflows: a tag push is the release, and a newer run must not cancel the one
+# that is publishing it.
+concurrency:
+  group: ${{ startsWith(github.ref, 'refs/tags/android-v') && format('android-release-{0}', github.ref) || format('{0}-{1}', github.workflow, github.event.pull_request.number || github.ref) }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/android-v') }}
+
+env:
+  NDK_VERSION: 27.0.12077973
+  # Public verification material, not a secret. Empty until rollout is enabled;
+  # the client then falls back to explicit homeserver choice. The URL is optional
+  # so packaged clients can use a mirror of the same signed catalogue.
+  VITE_TELIUM_RECOMMENDATION_PUBLIC_KEY: ${{ vars.TELIUM_RECOMMENDATION_PUBLIC_KEY }}
+  VITE_TELIUM_RECOMMENDATION_URL: ${{ vars.TELIUM_RECOMMENDATION_URL }}
+
+  # Deliberately no `VITE_TELIUM_UPDATE_URL` or `VITE_TELIUM_UPDATE_PUBLIC_KEY`
+  # here, unlike the desktop workflows.
+  #
+  # The published client manifest describes desktop artifacts. It has no
+  # `android-apk` entry, and `assess()` picks the newest release newer than the
+  # running version before looking for that entry -- so an Android build given
+  # the desktop publisher would, on the first desktop release ahead of it,
+  # announce a new version and then say there is nothing for this machine.
+  # Every Android install would show a notice that is wrong, every time the
+  # desktop app shipped.
+  #
+  # Empty is a named state rather than a broken one: `publisherState()` returns
+  # `unconfigured`, no request is made, and no notice appears. Protocol
+  # incompatibility (gateway close 4015) is a fact about the socket and still
+  # reaches the reader without a publisher. Android has no automatic update
+  # path yet -- the download page always links to the newest preview -- and
+  # when it gets one, the manifest has to learn that a version belongs to a
+  # platform before this build may read it.
+  VITE_TELIUM_UPDATE_PUBLIC_KEY: ''
+  VITE_TELIUM_UPDATE_URL: ''
+
+jobs:
+  build:
+    name: Android ARM64 signed debug APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      # Every `uses:` below names a commit, not a tag. A tag is a mutable
+      # pointer that the action's owner -- or anyone who takes their account
+      # -- can move onto new code, and this repository's runs would then
+      # execute it without a diff, a review, or a notification. The trailing
+      # comment is the release that commit was, so the pin is still readable;
+      # `docs/supply-chain.md` explains how to move one forward.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # The Android Gradle task Tauri generates shells out to `node tauri`, so
+      # Node stays alongside bun here.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.0
+
+      # setup-bun caches only the bun executable, so the package cache that
+      # setup-node's `cache: npm` used to manage has to be its own step.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('web/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Set up Java 17
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          # The action's historical default also asks sdkmanager for the old
+          # package named "tools". Google no longer publishes that package on
+          # current runner images, so setup fails before our explicit SDK install.
+          # Command-line tools are installed by setup-android itself; everything
+          # Telium actually builds against is installed in the next step.
+          packages: platform-tools
+
+      - name: Install Android SDK and NDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;${NDK_VERSION}"
+
+          echo "NDK_HOME=${ANDROID_HOME}/ndk/${NDK_VERSION}" >> "${GITHUB_ENV}"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${NDK_VERSION}" >> "${GITHUB_ENV}"
+
+      - name: Install Rust with Android ARM64 target
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch @ 2026-09-03
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: web/src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      # The tag is the version, the same rule the desktop workflows follow. It
+      # has to be applied here rather than read at publish time, because the
+      # version is baked into the APK by `build-android.sh` -- a release that
+      # published an APK reporting the package version while its tag said
+      # something else would leave every installed phone comparing itself
+      # against a number nobody published.
+      #
+      # Plain `X.Y.Z` only, no prerelease suffix. Tauri derives the APK's
+      # versionCode as major*1e6 + minor*1e3 + patch and ignores the suffix, so
+      # `0.1.3-beta.1` and `0.1.3` both come out as 1003 -- and Android refuses
+      # to install a package whose versionCode is not greater than the one
+      # already there. A beta tagged that way could never be superseded by the
+      # release it leads to. The release notes say "preview"; the version string
+      # stays plain so the phone can be updated at all.
+      - name: Set the Android version from the tag
+        if: startsWith(github.ref, 'refs/tags/android-v')
+        env:
+          ANDROID_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${ANDROID_TAG#android-v}"
+          node -e '
+            const version = process.argv[1];
+            if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(version)) {
+              throw new Error(`android release tag must be android-vX.Y.Z with no suffix, got ${version}`);
+            }
+          ' "$VERSION"
+          {
+            echo "TELIUM_APP_VERSION=$VERSION"
+            echo "TELIUM_ANDROID_BUILD_TYPE=release"
+          } >> "$GITHUB_ENV"
+
+      # A tag builds the release variant; everything else builds debug.
+      #
+      # These are two different APKs, not one APK with a flag: the release
+      # variant is not debuggable and refuses cleartext traffic. It is also
+      # left unsigned here -- signing happens in the publish job, which is the
+      # only job that can read the key -- so this artifact is deliberately not
+      # installable. `apksigner` says so plainly, and the publish job is the
+      # one place that turns it into a file somebody can use.
+      - name: Select the build variant
+        if: "!startsWith(github.ref, 'refs/tags/android-v')"
+        run: echo "TELIUM_ANDROID_BUILD_TYPE=debug" >> "$GITHUB_ENV"
+
+      # A stable name for the file somebody downloads, and the name the website
+      # asks for (`URLS.downloads.android` in `site/src/config.ts`). Staging it
+      # here rather than uploading the Gradle tree is what keeps the upload
+      # path a constant: on a self-hosted runner `build/outputs/apk` still
+      # holds yesterday's build, and a glob over it would sometimes upload the
+      # previous APK.
+      #
+      # A debug build keeps a `-debug` name. A manual dispatch publishes its
+      # artifact for device testing, and a debug APK called `Telium_arm64.apk`
+      # is indistinguishable from the release at the moment somebody installs
+      # it -- which is the one moment the difference matters.
+      #
+      # `working-directory: .` and `$GITHUB_WORKSPACE` rather than the job's
+      # default `web`: this job runs from `web/`, and a relative path here
+      # produced `web/web/dist-android`, which the next step could not enter.
+      - name: Stage the APK under its published name
+        working-directory: .
+        run: |
+          set -euo pipefail
+          NAME="Telium_arm64.apk"
+          if [ "${TELIUM_ANDROID_BUILD_TYPE}" = "debug" ]; then
+            NAME="Telium_arm64-debug.apk"
+          fi
+          mkdir -p "$GITHUB_WORKSPACE/web/dist-android"
+          echo "TELIUM_APK_OUT=$GITHUB_WORKSPACE/web/dist-android/$NAME" >> "$GITHUB_ENV"
+
+      # Use the same build helper developers use locally. It patches both the
+      # checked-in Gradle file and Tauri's fetched Android module before Gradle
+      # parses them, including on a cold Cargo cache.
+      - name: Build ARM64 APK
+        working-directory: .
+        run: ./build-android.sh
+
+      # The variant's own test task. `testArm64DebugUnitTest` against a release
+      # build would compile the debug variant as well -- a second full Rust
+      # compile for tests that do not differ between the two.
+      - name: Test Android native code
+        working-directory: web/src-tauri/gen/android
+        run: ./gradlew ":app:testArm64${{ startsWith(github.ref, 'refs/tags/android-v') && 'Release' || 'Debug' }}UnitTest"
+
+      # Integrity, not authenticity, and the distinction matters more on a
+      # release build than it did on a debug one.
+      #
+      # This file is generated by the same job that built the APK, travels in
+      # the same bundle, and is replaceable by anyone who could replace the
+      # APK. It catches a truncated download and it puts a durable identifier
+      # in the step summary, which outlives the artifact. What actually proves
+      # who built the release is the APK's own signature, applied in the
+      # publish job with a key this job never sees.
+      #
+      # Written to the step summary only, not into the artifact. On a release
+      # build this checksums the *unsigned* file, so publishing it beside the
+      # signed APK would be a checksum that never matches the download -- the
+      # publish job writes the one that belongs to the published bytes.
+      #
+      # `shasum -a 256` rather than `sha256sum`: both exist on the runner, but
+      # only shasum is guaranteed on every platform this repository's other
+      # jobs have had to run on, and the output format is the same.
+      - name: Checksum the APK
+        working-directory: web/dist-android
+        run: |
+          set -euo pipefail
+          {
+            echo "### APK checksums (as built, before signing)"
+            echo
+            echo '```'
+            shasum -a 256 ./*.apk
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Pull-request CI only needs to prove the APK builds and native tests pass.
+      # GitHub artifact storage is a separate account-level quota and must not
+      # turn a successful Android build red. Manual runs still publish an APK
+      # for device testing when quota is available.
+      #
+      # A tag push is the exception: that artifact is the input to the publish
+      # job below, so a failed upload has to fail the run rather than leave a
+      # tag with no build behind it.
+      - name: Upload the APK
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/android-v')
+        continue-on-error: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: telium-android-arm64-apk
+          path: web/dist-android/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Sign and publish the Android release
+    if: startsWith(github.ref, 'refs/tags/android-v')
+    needs: build
+    runs-on: ubuntu-latest
+    # The only job in this repository that can read the Android signing key,
+    # and the reason it is a separate job rather than a step in `build`.
+    #
+    # `environment:` applies to a whole job, not to a step, so putting it on
+    # the build job would also put it on every pull request that touches
+    # Android -- and a protected environment with required reviewers would then
+    # hold up ordinary CI. This job runs on a tag only, which is the one moment
+    # a human should be looking anyway.
+    #
+    # The secrets live on this environment, not on the repository. Add required
+    # reviewers in Settings → Environments → android-release and a tag push
+    # waits for one; without reviewers the secrets are still unavailable to any
+    # run that does not declare the environment, which is the floor.
+    environment: android-release
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: telium-android-arm64-apk
+          path: release
+
+      # apksigner is the only thing wanted from the SDK, and it ships in the
+      # build-tools package. Installing it here rather than signing in `build`
+      # is what keeps the key out of the job that runs on pull requests.
+      - name: Set up Android SDK build tools
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          packages: platform-tools
+
+      - name: Install apksigner
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "build-tools;36.0.0"
+          echo "$ANDROID_HOME/build-tools/36.0.0" >> "$GITHUB_PATH"
+
+      # Signed, then verified, then named. In that order, because the name is
+      # the last irreversible step: a file called Telium_arm64.apk that has not
+      # been checked is a file somebody will install.
+      #
+      # `zipalign` before `apksigner` is the required order, not a preference.
+      # Signing rewrites the archive, and any alignment applied afterwards
+      # invalidates the signature. apksigner would report the result as
+      # `v2`-signed but the APK would fail to install on some devices -- so
+      # aligning first is the only arrangement where both are true.
+      - name: Sign the APK
+        env:
+          # Through the environment, never through argv. `--ks-pass env:` is
+          # apksigner's own support for that, and it matters because argv is
+          # world-readable through `ps` on a shared runner while the
+          # environment of a process is not.
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ vars.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64:-}" ] || [ -z "${KEYSTORE_PASSWORD:-}" ] || [ -z "${KEY_ALIAS:-}" ]; then
+            echo "::error title=Android signing key is not configured::ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_ALIAS must be set on the android-release environment. Run scripts/create-android-keystore.sh, then see docs/updates.md."
+            exit 1
+          fi
+
+          UNSIGNED="release/Telium_arm64.apk"
+          if [ ! -f "$UNSIGNED" ]; then
+            echo "::error title=No release APK::the build job did not produce release/Telium_arm64.apk. Check TELIUM_ANDROID_BUILD_TYPE in build-android.sh."
+            exit 1
+          fi
+          # A release APK that already verifies was not built the way this job
+          # expects, and signing it again would hide that.
+          if apksigner verify "$UNSIGNED" >/dev/null 2>&1; then
+            echo "::error title=APK is already signed::$UNSIGNED verifies already, so the build job signed it with something. The release key must be the only thing that signs a published APK."
+            exit 1
+          fi
+
+          # Decoded into a path that does not outlive the job. `$RUNNER_TEMP` is
+          # wiped between jobs on a hosted runner; this job is on one precisely
+          # so the key is not left on a disk that a later job can read.
+          KEYSTORE="$RUNNER_TEMP/android-release.p12"
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE"
+          trap 'rm -f "$KEYSTORE" "$RUNNER_TEMP/aligned.apk"' EXIT
+
+          mkdir -p out
+          ALIGNED="$RUNNER_TEMP/aligned.apk"
+          zipalign -p -f 4 "$UNSIGNED" "$ALIGNED"
+          apksigner sign \
+            --ks "$KEYSTORE" \
+            --ks-pass env:KEYSTORE_PASSWORD \
+            --ks-key-alias "$KEY_ALIAS" \
+            --out out/Telium_arm64.apk \
+            "$ALIGNED"
+
+      # A signature that was just produced is not the same as a signature that
+      # verifies. `apksigner verify` re-reads the file from disk and checks
+      # every digest it finds, which is the only check that catches an APK
+      # that was signed and then modified.
+      #
+      # The certificate digest is printed and written to the step summary so a
+      # release can be compared against the previous one by eye: a key that
+      # changed without anybody meaning to is the failure this catches, and it
+      # is the one that makes every installed copy un-updatable.
+      - name: Verify the signature
+        run: |
+          set -euo pipefail
+          apksigner verify --verbose --print-certs out/Telium_arm64.apk | tee /tmp/verify.txt
+          FINGERPRINT="$(awk -F': ' '/Signer #1 certificate SHA-256 digest/ { print $2; exit }' /tmp/verify.txt)"
+          test -n "$FINGERPRINT"
+          {
+            echo "### Android release signature"
+            echo
+            echo '```'
+            echo "SHA-256: $FINGERPRINT"
+            echo '```'
+            echo
+            echo "Compare with the previous release's step summary. A change here means"
+            echo "the signing key changed, and no existing install can update to this build."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Checksum the signed APK
+        working-directory: out
+        run: |
+          set -euo pipefail
+          sha256sum Telium_arm64.apk > SHA256SUMS-android-arm64
+          cat SHA256SUMS-android-arm64 >> "$GITHUB_STEP_SUMMARY"
+
+      # The notes are written here rather than generated from commit titles,
+      # because what a person needs before installing this is not a list of
+      # commits: it is how to install it, and what this build is not.
+      - name: Write the release notes
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#android-v}"
+          cat > /tmp/notes.md <<EOF
+          ## Telium for Android $VERSION — preview build
+
+          **This is an early build.** Telium for Android is still in
+          development: expect rough edges, and please report what you find
+          rather than working around it quietly.
+
+          - ARM64, Android 8.0 or later.
+          - Sideload it: allow installation from unknown sources, then open the
+            downloaded APK.
+          - Signed with Telium's Android release key. The SHA-256 of the file is
+            in \`SHA256SUMS-android-arm64\`.
+          - Built from \`${GITHUB_SHA}\`.
+
+          There is no automatic update yet. The download page always links to
+          the newest preview, and installing a newer one over an older one
+          works without uninstalling.
+          EOF
+
+      - name: Publish the APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#android-v}"
+          ASSETS="out/Telium_arm64.apk out/SHA256SUMS-android-arm64"
+
+          # The versioned release is the record of this tag, and its asset URL
+          # is immutable because the tag is. A re-run against an existing tag
+          # replaces the asset rather than dying on "release already exists",
+          # and the notes are re-applied because a release created by an older
+          # run may not say what this one says.
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" $ASSETS --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --title "Telium for Android $VERSION (preview)" \
+              --notes-file /tmp/notes.md \
+              --latest=false
+          else
+            gh release create "$GITHUB_REF_NAME" $ASSETS \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Telium for Android $VERSION (preview)" \
+              --notes-file /tmp/notes.md \
+              --latest=false \
+              --verify-tag
+          fi
+
+      # One URL the website can name once and never edit again. A static site
+      # cannot resolve "the newest android-v tag" at build time without a
+      # rebuild for every release, so the newest APK is mirrored onto a rolling
+      # release whose tag never moves.
+      #
+      # `--latest=false` keeps this rolling pointer out of GitHub's "Latest"
+      # slot, which the desktop releases own: clients built before
+      # `desktop-latest` existed read `releases/latest` and cannot be changed.
+      # That is a statement about which release is the newest desktop one, not
+      # a claim that this build is unfit -- so it is a normal release with a
+      # normal title, not a prerelease.
+      - name: Point the website's download link at this build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ASSETS="out/Telium_arm64.apk out/SHA256SUMS-android-arm64"
+          TITLE="Telium for Android — latest preview"
+
+          if gh release view android-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload android-latest $ASSETS --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit android-latest --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" --notes-file /tmp/notes.md --latest=false
+            exit 0
+          fi
+
+          # No release yet. The tag may still exist -- an earlier run can have
+          # created it and then failed before the release landed -- and in that
+          # case `--target` would be an attempt to move a tag that is already
+          # there. So the target is supplied only when the tag is genuinely
+          # absent, and the existing tag is used as-is otherwise.
+          TARGET_ARGS=(--target "$GITHUB_SHA")
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/android-latest" >/dev/null 2>&1; then
+            TARGET_ARGS=()
+          fi
+          gh release create android-latest $ASSETS \
+            --repo "$GITHUB_REPOSITORY" \
+            ${TARGET_ARGS[@]+"${TARGET_ARGS[@]}"} \
+            --title "$TITLE" \
+            --notes-file /tmp/notes.md \
+            --latest=false
+
+      # The one property this release exists to have, checked as an outsider:
+      # can somebody who is not signed in to GitHub download it? The website's
+      # button makes a plain, unauthenticated request. While the repository is
+      # private every such request answers 404, and the release looks fine to
+      # anyone testing in a signed-in browser. A warning rather than a failure,
+      # because repository visibility is a decision this job cannot make.
+      - name: Check the download is reachable without a GitHub session
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#android-v}"
+          URL="https://github.com/$GITHUB_REPOSITORY/releases/download/android-latest/Telium_arm64.apk"
+          CODE="$(curl -sS -o /dev/null -w '%{http_code}' -L --max-time 30 "$URL" || true)"
+          echo "anonymous GET $URL -> $CODE"
+          {
+            echo "### Android $VERSION (preview)"
+            echo
+            echo '```'
+            echo "$URL"
+            echo '```'
+            echo
+            echo "Versioned release: \`$GITHUB_REF_NAME\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$CODE" != "200" ]; then
+            echo "::warning title=Android download is not public::$URL answered $CODE without authentication. While the repository is private, release assets are served only to signed-in users, so the website's download button will fail for everyone else."
+          fi

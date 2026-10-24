@@ -1,0 +1,979 @@
+{
+  "channel": "releases",
+  "generated_at": 1792739262524,
+  "releases": [
+    {
+      "version": "0.2.0",
+      "commit": "6d4073988e0612336b05d1c3b11577d618ef352a",
+      "released_at": 1792736525000,
+      "security": false,
+      "summary": "Release server 0.2.0 (#402)",
+      "image": "sha256:5c787ceaaacc4035f2fa1d440fd9195556344b50cbc39458ddb443fad018dc82",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "server-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/server-v0.2.0/telium-server-linux-x86_64.tar.gz",
+          "sha256": "5224a32700f32839c509bbe63ada9c8364963ea59a4a455c46da15d2fb2e8320",
+          "size": 13095324
+        },
+        "server-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/server-v0.2.0/telium-server-linux-aarch64.tar.gz",
+          "sha256": "d65694a449d67766e2d6d1d1cf32927d3a74ea3df697edfac06a9ea05954e3f4",
+          "size": 12148903
+        }
+      }
+    },
+    {
+      "commit": "3fba60993e91d33e2fc7d8b1e1d3fdc8db1107ef",
+      "released_at": 1792646038000,
+      "security": false,
+      "summary": "Give each release train its own download pointer (#400)",
+      "image": "sha256:2849dd5e01dd51b5673427e78331951aab1d7dcece38a81ad6b68b4b65ce1826",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "server-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-3fba60993e91-linux-x86_64.tar.gz",
+          "sha256": "93ce25d41bfc21d988680e968ecea6b777f5822288ab03a6abdeeb7e6d731f7d",
+          "size": 13093646
+        },
+        "server-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-3fba60993e91-linux-aarch64.tar.gz",
+          "sha256": "4cc5629fa7bbb355c7d193a087a67fd17823e37f2edf4e6a224425d6b1603ad7",
+          "size": 12142851
+        }
+      }
+    },
+    {
+      "commit": "9ed1bcf079d1ed67a3de4a00bf3e2da59b354078",
+      "released_at": 1792616725000,
+      "security": false,
+      "summary": "Publish signed Android releases from an android-v tag (#399)",
+      "image": "sha256:cde0ced4385b725e9459787ec14b2f4b2db80b74c9ba955bace841d34c6e5a86",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "server-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-9ed1bcf079d1-linux-x86_64.tar.gz",
+          "sha256": "4381942f6194dc77675f6214d59929a7c1bdff41226f976378a5fc28215550ea",
+          "size": 13093688
+        },
+        "server-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-9ed1bcf079d1-linux-aarch64.tar.gz",
+          "sha256": "292c1b74b5f823577f6299740e3917ba06f49f89060c2085f3fe527c2e7d06b6",
+          "size": 12142680
+        }
+      }
+    },
+    {
+      "commit": "adb0ff75245eb147ec1b4c7393b1bba5abbc3914",
+      "released_at": 1792538090000,
+      "security": false,
+      "summary": "Put the real fetch back for the real-server E2EE suite (#398)",
+      "image": "sha256:f0ec7b2866467f2d61690eca93338fc2c1d4740328a28db803f333ed750826c7",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "server-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-adb0ff75245e-linux-x86_64.tar.gz",
+          "sha256": "933d2050f1302afd7a09b854d99d5f5fa952e8d3fd0bfe126a94a93175399f2e",
+          "size": 13093666
+        },
+        "server-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-adb0ff75245e-linux-aarch64.tar.gz",
+          "sha256": "89b1d22b8cc2cb5d3c1e501cd988e6d7942ac4c0d43101eacac9c11e7ac2fdbc",
+          "size": 12142648
+        }
+      }
+    },
+    {
+      "commit": "0dbb07b282904660243dbcec580eb169957e6cdd",
+      "released_at": 1792533079000,
+      "security": false,
+      "summary": "encryption improvements (#396)",
+      "image": "sha256:42e6eb1a33386760e0ef3ea440ecd7f58067b6d7c710cf781c02851e52ed577a",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "server-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-0dbb07b28290-linux-x86_64.tar.gz",
+          "sha256": "037aa9fa9948439cb57af076f1aab744b856bc15b1115595c42a03c690a4e00d",
+          "size": 13093461
+        },
+        "server-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-0dbb07b28290-linux-aarch64.tar.gz",
+          "sha256": "e5ae8fa1a52435931f3b5180a72e497a94d60210b70882e32aac2bfa4c28c280",
+          "size": 12142723
+        }
+      }
+    },
+    {
+      "commit": "074603b76216c0f446b312b23aedb970c6d56388",
+      "released_at": 1792478781000,
+      "security": false,
+      "summary": "Update package.json",
+      "image": "sha256:a54e51326cbba5319adc87e9f371837d3b11f73bd962c442b67b8a985db4a0f1",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "server-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-074603b76216-linux-x86_64.tar.gz",
+          "sha256": "86b02e560a86d8be57cb7d572a1c4e27a4c0a20f6dc57a22c760ee4bbc13c5e4",
+          "size": 12937526
+        },
+        "server-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-074603b76216-linux-aarch64.tar.gz",
+          "sha256": "6b2dc6f42b3b08e1d6478eb7c57c67251a763dd89cee5335f890879ea162ec6d",
+          "size": 12000707
+        }
+      }
+    },
+    {
+      "commit": "735715034a94d95dbef5f728ca7a3672963b3deb",
+      "released_at": 1792443953000,
+      "security": false,
+      "summary": "Never let electron-builder publish the Linux build itself (#394)",
+      "image": "sha256:e74bb86e4f1a8833ea48a1694d40c0ef249b342f4344b4103b80d4baac68cbca",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "server-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-735715034a94-linux-x86_64.tar.gz",
+          "sha256": "7d6a22a8fdbb953dfb5d8f2e1e604cdc5f6dd9e988b608859fe280c92081cc7c",
+          "size": 12937489
+        },
+        "server-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-735715034a94-linux-aarch64.tar.gz",
+          "sha256": "45c3a05df5dcd62969f83ef9c127f25600d5441cb2b99e712f42adaf0b8b48a8",
+          "size": 12000509
+        }
+      }
+    },
+    {
+      "commit": "50c736ddc5180a9287e187832b7643f193eb6dbb",
+      "released_at": 1792298235000,
+      "security": false,
+      "summary": "Bump version from 0.1.0 to 0.1.1",
+      "image": "sha256:1797df327daf70a80e9d87e8250837e55b4fe38b41f65fc5221b6e16d9f94449",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "server-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-50c736ddc518-linux-x86_64.tar.gz",
+          "sha256": "5cf7a78bae91ebbed5f6056a4d9aec8c12a6c1235e0e6d58ca7ac6500fc37fe7",
+          "size": 12937561
+        },
+        "server-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-50c736ddc518-linux-aarch64.tar.gz",
+          "sha256": "d25a47c56bdd1d46f906798cb0ad01b5d13d72b5781e0f093f50bda8f976ad1b",
+          "size": 12000417
+        }
+      }
+    },
+    {
+      "commit": "6d4ed3864bfa7a2aa6f15d75617745c2e0d30b6b",
+      "released_at": 1792287536000,
+      "security": false,
+      "summary": "Put Windows on the signed update path (#392)",
+      "image": "sha256:2e16f51514863c13e9d8b9cd0884c3a9d20d35f53d5fb75f6b5ccd117ffffcf1",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "server-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-6d4ed3864bfa-linux-x86_64.tar.gz",
+          "sha256": "e55bf4f44427bc62dfa04adb87fe95d02e5039dbbcef8696d2837e3e63f3785d",
+          "size": 12937510
+        },
+        "server-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-6d4ed3864bfa-linux-aarch64.tar.gz",
+          "sha256": "c3e43661be9f6d7e15fa6fcdf20414db1d2c5e94320bdb8f4d56816028f642b4",
+          "size": 12000394
+        }
+      }
+    },
+    {
+      "commit": "fdb68330edfec5366ac905b85039ba4fd777e3e0",
+      "released_at": 1792207332000,
+      "security": false,
+      "summary": "Complete every shipped catalogue and add five more languages (#386)",
+      "image": "sha256:3a34b1a1e9757dafda129e1c49b9164707876d8a20ba1200545a5c05ed038a5e",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "server-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-fdb68330edfe-linux-x86_64.tar.gz",
+          "sha256": "9cc7d4639dc9bb5507575531d6ed202c144f2549e09f383aa4eacdd19da47401",
+          "size": 12937429
+        },
+        "server-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-fdb68330edfe-linux-aarch64.tar.gz",
+          "sha256": "2d114e2ac965f8a86b5af9bc370e81fc716ce39f8c73e7eb2717cd48c1ff1d12",
+          "size": 12000469
+        }
+      }
+    },
+    {
+      "commit": "d49b5826ecda07c4dcb24a84ac28fcdd3e6c81b4",
+      "released_at": 1792126755000,
+      "security": false,
+      "summary": "Open the media mini view in chat on double-click (#385)",
+      "image": "sha256:c6eccd2ac11ddae3171e9c8c999b1ef5e0325b91a6268dc41c40634dcc519fd7",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "server-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-d49b5826ecda-linux-x86_64.tar.gz",
+          "sha256": "3af644f30b6c905e47e5f7f868f0ba454489a6a28931cfd89817ecf7c4a67c7a",
+          "size": 12937346
+        },
+        "server-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-d49b5826ecda-linux-aarch64.tar.gz",
+          "sha256": "20f0925d0ff7c41f4c7a22d979eee34a384ab1549d2b46196a27f93ede570351",
+          "size": 12000610
+        }
+      }
+    },
+    {
+      "commit": "20c33ad7d82cda1970549d8a1525b5a6d14eab08",
+      "released_at": 1792110753000,
+      "security": false,
+      "summary": "Count deployments with one daily two-number report (#384)",
+      "image": "sha256:71e1cdefa34a1ff90fb5e90698908699993f2872ad7f82489a6531b34c4fb915",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "server-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-20c33ad7d82c-linux-x86_64.tar.gz",
+          "sha256": "d8088e19d9bb43edf4d2fbdab8464f741835dba550d1b391996615f604cb52da",
+          "size": 12937583
+        },
+        "server-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-20c33ad7d82c-linux-aarch64.tar.gz",
+          "sha256": "edd13d339e3d8016fef11251e266459ee0fbaa0998d7ec7a7d7be76d73289eb7",
+          "size": 12000483
+        }
+      }
+    },
+    {
+      "commit": "1380f9e60fd82bcfe257b9c441c658cdf4980c15",
+      "released_at": 1792105098000,
+      "security": false,
+      "summary": "Add a What's new button to the rail, backed by a real changelog (#383)",
+      "image": "sha256:773fb7c51582866fdafca311e3e5542b20ae4b7f2848617e157d6bab0ccf6b48",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "server-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-1380f9e60fd8-linux-x86_64.tar.gz",
+          "sha256": "a6fec7f23a63b1d3442acaee7fe8b61c11756aa97d4e8e47414015007efc3fb7",
+          "size": 12920882
+        },
+        "server-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-1380f9e60fd8-linux-aarch64.tar.gz",
+          "sha256": "6ac66fbbb1a8d0bb5f44d6bfcd8f33ae86e4fb4494a9b68de10e79271129c559",
+          "size": 11984094
+        }
+      }
+    },
+    {
+      "commit": "6ccb0f83496ff40bf6f4f1060aca3de579932510",
+      "released_at": 1792101890000,
+      "security": false,
+      "summary": "Take the doing line in the feedback pane, not on the tracker (#382)",
+      "image": "sha256:36a8ef6c3e1c7c2a6529e519fa409889c36d116d33611f83d3a3345d085204ba",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "server-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-6ccb0f83496f-linux-x86_64.tar.gz",
+          "sha256": "47488b3bebc51796f51c2e87dfe09e8ecf81f22378408c3952d61b9affb61bd1",
+          "size": 12920829
+        },
+        "server-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-6ccb0f83496f-linux-aarch64.tar.gz",
+          "sha256": "40fa0739f3c908bf35a41131fb4ed3a332da4793ce0ca5cbed0f1e00e1e93ce3",
+          "size": 11984079
+        }
+      }
+    },
+    {
+      "commit": "c5de56cac3af4a0a55759c3d50501d420daf5a18",
+      "released_at": 1792089289000,
+      "security": false,
+      "summary": "Point cargo at the target volume it was supposed to be using (#381)",
+      "image": "sha256:6c17a3cd8905a4f8f36e497605cda4396f26016e150a694ec33dfac3e20a55d1",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "server-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-c5de56cac3af-linux-x86_64.tar.gz",
+          "sha256": "a43eeba3e593982b516ce5c8f628bbd577eb3ca2d6440bea4b208c38732bb5f4",
+          "size": 12921008
+        },
+        "server-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/main/telium-server-c5de56cac3af-linux-aarch64.tar.gz",
+          "sha256": "6c8cdb66dcec9a1025f2c14240661d7707981e6c4525a41c7f4759c219b317c4",
+          "size": 11984282
+        }
+      }
+    },
+    {
+      "commit": "6c727550116bfe6e45bc036e887f1cce0e1f88e5",
+      "released_at": 1791585507000,
+      "security": false,
+      "summary": "fix: step over a frame this account sent from a session it forgot (#373)",
+      "image": "sha256:82fbc8854f50a5f4111e30c20f5a90a7362e3a58913a36100e4750794dcca7ba",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "694f4918646fd3168b8daa776172dea048f08bb7",
+      "released_at": 1791581967000,
+      "security": false,
+      "summary": "fix: stop destroying DM group state, and say why a walk stopped (#372)",
+      "image": "sha256:760727780d8def0db4490254470e24a1d866822d119f02efa5ccf99c658b6a47",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "72cffad808080c10e3d94a6898e308ac05e8e320",
+      "released_at": 1791562084000,
+      "security": false,
+      "summary": "fix: do not walk DM frames against an engine that cannot do crypto yet (#371)",
+      "image": "sha256:d2a018970997d46c6ed68577dd50d575b055f998a799ee11c7eec75746d41f43",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "0ce7d609f18bffa8eabeca8465f0b56753469a46",
+      "released_at": 1791521158000,
+      "security": false,
+      "summary": "fix: re-walk full history on key schedule divergence instead of rejoining (#370)",
+      "image": "sha256:7a2195bda1e04fffa22566c28593098abe6a4a7bb0526c76bf02c6702079f608",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "a737f475837f99dfb5222e309844c10d5c6b922f",
+      "released_at": 1791507219000,
+      "security": false,
+      "summary": "fix: retry DM sync when a live frame cannot be decrypted (#369)",
+      "image": "sha256:3a1c38dd333cbbecb6fcd0fc6829bba51bb5944ab3c5e3401b6459938ad98920",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "ec3b5d5bcd2c509eb033a6229aa167492b295033",
+      "released_at": 1791425474000,
+      "security": false,
+      "summary": "Keep calls up through key changes, reconnects and slow lookups (#368)",
+      "image": "sha256:c6ee8f9243fdf0130928b8181da65b8e8b069efc7c5c1e72b7d8fd43e7e6cdf1",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "4c75684ab82268c02cbbdde4e02729181c47eed6",
+      "released_at": 1790971410000,
+      "security": false,
+      "summary": "Keep a guild call going through the faults that used to end it (#367)",
+      "image": "sha256:b3c921c88ca1144ac57a31f1e4421fd32df8e88550219c3cfedd3abd96c5367e",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "17dd100cf69f44b2d258757a9a06ce35ab3ef9da",
+      "released_at": 1790809141000,
+      "security": false,
+      "summary": "Open the lightbox entrance after StrictMode replays the effect (#364)",
+      "image": "sha256:a20cb7d6328b8cc606d5f0656be6ef7256adf12b8dc87201d750ae62e9b60cf9",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "8cdecddac58a40b917e4cb49202877f45d6b1ef8",
+      "released_at": 1790799915000,
+      "security": false,
+      "summary": "Mark pins and dates in the history, graph ping from the voice bar, and animate the mini profile opening (#362)",
+      "image": "sha256:7b10a1bf97335bc516ffa8500d5d1b9de5c7f475d4d7f4c6e90e9a937682a68b",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "a4e619071e1cb04ed54c3344363404a036e54a5c",
+      "released_at": 1790732407000,
+      "security": false,
+      "summary": "Resize the GIF picker, add fullscreen, and put Favorites in the grid (#361)",
+      "image": "sha256:d67046e5b7b7821941ca08a1d9b32f84e8f821fa80b6e36299dcb7e4bb4de78a",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "501c862444b74b6c4e8294f253a542e1d880d552",
+      "released_at": 1790711732000,
+      "security": false,
+      "summary": "Take View profile from a rail row straight to the full profile (#360)",
+      "image": "sha256:c35abdd9b61a6a08be129a640f49f11798f1d04905f90e6473f6f4def436fd44",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "98c48de4bf8e34c52ed2de2b93953a9a621e6758",
+      "released_at": 1790656429000,
+      "security": false,
+      "summary": "Bring back the bar that floats over a highlighted draft (#359)",
+      "image": "sha256:bbde5d1856f27be6849024be4639a65b42e93860e585a3a7fb075c2c203bf481",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "5980270c32be50a92c4173d6ab85bc8d50a979b9",
+      "released_at": 1790649247000,
+      "security": false,
+      "summary": "Install a call's new media key even when a hello got there first (#358)",
+      "image": "sha256:2336dc2609da1455706f0a272b8279a5596bd0a3baf72b7336dbab8388619e37",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "db78680587b7715145b99cc35cadc7fda69fd886",
+      "released_at": 1790554618000,
+      "security": false,
+      "summary": "Fix AppImage packaging miss and flaky public-profile tests (#356)",
+      "image": "sha256:bfb4a4997d6cb8ce23eee3a0d3ad052ad8c79a3c16bfeb6fb907864c5acfa8f9",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "8bced254d310083e7d5c78791473f3585110e5f5",
+      "released_at": 1790549771000,
+      "security": false,
+      "summary": "Show conversation call logs in chat, ring on the caller's side (#355)",
+      "image": "sha256:17adf5072f383de226f0824c7989cce95ff1c0f37cdf45e366d38b8d874be2b6",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "b25b63e67fc7ccd10d005b09b0b48597c4d27d2b",
+      "released_at": 1790549348000,
+      "security": false,
+      "summary": "Give the desktop shell its own page-zoom shortcuts (#354)",
+      "image": "sha256:5583f9cf026577ee2242c4042ae30379517392e7f002c6e97e95570364806b76",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "69d99c55ed0ba7ef0d9761f32255022de3b89618",
+      "released_at": 1790547508000,
+      "security": false,
+      "summary": "Bring the revamp's best pieces onto the current client (#353)",
+      "image": "sha256:173d60581d672be13e152ec6f1fbfcb297a9d794919c1ecbc608efb587f3b207",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "40ca19700c2c84764a1f55e6235200bea453a86c",
+      "released_at": 1790497300000,
+      "security": false,
+      "summary": "Stop a new call key from breaking media for the peers that lack it (#352)",
+      "image": "sha256:66e061379610fec72bacdc0a637a66d7d36cb73495c92db27a3fb68cd076a745",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "f6678edc929d5e45c29e8f60908e5e7622f8f5b9",
+      "released_at": 1790479623000,
+      "security": false,
+      "summary": "Ask desktop users where their account lives instead of assuming telium.chat (#337)",
+      "image": "sha256:a933c150b6aae16d33214e39a9db29c760f15b2d7500fa2c1a376c63958b3705",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "2e69af65d561b8062673b0141c870ff8c2a2ecee",
+      "released_at": 1790474228000,
+      "security": false,
+      "summary": "Add GIF favorites JSON export to settings extras (#350)",
+      "image": "sha256:19fa0549e3eae7a1927a01809d1c3c65c1054f4cf3247bad3858768d38101eba",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "9d931508986d5cc542bc078b627e5eaf8e68183e",
+      "released_at": 1790459997000,
+      "security": false,
+      "summary": "Open voice text chat without joining, hide share volume until hover (#349)",
+      "image": "sha256:86e54aedaedb7f5360b7d80cad39b95e53b51197ac898bee58e059169fa0855c",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "2bff803192ef375b65b80c6cff01418c8e55a065",
+      "released_at": 1790458641000,
+      "security": false,
+      "summary": "Fix >100% voice volume silence, add call roster faces, add voice channel status (#348)",
+      "image": "sha256:c5659626351b3e5a20c4fb3e373fccee7053f2638d94eb0d0d5e8ac6f93304f9",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "955db0d745a34448be06ed4b06c03202b8e2f60c",
+      "released_at": 1790384331000,
+      "security": false,
+      "summary": "Improve screen share capture constraints (#344)",
+      "image": "sha256:c4b1da06bfe01775c5458840015e204e905f0e86c4c22744527afef5679b594a",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "5d65ea0456e3b138b99f8be9d58d2cc0aae3b927",
+      "released_at": 1790383506000,
+      "security": false,
+      "summary": "Polish mobile navigation and chat experience (#343)",
+      "image": "sha256:0243be413514b23a12b83347d81d75594e0c30e0a202e9051f893948abbc27f3",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "50af47b6630714f79829ecc11fe0f52c4f26283d",
+      "released_at": 1790376103000,
+      "security": false,
+      "summary": "Route Discord GIF imports through transport (#342)",
+      "image": "sha256:7ebd82c25015f2af785e3d43300ec688f4ad9364ee4ddd9fc3172ee6ce1e5dd0",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "753e2478f7d40dce0d6d03772ee2a5d6f8b8c97e",
+      "released_at": 1790365392000,
+      "security": false,
+      "summary": "Pause GIFs when Telium loses focus (#341)",
+      "image": "sha256:b4654957a44c71598ebb9aa7ae54d5254f63d56f40f88f667f4f8ae6c10c7e74",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "532729297123f2bc7fda8441b9acaf8c1c857a30",
+      "released_at": 1790363462000,
+      "security": false,
+      "summary": "Recognize Telium media URLs as GIF embeds with star favorite button (#340)",
+      "image": "sha256:4aa1ec2b49cd928c936a1ab7a1d23d528da3acaecc54d34799e3fd16fb2a6ec0",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "4ef6845c9b17950fe50908f7fcb939d1ed0c650e",
+      "released_at": 1790320006000,
+      "security": false,
+      "summary": "Make SFU defaults operator-configured (#338)",
+      "image": "sha256:99863dabf7ec47852f57344a0f4e8278fa3311b379f354482d375bbb69e11f48",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "719b7e75d9bdae0a952790d59d888faed6234e25",
+      "released_at": 1790288449000,
+      "security": false,
+      "summary": "Show branded unavailable GIF tiles (#336)",
+      "image": "sha256:4c8d04adac7199cb44d76596ede3e6744cbd6c34799ed25b2d734ed657af7ea2",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "c04c228a7fe03086f09e44692981fd8337fcaae0",
+      "released_at": 1790285604000,
+      "security": false,
+      "summary": "Import Discord GIF favorites with automated CDN re-hosting (#335)",
+      "image": "sha256:b0a276bcc2f80547cdd5185ef3cff30e66e5e11772da5e59c0e44f4ab24f77a1",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "8a9318b6855aab7e5774ae14564a822d459736d0",
+      "released_at": 1790279244000,
+      "security": false,
+      "summary": "Fix tilde-prefixed invite embeds (#334)",
+      "image": "sha256:4564d172cc932e63b2d3157ab0baa017aa6d9edfcdc3951b471bc6eb7b626b41",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "5d7826781c6977011c17d8dcaa07ecb825099140",
+      "released_at": 1790226988000,
+      "security": false,
+      "summary": "Keep Matrix separators readable in profile links (#331)",
+      "image": "sha256:1fa465ded1bec8020f7d35f8cf209597859dcfcde76fe1e660accfb65a42eee7",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "5e3ba0f05828cc50c728219ce3892f49ae22b7ef",
+      "released_at": 1790224894000,
+      "security": false,
+      "summary": "Encrypt guild calls on an SFU end to end (#330)",
+      "image": "sha256:4064796702d297fa32f010e0183e7f3894418983a7ea5353aab7b1773f5e997b",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "12179e6e6a6699d4d59daa6b4455e3d538ac3b6e",
+      "released_at": 1790220676000,
+      "security": false,
+      "summary": "Make bulk GIF tools available to everyone (#329)",
+      "image": "sha256:dbc13d41a8fb7315f2f8e7c0e42c95d3feeb875656e5acf66a45d698180f377a",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "a5cd00c460b632afe304fcdc9750e57cb3022544",
+      "released_at": 1790218250000,
+      "security": false,
+      "summary": "Polish Android touch interactions (#328)",
+      "image": "sha256:f73f63a63201cf2a2444f7a3da7bd207b711963045e95576e14ab142725b4b8f",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "f2f91195c7bc6ce6e6f0b65accfdfe4dc40ffc0b",
+      "released_at": 1790214531000,
+      "security": false,
+      "summary": "GIF import suite as an extra (#327)",
+      "image": "sha256:f88e1ecb9bd458d82b72fc3f2434507ae2aea4776c4ebbcdc51c5af195efcd62",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "4798aaae0ff3a13a1b0c17b50be887282cf72067",
+      "released_at": 1790211708000,
+      "security": false,
+      "summary": "Stop stale redirects from reviving disabled vanity links (#326)",
+      "image": "sha256:2b427c20e988af72ca95d08813ca4c38c1548179b45cad572e52eec393c7b1c2",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "7976da628aef7036bb5b038e7c3f61ca67132639",
+      "released_at": 1790203851000,
+      "security": false,
+      "summary": "Add Windows Electron desktop foundation (#309)",
+      "image": "sha256:f985f86ed28793b418dd9006d18436a895fc617eb9f741f9a35c6943445fdbac",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "cdb64902bdd4bd1ff7ba7bc118eddb3f923dc463",
+      "released_at": 1790202704000,
+      "security": false,
+      "summary": "Resolve Tenor legacy share post IDs (#325)",
+      "image": "sha256:7dc8d9f2aedfef52e25d080e903d7546425bed705b25f9cff42f15a74407c219",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "1a3b47fde4a8220fffd4ee90fd0963a4439b43df",
+      "released_at": 1790193741000,
+      "security": false,
+      "summary": "Resolve provider URLs in GIF favorites (#324)",
+      "image": "sha256:d1f6017fbd29b63ba037dc0e0e80042be4a5593d6109916470c9b133a83a0173",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "45c8c67750e2b8c56d79282fa7e5316357459f48",
+      "released_at": 1790190244000,
+      "security": false,
+      "summary": "Organize user settings without dropping controls (#323)",
+      "image": "sha256:5fc80d5fc2456bbe0c7be2581bc01db896195dd66827a12837f08ac54d5e6ae9",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "7db0b66495a7395bfa3eac3ac592d6be1ba81ac9",
+      "released_at": 1790182374000,
+      "security": false,
+      "summary": "Consolidate PRs 312-315: viewer, volume, vanity links, and activity (#319)",
+      "image": "sha256:1f02adae18f42771d49d0e3f61bb5bb51bbfa841ea977f61c05509a1df9389d7",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "b011966237a20b23ec01b4b58db206b90d679591",
+      "released_at": 1790142841000,
+      "security": false,
+      "summary": "Tint the profile popover and add profile themes with a gradient border (#318)",
+      "image": "sha256:1b9760091dbd9fa09d3459c0d57ffd72e4ae8cd9a35c35e4c542ea132db433cb",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "dd12c998a479385234b8d40012ac22f05676f5f2",
+      "released_at": 1790137640000,
+      "security": false,
+      "summary": "List conversations newest first and move one up when a message lands (#316)",
+      "image": "sha256:974d89f116ae5247376588766888ed923ff64a74f6493f61a164457eb0c1e51e",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "044953a0005f459bdead5af21c810625ed873095",
+      "released_at": 1790114925000,
+      "security": false,
+      "summary": "Ship the German, Japanese, Arabic and French translations (#311)",
+      "image": "sha256:68d10ea7b7c188915dbc2c32f31bdfc92d726c1da40cd3194de3f9fabb73e133",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "13a5952767ea87885a5ac28586460bd53377d851",
+      "released_at": 1790112844000,
+      "security": false,
+      "summary": "Land the integration branch: operator control plane, DM correctness, data lifecycle (#310)",
+      "image": "sha256:cc29bf7439f68fdd09cf599dc103be34dd73715d84bc7f73552e86abe38c0689",
+      "protocol": 1,
+      "min_protocol": 1
+    },
+    {
+      "commit": "688ca26888b4ba5cab093504822ca64c63e502b9",
+      "released_at": 1790046948000,
+      "security": false,
+      "summary": "Add AppImage self-updates and FUSE 3-friendly runtime (#308)",
+      "image": "sha256:7525cf11b105e782387f6d7cf7812723bcefdc59174ea9a5b90da5dba0c017bf"
+    },
+    {
+      "commit": "5702bde0dbb5bc8139b75426309d3a110732c297",
+      "released_at": 1790023572000,
+      "security": false,
+      "summary": "Fix notification message jump race (#307)",
+      "image": "sha256:2258b048625cdff1a86e8592efa01076235075d8b746bb586e4f3e67c8c58cba"
+    },
+    {
+      "commit": "3b56aad1cce012592813627465057b66eb0c80b2",
+      "released_at": 1790022105000,
+      "security": false,
+      "summary": "Improve Android notification controls and badges (#306)",
+      "image": "sha256:34d3cb8d039a5e2b2f83718e56f363492db25c52eba6dbbfdf0b5de01a2349b1"
+    },
+    {
+      "commit": "bc77eebd28397a0da3d7e77aadd786dadbb71df1",
+      "released_at": 1789963355000,
+      "security": false,
+      "summary": "Add Android Core-Telecom call lifecycle (#305)",
+      "image": "sha256:9cda826d1aa50e750ae538f912ec1395baffc037ac5ab584025e8c51233f802f"
+    },
+    {
+      "commit": "01dee23eddda7f32b348b956a7fc7a380e53f61f",
+      "released_at": 1789954720000,
+      "security": false,
+      "summary": "Improve browser and Android notification reliability (#303)",
+      "image": "sha256:c5ec38c731f20cbdc136d7a28f4609c2b22c45d2398290118837acd9de91bac8"
+    },
+    {
+      "commit": "057e24bbe372432d6b73ab44abc039c735b4ef8d",
+      "released_at": 1789936016000,
+      "security": false,
+      "summary": "Fix member rail profile toggle (#302)",
+      "image": "sha256:b1c7d666aa9146e0937873ad093152e5da5ffbc5a77879348d597b78b4ca5124"
+    },
+    {
+      "commit": "2f50c5f7b44d7d0d8c31e240b740d2ccbb4ef7f7",
+      "released_at": 1789934232000,
+      "security": false,
+      "summary": "Add privacy-preserving killed-app DM notifications (#298)",
+      "image": "sha256:42d9b411312e4a4c7773ce5f403cadb676ba29947823819398d32d5faa2f29a7"
+    },
+    {
+      "commit": "2eee9519e3927a66a721be7fd5566b71c7e854bb",
+      "released_at": 1789926138000,
+      "security": false,
+      "summary": "Add persistent Electron tray icon and close-to-tray lifecycle (#301)",
+      "image": "sha256:d1f5f09bc015d24209d5f5e39834f11b12d707b9225c932fdd7a1f69748c19ac"
+    },
+    {
+      "commit": "e0091a2850e5063e3defbe25a2f0cc681463ca34",
+      "released_at": 1789886889000,
+      "security": false,
+      "summary": "Let a homeserver run bots of its own, and give it Otto to run (#300)",
+      "image": "sha256:0e4a882b57aeb6a369fd1fd6c5f3baa746d41de115c84f6c46edcdda0bd255fd"
+    },
+    {
+      "commit": "cfab3495bf28969dcb960eae0eb41430a7da63d1",
+      "released_at": 1789855233000,
+      "security": false,
+      "summary": "Roll up notification scalability, lifecycle, and Android UX (#296)",
+      "image": "sha256:239be064ef8603b4fd42b9f56aa2460d185486e5664699b117cc41c5358c77fd"
+    },
+    {
+      "commit": "1f136f4411e0d7143abc3075a186e48c4cdaa2d6",
+      "released_at": 1789852846000,
+      "security": false,
+      "summary": "Draw the profile card's verdict and mutuals on the frame it opens (#297)",
+      "image": "sha256:e5ba84507239963a29da64c26b68972acd022a43992da43453ad2715c86eeb6d"
+    },
+    {
+      "commit": "bdfcc5a0bad79527eb8bd57d3fc2fd18f88f4887",
+      "released_at": 1789846127000,
+      "security": false,
+      "summary": "Private notification federation and Android push foundation (#204)",
+      "image": "sha256:779d6a148fe4de470162bfe0c9f4c7fc0313b94385e2462ab1a23fa00ec32195"
+    },
+    {
+      "commit": "173f436f7db24e368b759f48662e06991539deae",
+      "released_at": 1789843523000,
+      "security": false,
+      "summary": "Stop unit tests from serializing on the self-hosted runner (#290)",
+      "image": "sha256:983ca0445ef27b9e6253ab4e3296a84b5aa0a3d2666c10defef9e9423a584cdd"
+    },
+    {
+      "commit": "cdfd1a933c0be52193fcbf6dcc0879b68fd0166a",
+      "released_at": 1789839331000,
+      "security": false,
+      "summary": "Split desktop activity presence into game, music, and video toggles (#286)",
+      "image": "sha256:9e34a86a15da777ba3b46506cfef13ca08338182dd314e873c7a1d40fd7735a9"
+    },
+    {
+      "commit": "cc8335a5a33d5c9b45f3f75e9808766a6b68ce0b",
+      "released_at": 1789835431000,
+      "security": false,
+      "summary": "Fix staging release record on self-hosted runner (#287)",
+      "image": "sha256:3d197dd944116da3bfece41a3467c18c15164f925212f8f672fe4e058dd63c8f"
+    },
+    {
+      "commit": "96d27c425b7d28a81d7631b9563ee77a41e1195c",
+      "released_at": 1789701183000,
+      "security": false,
+      "summary": "Take the profile tint all the way down to the controls standing on it (#255)"
+    },
+    {
+      "commit": "dba2311702486e47d1bfdfeceed78244c6c30977",
+      "released_at": 1789700859000,
+      "security": false,
+      "summary": "Stop asking the profile card for a heading it no longer has (#254)"
+    },
+    {
+      "commit": "8720992e2f43bcd2c0ddaee967c127cc255fb990",
+      "released_at": 1789700717000,
+      "security": false,
+      "summary": "Let a call choose between the browser's noise suppressor and a neural one (#253)"
+    },
+    {
+      "commit": "75daeccbb718cc516709a493ed595797418af2a5",
+      "released_at": 1789700643000,
+      "security": false,
+      "summary": "Give the sidebar and the voice room a test harness of their own (#252)"
+    },
+    {
+      "commit": "214d7bda670c1226851a9c522ffdeb950e7afdab",
+      "released_at": 1789700596000,
+      "security": false,
+      "summary": "Refuse the one engine that claims it can seal a frame and cannot (#251)"
+    },
+    {
+      "commit": "669c6a71f35c00e4181e54c10b48e0cf9ca62a54",
+      "released_at": 1789700561000,
+      "security": false,
+      "summary": "Hold the member row whose profile card is open (#250)"
+    },
+    {
+      "commit": "efaf2f4f8c1be2e3635c513b859f1f372f267b74",
+      "released_at": 1789700258000,
+      "security": false,
+      "summary": "Let a click put one person on the stage, and ring your own face while you talk (#249)"
+    },
+    {
+      "commit": "39097f5c48d3d7aa17254995d715f6f1170e245d",
+      "released_at": 1789700099000,
+      "security": false,
+      "summary": "Let a tall page scroll, leave a face alone, and stop naming the transport (#248)"
+    },
+    {
+      "commit": "c9e0c8692a5fb3cc47c2f3257512a87e4cb437f3",
+      "released_at": 1789700073000,
+      "security": false,
+      "summary": "Give staging an SFU, and stop a region with no address from claiming to be one (#247)"
+    },
+    {
+      "commit": "cc2571e3ed9484a330b02296a6209566f49e2405",
+      "released_at": 1789699997000,
+      "security": false,
+      "summary": "Move the backups out of the volume they were a backup of (#246)"
+    },
+    {
+      "commit": "db457f6c42fb196f1b4cffc2155eb71983ac78bc",
+      "released_at": 1789699555000,
+      "security": false,
+      "summary": "Stop the presence card flickering, and draw it like a card (#245)"
+    },
+    {
+      "commit": "234185d81224ad3ff84e088be2487cecb58c25a8",
+      "released_at": 1789698996000,
+      "security": false,
+      "summary": "Put somebody's own words back beside their name in the opened-out profile (#244)"
+    },
+    {
+      "commit": "182b4b5a1bd9807fa7f0c0984aad8580998cf511",
+      "released_at": 1789698911000,
+      "security": false,
+      "summary": "Make a notification mean somebody said something to you (#243)"
+    },
+    {
+      "commit": "b6fba225e6be2b72578344ae87e809c5181f5e95",
+      "released_at": 1789698707000,
+      "security": false,
+      "summary": "Show the local camera again when it is turned back on (#242)"
+    },
+    {
+      "commit": "8d93251e842c3305e86e5638b9631646fca995ca",
+      "released_at": 1789698575000,
+      "security": false,
+      "summary": "Draw an emoji everywhere a name or a message is shown, and copy one out as itself (#240)"
+    },
+    {
+      "commit": "9a7cc3972629106271b8d5da1aa52d6992183fc8",
+      "released_at": 1789698571000,
+      "security": false,
+      "summary": "Sink the part of a link card that the site wrote, not the part we did (#239)"
+    },
+    {
+      "commit": "312fa432f4c40129b637aac90303544d6652a148",
+      "released_at": 1789698009000,
+      "security": false,
+      "summary": "Settle four stale assertions against the behaviour their code already chose (#238)"
+    },
+    {
+      "commit": "c3eaf78cc0070d4287af861f27e7aa4b1aeca8e8",
+      "released_at": 1789697408000,
+      "security": false,
+      "summary": "Search the whole server for somebody the member list has not loaded (#236)"
+    },
+    {
+      "commit": "89e2de0bbf6db0d8dc818422a235b03d3931cc4f",
+      "released_at": 1789696686000,
+      "security": false,
+      "summary": "Let a server decide whether signup offers anywhere but itself (#235)"
+    },
+    {
+      "commit": "e6ff2107d495cae534276f754b6a6f481acbe71f",
+      "released_at": 1789696587000,
+      "security": false,
+      "summary": "Break up the client's largest files and finish the shape vocabulary (#233)"
+    },
+    {
+      "commit": "021ea373993e32c6942ea229a7fd10f19d99e799",
+      "released_at": 1789693662000,
+      "security": false,
+      "summary": "Implement distributed homeserver onboarding (#216)"
+    },
+    {
+      "commit": "1b80b872f3cd70b34c26996b5a0b202d63000187",
+      "released_at": 1789690603000,
+      "security": false,
+      "summary": "Do not fail a published build because the cache would not save (#232)"
+    },
+    {
+      "commit": "e6d9b74b926ca3f8b00eef97e1818053f40d22cc",
+      "released_at": 1789690230000,
+      "security": false,
+      "summary": "Deploy main to staging without giving GitHub a key to the box (#231)"
+    }
+  ]
+}

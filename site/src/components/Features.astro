@@ -1,0 +1,143 @@
+---
+import Icon from './Icon.astro'
+
+const features = [
+  {
+    icon: 'server',
+    title: 'Choose where your account lives',
+    body: 'Pick a public homeserver you trust or run your own. Your first choice is not a permanent commitment.',
+    tone: 'featured',
+    kicker: 'Server choice',
+  },
+  {
+    icon: 'arrow-left-right',
+    title: 'Move without starting over',
+    body: 'Move your account to another homeserver later without creating a new identity and rebuilding from scratch.',
+    tone: 'accent',
+    kicker: 'Account migration',
+  },
+  {
+    icon: 'lock-keyhole',
+    title: 'Private messages stay private',
+    body: 'Direct messages and group DMs use end-to-end encryption. Your normal password can restore encrypted history without being sent to your homeserver; independent recovery is optional.',
+    tone: '',
+    kicker: 'Encrypted DMs',
+  },
+  {
+    icon: 'users',
+    title: 'One account across communities',
+    body: 'Join communities hosted on other Telium servers without making a separate account for every server you visit.',
+    tone: '',
+    kicker: 'One identity',
+  },
+] as const
+---
+
+<section class="band overflow-hidden" id="features">
+  <div class="page">
+    <div class="reveal grid gap-5 sm:grid-cols-[minmax(0,.8fr)_minmax(0,1.2fr)] sm:items-end">
+      <div>
+        <p class="eyebrow">Why Telium</p>
+        <h2 class="h2 mt-3 max-w-[14ch]">Choose your server. Keep your identity.</h2>
+      </div>
+      <p class="max-w-[58ch] text-[15px] leading-relaxed text-muted sm:justify-self-end">
+        Pick where your account lives, use it across communities on other servers, and move later
+        if your needs change.
+      </p>
+    </div>
+
+    <div class="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-6">
+      {
+        features.map((feature, index) => (
+          <article
+            class:list={[
+              'feature-card panel reveal relative overflow-hidden p-6',
+              index === 0 ? 'lg:col-span-4 lg:min-h-[270px]' : '',
+              index === 1 ? 'lg:col-span-2 lg:min-h-[270px]' : '',
+              index >= 2 ? 'lg:col-span-3' : '',
+              feature.tone === 'featured' ? 'feature-card-featured' : '',
+              feature.tone === 'accent' ? 'feature-card-accent' : '',
+            ]}
+          >
+            <div class="mb-8 flex items-center justify-between gap-4">
+              <span class="feature-icon"><Icon name={feature.icon} size={19} /></span>
+              <span class="eyebrow">{feature.kicker}</span>
+            </div>
+            <h3 class:list={['font-semibold tracking-[-.02em]', index === 0 ? 'text-[1.65rem] leading-tight' : 'text-[1.2rem]']}>
+              {feature.title}
+            </h3>
+            <p class="mt-3 max-w-[52ch] text-[14px] leading-relaxed text-muted">{feature.body}</p>
+
+            {index === 0 && (
+              <div class="mt-7 flex flex-wrap gap-2" aria-hidden="true">
+                <span class="pill mini-pill">public server</span>
+                <span class="pill mini-pill">self-host</span>
+                <span class="pill mini-pill">move later</span>
+              </div>
+            )}
+          </article>
+        ))
+      }
+    </div>
+  </div>
+</section>
+
+<style>
+  /* A card that lifts 3px and grows a 48px shadow under the pointer is the
+     house style this site is being taken *out* of. Hover moves the fill one
+     step instead — the same gesture the client gives a list row, and the only
+     thing on the card that changes. */
+  .feature-card {
+    transition: background-color var(--dur-3) var(--ease);
+  }
+
+  .feature-card:hover {
+    background: var(--color-surface-secondary);
+  }
+
+  /* The two emphasised cards are told apart by how much colour they hold, not
+     by a blurred glow bleeding off one corner. `--accent-soft` is the client's
+     quietest accent fill and it is legible in both themes, which a 14–18%
+     `color-mix` of the accent against the page was not in light. */
+  .feature-card-featured {
+    background: color-mix(in oklab, var(--color-accent-soft) 55%, var(--color-surface));
+  }
+
+  .feature-card-featured:hover {
+    background: color-mix(in oklab, var(--color-accent-soft) 75%, var(--color-surface));
+  }
+
+  .feature-card-accent {
+    background: color-mix(in oklab, var(--color-accent-soft) 30%, var(--color-surface));
+  }
+
+  .feature-card-accent:hover {
+    background: color-mix(in oklab, var(--color-accent-soft) 50%, var(--color-surface));
+  }
+
+  .feature-icon {
+    display: grid;
+    width: 2.4rem;
+    height: 2.4rem;
+    place-items: center;
+    border-radius: 0.6rem;
+    color: var(--color-accent-soft-foreground);
+    background: var(--color-accent-soft);
+  }
+
+  /* On a card that is already tinted with `--accent-soft`, an icon in the same
+     fill disappears. The two emphasised cards give it the solid accent instead,
+     which is the only other fill on the page that is allowed to be loud. */
+  .feature-card-featured .feature-icon,
+  .feature-card-accent .feature-icon {
+    color: var(--color-accent-solid-foreground);
+    background: var(--color-accent-solid);
+  }
+
+  /* Shape, fill and ink come from `.pill`; the only thing particular to these
+     three is the mono face, which is what makes them read as the names of
+     options rather than as prose. */
+  .mini-pill {
+    font-family: var(--font-mono);
+  }
+</style>

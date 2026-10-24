@@ -1,0 +1,20 @@
+-- Which claim the landed push spent.
+--
+-- A receipt written again, long after the import, has to close the claim that
+-- import ran on: saying "this landed" and leaving a token still good for a
+-- second import of the same subject are not consistent with each other. There
+-- was no column for it, so the re-issue matched on the subject tuple -- source,
+-- source id, kind -- and any local account may open a claim naming any source
+-- and any id it likes, so that predicate could spend a bystander's claim for a
+-- move that had not started yet, and nothing anywhere would say a receipt did
+-- it.
+--
+-- Rows written before this column exists carry the empty string, and for those
+-- the subject tuple is still the only question that can be asked, so it is what
+-- they keep. Spending nothing for them would not be the conservative choice it
+-- looks like: the claim would stay good, and the same bundle could be pushed
+-- again under a *fresh* migration id, where there is no log row to collide with
+-- and nothing to stop the subject landing twice. The set of such rows only
+-- shrinks -- no path writes a blank token now, and the claims they can reach
+-- expire with the week they had left.
+ALTER TABLE import_log ADD COLUMN token_hash TEXT NOT NULL DEFAULT '';

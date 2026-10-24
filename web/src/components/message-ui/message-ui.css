@@ -1,0 +1,733 @@
+/* Everything an application is allowed to draw.
+ * =========================================================================
+ *
+ * This sheet is loaded from `index.css`, next to `links.css` -- the unfurl and
+ * the app card are the two halves of one argument, so they sit together. It is
+ * the one house sheet that lives beside its components rather than in
+ * `src/*.css` with the client's other twenty, because every rule in it is
+ * scoped to what an application is allowed to draw and none of it is reachable
+ * from anywhere else in the client. Keeping it here means a change to the app
+ * card's look is one directory, not two.
+ *
+ * No module in this directory imports it. A CSS import from JSX would tie the
+ * sheet's arrival to whichever component happened to be code-split first,
+ * which is how a card renders unstyled for a frame.
+ *
+ * Nothing here is inside an `@layer`, which is what lets these rules beat a
+ * Tailwind utility without a specificity contest. See the note at the foot of
+ * `index.css` for why every house sheet is written that way.
+ *
+ * The house rules this sheet is built out of, so that none of them have to be
+ * re-argued here:
+ *
+ *   * Nothing is lifted. There are no shadows in this file and there must not
+ *     be one: a card is told apart from the page by its colour, not by an edge
+ *     or by floating over it.
+ *   * A press is a change of brightness, never a change of size. `motion.css`
+ *     already applies `filter: brightness(var(--press))` to every `button` and
+ *     `[role="button"]` in the client, which is every control in this file, so
+ *     the press is inherited and not restated.
+ *   * The focus ring is `focus.css`'s, inset, and it is inherited by every
+ *     `button`, `a` and `[role="option"]` here for the same reason.
+ *   * Durations come from `--dur-*`, which `reduced-motion.css` zeroes when
+ *     somebody has asked for less movement. Reading them is how a component
+ *     honours that preference without knowing it exists.
+ */
+
+/* The one colour an application chooses, and the ink that has to stay legible
+ * on the two fills this client actually has. `--success` is a mid-green on the
+ * light theme and a bright one on the dark, so white ink is right on one and
+ * unreadable on the other; the pair below tracks the theme the same way the
+ * palette's own `-foreground` tokens do. The app-chosen accent falls back to
+ * the house accent, so a card that sends no colour is purple like everything
+ * else rather than grey. */
+:root {
+  --mc-accent: var(--accent);
+  --mc-success-ink: oklch(100% 0 0);
+}
+
+:root[data-theme="dark"] {
+  --mc-success-ink: oklch(20% 0.03 155);
+}
+
+/* Every piece of text on this surface was written by a third party, so every
+ * piece of text on this surface has to survive a third party writing two
+ * thousand characters with no spaces in them. `anywhere` breaks inside a word
+ * when there is no other option, which is what stops one hostile label from
+ * setting the width of the whole timeline. The clamps in
+ * `lib/interactions.js` are the other half of this: they bound the length,
+ * this bounds the damage a bounded length can still do. */
+.mc-btn__text,
+.mc-option__label,
+.mc-option__hint,
+.mc-select__value,
+.appcard__title,
+.appcard__text,
+.appcard__author-name,
+.appcard__field-name,
+.appcard__field-value,
+.appcard__foot-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* ------------------------------------------------------------ the rows */
+
+.mc-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  /* A row of controls is as wide as its controls. In the stretching flex
+     column a message body is, it has to say so or it takes the whole width and
+     the select's popup below is positioned against a box the size of the
+     room. */
+  align-items: flex-start;
+  max-width: min(520px, 100%);
+}
+
+.mc-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  /* Five buttons on one row is legal in the contract and will not fit on a
+     phone, so the row wraps rather than scrolling sideways or clipping. */
+  width: 100%;
+}
+
+/* --------------------------------------------------------- the buttons */
+
+.mc-btn {
+  --mc-btn-fill: var(--surface-secondary);
+  --mc-btn-ink: var(--foreground);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  /* A ceiling, not a width. A button is as wide as its label until its label
+     is somebody being difficult, at which point it stops growing and the label
+     wraps inside it. */
+  max-width: 100%;
+  padding: 5px 12px;
+  /* The row corner, because a button is a row you can press -- the same
+     argument `components/Button.jsx` makes about the house button. */
+  border-radius: var(--radius-row);
+  border: 0;
+  background: var(--mc-btn-fill);
+  color: var(--mc-btn-ink);
+  font: inherit;
+  font-size: 0.8125rem; /* 13px */
+  font-weight: 500;
+  line-height: 1.3;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease), opacity var(--dur-1) var(--ease);
+}
+
+.mc-btn:not(:disabled):not([aria-disabled="true"]):hover {
+  /* One step up the same ramp the house's quiet button uses, so an app's
+     secondary button and Telium's own answer a pointer identically. A filled
+     button has nowhere on the ramp to go, so it brightens instead -- the same
+     gesture the press makes, one size smaller. */
+  background: var(--surface-tertiary);
+}
+
+.mc-btn--primary,
+.mc-btn--success,
+.mc-btn--danger {
+  color: var(--mc-btn-ink);
+}
+
+.mc-btn--primary {
+  --mc-btn-fill: var(--accent-solid);
+  --mc-btn-ink: var(--accent-solid-foreground);
+}
+
+.mc-btn--success {
+  --mc-btn-fill: var(--success);
+  --mc-btn-ink: var(--mc-success-ink);
+}
+
+.mc-btn--danger {
+  --mc-btn-fill: var(--danger);
+  --mc-btn-ink: var(--danger-foreground);
+}
+
+.mc-btn--primary:not(:disabled):hover,
+.mc-btn--success:not(:disabled):hover,
+.mc-btn--danger:not(:disabled):hover {
+  background: var(--mc-btn-fill);
+  filter: brightness(1.08);
+}
+
+/* A link button is the one style that is not a button, and it says so. It
+   carries the client's link colour and a small outbound glyph, because the
+   thing a reader most needs to know about it is that pressing it leaves
+   Telium -- everything else in this row does something here. */
+.mc-btn--link {
+  --mc-btn-ink: var(--link);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.mc-btn--link:not([aria-disabled="true"]):hover {
+  background: var(--surface-secondary);
+}
+
+.mc-btn__glyph {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  opacity: 0.7;
+}
+
+.mc-btn--sm {
+  min-height: 26px;
+  padding: 3px 10px;
+  font-size: 0.75rem; /* 12px */
+}
+
+.mc-btn:disabled,
+.mc-btn--off,
+.mc-btn[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The label and the spinner in one grid cell, so a busy button keeps the
+   width it had. A control that narrows when pressed moves the four beside it,
+   which in a row of buttons means the one somebody was about to press next is
+   no longer where they saw it. Same trick, same reason, as `Button.jsx`. */
+.mc-btn__stack {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+}
+
+.mc-btn__stack > * {
+  grid-area: 1 / 1;
+}
+
+.mc-btn__stack.is-busy .mc-btn__label {
+  visibility: hidden;
+}
+
+.mc-btn__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mc-btn__spinner {
+  width: 15px;
+  height: 15px;
+}
+
+/* --------------------------------------------------------- the select */
+
+.mc-select {
+  position: relative;
+  min-width: 180px;
+  max-width: 100%;
+}
+
+.mc-select__trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: var(--radius-row);
+  /* The field ramp rather than the button ramp: this is a control you read a
+     value out of, which is what every filled input in the client looks like.
+     See `fields.css` for the argument. */
+  background: var(--field-background);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.8125rem; /* 13px */
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease);
+}
+
+.mc-select__trigger:not(:disabled):hover {
+  background: var(--surface-tertiary);
+}
+
+.mc-select__trigger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.mc-select__value {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* One line in the trigger. The full text is in the list below it, which is
+     where somebody reads it; the trigger is a summary and a summary that grows
+     to four lines pushes the message under it down every time a choice
+     changes. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mc-select__value.is-placeholder {
+  color: var(--muted);
+}
+
+.mc-select__glyph {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--muted);
+}
+
+.mc-select__list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  /* A dropdown hangs from the edge of its trigger that the label starts at,
+     so that the option text lines up with the closed control's text. That is
+     the inline-start edge, which is the left in English and the right in
+     Arabic; `left: 0` pins it to the wrong edge in the second case and the
+     panel appears to slide out from under the control. */
+  inset-inline-start: 0;
+  min-width: 100%;
+  max-width: min(360px, 90vw);
+  /* Taller than this and it is a scroller. Twenty-five options is the
+     contract's ceiling and twenty-five rows is most of a laptop screen. */
+  max-height: 280px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+  border-radius: var(--radius-card);
+  /* The popup surface, which is the one place in this sheet something sits
+     over something else. It is still flat: it is told apart from the page by
+     being a lighter fill, the same way the menu and the emoji picker are. */
+  background: var(--overlay);
+  box-shadow: none;
+  outline: 1px solid var(--border);
+  outline-offset: -1px;
+}
+
+.mc-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: var(--radius-lg, 8px);
+  cursor: pointer;
+  font-size: 0.8125rem; /* 13px */
+}
+
+/* The active option is the keyboard's cursor, not the pointer's hover: arrow
+   keys move it without moving focus, which is what `aria-activedescendant`
+   means, and the pointer sets it on enter so the two never disagree about
+   where the cursor is. */
+.mc-option.is-active {
+  background: var(--surface-tertiary);
+}
+
+.mc-option__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.mc-option__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.mc-option__hint {
+  color: var(--muted);
+  font-size: var(--text-2xs);
+  line-height: 1.45;
+}
+
+.mc-option__tick {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  margin-top: 1px;
+  color: var(--accent);
+}
+
+.mc-select__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 6px 4px 2px;
+  border-top: 1px solid var(--separator);
+}
+
+.mc-select__count {
+  color: var(--muted);
+  font-size: var(--text-2xs);
+}
+
+/* ----------------------------------------------------------- the cards */
+
+.appcards {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding-top: 6px;
+}
+
+.appcard {
+  position: relative;
+  display: block;
+  width: fit-content;
+  max-width: min(460px, 100%);
+  min-width: 0;
+  align-self: flex-start;
+  overflow: hidden;
+  border-radius: var(--radius-card);
+  /* One fill, all the way through, and it is not the unfurl's.
+     `views/chat/Embeds.jsx` draws `--surface` with a `--background` well sunk
+     into it, because the words in an unfurl are a quotation from a stranger's
+     website. Nothing on this card is a quotation -- an application composed
+     all of it on purpose -- so there is no well, and the single block of
+     `--surface-secondary` is what tells the two card shapes apart at a glance
+     from across the room, before anybody has read a word of either. */
+  background: var(--surface-secondary);
+}
+
+/* The colour an application chose. A band, and only a band: an application
+   that could set this card's fill could paint it the colour of the client's
+   own error banner, or of the page, and draw something that does not read as a
+   message at all. Three pixels along the top edge cannot impersonate
+   anything. */
+.appcard::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: var(--mc-accent);
+}
+
+/* Ours, and it is the first thing on the card. The message already carries
+   this name and a BOT badge in its header, but a card is frequently the whole
+   message and is read -- and screenshotted, and quoted -- on its own, so the
+   attribution is restated where the card can carry it by itself. */
+.appcard__from {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 9px 14px 0;
+  color: var(--muted);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.appcard__from-glyph {
+  width: 11px;
+  height: 11px;
+  flex: none;
+}
+
+.appcard__from-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appcard__body {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 6px 14px 12px;
+}
+
+.appcard__main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.appcard__author {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.78125rem; /* 12.5px */
+  font-weight: 600;
+}
+
+.appcard__author-icon {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.appcard__author-name {
+  color: var(--foreground);
+  text-decoration: none;
+}
+
+a.appcard__author-name:hover {
+  text-decoration: underline;
+}
+
+.appcard__title {
+  margin: 0;
+  font-size: 0.9375rem; /* 15px */
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--foreground);
+}
+
+.appcard__title--link {
+  color: var(--link);
+  text-decoration: none;
+}
+
+.appcard__title--link:hover {
+  text-decoration: underline;
+}
+
+.appcard__text {
+  margin: 0;
+  font-size: 0.84375rem; /* 13.5px */
+  line-height: 1.5;
+  color: var(--muted);
+  /* The newlines an application wrote are kept -- `plainText` has already
+     capped a run of blank lines at two, so this cannot be used to push the
+     rest of the channel off the screen. */
+  white-space: pre-wrap;
+}
+
+.appcard__fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin-top: 2px;
+}
+
+.appcard__field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  /* `inline` in the contract means "share a line with the next one". A field
+     that is not inline spans the grid, which is the same thing said in the
+     layout's own words. */
+  grid-column: span 1;
+}
+
+.appcard__field.is-wide {
+  grid-column: 1 / -1;
+}
+
+.appcard__field-name {
+  font-size: 0.78125rem; /* 12.5px */
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.appcard__field-value {
+  font-size: 0.8125rem; /* 13px */
+  line-height: 1.45;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
+.appcard__thumb {
+  width: 68px;
+  height: 68px;
+  flex: none;
+  border-radius: var(--radius-row);
+  object-fit: cover;
+}
+
+.appcard__media {
+  padding: 0 14px 12px;
+}
+
+.appcard__media img,
+.appcard__media canvas {
+  max-width: 100%;
+  border-radius: var(--radius-row);
+}
+
+.appcard__foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px 12px;
+  color: var(--muted);
+  font-size: var(--text-2xs);
+  line-height: 1.45;
+}
+
+.appcard__foot-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+/* ----------------------------------------------------------- the modal */
+
+/* The dialog shape is the client's own -- it is the shape that asks for a
+   password -- so an application's version of it is marked. The tint is the
+   accent at a few per cent, which is enough to read as "this one is not the
+   usual one" beside a house dialog and not enough to fight the fields inside
+   it. The strip below does the saying; this does the noticing. */
+.mc-modal {
+  display: contents;
+}
+
+.mc-modal__origin {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+  padding: 8px 10px;
+  border-radius: var(--radius-row);
+  background: color-mix(in oklch, var(--accent) 12%, var(--surface-secondary));
+  color: var(--foreground);
+  font-size: 0.78125rem; /* 12.5px */
+  line-height: 1.45;
+}
+
+.mc-modal__origin b {
+  font-weight: 600;
+}
+
+.mc-modal__origin-glyph {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  color: var(--accent);
+}
+
+/* The standing warning. It is not conditional on what the fields say: a
+   warning that appears only when this client thinks it smells a phishing
+   attempt is a warning whose absence teaches people the form is safe. */
+.mc-modal__warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+}
+
+.mc-modal__warn-glyph {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin-top: 1px;
+  color: var(--warning);
+}
+
+/* A field this client is complaining about. The house field says "focused" by
+   its fill stepping up the ramp rather than by an outline (see `fields.css`),
+   so "wrong" is said the same way -- in the box, not around it. */
+.mc-field--bad input,
+.mc-field--bad textarea {
+  background: color-mix(in oklch, var(--danger) 10%, var(--field-background));
+}
+
+/* ------------------------------------------------------- the ephemeral */
+
+/* A message only this reader can see.
+ *
+ * The problem this solves is that an ephemeral reply is, to look at, an
+ * ordinary message in an ordinary channel -- and it is not one. Nobody else
+ * can see it, it is not in anybody's history including this reader's, and it
+ * is gone on reload. A reader who does not know that will reply to it, quote
+ * it, or ask somebody else to look at it.
+ *
+ * So it is drawn as a thing resting on the timeline rather than a thing in it:
+ * inset from the stream's own gutter, on the card fill instead of the page,
+ * with a label along the top saying who can see it and a control to dismiss
+ * it. The dashed edge is the one place in this client something is dashed, and
+ * it is here because dashed means provisional in every drawing convention
+ * there is -- this is the one message in the room that is not a matter of
+ * record. */
+.mc-ghost {
+  position: relative;
+  margin: 4px 0;
+  padding: 8px 12px 10px;
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  outline: 1px dashed var(--border);
+  outline-offset: -1px;
+}
+
+.mc-ghost__mark {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 4px;
+  color: var(--muted);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.mc-ghost__glyph {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+
+.mc-ghost__spacer {
+  flex: 1 1 auto;
+}
+
+.mc-ghost__dismiss {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: var(--radius-row);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.mc-ghost__dismiss:hover {
+  background: var(--surface-secondary);
+  color: var(--foreground);
+}
+
+.mc-ghost__body {
+  font-size: 0.875rem; /* 14px */
+  line-height: 1.55;
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+}

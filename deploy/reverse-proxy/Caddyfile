@@ -1,0 +1,67 @@
+# A reverse proxy in front of a Telium homeserver, for Caddy.
+#
+# Shorter than the nginx version, and that is Caddy's doing rather than a
+# difference in what is being asked for. Caddy gets certificates by itself,
+# proxies WebSocket upgrades without being told, streams rather than buffers,
+# and has no read timeout to trip over. So most of the nginx file's careful
+# lines have no counterpart here, and the ones that remain are the ones that
+# are about Telium rather than about the proxy.
+#
+#   caddy run --config Caddyfile
+#   # or: install to /etc/caddy/Caddyfile and `systemctl reload caddy`
+#
+# See docs/production.md for what goes around this.
+
+telium.example.org {
+	# Everything is one listener on the server side -- API, federation, the
+	# WebSocket gateway, the admin routes, and the static client. Caddy
+	# forwards the Upgrade and Connection headers for a WebSocket request
+	# without configuration, and streams responses rather than accumulating
+	# them, so a gateway connection works here by default.
+	reverse_proxy 127.0.0.1:8448 {
+		# Caddy sets X-Forwarded-For, X-Forwarded-Proto and X-Forwarded-Host
+		# itself. What it cannot do is make the server believe them: add this
+		# proxy's address to `rate_limit.trusted_proxies` in the server
+		# config, or every request arrives looking like it came from here and
+		# the rate limiter is counting one client with all of the traffic.
+		# Nothing errors when this is missed. It just does the wrong thing.
+
+		# A gateway connection is idle between heartbeats, 45 seconds apart.
+		# Caddy has no read timeout by default, so this is stated rather than
+		# changed -- it is here so that anybody who adds one later knows what
+		# it has to clear.
+		transport http {
+			read_timeout 0
+			write_timeout 0
+		}
+	}
+
+	# Large enough for the biggest upload the server will accept, plus the
+	# multipart envelope. `media_policy.max_file_bytes` defaults to 100 MB; if
+	# you raise that, raise this, or uploads fail here with a 413 that the
+	# server never sees and cannot explain.
+	request_body {
+		max_size 128MB
+	}
+
+	# The server sets its own security headers and chooses them to match what
+	# the client needs. Do not add a Content-Security-Policy here: two policies
+	# are intersected rather than merged, and the usual result is a client that
+	# half-loads with nothing in any log to say why.
+
+	encode zstd gzip
+
+	log {
+		output file /var/log/caddy/telium.log
+	}
+}
+
+# If the name in user ids is not the name clients connect to, the first name
+# still has to serve the delegation document. Two lines, and it is the whole of
+# what `public_base_url` needs from the apex:
+#
+# example.org {
+# 	handle /.well-known/telium/* {
+# 		reverse_proxy 127.0.0.1:8448
+# 	}
+# }

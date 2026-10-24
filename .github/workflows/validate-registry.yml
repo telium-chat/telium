@@ -1,0 +1,69 @@
+name: Validate registry
+
+on:
+  pull_request:
+    paths:
+      - 'site/registry/**'
+      - 'site/scripts/validate-registry.mjs'
+      - '.github/workflows/validate-registry.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'site/registry/**'
+      - 'site/scripts/validate-registry.mjs'
+
+permissions:
+  contents: read
+
+# One run of this workflow per pull request. Without this, a rebase or a
+# follow-up commit left the superseded run queued, and on a single self-hosted
+# runner that is not a wasted minute somewhere else -- it is the front of the
+# queue, held by a build of a commit nobody is waiting for any more, while the
+# run someone is waiting for sits behind it. Every other workflow here already
+# says this; these three were the ones that did not.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: site
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      # Every `uses:` below names a commit, not a tag. A tag is a mutable
+      # pointer that the action's owner -- or anyone who takes their account
+      # -- can move onto new code, and this repository's runs would then
+      # execute it without a diff, a review, or a notification. The trailing
+      # comment is the release that commit was, so the pin is still readable;
+      # `docs/supply-chain.md` explains how to move one forward.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      # The validator has no dependencies — it is deliberately plain Node so a
+      # first-time contributor can run it without installing anything.
+      - name: Validate registry/servers.json
+        run: node scripts/validate-registry.mjs
+
+  # Advisory, not required: a listing is judged on whether the server answers,
+  # and the fastest way to tell a contributor their DNS or TLS is wrong is to
+  # try it here rather than after the merge. Failing this job does not fail the
+  # PR — a server can be briefly down while its operator is filing the entry.
+  reach:
+    runs-on: ubuntu-latest
+    needs: validate
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Probe every domain in the registry
+        run: node scripts/probe.mjs

@@ -1,0 +1,77 @@
+name: Migration conformance
+
+# Old bundles keep importing: every account and guild bundle frozen under
+# server/tests/fixtures/migration/ is imported into this server and compared,
+# row by row, with what landed, then moved on to a third server and compared
+# again. A failure names the frozen shape, the row and the column that
+# differed. Runs on every change to the server (docs/migration.md,
+# "Conformance suite").
+
+on:
+  pull_request:
+    paths:
+      - 'server/**'
+      - 'sdk/bot/js/**'
+      - '.github/workflows/migration-conformance.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'server/**'
+      - 'sdk/bot/js/**'
+      - '.github/workflows/migration-conformance.yml'
+
+concurrency:
+  group: migration-conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  migration-conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # Every `uses:` below names a commit, not a tag. A tag is a mutable
+      # pointer that the action's owner -- or anyone who takes their account
+      # -- can move onto new code, and this repository's runs would then
+      # execute it without a diff, a review, or a notification. The trailing
+      # comment is the release that commit was, so the pin is still readable;
+      # `docs/supply-chain.md` explains how to move one forward.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch @ 2026-09-03
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: server
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      - name: Focused notification tests
+        run: cargo test --manifest-path server/Cargo.toml --test notifications --test notification_push_auth
+
+      - name: Conformance suite (every frozen bundle, imported and moved on)
+        run: cargo test --manifest-path server/Cargo.toml --test conformance
+
+      - name: Bot platform security and federation suite
+        run: >-
+          cargo test --manifest-path server/Cargo.toml
+          --test bots
+          --test bot_ratelimit
+          --test bot_receipts
+          --test bot_account_migration
+          --test bot_relocation
+
+      - name: Bot SDK tests
+        run: |
+          node --check sdk/bot/js/src/index.js
+          node --check sdk/bot/js/examples/ping.js
+          node --test sdk/bot/js/test/*.test.js
+
+      - name: Migration round-trip suite
+        run: cargo test --manifest-path server/Cargo.toml --test migration
+

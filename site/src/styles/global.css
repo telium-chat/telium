@@ -1,0 +1,549 @@
+@import "tailwindcss";
+
+/* The client's own files, imported rather than copied.
+ *
+ * These five are the product's colour, motion and focus decisions, and until
+ * now this site restated them by hand. A hand copy of a palette is a promise
+ * to notice when the original moves, and nobody ever does: the block that used
+ * to sit here still described the neutrals as carrying "a little blue at hue
+ * 250", which had not been true of the client since it went purple.
+ *
+ * They import cleanly because they are plain CSS with no dependency on the
+ * app: `palette.css` is two `:root` blocks, `motion.css` is tokens and
+ * keyframes, `reduced-motion.css` is one media query naming the animations
+ * this page also uses, and `focus.css` is a single ring. What is *not*
+ * shareable is the client's controls, which are Kumo React components styled
+ * through `--color-kumo-*`; a static Astro page cannot mount them, so the
+ * button geometry below is restated here deliberately. That is the seam, and
+ * it is drawn where the technology actually changes rather than anywhere
+ * convenient.
+ *
+ * The paths reach across package boundaries into `web/`, which is why the
+ * Astro config has to allow Vite to serve from the repo root. */
+@import "../../../web/src/brand-tokens.css";
+@import "../../../web/src/palette.css";
+@import "../../../web/src/motion.css";
+@import "../../../web/src/reduced-motion.css";
+@import "../../../web/src/focus.css";
+
+/* Self-hosted, not fetched from a font CDN. The client makes this choice for a
+   protocol reason — a federated client that phones a third party on every page
+   load leaks which server you are using to a company with no part in the
+   conversation — and the footer of this site repeats the claim, so the site has
+   to keep it too. */
+@import "@fontsource-variable/ibm-plex-sans";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+
+@source "../";
+
+/* --- theme ----------------------------------------------------------------
+   Tailwind's `@theme` is what turns each palette token into a utility class —
+   `bg-surface`, `text-muted`. The names below are the client's, pointed at the
+   properties `palette.css` declares, so a `[data-theme]` swap re-tints every
+   utility on the page without regenerating a class and no component file
+   repeats a colour.
+
+   This registration stays site-side rather than importing the client's
+   `theme.css`, for one reason: the type scale. The client's runs a step
+   tighter than a document's on purpose — a chat client is scanned, not read —
+   and a marketing page wants the opposite. Sharing the colours while keeping
+   our own reading sizes is the whole of the difference between the two. */
+@theme {
+  --font-sans:
+    "IBM Plex Sans Variable", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --color-background: var(--background);
+  --color-background-secondary: var(--background-secondary);
+  --color-surface: var(--surface);
+  --color-surface-secondary: var(--surface-secondary);
+  --color-surface-tertiary: var(--surface-tertiary);
+  --color-overlay: var(--overlay);
+  --color-muted: var(--muted);
+  --color-foreground: var(--foreground);
+  --color-border: var(--border);
+  --color-border-secondary: var(--border-secondary);
+  --color-separator: var(--separator);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-soft-foreground: var(--accent-soft-foreground);
+  /* The accent as a *fill*, which is not the same colour as the accent as ink.
+     The dark theme's link colour is lilac so it can be read on the page; a
+     button painted that same lilac has nothing left to put ink on. The client
+     splits the two for exactly this reason and so does the site — the primary
+     button is the only filled control here, and it is filled with this. */
+  --color-accent-solid: var(--accent-solid);
+  --color-accent-solid-foreground: var(--accent-solid-foreground);
+  --color-link: var(--link);
+  --color-focus: var(--focus);
+
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-soft-foreground: var(--danger-soft-foreground);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
+
+  --color-rail: var(--rail);
+  --color-strip: var(--strip);
+
+  /* Two shapes with names instead of numbers, matching the client's: a control
+     you press, and a surface that holds content. The page's panels are larger
+     than the app's rows, so `--radius-card` is the common one here where in the
+     client it is the exception. */
+  --radius-row: 10px;
+  --radius-card: 16px;
+  --radius-md: 6px;
+  --radius-lg: var(--radius-row);
+  --radius-xl: 12px;
+  --radius-2xl: var(--radius-card);
+
+  --ease-rise: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-1: 90ms;
+  --dur-2: 140ms;
+  --dur-3: 200ms;
+  --dur-4: 280ms;
+}
+
+/* What this site changes about the shared palette, and why each one.
+ *
+ * Everything not named here is the client's value, arriving from
+ * `palette.css`. These are the places where a page read at arm's length
+ * genuinely wants something a chat window does not. */
+:root,
+:root[data-theme="light"] {
+  /* Darker than the client's light-mode amber, which is the one real
+     divergence. There it tints icons and borders; here it is 13px text — an
+     uptime figure and a sunset notice — and at the client's 70% lightness that
+     measures 2.7:1 on this background. 52% measures 4.88:1 and is still
+     plainly amber. */
+  --warning: oklch(52% 0.125 72);
+  --success: oklch(52% 0.115 155);
+
+  /* A shade stronger than the client's. There a separator divides rows inside
+     a dense list and wants to disappear; here it is the rule between two
+     full-width bands of the same fill, seen across a 1120px column, and the
+     client's value is invisible at that distance. */
+  --separator: oklch(90.5% 0.014 298);
+
+  /* The two page glows, which the client has no equivalent of — it is a fixed
+     app shell and this is a scrolling page. Purple carries on a dark ground and
+     turns to mud on a pale one, so the light theme spends much less of it. It
+     spends less again than first drawn: on a pale page a glow can only darken,
+     and `--muted` over the near glow's centre measured 4.7:1 where the same
+     text on bare `--background` measures 5.22:1. The glow is decoration and the
+     text is not, so the glow gives the margin back. */
+  --glow-near: color-mix(in oklab, var(--telium-amethyst) 5.5%, transparent);
+  --glow-far: color-mix(in oklab, var(--telium-violet) 4.5%, transparent);
+
+  color-scheme: light;
+  accent-color: var(--accent);
+}
+
+:root[data-theme="dark"] {
+  --separator: oklch(30% 0.022 296);
+  --glow-near: color-mix(in oklab, #6740c7 20%, transparent);
+  --glow-far: color-mix(in oklab, #8b5fe8 9%, transparent);
+
+  color-scheme: dark;
+}
+
+/* --- base ------------------------------------------------------------------
+   The client sets its type in the 10.5–14px range because it is a dense
+   interface where every pixel of chrome is a pixel not spent on a message. A
+   page meant to be *read* wants the opposite, so the scale below is the one
+   thing here deliberately unlike the app. Same tokens, different distance from
+   the reader's eye. */
+@layer base {
+  /* The clip is on all three on purpose. An `overflow` set only on `body` is
+     propagated to the viewport and `body` is then painted as if `visible`, so
+     the hero watermark that deliberately bleeds past the right edge still
+     counted toward `scrollWidth` -- nothing scrolled, but the document measured
+     wider than the window. Naming the value on `html` keeps the viewport rule
+     there and lets `body` clip its own ink; `main` is the outermost full-bleed
+     box, so clipping there cuts the bleed at the window edge, which is where it
+     was always meant to end, instead of leaving an overflow area that a
+     full-page capture still renders. */
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+    overflow-x: clip;
+  }
+
+  #main {
+    overflow-x: clip;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    overflow-x: clip;
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-size: 16px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Two glows for the whole document, fixed to the viewport, rather than one
+     per section. Seven sections each fading their own corner is what made the
+     old page read as a stack of unrelated panels; a single light source behind
+     all of them is one page. They are `fixed` and unblurred — a `filter: blur()`
+     on something this large is a full-viewport raster on every scroll, and a
+     radial-gradient with a soft stop already has no edge to blur. */
+  body::before,
+  body::after {
+    content: "";
+    position: fixed;
+    z-index: -1;
+    border-radius: 999px;
+    pointer-events: none;
+  }
+
+  body::before {
+    width: min(70vw, 900px);
+    aspect-ratio: 1;
+    right: -12vw;
+    top: -24vw;
+    background: radial-gradient(circle, var(--glow-near), transparent 70%);
+  }
+
+  body::after {
+    width: min(52vw, 680px);
+    aspect-ratio: 1;
+    left: -16vw;
+    top: 42vh;
+    background: radial-gradient(circle, var(--glow-far), transparent 68%);
+  }
+
+  ::selection {
+    background-color: color-mix(in oklab, var(--color-accent) 26%, transparent);
+  }
+
+  /* The ring itself comes from the client's `focus.css`, which already covers
+     every anchor, button and `[role]` on this page. Two gaps are left, both
+     because the client has no equivalent element: this site has real form
+     fields outside a React component, and it has `.btn` — an anchor that is a
+     box. `focus.css` pushes the ring outside any anchor without a `rounded`
+     class, which is right for a run of text in a paragraph and wrong for a
+     button, so `.btn` takes the inset ring back. */
+  :where(input, select, textarea):focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: -2px;
+  }
+
+  a.btn:focus-visible {
+    outline-offset: -2px;
+  }
+
+  /* Nothing slides, sinks or scales under the pointer — the press is
+     `motion.css`'s `filter: brightness(var(--press))`, applied in place. That
+     rule matches `button` and `[role="button"]`, which is everything that can
+     be pressed in the client; on this site most of the buttons are links, so
+     the same declaration has to reach `a.btn` and `summary` as well. */
+  :where(a.btn, summary):active {
+    filter: brightness(var(--press));
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) transparent;
+  }
+}
+
+/* --- type utilities -------------------------------------------------------- */
+
+@utility display {
+  font-size: clamp(3rem, 1.6rem + 4.7vw, 5.4rem);
+  line-height: 0.98;
+  font-weight: 650;
+  letter-spacing: -0.045em;
+  text-wrap: balance;
+}
+
+@utility h2 {
+  font-size: clamp(1.75rem, 1.35rem + 1.5vw, 2.125rem);
+  line-height: 1.18;
+  font-weight: 600;
+  letter-spacing: -0.022em;
+  text-wrap: balance;
+}
+
+@utility h3 {
+  font-size: 1.0625rem;
+  line-height: 1.4;
+  font-weight: 600;
+  letter-spacing: -0.011em;
+}
+
+@utility lead {
+  font-size: 1.1875rem;
+  line-height: 1.6;
+  color: var(--color-muted);
+  text-wrap: pretty;
+}
+
+/* The label above a section. One utility so every file agrees what a section
+   heading is — same contract as the client's, one size up because this page is
+   read from further away. */
+@utility eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.4;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-muted);
+}
+
+/* Numbers line up in the directory table, where a column of latencies that
+   jitters by glyph width is unreadable at a glance. */
+@utility tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+.telium-wordmark-light {
+  display: none;
+}
+
+:root[data-theme="dark"] .telium-wordmark-dark {
+  display: none;
+}
+
+:root[data-theme="dark"] .telium-wordmark-light {
+  display: block;
+}
+
+/* --- motion ----------------------------------------------------------------
+   The curves, the four duration tokens and `rise-in` itself all arrive from the
+   client's `motion.css`, and `reduced-motion.css` already names `.rise-in`
+   among the animations it switches off. What is left here is the one thing the
+   client has no use for: this page reveals its sections on scroll, because a
+   page that animates eight things at once on arrival animates nothing. */
+
+@supports (animation-timeline: view()) {
+  .reveal {
+    animation: rise-in linear both;
+    animation-timeline: view();
+    animation-range: entry 0% entry 42%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* `reduced-motion.css` zeroes the duration tokens and stops the shared
+     animations; these two are the page's own. A scroll-driven animation has no
+     duration to zero, so it has to be named. */
+  html {
+    scroll-behavior: auto;
+  }
+
+  .reveal {
+    animation: none;
+  }
+}
+
+/* --- layout + controls -----------------------------------------------------
+   Three things every section needs, defined once rather than as a string of
+   utilities copy-pasted across nine files. The measure is 1120px because the
+   directory table wants room and prose is capped separately at ~62ch — a page
+   wide enough for a table is far too wide for a paragraph. */
+@layer components {
+  .page {
+    margin-inline: auto;
+    width: 100%;
+    max-width: 1120px;
+    padding-inline: 1.5rem;
+  }
+
+  @media (min-width: 640px) {
+    .page {
+      padding-inline: 2rem;
+    }
+  }
+
+  /* The client's button geometry, and only that: 40px tall, 16px of side
+     padding, a 10px corner, 13px text at weight 500, a flat fill, no border, no
+     ring and no shadow. Copying the geometry while keeping a hover lift and a
+     glow underneath would be the worst of both, so neither survives — hover
+     moves the fill, press moves the brightness, and nothing moves in space. */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    height: 40px;
+    border: 0;
+    border-radius: var(--radius-row);
+    padding-inline: 16px;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    transition:
+      background-color var(--dur-2) var(--ease),
+      color var(--dur-2) var(--ease),
+      filter var(--dur-2) var(--ease);
+  }
+
+  .btn-primary {
+    background: var(--color-accent-solid);
+    color: var(--color-accent-solid-foreground);
+  }
+
+  .btn-primary:hover {
+    filter: brightness(1.1);
+  }
+
+  /* The secondary button is a fill step, not an outline. On this palette
+     `--surface` is already a step above the page, which is the same move every
+     panel on the site makes — so the two buttons differ by how much colour they
+     spend, not by one having a box and the other not. */
+  .btn-secondary {
+    background: var(--color-surface);
+    color: var(--color-foreground);
+  }
+
+  .btn-secondary:hover {
+    background: var(--color-surface-secondary);
+  }
+
+  .btn-lg {
+    height: 44px;
+    padding-inline: 1.15rem;
+    font-size: 14px;
+  }
+
+  .btn:disabled,
+  .btn[aria-disabled="true"],
+  .btn-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+    filter: none !important;
+  }
+
+  /* A square ghost control, the shape the client gives every toolbar icon:
+     transparent at rest, a wash of the foreground on hover. A wash rather than
+     a named surface token because these sit on four different fills across the
+     site — the header bar, a panel, a table row — and a fixed grey would be
+     wrong on three of them. */
+  .icon-btn {
+    display: inline-grid;
+    place-items: center;
+    border: 0;
+    border-radius: var(--radius-row);
+    background: transparent;
+    color: var(--color-muted);
+    cursor: pointer;
+    transition:
+      background-color var(--dur-2) var(--ease),
+      color var(--dur-2) var(--ease),
+      filter var(--dur-2) var(--ease);
+  }
+
+  .icon-btn:hover {
+    background: color-mix(in oklab, var(--color-foreground) 9%, transparent);
+    color: var(--color-foreground);
+  }
+
+  /* The client's row primitive, restated at the one place this site needs it.
+     `web/src/shell.css` owns the original: a row is told from its neighbours by
+     a change of fill rather than by a line, it takes `--radius-row`, and it
+     does not move, scale or cast a shadow. That file is the *app's* shell —
+     rail, sidebar, members pane — and importing twenty-two kilobytes of it to
+     use one rule on a marketing page is a worse trade than restating eight
+     declarations and saying where they came from.
+
+     The metrics are the client's with the volume up: a nav link on a page read
+     at arm's length is not one of forty in a 248px column, so it is 34px rather
+     than 32 and set at the site's reading size. */
+  .nav-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 34px;
+    padding-inline: 12px;
+    border-radius: var(--radius-row);
+    color: var(--color-muted);
+    font-size: 13.5px;
+    line-height: 1;
+    transition:
+      background-color var(--dur-1) var(--ease),
+      color var(--dur-1) var(--ease);
+  }
+
+  .nav-row:hover,
+  .nav-row[aria-current="page"] {
+    background: var(--color-surface-secondary);
+    color: var(--color-foreground);
+  }
+
+  /* The headline's second clause, and the only gradient on the site that is not
+     the logo. It runs from the page's own ink into the accent, so it reads as
+     emphasis rather than as a second colour. */
+  .gradient-text {
+    color: transparent;
+    background: linear-gradient(
+      120deg,
+      var(--color-foreground) 10%,
+      var(--color-accent) 58%,
+      var(--telium-violet)
+    );
+    background-clip: text;
+    -webkit-background-clip: text;
+  }
+
+  /* A panel is a fill and a corner. It was `glass-panel` — a gradient, an 18px
+     backdrop blur and a tinted 1px border — and the name is now a lie in three
+     ways, so it is `panel`. The step from `--background` to `--surface` is what
+     separates it from the page; on a backdrop this close in lightness a blur
+     costs a compositor layer to achieve nothing. */
+  .panel {
+    border-radius: var(--radius-card);
+    background: var(--color-surface);
+  }
+
+  /* One step further from the page, for a panel that sits inside another one. */
+  .panel-inset {
+    border-radius: var(--radius-row);
+    background: var(--color-surface-secondary);
+  }
+
+  /* A small label that carries its own fill: the feature card's tags and the
+     role under a contributor's name were each rolling this by hand, and each
+     had the same fault. `--muted` is calibrated to sit on the page, and a wash
+     made *of the foreground* moves the local background toward the ink by the
+     exact amount of margin that token was given — dark measured 4.25:1 and
+     4.41:1 against a 4.5 floor. So a pill that owns a fill also owns its ink:
+     full `--foreground`, de-emphasised by size and letter-spacing rather than
+     by bleaching the contrast, which is the one axis that has a floor. */
+  .pill {
+    border-radius: 999px;
+    padding: 0.2rem 0.55rem;
+    background: color-mix(in oklab, var(--color-foreground) 8%, transparent);
+    color: var(--color-foreground);
+    font-size: 11px;
+    letter-spacing: 0.01em;
+  }
+
+  /* Section rhythm. A hairline between two regions of the same fill is a rule,
+     not a box drawn around a card, so this is the one place a 1px line survives
+     — the bands are not surfaces and must not read as them. */
+  .band {
+    position: relative;
+    border-top: 1px solid var(--color-separator);
+    padding-block: clamp(4.5rem, 8vw, 7rem);
+  }
+
+  .prose-measure {
+    max-width: 62ch;
+  }
+}

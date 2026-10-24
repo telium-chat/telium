@@ -1,0 +1,169 @@
+{
+  "cases": [
+    {
+      "artifact": {
+        "issuer": "home.example",
+        "key_id": "ed25519:spec-primary",
+        "kind": "spec",
+        "signature": "BOruH_wFCR28xj-IRmEBybfKspr3_ckJ0cKP33tJ9Kxmt5LyhE3q0I_gELABaMMt1PCqci3BUdyGax3lh6n5CA",
+        "value": 1,
+        "value_added_after_signing": "attacker's addition"
+      },
+      "if_the_check_is_missing": "A peer can append arbitrary members to any document it relays — a larger `max_bytes` on a voucher, an extra guardian on a recovery policy — and every downstream verifier accepts them as signed by the origin.",
+      "invariant": "The signature covers the whole document except exactly the members `signature` and `key_id`. Any other member added, removed or altered after signing invalidates it.",
+      "name": "signed-json/field-appended-after-signing"
+    },
+    {
+      "artifact": {
+        "key_id": "ed25519:spec-primary",
+        "kind": "spec",
+        "signature": "BOruH_wFCR28xj-IRmEBybfKspr3_ckJ0cKP33tJ9Kxmt5LyhE3q0I_gELABaMMt1PCqci3BUdyGax3lh6n5CA",
+        "value": 1
+      },
+      "if_the_check_is_missing": "A relaying peer can strip a member whose absence has a permissive default — dropping `audience` from a voucher removes its binding to one origin.",
+      "invariant": "Removal is as fatal as addition; a verifier must not treat an absent member as 'not covered'.",
+      "name": "signed-json/field-removed-after-signing"
+    },
+    {
+      "artifact": {
+        "issuer": "home.example",
+        "key_id": "ed25519:spec-primary",
+        "kind": "spec",
+        "signature": "wqvZVINe2yJx9WlNudxX8v9Do4G3jXGvtwEtiDpnfO_nG4fZSngz9q8WBwtgLJ4CU1ncntZQ_xCt6rt6cC-UDQ",
+        "value": 1
+      },
+      "if_the_check_is_missing": "An implementation that verifies only known members accepts a document whose unknown members were never signed — which is the exact combination of 'ignore unknown fields' and 'verify what you understand' that looks like good defensive practice.",
+      "invariant": "The verifier must serialise the document it actually received, not a projection of it onto the fields it understands.",
+      "name": "signed-json/signature-covers-a-subset"
+    },
+    {
+      "artifact": {
+        "issuer": "home.example",
+        "key_id": "ed25519:spec-primary",
+        "kind": "spec",
+        "signature": "BOruH_wFCR28xj-IRmEBybfKspr3_ckJ0cKP33tJ9KxTi4hPn7D8KGZ9CFPgYaJC1PCqci3BUdyGax3lh6n5GA",
+        "value": 1
+      },
+      "if_the_check_is_missing": "Two different byte strings authenticate one document. Anything keyed by signature — deduplication, replay caches, audit trails, idempotency — can be bypassed by re-encoding a signature the victim already accepted.",
+      "invariant": "Ed25519 verification must be strict (RFC 8032 §5.1.7): S must be canonically reduced and the public key must not be of small order.",
+      "name": "signed-json/malleable-signature-encoding"
+    },
+    {
+      "artifact": {
+        "document": {
+          "issuer": "home.example",
+          "key_id": "ed25519:spec-primary",
+          "kind": "spec",
+          "signature": "BOruH_wFCR28xj-IRmEBybfKspr3_ckJ0cKP33tJ9Kxmt5LyhE3q0I_gELABaMMt1PCqci3BUdyGax3lh6n5CA",
+          "value": 1
+        },
+        "public_b64u": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "if_the_check_is_missing": "The identity point verifies a forged signature against a key nobody holds. A directory that accepts such a key publishes an origin whose documents anyone can sign.",
+      "invariant": "A public key of small order must not verify anything.",
+      "name": "signed-json/small-order-public-key"
+    },
+    {
+      "artifact": {
+        "document": {
+          "issuer": "home.example",
+          "key_id": "ed25519:spec-primary",
+          "kind": "spec",
+          "signature": "BOruH_wFCR28xj-IRmEBybfKspr3_ckJ0cKP33tJ9Kxmt5LyhE3q0I_gELABaMMt1PCqci3BUdyGax3lh6n5CA",
+          "value": 1
+        },
+        "public_b64u": "11l5O7wTooGagnx2rbb7qKSa7gB_SfLQmS2ZuCWtLEg"
+      },
+      "if_the_check_is_missing": "A document that carries its own verification key proves only that whoever wrote it owns a key. Every signature in the system becomes self-certifying.",
+      "invariant": "The key that verifies a document must be one the claimed origin publishes, resolved by `key_id` from that origin's key document — never a key carried inside the document itself.",
+      "name": "signed-json/signed-by-an-unpublished-key"
+    },
+    {
+      "artifact": {
+        "expected_audience": "guilds.example",
+        "token": "eyJ1c2VyX2lkIjoiQGFsaWNlOmhvbWUuZXhhbXBsZSIsImRldmljZV9pZCI6ImRldi0wMUpBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSIsImRldmljZV9wdWJrZXkiOiJGOHQ1LXl0QklQS3g3R1hrR1kxdUNMS09nVF9yQWVTa0FJT2JoZUdBZ000IiwiYXVkaWVuY2UiOiJvdGhlci5leGFtcGxlIiwib3JpZ2luIjoiaG9tZS5leGFtcGxlIiwicHJvZmlsZV92ZXJzaW9uIjo3LCJkaXNwbGF5X25hbWUiOiJBbGljZSIsImlhdCI6MTc2NzIyNTYwMDAwMCwiZXhwIjoxNzY3MjI1OTAwMDAwfQ.7Ko8RiB-XJMRXwL1cs19IRWahvYzhLo65vtslyKH2BG7GzxEOQNy8mkL1mNwOSb8eavhM6vyQc0tPJ2qUnjbCw.ed25519:spec-primary"
+      },
+      "if_the_check_is_missing": "Any server a person has ever presented an assertion to can replay it at every other server on the network. This is the single highest-value missing check in the protocol.",
+      "invariant": "`audience` must equal this server's own name. The signature alone says nothing about who the token was for.",
+      "name": "assertion/audience-is-another-server"
+    },
+    {
+      "artifact": {
+        "expected_audience": "guilds.example",
+        "token": "eyJ1c2VyX2lkIjoiQGFsaWNlOmhvbWUuZXhhbXBsZSIsImRldmljZV9pZCI6ImRldi0wMUpBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSIsImRldmljZV9wdWJrZXkiOiJGOHQ1LXl0QklQS3g3R1hrR1kxdUNMS09nVF9yQWVTa0FJT2JoZUdBZ000IiwiYXVkaWVuY2UiOiJndWlsZHMuZXhhbXBsZSIsIm9yaWdpbiI6ImhvbWUuZXhhbXBsZSIsInByb2ZpbGVfdmVyc2lvbiI6NywiZGlzcGxheV9uYW1lIjoiQWxpY2UiLCJpYXQiOjE3NjcyMjU2MDAwMDAsImV4cCI6MTc2NzIyNTYwMDAwMX0.5BlwtBpoTRPy52vHLv9h6aMGLcmEmwWP1Fy8kqG5evnzaS6D1cUAsxi-NMGBiNsD1ASNSUXMevnmkYwp1UEaCQ.ed25519:spec-primary"
+      },
+      "if_the_check_is_missing": "An assertion is a bearer token. Without expiry it is a password that cannot be changed, recoverable from any log line that recorded a request URL or header.",
+      "invariant": "`exp` is milliseconds since the Unix epoch and must be strictly greater than now.",
+      "name": "assertion/expired"
+    },
+    {
+      "artifact": {
+        "evaluate_at": 1767225600000,
+        "expected_audience": "guilds.example",
+        "token": "eyJ1c2VyX2lkIjoiQGFsaWNlOmhvbWUuZXhhbXBsZSIsImRldmljZV9pZCI6ImRldi0wMUpBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSIsImRldmljZV9wdWJrZXkiOiJGOHQ1LXl0QklQS3g3R1hrR1kxdUNMS09nVF9yQWVTa0FJT2JoZUdBZ000IiwiYXVkaWVuY2UiOiJndWlsZHMuZXhhbXBsZSIsIm9yaWdpbiI6ImhvbWUuZXhhbXBsZSIsInByb2ZpbGVfdmVyc2lvbiI6NywiZGlzcGxheV9uYW1lIjoiQWxpY2UiLCJpYXQiOjE3NjcyMjkyMDAwMDAsImV4cCI6MTc2NzIzMjgwMDAwMH0.vA11S_MYH3_JFuP1NFG-BT9y4D2yLNcUh_YWxm7kZASgA5fEST9Ed94giIQZXnJb8EiZbn9GbX0nj4PGpMx0CQ.ed25519:spec-primary"
+      },
+      "if_the_check_is_missing": "Without it, a compromised issuer can mint a pile of tokens dated forward and keep its access long after the compromise is found and the key is rotated, because each token is still inside its own validity window when it is used.",
+      "invariant": "`iat` must not exceed now by more than 60 000 ms.",
+      "name": "assertion/issued-too-far-in-the-future"
+    },
+    {
+      "artifact": {
+        "expected_audience": "guilds.example",
+        "token": "eyJ1c2VyX2lkIjoiQG1hbGxvcnk6aG9tZS5leGFtcGxlIiwiZGV2aWNlX2lkIjoiZGV2LTAxSkFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwiZGV2aWNlX3B1YmtleSI6IkY4dDUteXRCSVBLeDdHWGtHWTF1Q0xLT2dUX3JBZVNrQUlPYmhlR0FnTTQiLCJhdWRpZW5jZSI6Imd1aWxkcy5leGFtcGxlIiwib3JpZ2luIjoiaG9tZS5leGFtcGxlIiwicHJvZmlsZV92ZXJzaW9uIjo3LCJkaXNwbGF5X25hbWUiOiJBbGljZSIsImlhdCI6MTc2NzIyNTYwMDAwMCwiZXhwIjoxNzY3MjI1OTAwMDAwfQ.7Ko8RiB-XJMRXwL1cs19IRWahvYzhLo65vtslyKH2BG7GzxEOQNy8mkL1mNwOSb8eavhM6vyQc0tPJ2qUnjbCw.ed25519:spec-primary"
+      },
+      "if_the_check_is_missing": "A verifier that re-serialises is checking a signature over bytes the issuer never produced; depending on its serialiser it either rejects every honest token or accepts a rewritten one.",
+      "invariant": "The signature covers the payload segment exactly as transmitted. A verifier must not re-serialise the parsed claims before checking.",
+      "name": "assertion/payload-swapped-signature-kept"
+    },
+    {
+      "artifact": {
+        "authorization_header": "X-Telium-Federation origin=home.example,destination=guilds.example,key=ed25519:spec-primary,ts=1767225600000,sig=1Lpq8nb1_VaW8k7DX_c1fcCuvwBXDuglRv6wkBHeR30cCcbvILJUqs2CUUMM2mTQpBP6nAbgEh1Psu9mjDRiBA",
+        "body_utf8": "{\"hash\":\"abc123\"}"
+      },
+      "if_the_check_is_missing": "This is the classic recompute-versus-echo bug. A verifier that accepts the caller's own hash has authenticated the header and nothing else, and every signed request becomes a signature on an empty promise.",
+      "invariant": "`body_hash` must be recomputed from the bytes actually received and the payload rebuilt from them — never taken from anything the caller supplied.",
+      "name": "federation-request/body-does-not-match-the-signed-hash"
+    },
+    {
+      "artifact": {
+        "authorization_header": "X-Telium-Federation origin=home.example,destination=somebody-else.example,key=ed25519:spec-primary,ts=1767225600000,sig=vNNYGzUruALHDv_jRcAxJZN0szhBcUgI3qA03GHDhJCKeartMB65X0CS5unohOEBHbzxeIohLR6FDFkaDKt_Bw",
+        "checked_by": "federation::check_envelope"
+      },
+      "if_the_check_is_missing": "Without it, any request a peer signs for anybody can be forwarded to every other server. It is the same replay as the assertion audience case, one layer down, and it is checked at the door rather than after the body because a five-minute upload should not be read before the envelope is found to be misaddressed.",
+      "invariant": "`destination` must equal this server's own name, and it must be checked before the body is read.",
+      "name": "federation-request/addressed-to-another-server"
+    },
+    {
+      "artifact": {
+        "authorization_header": "X-Telium-Federation origin=home.example,destination=guilds.example,key=ed25519:spec-primary,ts=1,sig=vNNYGzUruALHDv_jRcAxJZN0szhBcUgI3qA03GHDhJCKeartMB65X0CS5unohOEBHbzxeIohLR6FDFkaDKt_Bw",
+        "checked_by": "federation::check_envelope"
+      },
+      "if_the_check_is_missing": "A one-sided check — rejecting old but not future timestamps — leaves a captured request replayable for as long as the attacker likes by nobody, which sounds harmless right up until the clock it was compared against is the attacker's.",
+      "invariant": "`|now - ts|` must be within the configured clock skew, in both directions.",
+      "name": "federation-request/timestamp-outside-the-skew-window"
+    },
+    {
+      "artifact": {
+        "missing": "new_signature",
+        "record": {
+          "announced_at": 1767225600000,
+          "cutover_at": 1767830400000,
+          "key_id": "ed25519:spec-primary",
+          "kind": "relocation",
+          "new_domain": "attacker.example",
+          "new_key": "oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA",
+          "new_key_id": "ed25519:spec-successor",
+          "old_domain": "old.example",
+          "signature": "WIIc4w4z0VQRD1g0XZ-MkfHPJHlz6H8z2dXYjTaGytImP2Wf8EdgU4kpR-e956THftx-s5FBbGnO3s9x6t3oBQ"
+        }
+      },
+      "if_the_check_is_missing": "Verifying only the outer signature lets a domain redirect itself — and therefore every account and guild on it — to a domain that never consented, which is a hostile takeover of an address book rather than a move.",
+      "invariant": "A relocation record must carry `new_signature`, made by the successor domain's key over the body, and the old key's signature must cover that member.",
+      "name": "relocation/no-successor-countersignature"
+    }
+  ],
+  "frozen_at": 1767225600000,
+  "kind": "must-reject",
+  "note": "Every artifact here is well formed and most of them carry a genuinely valid signature. A correct implementation refuses each one for the stated reason. An implementation that accepts any of them interoperates perfectly on the happy path.",
+  "time_dependent": "Cases carrying `evaluate_at` are frozen so this file is byte-stable. Evaluate them with your clock set to that instant, or re-mint the artifact with the same offsets from your own now — otherwise the token is rejected for expiry and you learn nothing about the invariant under test."
+}

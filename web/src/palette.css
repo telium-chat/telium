@@ -1,0 +1,132 @@
+/* Android WebView is inconsistent about env() safe-area insets; MainActivity publishes a fallback. */
+:root {
+  --android-safe-area-top: 0px;
+  --android-safe-area-right: 0px;
+  --android-safe-area-bottom: 0px;
+  --android-safe-area-left: 0px;
+  --safe-area-top: max(env(safe-area-inset-top, 0px), var(--android-safe-area-top));
+  --safe-area-right: max(env(safe-area-inset-right, 0px), var(--android-safe-area-right));
+  --safe-area-bottom: max(env(safe-area-inset-bottom, 0px), var(--android-safe-area-bottom));
+  --safe-area-left: max(env(safe-area-inset-left, 0px), var(--android-safe-area-left));
+
+  --safe-area-start: var(--safe-area-left);
+  --safe-area-end: var(--safe-area-right);
+}
+
+:root[dir="rtl"] {
+  --safe-area-start: var(--safe-area-right);
+  --safe-area-end: var(--safe-area-left);
+}
+
+:root,
+:root[data-theme="light"] {
+  --background: oklch(95.2% 0.014 298);
+  --background-secondary: oklch(93.6% 0.0168 298);
+  --surface: oklch(99.2% 0.0042 298);
+  --surface-secondary: oklch(96.2% 0.0112 298);
+  --surface-tertiary: oklch(93.2% 0.0161 298);
+  --overlay: oklch(99.6% 0.0028 298);
+  --muted: oklch(50% 0.0224 298);
+  --foreground: oklch(24% 0.035 298);
+  --border: oklch(92.5% 0.0119 298);
+  --border-secondary: oklch(94.8% 0.0091 298);
+  --separator: oklch(93.8% 0.0112 298);
+
+  --field-background: var(--surface-secondary);
+  --field-border: transparent;
+  --field-border-width: 0;
+
+  --accent: var(--telium-amethyst);
+  --accent-foreground: #ffffff;
+  --accent-hover: var(--telium-deep-purple);
+  --accent-soft: oklch(92.5% 0.045 298);
+  --accent-soft-foreground: var(--telium-amethyst);
+  --accent-solid: var(--telium-amethyst);
+  --accent-solid-foreground: #ffffff;
+  --link: var(--telium-amethyst);
+  --focus: var(--telium-violet);
+
+  --danger: oklch(51% 0.18 25);
+  --danger-foreground: oklch(100% 0 0);
+  --danger-soft: oklch(94% 0.035 25);
+  --danger-soft-foreground: oklch(43% 0.16 25);
+
+  --warning: oklch(50% 0.125 72);
+
+  --warning-soft: oklch(94% 0.03 72);
+  --warning-soft-foreground: oklch(43% 0.115 72);
+
+  --success: oklch(56% 0.115 155);
+
+  --success-ink: oklch(48% 0.125 155);
+
+  --rail: oklch(93.8% 0.0161 298);
+  --rail-hover: oklch(91.6% 0.0203 298);
+  --rail-active: oklch(88.8% 0.0259 298);
+  --strip: oklch(91.4% 0.021 298);
+  --unread: oklch(24% 0.035 298);
+  --mention: oklch(51% 0.18 25);
+  --badge: oklch(58% 0.21 25);
+  --badge-foreground: oklch(100% 0 0);
+
+  --press: 0.955;
+
+  --radius: 8px;
+  --field-radius: var(--radius-row);
+}
+
+:root.dark,
+:root[data-theme="dark"] {
+  --background: oklch(15.5% 0.005 286);
+  --background-secondary: oklch(18.5% 0.0055 286);
+  --surface: oklch(20.5% 0.0058 286);
+  --surface-secondary: oklch(24.5% 0.0065 286);
+  --surface-tertiary: oklch(28.5% 0.007 286);
+  --overlay: oklch(20.5% 0.0058 286);
+  --muted: oklch(70% 0.0045 286);
+  --foreground: oklch(94.5% 0.0025 286);
+  --border: oklch(25.5% 0.0045 286);
+  --border-secondary: oklch(23.5% 0.0043 286);
+  --separator: oklch(24.5% 0.0045 286);
+
+  --field-background: var(--surface-secondary);
+  --field-border: transparent;
+  --field-border-width: 0;
+
+  --accent: var(--telium-lilac);
+  --accent-foreground: var(--telium-deep-purple);
+  --accent-hover: #C9AEFF;
+  --accent-soft: oklch(34% 0.06 296);
+  --accent-soft-foreground: oklch(84% 0.085 300);
+  --accent-solid: oklch(56% 0.165 296);
+  --accent-solid-foreground: #ffffff;
+  --link: var(--telium-lilac);
+  --focus: var(--telium-lilac);
+
+  --danger: oklch(68% 0.168 25);
+  --danger-foreground: oklch(18% 0.02 25);
+  --danger-soft: oklch(30% 0.06 25);
+  --danger-soft-foreground: oklch(84% 0.1 25);
+
+  --warning: oklch(80% 0.13 78);
+  --warning-soft: oklch(30% 0.05 78);
+  --warning-soft-foreground: oklch(84% 0.09 78);
+
+  --success: oklch(72% 0.12 158);
+
+  --success-ink: var(--success);
+
+  --rail: oklch(12.5% 0.0045 286);
+  --rail-hover: oklch(17.5% 0.0055 286);
+  --rail-active: oklch(22.5% 0.0063 286);
+  --strip: oklch(10.5% 0.0043 286);
+  --unread: oklch(94.5% 0.0025 286);
+  --mention: oklch(68% 0.168 25);
+  --badge: oklch(58% 0.21 25);
+  --badge-foreground: oklch(100% 0 0);
+
+  --press: 1.115;
+
+  --radius: 8px;
+  --field-radius: var(--radius-row);
+}

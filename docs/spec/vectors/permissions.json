@@ -1,0 +1,107 @@
+{
+  "bits": {
+    "ADMINISTRATOR": "1099511627776",
+    "DEFAULT_EVERYONE": "3657219",
+    "MANAGE_MESSAGES": "4",
+    "READ_MESSAGE_HISTORY": "2097152",
+    "SEND_MESSAGES": "2",
+    "TIMEOUT_ALLOWED": "2097153",
+    "VIEW_CHANNEL": "1"
+  },
+  "cases": [
+    {
+      "expected_permissions_decimal": "18446744073709551615",
+      "name": "administrator-ignores-channel-overwrites",
+      "rule": "A member holding ADMINISTRATOR (or the guild owner) has u64::MAX and channel overwrites are not applied at all.",
+      "setup": {
+        "overwrites": [
+          {
+            "deny": "all",
+            "target": "@everyone"
+          }
+        ],
+        "roles": [
+          "@everyone (default)",
+          "staff (ADMINISTRATOR)"
+        ]
+      },
+      "what_goes_wrong": "An implementation that applies the @everyone deny first and checks ADMINISTRATOR afterwards locks administrators out of channels they are supposed to be able to repair — and the person who can fix it is the one who is locked out."
+    },
+    {
+      "expected_permissions_decimal": "2097153",
+      "name": "timeout-applies-to-the-owner",
+      "rule": "A timed-out member keeps exactly VIEW_CHANNEL | READ_MESSAGE_HISTORY, whoever they are.",
+      "setup": {
+        "timed_out": true,
+        "user": "the guild owner"
+      },
+      "what_goes_wrong": "An implementation that returns early for the owner before applying the timeout produces a guild whose owner can be timed out on paper and not in fact, and a moderation log that says something untrue."
+    },
+    {
+      "expected_permissions_decimal": "3",
+      "name": "role-tier-unions-denies-then-allows",
+      "rule": "All role overwrites in the tier are unioned into one allow mask and one deny mask; the deny mask is applied first and the allow mask second. Allow wins a conflict.",
+      "setup": {
+        "base": "VIEW_CHANNEL from @everyone",
+        "overwrites": [
+          {
+            "deny": "SEND_MESSAGES",
+            "role": "staff"
+          },
+          {
+            "allow": "SEND_MESSAGES",
+            "role": "two"
+          }
+        ]
+      },
+      "what_goes_wrong": "An implementation that applies overwrites one at a time gets an answer that depends on the order the rows came back from its database — which means two servers hosting replicas of one guild disagree about who may speak, and neither is reproducible."
+    },
+    {
+      "expected_permissions_decimal": "3",
+      "name": "member-overwrite-is-the-last-tier",
+      "rule": "Order is: @everyone overwrite, then the union of role overwrites, then the member overwrite. Each tier is deny-then-allow.",
+      "setup": {
+        "overwrites": [
+          {
+            "deny": "SEND_MESSAGES",
+            "role": "staff"
+          },
+          {
+            "allow": "SEND_MESSAGES",
+            "member": "@member"
+          }
+        ]
+      },
+      "what_goes_wrong": "Flattening the tiers into one pass makes a per-member exception unable to override a role deny, which is the entire reason per-member exceptions exist."
+    },
+    {
+      "expected_permissions_decimal": "1",
+      "name": "bot-ceiling-is-applied-after-overwrites",
+      "rule": "A bot's installation grant is a ceiling on the final answer, re-applied after every overwrite tier — not only to its base permissions.",
+      "setup": {
+        "ceiling": "VIEW_CHANNEL",
+        "overwrites": [
+          {
+            "allow": "SEND_MESSAGES|MANAGE_MESSAGES",
+            "member": "@bot"
+          }
+        ]
+      },
+      "what_goes_wrong": "Applying the ceiling only to the base lets any channel overwrite hand a bot permissions its install never asked for and the installing admin never approved. The bot behaves correctly, the audit trail looks clean, and the consent the install screen collected was for a smaller set."
+    },
+    {
+      "expected_permissions_decimal": "3657219",
+      "name": "administrator-in-a-ceiling-means-unrestricted",
+      "rule": "ADMINISTRATOR in an installation ceiling lifts the ceiling entirely, exactly as ADMINISTRATOR in a role lifts ordinary permission checks.",
+      "setup": {
+        "ceiling": "ADMINISTRATOR",
+        "roles": [
+          "@everyone (default)"
+        ]
+      },
+      "what_goes_wrong": "Treating the ceiling as a plain mask here gives a bot installed with ADMINISTRATOR exactly one bit and nothing else, which is the opposite of what the install screen said."
+    }
+  ],
+  "kind": "permission-evaluation",
+  "note": "Permission bits are given as decimal strings elsewhere on the wire because they exceed 2^53 and JSON numbers do not survive a JavaScript client. ADMINISTRATOR is bit 40."
+}

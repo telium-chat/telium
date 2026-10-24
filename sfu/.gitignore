@@ -1,0 +1,8 @@
+/target
+/sfu.toml
+*.db
+
+# downloaded LiveKit server binary + its archive and generated config
+/livekit-server
+/livekit-server.tar.gz
+/livekit.yaml

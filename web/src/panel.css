@@ -1,0 +1,8 @@
+.panel {
+  border-radius: var(--radius-card);
+  background: var(--surface-secondary);
+}
+
+.panel--tight {
+  border-radius: var(--field-radius);
+}

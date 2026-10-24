@@ -1,0 +1,5 @@
+#!/usr/bin/env node
+
+// The generated Android Gradle task runs `node tauri` from this directory.
+// Keep the CLI lookup working for local installs without requiring a global Tauri CLI.
+import("../node_modules/@tauri-apps/cli/tauri.js");

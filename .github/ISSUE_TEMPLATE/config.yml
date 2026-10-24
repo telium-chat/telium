@@ -1,0 +1,11 @@
+# Template chooser behaviour. Blank issues stay on: feedback that fits no
+# template is still feedback, and a chooser with no way past it teaches people
+# to keep it to themselves.
+blank_issues_enabled: true
+contact_links:
+  - name: Security problem
+    url: https://github.com/telium-chat/telium/blob/main/SECURITY.md
+    about: Anything that could expose an account, a server or a message goes through private disclosure, not a public issue.
+  - name: Running a server
+    url: https://github.com/telium-chat/telium/blob/main/README.md#host-it
+    about: How to host a server.

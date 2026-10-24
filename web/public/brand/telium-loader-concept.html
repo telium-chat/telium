@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<title>Telium loader concept</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --page: #0f1014;
+    --panel: #17181e;
+    --panel-border: rgba(255, 255, 255, 0.08);
+    --text: #f7f5fb;
+    --muted: #9c98a8;
+
+    /* Main motion knobs. */
+    --arrival-duration: 1.3s;
+    --outer-turn: 3.8s;
+    --inner-turn: 4.6s;
+
+    /* The production artwork is shifted 3px left inside its 512px viewBox. */
+    --orbit-center-x: 49.4140625%;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    min-height: 100%;
+    margin: 0;
+  }
+
+  body {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 32px;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at 50% 42%, rgba(103, 64, 199, 0.12), transparent 32rem),
+      var(--page);
+    color: var(--text);
+    font: 500 15px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .demo {
+    width: min(560px, 100%);
+    display: grid;
+    justify-items: center;
+    gap: 28px;
+  }
+
+  .stage {
+    width: min(340px, 72vw);
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--panel-border);
+    border-radius: 32px;
+    background: rgba(23, 24, 30, 0.78);
+    box-shadow:
+      0 28px 90px rgba(0, 0, 0, 0.34),
+      inset 0 1px rgba(255, 255, 255, 0.025);
+
+    /* A gentler camera: enough depth to read without tearing the ring apart. */
+    perspective: 900px;
+    perspective-origin: var(--orbit-center-x) 50%;
+    transform-style: preserve-3d;
+  }
+
+  .logo {
+    position: relative;
+    width: 72%;
+    aspect-ratio: 1;
+    transform-style: preserve-3d;
+  }
+
+  .rotor,
+  .piece {
+    position: absolute;
+    inset: 0;
+    transform-style: preserve-3d;
+  }
+
+  .rotor {
+    transform-origin: var(--orbit-center-x) 50%;
+    will-change: transform;
+  }
+
+  .piece {
+    opacity: 0;
+    transform-origin: var(--orbit-center-x) 50%;
+    will-change: transform, opacity, filter;
+    backface-visibility: hidden;
+    --start-z: 145px;
+    --start-blur: 1.6px;
+    --start-opacity: .72;
+  }
+
+  .piece svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+
+  /* Both rings rotate continuously from frame one. */
+  .running .outer-rotor {
+    animation: outer-spin var(--outer-turn) linear infinite;
+  }
+
+  .running .inner-rotor {
+    animation: inner-spin var(--inner-turn) linear infinite;
+  }
+
+  .running .piece {
+    animation: piece-depth-arrival var(--arrival-duration) cubic-bezier(.18, .72, .22, 1) forwards;
+    animation-delay: var(--delay);
+  }
+
+  .paused .rotor,
+  .paused .piece {
+    animation-play-state: paused !important;
+  }
+
+  /*
+    One continuous depth interpolation. Outer arcs use a restrained default
+    depth, while the smaller inner arcs can start slightly closer to the
+    viewer so their arrival remains visible without distorting the rings.
+  */
+  @keyframes piece-depth-arrival {
+    from {
+      opacity: var(--start-opacity);
+      transform: translate3d(0, 0, var(--start-z));
+      filter: blur(var(--start-blur));
+    }
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+      filter: blur(0);
+    }
+  }
+
+  @keyframes outer-spin {
+    from { transform: rotateZ(0deg); }
+    to { transform: rotateZ(360deg); }
+  }
+
+  @keyframes inner-spin {
+    from { transform: rotateZ(0deg); }
+    to { transform: rotateZ(-360deg); }
+  }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  button {
+    appearance: none;
+    border: 1px solid var(--panel-border);
+    border-radius: 999px;
+    padding: 10px 15px;
+    background: var(--panel);
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+    transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+  }
+
+  button:hover {
+    background: #202129;
+    border-color: rgba(201, 174, 255, .26);
+  }
+
+  button:active { transform: scale(.97); }
+  button:focus-visible { outline: 2px solid #8b5fe8; outline-offset: 3px; }
+
+  .caption {
+    margin: -14px 0 0;
+    color: var(--muted);
+    text-align: center;
+    max-width: 490px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .piece {
+      opacity: 1;
+      filter: none;
+      transform: none;
+    }
+
+    .running .piece {
+      animation: none;
+    }
+
+    .running .outer-rotor,
+    .running .inner-rotor {
+      animation-duration: 8s;
+    }
+  }
+</style>
+</head>
+<body>
+<main class="demo">
+  <div class="stage">
+    <div class="logo running" id="logo" role="img" aria-label="Animated Telium loading logo">
+      <!--
+        Five independent SVG layers. Every layer keeps the full production
+        512x512 coordinate system so the arcs share one exact orbit center.
+      -->
+
+      <div class="rotor outer-rotor">
+        <div class="piece" style="--delay: 0ms">
+          <svg viewBox="0 0 512 512" aria-hidden="true">
+            <defs>
+              <linearGradient id="teliumGradientOuterA" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#C9AEFF" />
+                <stop offset="0.36" stop-color="#8B5FE8" />
+                <stop offset="0.72" stop-color="#6740C7" />
+                <stop offset="1" stop-color="#3F218D" />
+              </linearGradient>
+            </defs>
+            <g transform="translate(-3 0)">
+              <path d="M 83.099 209.671 A 179 179 0 0 1 302.329 83.099" stroke="url(#teliumGradientOuterA)" stroke-width="48" fill="none" stroke-linecap="round" />
+            </g>
+          </svg>
+        </div>
+
+        <div class="piece" style="--delay: 80ms">
+          <svg viewBox="0 0 512 512" aria-hidden="true">
+            <defs>
+              <linearGradient id="teliumGradientOuterB" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#C9AEFF" />
+                <stop offset="0.36" stop-color="#8B5FE8" />
+                <stop offset="0.72" stop-color="#6740C7" />
+                <stop offset="1" stop-color="#3F218D" />
+              </linearGradient>
+            </defs>
+            <g transform="translate(-3 0)">
+              <path d="M 382.572 129.428 A 179 179 0 0 1 424.205 317.222" stroke="url(#teliumGradientOuterB)" stroke-width="48" fill="none" stroke-linecap="round" />
+            </g>
+          </svg>
+        </div>
+
+        <div class="piece" style="--delay: 160ms">
+          <svg viewBox="0 0 512 512" aria-hidden="true">
+            <defs>
+              <linearGradient id="teliumGradientOuterC" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#C9AEFF" />
+                <stop offset="0.36" stop-color="#8B5FE8" />
+                <stop offset="0.72" stop-color="#6740C7" />
+                <stop offset="1" stop-color="#3F218D" />
+              </linearGradient>
+            </defs>
+            <g transform="translate(-3 0)">
+              <path d="M 389.023 375.774 A 179 179 0 0 1 85.761 311.314" stroke="url(#teliumGradientOuterC)" stroke-width="48" fill="none" stroke-linecap="round" />
+            </g>
+          </svg>
+        </div>
+      </div>
+
+      <div class="rotor inner-rotor">
+        <div class="piece" style="--delay: 40ms; --start-z: 210px; --start-blur: 1.9px; --start-opacity: .76">
+          <svg viewBox="0 0 512 512" aria-hidden="true">
+            <defs>
+              <linearGradient id="teliumGradientInnerA" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#C9AEFF" />
+                <stop offset="0.36" stop-color="#8B5FE8" />
+                <stop offset="0.72" stop-color="#6740C7" />
+                <stop offset="1" stop-color="#3F218D" />
+              </linearGradient>
+            </defs>
+            <g transform="translate(-3 0)">
+              <path d="M 144.494 224.026 A 116 116 0 0 1 264.092 140.283" stroke="url(#teliumGradientInnerA)" stroke-width="24" fill="none" stroke-linecap="round" />
+            </g>
+          </svg>
+        </div>
+
+        <div class="piece" style="--delay: 120ms; --start-z: 210px; --start-blur: 1.9px; --start-opacity: .76">
+          <svg viewBox="0 0 512 512" aria-hidden="true">
+            <defs>
+              <linearGradient id="teliumGradientInnerB" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#C9AEFF" />
+                <stop offset="0.36" stop-color="#8B5FE8" />
+                <stop offset="0.72" stop-color="#6740C7" />
+                <stop offset="1" stop-color="#3F218D" />
+              </linearGradient>
+            </defs>
+            <g transform="translate(-3 0)">
+              <path d="M 351.022 322.535 A 116 116 0 0 1 268.125 371.365" stroke="url(#teliumGradientInnerB)" stroke-width="24" fill="none" stroke-linecap="round" />
+            </g>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls" aria-label="Animation controls">
+    <button type="button" id="replay">Replay assembly</button>
+    <button type="button" id="pause">Pause</button>
+  </div>
+
+  <p class="caption">The five arcs arrive through a short, subtle depth stagger while both Telium orbits rotate slowly around the artwork's true shared center.</p>
+</main>
+
+<script>
+  const logo = document.getElementById('logo');
+  const replay = document.getElementById('replay');
+  const pause = document.getElementById('pause');
+
+  function replayAnimation() {
+    logo.classList.remove('paused', 'running');
+    pause.textContent = 'Pause';
+
+    // Force a style flush so both depth arrivals and orbit rotation restart.
+    void logo.getBoundingClientRect();
+    logo.classList.add('running');
+  }
+
+  replay.addEventListener('click', replayAnimation);
+
+  pause.addEventListener('click', () => {
+    const paused = logo.classList.toggle('paused');
+    pause.textContent = paused ? 'Resume' : 'Pause';
+  });
+</script>
+</body>
+</html>

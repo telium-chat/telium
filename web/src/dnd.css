@@ -1,0 +1,67 @@
+.drag-item {
+  position: relative;
+  transition:
+    transform var(--dur-3) var(--ease),
+    scale var(--dur-2) var(--ease),
+    background-color var(--dur-2) var(--ease);
+}
+
+.drag-item.is-lifted {
+  z-index: 30;
+  scale: 1.02;
+  cursor: grabbing;
+  transition: scale var(--dur-2) var(--ease), background-color var(--dur-2) var(--ease);
+}
+
+.drag-item.is-settling {
+  transition: transform var(--dur-3) var(--ease-rise), scale var(--dur-2) var(--ease);
+  scale: 1;
+}
+
+.drag-item.is-lifted {
+  background-color: var(--surface-secondary);
+  border-radius: var(--radius-row);
+}
+
+.drag-item--tile.is-lifted {
+  background-color: transparent;
+  border-radius: var(--radius-3xl);
+}
+
+.drag-item.is-over {
+  scale: 1.06;
+}
+
+.drag-item--tile.is-over > button {
+  box-shadow: 0 0 0 2px var(--strip), 0 0 0 4px var(--accent);
+}
+
+.is-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.is-dragging .drag-item,
+.is-dragging .drag-item * {
+  cursor: grabbing;
+}
+
+.is-dragging .drag-item * {
+  pointer-events: none;
+}
+
+.is-committing .drag-item {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drag-item,
+  .drag-item.is-settling {
+    transition: none;
+  }
+
+  .drag-item.is-lifted,
+  .drag-item.is-over {
+    scale: 1;
+  }
+}

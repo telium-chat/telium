@@ -1,0 +1,219 @@
+name: Dependency audit
+
+# Two questions about the dependency trees, asked on two different schedules,
+# because they fail in two different ways.
+#
+#   "Did this change bring in something known to be bad?"  -- a question about
+#   a pull request, answerable by the person who wrote it, and therefore worth
+#   blocking on. It runs only when a manifest or a lockfile actually moved.
+#
+#   "Has the world decided something we already depend on is bad?"  -- a
+#   question nobody's pull request caused and nobody's pull request can answer.
+#   It runs weekly and opens an issue. It does not block anything, ever.
+#
+# Collapsing those two into one required check is the mistake this file used to
+# make, and it is the mistake that kills dependency auditing everywhere it is
+# tried. A new advisory against a transitive crate with no fixed release turns
+# every pull request in the repository red, for a reason none of their authors
+# caused and none of them can fix, and the fix that actually gets applied is to
+# delete the job or neuter it with a permanent `--ignore`. What survives that
+# pressure is a gate whose failures are always actionable by the person reading
+# them, plus a slower channel for everything else. That is what this is.
+#
+# The exemption mechanism is `.github/dependency-audit-allowlist.json`, where
+# every tolerated advisory carries a reason, a reviewer and an expiry date, and
+# the gate fails when a date passes. See `scripts/audit-gate.mjs` for why that
+# shape was chosen over a list of muted identifiers, and `docs/supply-chain.md`
+# for how to use it.
+
+# Note what is NOT here: a `paths:` filter on the pull_request trigger.
+#
+# It is the obvious way to write "only run when a lockfile moved", and it makes
+# this workflow permanently unusable as a required check. GitHub does not
+# report a skipped-by-path-filter workflow as a passing check; it reports
+# nothing at all, and a branch rule waiting for a check that never arrives
+# blocks the pull request forever. Every repository that has tried this has
+# discovered it on a documentation-only PR, at which point the rule gets
+# removed and the gate protects nothing.
+#
+# So the job always starts and decides for itself, exactly as `unit-tests.yml`
+# does and for the same reason. The decision costs a checkout and a diff; the
+# expensive halves -- a Rust toolchain, a cargo-audit install, a bun -- are all
+# conditional on it, so a pull request that touches no dependency reports a
+# green `dependency-audit` in a few seconds without installing anything.
+on:
+  pull_request:
+  schedule:
+    # Weekly, at an odd minute. Every scheduled workflow on GitHub written as
+    # `0 * * * *` fires into one queue and waits there for no reason but the
+    # shape of the cron line.
+    - cron: '41 6 * * 3'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # One job, not three, for the reason `unit-tests.yml` gives at greater
+  # length: this repository has a single self-hosted runner that takes one job
+  # at a time, so separate jobs do not run in parallel -- they run in sequence,
+  # each paying for its own checkout and its own toolchain setup, while looking
+  # on the Actions page as though they were concurrent.
+  dependency-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      # Only the scheduled run uses this, and only to keep one tracking issue
+      # current. A pull-request run never reaches the reporting step.
+      issues: write
+    steps:
+      # Every `uses:` below names a commit, not a tag. A tag is a mutable
+      # pointer that the action's owner -- or anyone who takes their account
+      # -- can move onto new code, and this repository's runs would then
+      # execute it without a diff, a review, or a notification. The trailing
+      # comment is the release that commit was, so the pin is still readable;
+      # `docs/supply-chain.md` explains how to move one forward.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # A merge-base diff needs both sides. The runner is persistent, so
+          # this is one deep fetch ever and an incremental one after that.
+          fetch-depth: 0
+
+      - name: Decide whether anything about the dependencies changed
+        id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+
+          audit_everything() {
+            echo "$1"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
+          # Fails open, always. An uncertain diff costs a few minutes of runner
+          # time; a false-green on a security check costs whatever the advisory
+          # it skipped turns out to be worth. There is no version of this
+          # trade-off where guessing "probably nothing changed" is correct.
+          [ "$EVENT" = "pull_request" ] || audit_everything "not a pull request -- auditing everything"
+          [ -n "${PR_BASE_SHA:-}" ] || audit_everything "no PR base commit -- auditing everything"
+          [ -n "${PR_HEAD_SHA:-}" ] || audit_everything "no PR head commit -- auditing everything"
+          git cat-file -e "$PR_BASE_SHA^{commit}" 2>/dev/null \
+            || audit_everything "PR base is not in this clone -- auditing everything"
+          git cat-file -e "$PR_HEAD_SHA^{commit}" 2>/dev/null \
+            || audit_everything "PR head is not in this clone -- auditing everything"
+          changed="$(git diff --name-only "$PR_BASE_SHA...$PR_HEAD_SHA")" \
+            || audit_everything "could not diff -- auditing everything"
+          [ -n "$changed" ] || audit_everything "empty diff -- auditing everything"
+
+          echo "changed files:"
+          echo "$changed" | sed 's/^/  /'
+
+          # Every manifest and lockfile in the repository, plus the tooling
+          # that reads them. The tooling is in the list deliberately: a change
+          # to the gate or to the allowlist IS a security decision, and it must
+          # not be possible to land one without the gate running against it and
+          # showing what it now does.
+          if grep -qE '(^|/)(Cargo\.toml|Cargo\.lock|package\.json|bun\.lock)$' <<<"$changed" \
+            || grep -qE '^scripts/(audit-gate|check-dependency-sources|report-advisories)' <<<"$changed" \
+            || grep -qxF '.github/dependency-audit-allowlist.json' <<<"$changed" \
+            || grep -qxF '.github/workflows/dependency-audit.yml' <<<"$changed"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "decided: dependency inputs changed -- auditing"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "decided: no dependency inputs changed -- nothing to audit"
+          fi
+
+      # `cargo metadata --locked` is what reads the Rust graph for the source
+      # check, and `--locked` doubles as a lockfile-drift check: it fails
+      # outright when the committed Cargo.lock is not what the manifest
+      # resolves to. That mattered immediately -- sfu/Cargo.lock had been stale
+      # since telium-protocol gained a dependency, and nothing noticed, because
+      # every other Rust job here lets cargo quietly rewrite the lock in the
+      # workspace and then throws the workspace away.
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch @ 2026-09-03
+        if: steps.filter.outputs.run == 'true'
+
+      # The checks are plain Node scripts with no dependencies of their own,
+      # which is deliberate for tooling whose job is to be suspicious of
+      # dependencies. They still need a Node on PATH: a self-hosted runner does
+      # not have one just because JavaScript actions bring their own runtime.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: steps.filter.outputs.run == 'true'
+        with:
+          node-version: 22
+
+      # Pinned to a release rather than to the moving `cargo-audit` tool alias
+      # this used to name. The alias is re-pointed on every install-action
+      # release, so it was both unpinned *and* silently deciding which
+      # cargo-audit version ran.
+      #
+      # Freezing the installer does not freeze the advisories: cargo-audit
+      # fetches the RustSec database at run time, so a pinned binary still sees
+      # this morning's advisory. The thing that is frozen is the code that runs
+      # on this runner, which is the thing that should be.
+      - uses: taiki-e/install-action@9114bf4d891761788c546334fd37538eae1bf8b3 # v2.87.16
+        if: steps.filter.outputs.run == 'true'
+        with:
+          tool: cargo-audit
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: steps.filter.outputs.run == 'true'
+        with:
+          bun-version: 1.4.0
+
+      # Where every dependency comes from -- a different question from whether
+      # it is known-vulnerable, and one no advisory database answers. Always
+      # blocking, and with no expiring allowlist, because unlike an advisory
+      # this can never arrive by itself: somebody has to write an unexpected
+      # source into a manifest, in a reviewable diff, and that review is the
+      # exemption mechanism.
+      - name: Where every dependency comes from
+        if: steps.filter.outputs.run == 'true'
+        run: node scripts/check-dependency-sources.mjs
+
+      - name: Test the gate's own decision logic
+        if: steps.filter.outputs.run == 'true'
+        run: node --test scripts/audit-gate.test.mjs
+
+      # Note what is *not* above this step: `bun install`. `bun audit` reads
+      # bun.lock and asks the registry about it, so the three JavaScript trees
+      # are audited without installing any of them -- which also means this job
+      # never runs a dependency's install script in order to find out whether
+      # that dependency is safe to run.
+      - name: Advisories
+        if: steps.filter.outputs.run == 'true'
+        env:
+          # Blocking on a pull request, where the finding is something the
+          # author just introduced and can act on. Reporting only otherwise,
+          # so a Wednesday-morning advisory against a dependency nobody touched
+          # becomes an issue rather than a red main branch.
+          MODE: ${{ github.event_name == 'pull_request' && 'gate' || 'report' }}
+        run: |
+          args=(--findings "$RUNNER_TEMP/advisories.json")
+          if [ "$MODE" = report ]; then args+=(--report-only); fi
+          node scripts/audit-gate.mjs "${args[@]}"
+
+      # Only the scheduled sweep keeps the issue. A dispatched run is somebody
+      # reading the output directly, and a pull-request run has already failed
+      # if it needed to.
+      - name: Open or update the tracking issue
+        if: always() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/report-advisories.mjs "$RUNNER_TEMP/advisories.json"
+
+      - name: Nothing to audit
+        if: steps.filter.outputs.run != 'true'
+        run: |
+          echo "No manifest, lockfile or audit-tooling change in this pull request."
+          echo "The required dependency-audit check is green because there was nothing to ask about."

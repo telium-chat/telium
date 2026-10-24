@@ -1,0 +1,73 @@
+.privacy-note {
+  border-radius: var(--radius-card);
+  background: color-mix(in oklab, var(--color-accent) 7%, var(--color-surface-secondary));
+  padding-block: 0.75rem 0.8125rem;
+  padding-inline: 0.875rem;
+}
+
+.privacy-note__head {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-foreground);
+}
+
+.privacy-note__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4375rem;
+  margin-block-start: 0.5rem;
+  list-style: none;
+  padding-inline: 0;
+}
+
+.privacy-note__party {
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+.privacy-note__name {
+  color: var(--color-foreground);
+}
+
+.privacy-note__name::after {
+  content: ": ";
+}
+
+.privacy-note__note {
+  margin-block-start: 0.5625rem;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+.privacy-note--menu {
+  background: none;
+  padding-block: 0.375rem 0.25rem;
+  padding-inline: 8px;
+  max-inline-size: 12.5rem;
+  pointer-events: none;
+}
+
+.privacy-note--menu .privacy-note__head {
+  font-size: var(--text-xs);
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+.gif-privacy {
+  flex: none;
+  margin-block-start: 8px;
+  margin-inline: 8px;
+  padding-block: 0.5rem 0.5625rem;
+  padding-inline: 0.625rem;
+}
+
+.gif-privacy .privacy-note__head {
+  font-size: var(--text-xs);
+}
+
+.gif-privacy .privacy-note__note {
+  margin-block-start: 0.3125rem;
+}

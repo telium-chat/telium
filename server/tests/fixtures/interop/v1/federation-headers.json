@@ -1,0 +1,7 @@
+{
+  "authorization": "<signature>",
+  "content-type": "application/json",
+  "x-telium-protocol": "1",
+  "x-telium-min-protocol": "1",
+  "x-telium-capabilities": "federation.curator_feeds,migrate.handoff,migrate.try_again,onboarding.recommendations,relocation.announce,sync.sealed"
+}

@@ -1,0 +1,202 @@
+:root {
+  --popup-shadow:
+    0 0 0 1px var(--border),
+    0 8px 24px -8px rgb(0 0 0 / 0.28);
+}
+
+:root.dark,
+:root[data-theme="dark"] {
+  --popup-shadow:
+    0 0 0 1px var(--border),
+    0 12px 32px -10px rgb(0 0 0 / 0.6);
+}
+
+.popup {
+  background: var(--overlay);
+  border: 0;
+  border-radius: var(--radius-2xl);
+  padding: 4px;
+  box-shadow: var(--popup-shadow);
+  color: var(--foreground);
+  outline: none;
+
+  transform-origin: var(--transform-origin, center);
+  transition:
+    opacity var(--dur-1) var(--ease),
+    transform var(--dur-1) var(--ease);
+}
+
+.popup[data-starting-style],
+.popup[data-ending-style] {
+  opacity: 0;
+  transform: scale(0.96);
+}
+
+.popup--card {
+  border-radius: var(--radius-card);
+  padding: 0;
+}
+
+.popup--panel {
+  padding: 12px;
+}
+
+.modal--top {
+  --modal-top: clamp(24px, 12dvh, 140px);
+  top: var(--modal-top);
+  bottom: auto;
+  margin-block: 0;
+  --modal-max-h: calc(100dvh - var(--modal-top) - 24px);
+}
+
+.popup-chip {
+  background: var(--overlay);
+  border: 0;
+  box-shadow: var(--popup-shadow);
+  transition: background-color var(--dur-1) var(--ease);
+}
+
+.popup-chip:hover {
+  background: var(--surface-secondary);
+}
+
+.menu-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding-block: 5px;
+  padding-inline: 8px;
+  border-radius: var(--radius-row);
+  font-size: var(--text-base);
+  line-height: var(--text-base--line-height);
+  text-align: start;
+  cursor: default;
+  user-select: none;
+  transition:
+    background-color var(--dur-1) var(--ease),
+    color var(--dur-1) var(--ease);
+}
+
+.menu-row:hover,
+.menu-row[data-highlighted],
+.menu-row[data-popup-open],
+.menu-row[data-selected] {
+  background-color: var(--surface-secondary);
+  color: var(--foreground);
+}
+
+.menu-row[data-tone="danger"] {
+  color: var(--danger);
+}
+
+.menu-row[data-tone="danger"]:hover,
+.menu-row[data-tone="danger"][data-highlighted],
+.menu-row[data-tone="danger"][data-selected] {
+  background-color: color-mix(in oklab, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+.menu-row[data-disabled],
+.menu-row:disabled {
+  opacity: 0.4;
+}
+
+.menu-hint {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.menu-row--stacked {
+  align-items: flex-start;
+  min-height: 0;
+  padding-block: 7px;
+  gap: 12px;
+}
+
+.menu-chip {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius);
+  background: var(--surface-secondary);
+  transition: background-color var(--dur-1) var(--ease);
+}
+
+.menu-row:hover > .menu-chip,
+.menu-row[data-highlighted] > .menu-chip {
+  background: var(--surface-tertiary);
+}
+
+.menu-reactions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.menu-reaction {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  border-radius: var(--radius-row);
+  font-size: 1.125rem;
+  cursor: default;
+  outline: none;
+  user-select: none;
+  transition: background-color var(--dur-1) var(--ease);
+}
+
+.menu-reaction:hover,
+.menu-reaction[data-highlighted] {
+  background-color: var(--surface-secondary);
+}
+
+.menu-reaction .emoji {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  vertical-align: middle;
+}
+
+.menu-label {
+  padding-block: 6px 4px;
+  padding-inline: 8px;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.menu-separator {
+  height: 1px;
+  margin-block: 4px;
+  margin-inline: -4px;
+  background: var(--separator);
+}
+
+.popup-icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  color: var(--muted);
+  transition:
+    background-color var(--dur-1) var(--ease),
+    color var(--dur-1) var(--ease);
+}
+
+.popup-icon-button:hover {
+  background-color: var(--surface-secondary);
+  color: var(--foreground);
+}

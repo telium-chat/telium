@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="light dark" />
+<!-- The web client is an application surface, not a public directory. Profile
+     links are shareable by URL but are never offered to search engines. -->
+<meta name="robots" content="noindex,nofollow,noarchive" />
+<!-- Mobile browser chrome matches the page it is framing. -->
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F8F7FA" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#17191D" />
+<title>Telium</title>
+<meta name="description" content="Open this link in Telium — familiar chat on an open, federated network." />
+<!-- Deliberately generic. The web client stays static, so link-preview crawlers
+     that do not execute JavaScript see Telium branding without requiring a
+     centralized per-user renderer or profile database. -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Telium" />
+<meta property="og:title" content="Telium" />
+<meta property="og:description" content="Open this link in Telium — familiar chat on an open, federated network." />
+<meta property="og:image" content="https://app.telium.chat/brand/telium-app-icon-light-1024.png" />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="Telium" />
+<meta name="twitter:description" content="Open this link in Telium — familiar chat on an open, federated network." />
+<!-- Named so the unread badge can find and restore exactly this one link
+     rather than appending a second icon per update. See lib/favicon.js. -->
+<link id="favicon" rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="alternate icon" href="/favicon.ico" />
+<link rel="apple-touch-icon" href="/brand/telium-app-icon-light-1024.png" />
+</head>
+<body>
+<div id="root"></div>
+<script type="module" src="/src/main.jsx"></script>
+</body>
+</html>

@@ -1,0 +1,86 @@
+.data-table th {
+  border-bottom: 1px solid var(--separator);
+  background: transparent;
+}
+
+.data-table td {
+  border-top: 1px solid var(--separator);
+}
+
+.data-table tbody tr {
+  --kumo-table-row-bg: var(--surface-secondary);
+  background: transparent;
+}
+
+.data-table tbody tr:first-child td { border-top: 0; }
+
+.record-list {
+  border-radius: var(--radius-card);
+  background-color: var(--surface-secondary);
+  overflow: hidden;
+}
+
+.record {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 11px 14px;
+}
+
+.record + .record {
+  border-top: 1px solid var(--separator);
+}
+
+.record__body {
+  min-width: 0;
+  flex: 1 1 14rem;
+}
+
+.record__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+}
+
+.record__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px 14px;
+  padding-top: 2px;
+}
+
+.record__fact {
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
+.record__label {
+  color: var(--muted);
+}
+
+.record__value {
+  min-width: 0;
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.record__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-inline-start: auto;
+}

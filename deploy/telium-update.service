@@ -1,0 +1,15 @@
+[Unit]
+Description=Update the Telium staging container if the registry has a newer main
+Documentation=https://github.com/telium-chat/telium/blob/main/deploy/README.md
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=benjamin
+Group=benjamin
+# The GHCR pull credential lives in this user's Docker config, so the unit
+# needs a HOME to find it in.
+Environment=HOME=/home/benjamin
+ExecStart=/opt/telium/update.sh
+TimeoutStartSec=600

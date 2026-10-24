@@ -1,0 +1,37 @@
+---
+import Icon from './Icon.astro'
+import ServerTable from './ServerTable.astro'
+import { openServers } from '../lib/servers'
+import { URLS } from '../config'
+---
+
+<section class="band overflow-hidden" id="homeservers">
+  <div class="page">
+    <div class="directory-shell panel reveal relative overflow-hidden p-6 sm:p-8 lg:p-10">
+      <div class="grid gap-7 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+        <div>
+          <p class="eyebrow">Homeservers</p>
+          <h2 class="h2 mt-3 max-w-[16ch]">Pick a home. Keep your options open.</h2>
+          <p class="mt-5 max-w-[60ch] text-[15px] leading-relaxed text-muted">
+            Start with a server near you that is accepting new accounts and run by people you trust.
+            The directory is checked every hour, and you can measure the connection from your own browser.
+          </p>
+        </div>
+
+        <a href={URLS.servers} class="btn btn-primary btn-lg lg:justify-self-end">
+          See all {openServers.length} homeservers
+          <Icon name="arrow-right" size={16} />
+        </a>
+      </div>
+
+      <div class="panel-inset mt-10 overflow-hidden">
+        <ServerTable limit={3} controls={false} class="landing-preview" />
+      </div>
+
+      <div class="mt-5 flex flex-wrap items-center justify-between gap-3 text-[12px] text-muted">
+        <span class="inline-flex items-center gap-2"><span class="size-1.5 rounded-full bg-success"></span> Registry health checked hourly</span>
+        <span>You can migrate later if your needs change.</span>
+      </div>
+    </div>
+  </div>
+</section>

@@ -1,0 +1,103 @@
+---
+import Icon from './Icon.astro'
+
+const steps = [
+  {
+    number: '01',
+    icon: 'users',
+    title: 'Choose your account home',
+    body: 'Pick a homeserver run by people you trust. It keeps your account and private-message state.',
+  },
+  {
+    number: '02',
+    icon: 'video',
+    title: 'Join communities anywhere',
+    body: 'Communities can live on other servers. Telium connects you to each one without making you create another identity.',
+  },
+  {
+    number: '03',
+    icon: 'arrow-left-right',
+    title: 'Move when you need to',
+    body: 'Change your account home or move a community later without throwing away the identity and structure you already built.',
+  },
+] as const
+---
+
+<section class="band" id="how-it-works">
+  <div class="page">
+    <div class="reveal grid gap-6 lg:grid-cols-[minmax(0,.8fr)_minmax(0,1.2fr)] lg:items-end">
+      <div>
+        <p class="eyebrow">How it works</p>
+        <h2 class="h2 mt-3 max-w-[14ch]">One account. Any community.</h2>
+      </div>
+      <p class="max-w-[60ch] text-[15.5px] leading-relaxed text-muted lg:justify-self-end">
+        A homeserver is simply where your account lives. Communities can live somewhere else,
+        and the client handles that boundary for you.
+      </p>
+    </div>
+
+    <div class="relative mt-12">
+      <div class="step-line hidden lg:block" aria-hidden="true"></div>
+      <ol class="grid gap-4 lg:grid-cols-3">
+        {
+          steps.map((step) => (
+            <li class="step-card panel reveal relative p-6">
+              <div class="flex items-center justify-between gap-4">
+                <span class="step-icon"><Icon name={step.icon} size={18} /></span>
+                <span class="font-mono text-[11px] tracking-[.1em] text-accent">{step.number}</span>
+              </div>
+              <h3 class="mt-7 text-[1.12rem] font-semibold tracking-[-.02em]">{step.title}</h3>
+              <p class="mt-3 text-[14px] leading-relaxed text-muted">{step.body}</p>
+            </li>
+          ))
+        }
+      </ol>
+    </div>
+  </div>
+</section>
+
+<style>
+  /* The rule threading the three steps together. It is a line between cards
+     rather than a border around one, so it stays — but it now runs behind them
+     in the page fill's own separator colour instead of a gradient tinted with
+     the accent, which on the new palette was the brightest thing in the band. */
+  .step-line {
+    position: absolute;
+    left: 16%;
+    right: 16%;
+    top: 2.4rem;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--color-separator) 12%,
+      var(--color-separator) 88%,
+      transparent
+    );
+  }
+
+  .step-card {
+    min-height: 230px;
+    transition: background-color var(--dur-3) var(--ease);
+  }
+
+  .step-card:hover {
+    background: var(--color-surface-secondary);
+  }
+
+  /* The icon covers the rule where it crosses the card, which used to be done
+     with a 6px `box-shadow` ring in the page colour. The card's own fill is
+     already painted over the line, so the ring was drawing the page on top of
+     the page — the icon only has to be opaque. */
+  .step-icon {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    width: 2.75rem;
+    height: 2.75rem;
+    place-items: center;
+    border-radius: 0.65rem;
+    color: var(--color-accent-soft-foreground);
+    background: var(--color-accent-soft);
+  }
+</style>

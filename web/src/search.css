@@ -1,0 +1,212 @@
+.search-field {
+  position: relative;
+  flex: 0 1 260px;
+  min-width: 140px;
+}
+
+.search-field--wide {
+  flex: 1 1 auto;
+  width: 100%;
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  height: 32px;
+  padding-inline: 6px 28px;
+  border-radius: var(--radius-row);
+  background: var(--surface-secondary);
+  overflow: hidden;
+  transition: background-color var(--dur-1) var(--ease);
+}
+
+.search-box:hover,
+.search-box:focus-within {
+  background: var(--surface-tertiary);
+}
+
+.search-field-input {
+  flex: 1 1 64px;
+  min-width: 48px;
+  height: 100%;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  outline: none;
+}
+
+.search-field-input::placeholder { color: var(--muted); }
+
+.search-tokens {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  white-space: nowrap;
+}
+
+.search-tokens::-webkit-scrollbar { display: none; }
+
+.search-stash {
+  flex: 0 0 auto;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.search-chip {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  max-width: 180px;
+  height: 22px;
+  padding-inline: 6px;
+  border: 0;
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-size: 0.75rem;
+  line-height: 1;
+  transition: background-color var(--dur-1) var(--ease);
+}
+
+.search-chip:hover { background: color-mix(in oklab, var(--accent) 18%, transparent); }
+.search-chip:active { background: color-mix(in oklab, var(--accent) 24%, transparent); }
+
+.search-chip--open {
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+  opacity: 0.85;
+}
+
+.search-chip--open:hover { background: color-mix(in oklab, var(--accent) 12%, transparent); }
+
+.search-chip-token {
+  flex: 0 0 auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.6875rem;
+  opacity: 0.75;
+}
+
+.search-chip-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-field-glyph {
+  position: absolute;
+  inset-inline-end: 9px;
+  inset-block-start: 50%;
+  translate: 0 -50%;
+  pointer-events: none;
+  color: var(--muted);
+}
+
+.search-panel {
+  position: fixed;
+  z-index: 60;
+  width: max(var(--anchor-w, 220px), 380px);
+  max-width: calc(100vw - 24px);
+  max-height: min(440px, calc(100vh - 96px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.search-hint,
+.search-hit {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: var(--radius-row);
+  text-align: start;
+  color: var(--foreground);
+  transition: background-color var(--dur-1) var(--ease);
+}
+
+.search-hint:hover,
+.search-hint:focus-visible,
+.search-hit:hover,
+.search-hit:focus-visible {
+  background: var(--surface-secondary);
+  outline: none;
+}
+
+.search-hint-label,
+.search-hint-token {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-hint-label {
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+
+.search-hint-token {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.71875rem;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.search-hit {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-height: 48px;
+  padding: 8px 10px;
+}
+
+.search-pick {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 5px 8px;
+  border-radius: var(--radius-row);
+  text-align: start;
+  color: var(--foreground);
+  transition: background-color var(--dur-1) var(--ease);
+}
+
+.search-pick.is-on,
+.search-pick:focus-visible {
+  background: var(--surface-secondary);
+  outline: none;
+}
+
+.search-pick-name,
+.search-pick-sub {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-pick-name {
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+
+.search-pick-sub {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  color: var(--muted);
+}

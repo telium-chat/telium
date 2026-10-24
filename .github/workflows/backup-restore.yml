@@ -1,0 +1,492 @@
+name: Backup and restore
+
+# The backup floor, proven the only way that counts: a real server is backed
+# up to a real S3-compatible bucket, its database is deleted, and it is
+# rebuilt from `s3://latest`. Runs on every change to the server.
+
+on:
+  pull_request:
+    paths:
+      - 'server/**'
+      - '.github/workflows/backup-restore.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'server/**'
+      - '.github/workflows/backup-restore.yml'
+
+concurrency:
+  group: backup-restore-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  MINIO_ROOT_USER: telium-ci
+  MINIO_ROOT_PASSWORD: telium-ci-${{ github.run_id }}-${{ github.run_attempt }}
+  TEST_ACCOUNT_PASSWORD: telium-test-${{ github.run_id }}-${{ github.run_attempt }}
+
+jobs:
+  backup-restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Every `uses:` below names a commit, not a tag. A tag is a mutable
+      # pointer that the action's owner -- or anyone who takes their account
+      # -- can move onto new code, and this repository's runs would then
+      # execute it without a diff, a review, or a notification. The trailing
+      # comment is the release that commit was, so the pin is still readable;
+      # `docs/supply-chain.md` explains how to move one forward.
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch @ 2026-09-03
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: server
+
+      - name: Clean persistent runner state
+        run: |
+          set -euo pipefail
+          if [[ -f /tmp/telium-ci/server.pid ]]; then
+            kill "$(cat /tmp/telium-ci/server.pid)" 2>/dev/null || true
+          fi
+          pkill -f 'telium-server --config /tmp/telium-ci/telium.toml serve' 2>/dev/null || true
+          docker rm -f minio >/dev/null 2>&1 || true
+          rm -rf /tmp/telium-ci
+
+      - name: Backup suite (format, S3 client, in-process bucket)
+        run: cargo test --manifest-path server/Cargo.toml --test backup -- --test-threads=1
+
+      - name: Build server binary
+        run: cargo build --manifest-path server/Cargo.toml
+
+      # Everything this job holds on the machine, named after the run holding
+      # it.
+      # ---------------------------------------------------------------------
+      # A hosted runner is a fresh machine every time and a self-hosted one is
+      # the same machine every time, which this job did not know when it was
+      # written. It took the container name `minio`, the ports 9000 and 8448
+      # and the directory /tmp/telium-ci, all four of them fixed -- so a run
+      # that ended badly left `minio` behind and every run after it died on
+      # its first step with `the container name "/minio" is already in use`,
+      # having nothing to do with what it was asked to test. The database left
+      # behind in the scratch directory was the quieter version of the same
+      # thing: the next run registered alice into a database that had an alice
+      # in it already.
+      #
+      # Clearing those before each run fixed the failure without fixing the
+      # cause, and it only worked at all because the runner takes one job at a
+      # time. The moment there is a second runner on this box -- which is the
+      # one change that would actually shorten the queue -- two of these would
+      # be clearing each other's containers mid-test. So nothing is fixed any
+      # more: the run names all four, and owns them for as long as it lasts.
+      #
+      # The ports are derived rather than asked for. Binding port 0 to find a
+      # free one and then handing the number to something else is a race with
+      # whatever else on the box is doing the same; a number derived from the
+      # run id cannot collide with another run of this job, which is the only
+      # thing it shares a machine with. Doubling the id spaces consecutive runs
+      # two apart, so the pair a run takes never overlaps its neighbour's.
+      #
+      # The fresh-install stage at the end needs a fifth name: a third port and
+      # a second directory tree. They are derived from the same `slot` rather
+      # than by widening the stride from two to four, because widening it would
+      # quietly falsify the paragraph above -- which is load-bearing, and was
+      # paid for. `slot` runs 0..19998, so the existing pair can land anywhere
+      # in 20000..39999 and 40000 is the first number that cannot collide with
+      # it whatever the run id is. The second directory keeps the `telium-ci-`
+      # prefix so the daily sweep below and the teardown at the end both
+      # already know how to find it.
+      - name: Pick names nothing else is using
+        run: |
+          slot=$(( GITHUB_RUN_ID % 10000 * 2 ))
+          {
+            echo "WORK=/tmp/telium-ci-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+            echo "NEWBOX=/tmp/telium-ci-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-newbox"
+            echo "MINIO=minio-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+            echo "API_PORT=$(( 20000 + slot ))"
+            echo "S3_PORT=$(( 20001 + slot ))"
+            echo "API2_PORT=$(( 40000 + slot ))"
+          } >> "$GITHUB_ENV"
+
+          # Names that belong to a run are cleaned up by that run, and this
+          # job's teardown runs even when the job fails or is cancelled. What
+          # it cannot survive is the runner being killed outright, and there
+          # is no longer a step at the start of the next run that clears the
+          # fixed names, because there are no fixed names. Orphans collide
+          # with nothing now -- that is the whole point -- so this is only
+          # about not accumulating: anything left from yesterday goes. A day
+          # is far longer than this job has ever taken, and the container
+          # filter is a label rather than a name pattern so the sweep cannot
+          # reach anything another workflow left on the box.
+          find /tmp -maxdepth 1 -name 'telium-ci-*' -mmin +1440 \
+            -exec rm -rf {} + 2>/dev/null || true
+          docker container prune -f \
+            --filter 'label=telium-ci' --filter 'until=24h' >/dev/null || true
+
+      - name: Start RustFS
+        run: |
+          docker run -d --name "$MINIO" --label telium-ci -p "127.0.0.1:$S3_PORT:9000" \
+            -e RUSTFS_ACCESS_KEY="$MINIO_ROOT_USER" \
+            -e RUSTFS_SECRET_KEY="$MINIO_ROOT_PASSWORD" \
+            rustfs/rustfs:1.0.2
+          for i in $(seq 1 30); do
+            if curl -s -o /dev/null http://127.0.0.1:${S3_PORT}/; then
+              echo "rustfs is up"; exit 0
+            fi
+            sleep 1
+          done
+          echo "rustfs did not come up"; docker logs "$MINIO"; exit 1
+
+      - name: Write config
+        run: |
+          mkdir -p "$WORK"
+          cat > "$WORK/telium.toml" <<EOF
+          server_name = "ci.example"
+          public_base_url = "http://127.0.0.1:${API_PORT}"
+          bind = "127.0.0.1:${API_PORT}"
+          database_url = "sqlite://${WORK}/telium.db?mode=rwc"
+          media_dir = "${WORK}/media"
+
+          [registration]
+          open = true
+
+          [archive]
+          dir = "${WORK}/cold"
+
+          [backup]
+          enabled = true
+          dir = "${WORK}/backups"
+          key_file = "${WORK}/backup.key"
+
+          [backup.remote]
+          enabled = true
+          endpoint = "http://127.0.0.1:${S3_PORT}"
+          bucket = "telium-ci-backups"
+          region = "us-east-1"
+          path_style = true
+          keep = 3
+          EOF
+          server/target/debug/telium-server --config ${WORK}/telium.toml backup keygen
+          test "$(stat -c %a ${WORK}/backup.key)" = "600"
+
+      - name: Start the server and create a row
+        env:
+          TELIUM_S3_ACCESS_KEY_ID: ${{ env.MINIO_ROOT_USER }}
+          TELIUM_S3_SECRET_ACCESS_KEY: ${{ env.MINIO_ROOT_PASSWORD }}
+        run: |
+          server/target/debug/telium-server --config ${WORK}/telium.toml serve \
+            > ${WORK}/server-1.log 2>&1 &
+          echo $! > ${WORK}/server.pid
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:${API_PORT}/_telium/v1/health >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:${API_PORT}/_telium/v1/health
+          code=$(curl -s -o ${WORK}/register.json -w '%{http_code}' \
+            -H 'content-type: application/json' \
+            -d "{\"localpart\":\"alice\",\"password\":\"$TEST_ACCOUNT_PASSWORD\"}" \
+            http://127.0.0.1:${API_PORT}/_telium/v1/register)
+          test "$code" = "200" || { cat ${WORK}/register.json; exit 1; }
+          # Something on disk outside the database, so the restore has all three
+          # parts to put back.
+          mkdir -p ${WORK}/media/ab/cd ${WORK}/cold
+          head -c 300000 /dev/urandom > ${WORK}/media/ab/cd/attachment.bin
+          head -c 50000 /dev/urandom > ${WORK}/cold/0001.seg
+          sha256sum ${WORK}/media/ab/cd/attachment.bin ${WORK}/cold/0001.seg > ${WORK}/files.sha256
+
+          # What the only server that has ever held this identity publishes
+          # about it, captured while it is still the only one. After the data
+          # is deleted there is no second opinion left: a check at the end that
+          # reads the identity off the restored box and compares it to itself
+          # would pass no matter what happened in between.
+          curl -sf http://127.0.0.1:${API_PORT}/_telium/v1/keys > ${WORK}/keys-original.json
+          grep -q '"current_key_id"' ${WORK}/keys-original.json
+
+          # A real upload rather than a file dropped into the media directory,
+          # so the box at the end can be asked for it through the API instead
+          # of having its filesystem read. The capability is a row in the
+          # database and the bytes are a file in the media store; fetching it
+          # over there proves both came back and still agree with each other,
+          # which is a stronger claim than either one on its own.
+          token=$(sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p' ${WORK}/register.json)
+          test -n "$token"
+          head -c 120000 /dev/urandom > ${WORK}/upload.bin
+          curl -sf -X POST -H "authorization: Bearer $token" \
+            -H 'X-Telium-Filename: attachment.bin' \
+            -H 'content-type: application/octet-stream' \
+            --data-binary "@${WORK}/upload.bin" \
+            http://127.0.0.1:${API_PORT}/_telium/v1/media > ${WORK}/upload.json
+          {
+            echo "MEDIA_HASH=$(sed -n 's/.*"hash":"\([^"]*\)".*/\1/p' ${WORK}/upload.json)"
+            echo "MEDIA_CAP=$(sed -n 's/.*"capability":"\([^"]*\)".*/\1/p' ${WORK}/upload.json)"
+            echo "MEDIA_SHA=$(sha256sum ${WORK}/upload.bin | cut -d' ' -f1)"
+          } >> "$GITHUB_ENV"
+
+      - name: Back up to MinIO
+        env:
+          TELIUM_S3_ACCESS_KEY_ID: ${{ env.MINIO_ROOT_USER }}
+          TELIUM_S3_SECRET_ACCESS_KEY: ${{ env.MINIO_ROOT_PASSWORD }}
+        run: |
+          server/target/debug/telium-server --config ${WORK}/telium.toml backup now | tee ${WORK}/backup-now.txt
+          grep -q '^uploaded:  s3://telium-ci-backups/telium/ci.example/telium-.*\.tbk$' ${WORK}/backup-now.txt
+
+          # Remember which archive this was, by name. The stage at the end of
+          # this job restores onto a second box, and by the time it runs the
+          # restarted server above has been alive long enough to have taken a
+          # scheduled backup of its own -- so `s3://latest` over there may well
+          # resolve to an archive written after the disaster rather than the
+          # one written before it. That archive would almost certainly pass
+          # every check, which is the problem: the job would be testing a copy
+          # of the recovery instead of the recovery.
+          #
+          # Just the file name, not the URL the line prints: `s3://<name>` is
+          # resolved under the configured prefix, whereas everything after
+          # `s3://` in a printed URL is the bucket *and* the key, which is not
+          # a key. A bare name is also what an operator reads off `backup list`.
+          echo "ARCHIVE_NAME=$(sed -n 's|^uploaded:  .*/||p' ${WORK}/backup-now.txt)" >> "$GITHUB_ENV"
+          server/target/debug/telium-server --config ${WORK}/telium.toml backup list | tee ${WORK}/backup-list.txt
+          # The listing after "remote" comes from ListObjectsV2, not from disk.
+          sed -n '/^remote/,$p' ${WORK}/backup-list.txt | grep -q 'telium-.*\.tbk'
+          server/target/debug/telium-server --config ${WORK}/telium.toml backup verify s3://latest
+
+      - name: Stop the server and delete its data
+        run: |
+          kill "$(cat ${WORK}/server.pid)"
+          for i in $(seq 1 30); do
+            kill -0 "$(cat ${WORK}/server.pid)" 2>/dev/null || break
+            sleep 1
+          done
+          rm -f ${WORK}/telium.db ${WORK}/telium.db-wal ${WORK}/telium.db-shm
+          rm -rf ${WORK}/media ${WORK}/cold
+          # The local archives go too: the restore has to come from the bucket.
+          rm -rf ${WORK}/backups
+          test ! -e ${WORK}/telium.db
+
+      - name: Restore from s3://latest
+        env:
+          TELIUM_S3_ACCESS_KEY_ID: ${{ env.MINIO_ROOT_USER }}
+          TELIUM_S3_SECRET_ACCESS_KEY: ${{ env.MINIO_ROOT_PASSWORD }}
+        run: |
+          server/target/debug/telium-server --config ${WORK}/telium.toml restore s3://latest --yes
+          test -s ${WORK}/telium.db
+          sha256sum -c ${WORK}/files.sha256
+
+      - name: Restart and log in as the restored account
+        env:
+          TELIUM_S3_ACCESS_KEY_ID: ${{ env.MINIO_ROOT_USER }}
+          TELIUM_S3_SECRET_ACCESS_KEY: ${{ env.MINIO_ROOT_PASSWORD }}
+        run: |
+          server/target/debug/telium-server --config ${WORK}/telium.toml serve \
+            > ${WORK}/server-2.log 2>&1 &
+          echo $! > ${WORK}/server.pid
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:${API_PORT}/_telium/v1/health >/dev/null; then break; fi
+            sleep 1
+          done
+          code=$(curl -s -o ${WORK}/login.json -w '%{http_code}' \
+            -H 'content-type: application/json' \
+            -d "{\"user\":\"alice\",\"password\":\"$TEST_ACCOUNT_PASSWORD\"}" \
+            http://127.0.0.1:${API_PORT}/_telium/v1/login)
+          test "$code" = "200" || { cat ${WORK}/login.json; exit 1; }
+          grep -q '"user_id":"@alice:ci.example"' ${WORK}/login.json
+          # And the wrong password is still wrong: the row came back with its hash.
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H 'content-type: application/json' \
+            -d "{\"user\":\"alice\",\"password\":\"wrong-$TEST_ACCOUNT_PASSWORD\"}" \
+            http://127.0.0.1:${API_PORT}/_telium/v1/login)
+          test "$code" = "401"
+          kill "$(cat ${WORK}/server.pid)"
+
+      # A second machine, which is the only way to test the thing that actually
+      # goes wrong
+      # ---------------------------------------------------------------------
+      # Every restore above happens over the top of the box that took the
+      # backup. That proves the archive and it proves the format, and it cannot
+      # prove the failure this job is named after, because the directory being
+      # restored into has been that server's directory the whole time: paths
+      # the old config named, a key file the old server wrote, a `status.json`
+      # from the old run. A restore that quietly read any of those would pass
+      # every assertion above it.
+      #
+      # So this is a new machine in every way one can be simulated on a runner
+      # that is not new: its own directory tree, its own port, and a config
+      # typed out from scratch carrying only what an operator would retype off
+      # a runbook -- the server name, the URLs, the paths. Nothing is copied
+      # from $WORK except the backup key, because the backup key is the one
+      # thing a human has to carry by hand, and the archive comes out of the
+      # bucket the way it would on the day.
+      #
+      # What it then checks is what a peer checks rather than what an operator
+      # notices. An operator notices the guild. A peer notices that the key
+      # document is signed by a key it has never seen before, and by the time
+      # anybody connects those two facts the new identity has been published
+      # for days.
+      - name: Provision a new machine and restore onto it
+        env:
+          TELIUM_S3_ACCESS_KEY_ID: ${{ env.MINIO_ROOT_USER }}
+          TELIUM_S3_SECRET_ACCESS_KEY: ${{ env.MINIO_ROOT_PASSWORD }}
+        run: |
+          mkdir -p "$NEWBOX"
+          cat > "$NEWBOX/telium.toml" <<EOF
+          server_name = "ci.example"
+          public_base_url = "http://127.0.0.1:${API2_PORT}"
+          bind = "127.0.0.1:${API2_PORT}"
+          database_url = "sqlite://${NEWBOX}/telium.db?mode=rwc"
+          media_dir = "${NEWBOX}/media"
+
+          [registration]
+          open = true
+
+          [archive]
+          dir = "${NEWBOX}/cold"
+
+          [backup]
+          enabled = true
+          dir = "${NEWBOX}/backups"
+          key_file = "${NEWBOX}/backup.key"
+
+          [backup.remote]
+          enabled = true
+          endpoint = "http://127.0.0.1:${S3_PORT}"
+          bucket = "telium-ci-backups"
+          region = "us-east-1"
+          path_style = true
+          keep = 3
+          EOF
+
+          # The one step in this job with no automated equivalent, and there
+          # never will be one: if the key were recoverable from anything on
+          # this machine, the archive would not be encrypted in any useful
+          # sense. An operator does this out of a password manager.
+          cp ${WORK}/backup.key ${NEWBOX}/backup.key
+          chmod 600 ${NEWBOX}/backup.key
+          test "$(stat -c %a ${NEWBOX}/backup.key)" = "600"
+
+          # Fresh means fresh, and it is asserted rather than assumed: no
+          # database, no media or cold directory, no `.pre-restore-*` parked by
+          # an earlier attempt, and no `status.json` from the old box -- that
+          # last one would make `backup list` over here describe a machine that
+          # does not exist any more.
+          test ! -e ${NEWBOX}/telium.db
+          test ! -e ${NEWBOX}/media
+          test ! -e ${NEWBOX}/cold
+          test ! -e ${NEWBOX}/backups/status.json
+          test -z "$(find ${NEWBOX} -maxdepth 1 -name '*.pre-restore-*' 2>/dev/null)"
+
+          # No `--yes`. An empty box does not need to be forced, and needing to
+          # force it would mean it was not empty -- so leaving the flag off is
+          # itself one of the assertions in this step.
+          #
+          # And the archive is named rather than asked for by recency, so that
+          # what this box brings back is the archive taken before the original
+          # was destroyed and not something the restarted server uploaded in
+          # the meantime. See the note where ARCHIVE_NAME is set.
+          test -n "$ARCHIVE_NAME"
+          server/target/debug/telium-server --config ${NEWBOX}/telium.toml restore "s3://$ARCHIVE_NAME"
+          test -s ${NEWBOX}/telium.db
+
+          # The two directories a backup leaves out on purpose: other servers'
+          # bytes, re-fetched rather than restored. If they ever start coming
+          # back, every archive grows forever and nothing else fails.
+          test ! -e ${NEWBOX}/media/cache
+          test ! -e ${NEWBOX}/media/camo
+
+      - name: The new machine is the same homeserver
+        run: |
+          server/target/debug/telium-server --config ${NEWBOX}/telium.toml serve \
+            > ${NEWBOX}/server.log 2>&1 &
+          echo $! > ${NEWBOX}/server.pid
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:${API2_PORT}/_telium/v1/health >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:${API2_PORT}/_telium/v1/health
+
+          # 1. The person who was here can get back in, and the wrong password
+          #    is still wrong -- so what came back is a verifier and not a row
+          #    that lets anything through.
+          code=$(curl -s -o ${NEWBOX}/login.json -w '%{http_code}' \
+            -H 'content-type: application/json' \
+            -d "{\"user\":\"alice\",\"password\":\"$TEST_ACCOUNT_PASSWORD\"}" \
+            http://127.0.0.1:${API2_PORT}/_telium/v1/login)
+          test "$code" = "200" || { cat ${NEWBOX}/login.json; exit 1; }
+          grep -q '"user_id":"@alice:ci.example"' ${NEWBOX}/login.json
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H 'content-type: application/json' \
+            -d "{\"user\":\"alice\",\"password\":\"wrong-$TEST_ACCOUNT_PASSWORD\"}" \
+            http://127.0.0.1:${API2_PORT}/_telium/v1/login)
+          test "$code" = "401"
+
+          # 2. The headline. `/_telium/v1/keys` is the document federation reads
+          #    to decide whether a signature is this server's. A box that minted
+          #    a new signing key on first boot -- correct behaviour on a server
+          #    that really is new, a catastrophe on this one -- serves a
+          #    document that differs in exactly these fields while passing
+          #    check 1 and check 3 without complaint.
+          #
+          #    `generated_at` and the signature over it differ by construction,
+          #    because the document is signed afresh on every request. So the
+          #    comparison is field by field rather than a diff of the whole
+          #    body. Python rather than shell because there is no jq here and
+          #    something that parses JSON with sed passes quietly on the day
+          #    the JSON changes shape.
+          curl -sf http://127.0.0.1:${API2_PORT}/_telium/v1/keys > ${NEWBOX}/keys-restored.json
+          python3 - ${WORK}/keys-original.json ${NEWBOX}/keys-restored.json <<'PY'
+          import json, sys
+
+          before = json.load(open(sys.argv[1]))
+          after = json.load(open(sys.argv[2]))
+
+          # `verify_keys` is in this list on purpose, and it is the half that is easy to
+          # leave out: peers verify durable records against whichever key was current
+          # when the record was made, so a box that brought back one key out of several
+          # is still missing an identity even though everything live about it works.
+          for field in ("server_name", "signer", "authority", "current_key_id", "verify_keys"):
+              if before.get(field) != after.get(field):
+                  print("the restored server is not the server that was backed up.")
+                  print("  field:  %s" % field)
+                  print("  before: %s" % json.dumps(before.get(field), sort_keys=True))
+                  print("  after:  %s" % json.dumps(after.get(field), sort_keys=True))
+                  sys.exit(1)
+
+          print("federation identity unchanged: %s, %d published key(s)"
+                % (after["current_key_id"], len(after["verify_keys"])))
+          PY
+
+          # 3. Media, served by this box, byte for byte. Not a checksum of a
+          #    file on disk: the bytes come back out of the API, which means
+          #    the row carrying the capability and the file carrying the
+          #    content both survived and still agree with each other.
+          curl -sf -o ${NEWBOX}/fetched.bin \
+            "http://127.0.0.1:${API2_PORT}/_telium/v1/media/${MEDIA_HASH}?cap=${MEDIA_CAP}"
+          test "$(sha256sum ${NEWBOX}/fetched.bin | cut -d' ' -f1)" = "$MEDIA_SHA"
+
+          kill "$(cat ${NEWBOX}/server.pid)"
+
+      - name: Server logs
+        if: always()
+        run: |
+          echo "== first run =="; cat ${WORK}/server-1.log || true
+          echo "== after restore =="; cat ${WORK}/server-2.log || true
+          echo "== the new machine =="; cat ${NEWBOX}/server.log || true
+          docker logs "$MINIO" 2>&1 | tail -50 || true
+
+      # The other half, and now the only half that has to work: a run owns a
+      # container and a directory that nothing else will ever be handed, so
+      # this is the step that gives them back. `always()` covers the job
+      # failing and the job being cancelled; the sweep in the first step
+      # covers the runner dying before this can run at all.
+      - name: Tear down
+        if: always()
+        run: |
+          kill "$(cat "$WORK/server.pid")" 2>/dev/null || true
+          kill "$(cat "$NEWBOX/server.pid")" 2>/dev/null || true
+          docker rm -f "$MINIO" 2>/dev/null || true
+          rm -rf "$WORK" "$NEWBOX"

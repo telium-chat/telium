@@ -1,0 +1,236 @@
+name: Unit tests
+
+# The cheap, required unit-test gate. It always reports a `unit-tests` check,
+# but only runs the suites a change can actually affect.
+#
+# This repository currently uses one self-hosted runner. Keeping Rust, web, and
+# the final collector as separate jobs made those jobs look parallel while the
+# runner actually executed them serially, reacquiring the same machine between
+# each job. Keep the whole gate in one job so one checkout/filter can feed the
+# affected suites directly.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+# One run per pull request/ref. A newer commit makes an older queued/running
+# unit-test result obsolete, which matters on a single-runner queue.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Keep this job name stable: this is the check branch/ruleset protection
+  # should require.
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      # Full history is needed for a pull request merge-base diff. On the
+      # persistent runner this normally fetches only what is new.
+      # Every `uses:` below names a commit, not a tag. A tag is a mutable
+      # pointer that the action's owner -- or anyone who takes their account
+      # -- can move onto new code, and this repository's runs would then
+      # execute it without a diff, a review, or a notification. The trailing
+      # comment is the release that commit was, so the pin is still readable;
+      # `docs/supply-chain.md` explains how to move one forward.
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Decide which suites to run
+        id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+
+          run_everything() {
+            echo "$1"
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+            echo "web=true"  >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
+          # Fail open. An uncertain diff should cost test time, never produce
+          # a false-green required check.
+          if [ "$EVENT" = "pull_request" ]; then
+            [ -n "${PR_BASE_SHA:-}" ] || run_everything "no PR base commit -- running both suites"
+            [ -n "${PR_HEAD_SHA:-}" ] || run_everything "no PR head commit -- running both suites"
+            git cat-file -e "$PR_BASE_SHA^{commit}" 2>/dev/null \
+              || run_everything "PR base $PR_BASE_SHA is not in this clone -- running both suites"
+            git cat-file -e "$PR_HEAD_SHA^{commit}" 2>/dev/null \
+              || run_everything "PR head $PR_HEAD_SHA is not in this clone -- running both suites"
+
+            # Three dots describe what the branch changed from its merge base,
+            # rather than attributing unrelated movement on main to the PR.
+            changed="$(git diff --name-only "$PR_BASE_SHA...$PR_HEAD_SHA")" \
+              || run_everything "could not diff PR commits -- running both suites"
+          elif [ "$EVENT" = "push" ]; then
+            [ -n "${BEFORE_SHA:-}" ] || run_everything "no pre-push commit -- running both suites"
+            [ -n "${CURRENT_SHA:-}" ] || run_everything "no pushed commit -- running both suites"
+            [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ] \
+              || run_everything "new branch/history boundary -- running both suites"
+            git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null \
+              || run_everything "pre-push commit $BEFORE_SHA is not in this clone -- running both suites"
+            git cat-file -e "$CURRENT_SHA^{commit}" 2>/dev/null \
+              || run_everything "pushed commit $CURRENT_SHA is not in this clone -- running both suites"
+
+            # A main push already gives us the exact before/after boundary.
+            # Unlike the old workflow, a deploy-only or release-record commit
+            # therefore does not need to run 1,000+ unrelated unit tests.
+            changed="$(git diff --name-only "$BEFORE_SHA..$CURRENT_SHA")" \
+              || run_everything "could not diff push commits -- running both suites"
+          else
+            run_everything "unknown event '$EVENT' -- running both suites"
+          fi
+
+          [ -n "$changed" ] || run_everything "empty diff -- running both suites"
+
+          echo "changed files:"
+          echo "$changed" | sed 's/^/  /'
+
+          rust=false
+          web=false
+
+          # telium-protocol is a path dependency of the Rust crates. Changing
+          # this workflow itself deliberately exercises both branches so edits
+          # to the gate are validated by the gate.
+          grep -qE '^(server|sfu|telium-protocol)/' <<<"$changed" && rust=true
+          grep -qE '^web/'                          <<<"$changed" && web=true
+          grep -qxF '.github/workflows/unit-tests.yml' <<<"$changed" && { rust=true; web=true; }
+
+          echo "rust=$rust" >> "$GITHUB_OUTPUT"
+          echo "web=$web"   >> "$GITHUB_OUTPUT"
+          echo "decided: rust=$rust web=$web"
+
+      - name: Set up Rust
+        if: steps.filter.outputs.rust == 'true'
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch @ 2026-09-03
+        with:
+          # clippy is not part of what this action installs by default, and the
+          # persistent runner cannot be relied on to have it: rustup only ships
+          # it when the profile asks for it, and the toolchain the runner had
+          # lying around from some earlier job is whatever that job asked for.
+          # Without this line the Rust lint step below dies on "'cargo-clippy'
+          # is not installed for the toolchain 'stable-x86_64-unknown-linux-gnu'"
+          # -- which reads like a broken gate rather than a missing component,
+          # because the workflow looks like it set up a toolchain and did.
+          components: clippy
+
+      # Three separate crates rather than one workspace, so the cache names
+      # all three.
+      - name: Restore Rust cache
+        if: steps.filter.outputs.rust == 'true'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: |
+            server
+            sfu
+            telium-protocol
+          cache-on-failure: true
+
+      # Lint before test, because a clippy failure is a two-line message and a
+      # test failure is a stack trace, and there is no sense making somebody
+      # read the second to discover the first.
+      #
+      # WHY THIS EXACT LINT SET, AND NOT `-D warnings`
+      #
+      # `-D warnings` is the obvious thing to write and it cannot be turned on
+      # here today: the three crates currently emit about forty-five clippy
+      # warnings between them. Turning it on would mean either a sweeping
+      # cleanup commit touching files that six other branches are editing right
+      # now, or -- far more likely -- forty-five `#[allow]` attributes sprayed
+      # across the codebase to make the gate shut up, which is strictly worse
+      # than not having the gate. A lint gate that arrives with a pile of
+      # suppressions has taught everybody, on its first day, that the way to
+      # deal with it is to suppress it.
+      #
+      # `correctness` and `suspicious` are the two clippy groups that mean "this
+      # is a bug", as distinct from "this could be tidier". Both are clean
+      # across all three crates as of this commit -- verified, not assumed --
+      # so this gate starts green and any red it shows is new and is real.
+      # `style`, `complexity`, `perf` and `pedantic` are deliberately excluded:
+      # they are opinions, and a required check is the wrong venue for an
+      # opinion. They still appear as warnings in local output where somebody
+      # can weigh them.
+      #
+      # The cost is honest: clippy and `cargo test` use different metadata
+      # hashes, so this does not reuse the test build and it roughly doubles the
+      # Rust wall time on a cold cache. On the persistent runner with
+      # rust-cache, the dependency tree is already built and only the three
+      # workspace crates recompile.
+      #
+      # `cargo fmt --check` is NOT here. See docs/supply-chain.md: the
+      # codebase has never been rustfmt-formatted, the check produces roughly
+      # 2,800 diffs, and the fix is one agreed reformatting commit on a quiet
+      # day rather than a gate that is red from the moment it is added.
+      - name: Rust lint
+        if: steps.filter.outputs.rust == 'true'
+        run: |
+          set -euo pipefail
+          for crate in telium-protocol sfu server; do
+            cargo clippy --manifest-path "$crate/Cargo.toml" --all-targets \
+              -- -D clippy::correctness -D clippy::suspicious
+          done
+
+      - name: Protocol suite
+        if: steps.filter.outputs.rust == 'true'
+        run: cargo test --manifest-path telium-protocol/Cargo.toml
+
+      - name: SFU suite
+        if: steps.filter.outputs.rust == 'true'
+        run: cargo test --manifest-path sfu/Cargo.toml
+
+      - name: Server suite
+        if: steps.filter.outputs.rust == 'true'
+        run: cargo test --manifest-path server/Cargo.toml
+
+      - name: Set up Bun
+        if: steps.filter.outputs.web == 'true'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.0
+
+      # setup-bun caches the executable, not Bun's package cache.
+      - name: Restore Bun cache
+        if: steps.filter.outputs.web == 'true'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('web/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install web dependencies
+        if: steps.filter.outputs.web == 'true'
+        working-directory: web
+        run: bun install --frozen-lockfile
+
+      # Development mode is enough here: this catches unresolved/untransformable
+      # modules without paying for a production minification pass.
+      - name: Build
+        if: steps.filter.outputs.web == 'true'
+        working-directory: web
+        run: bunx vite build --mode development --logLevel error
+
+      # jsdom is expensive on this runner. Four workers was already established
+      # as the stable ceiling; keep that behavior unchanged.
+      - name: Unit suite
+        if: steps.filter.outputs.web == 'true'
+        working-directory: web
+        run: bunx vitest run --maxWorkers=4
+
+      - name: Nothing affected
+        if: steps.filter.outputs.rust != 'true' && steps.filter.outputs.web != 'true'
+        run: echo "No Rust or web unit-test inputs changed; required check is green."

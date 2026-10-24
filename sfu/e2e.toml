@@ -1,0 +1,32 @@
+bind = "127.0.0.1:7894"
+
+[livekit]
+mode = "Spawn"
+url = "http://127.0.0.1:7888"
+api_key = "devkey"
+api_secret = "0123456789abcdef0123456789abcdef"
+binary = "/tmp/opencode/livekit-server"
+config_dir = "/tmp/opencode"
+
+[livekit.rtc]
+port_range_start = 54000
+port_range_end = 64000
+tcp_port = 7889
+use_external_ip = false
+
+[livekit.turn]
+enabled = true
+udp_port = 3482
+
+[livekit.room]
+empty_timeout = 300
+max_participants = 0
+
+[trust]
+discovery = false
+cache_ttl_secs = 86400
+
+[[trust.origins]]
+server_name = "home.example"
+key_id = "ed25519:test"
+public_key_b64 = "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw="

@@ -1,0 +1,75 @@
+name: Probe homeservers
+
+on:
+  # The schedule may safely stay present before launch: the job below is gated
+  # by DIRECTORY_PROBE_ENABLED. This avoids needing another code change when the
+  # public directory starts carrying real community servers.
+  #
+  # The odd minute avoids the top-of-hour Actions queue spike.
+  schedule:
+    - cron: '7 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  # To dispatch the rebuild — see the step at the bottom.
+  actions: write
+
+# One probe run at a time. Two overlapping runs would each read the same
+# probe-history.json, append their own sample, and the second push would lose
+# the first run's history.
+concurrency:
+  group: probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    # Manual runs are always allowed for testing. Scheduled runs become active
+    # only when the non-secret repository variable is explicitly enabled.
+    if: github.event_name == 'workflow_dispatch' || vars.DIRECTORY_PROBE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      # Every `uses:` below names a commit, not a tag. A tag is a mutable
+      # pointer that the action's owner -- or anyone who takes their account
+      # -- can move onto new code, and this repository's runs would then
+      # execute it without a diff, a review, or a notification. The trailing
+      # comment is the release that commit was, so the pin is still readable;
+      # `docs/supply-chain.md` explains how to move one forward.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Probe every homeserver in the registry
+        run: node scripts/probe.mjs
+
+      - name: Commit the results
+        id: commit
+        run: |
+          if git diff --quiet -- data/; then
+            echo "no change"
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name  'telium-probe'
+          git config user.email 'telium-probe@users.noreply.github.com'
+          git add data/
+          git commit -m "probe: $(date -u +'%Y-%m-%dT%H:%MZ')"
+          # A deploy may have pushed while we were probing; rebase rather than
+          # force, so the repository's own commits survive.
+          git pull --rebase --autostash origin main
+          git push
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+
+      # A push made with GITHUB_TOKEN deliberately does not trigger other
+      # workflows, so the rebuild is asked for by name. It builds either way;
+      # whether it publishes depends on the PAGES_ENABLED gate in that file.
+      - name: Rebuild the site
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run site.yml --ref main

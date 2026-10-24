@@ -1,0 +1,13 @@
+{
+  "op": "IDENTIFY",
+  "d": {
+    "token": "<token>",
+    "intents": ["GUILD_PRESENCES"],
+    "protocol": {
+      "version": 2,
+      "min_supported": 2,
+      "capabilities": ["sync.sealed", "some.capability.this.build.has.never.heard.of"]
+    },
+    "a_field_added_after_this_build_shipped": true
+  }
+}

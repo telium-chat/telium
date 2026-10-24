@@ -1,0 +1,241 @@
+.upload-tray {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 8px 2px;
+}
+
+.upload-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 264px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.upload-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: 132px;
+  border-radius: var(--radius-2xl);
+  background: var(--surface-secondary);
+  padding: 6px;
+  overflow: hidden;
+}
+
+.upload-card-body {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 92px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  border-radius: var(--radius-xl);
+  background: var(--surface-tertiary);
+  color: var(--muted);
+  overflow: hidden;
+  transition: opacity var(--dur-2) var(--ease);
+}
+
+.upload-card-body[data-zoom="true"] {
+  cursor: zoom-in;
+}
+
+.upload-card-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.upload-card[data-status="uploading"] .upload-card-body {
+  opacity: 0.5;
+}
+
+.upload-card-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: 5px 2px 1px;
+}
+
+.upload-card-name {
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.upload-card-name .emoji {
+  width: 1.1em;
+  height: 1.1em;
+  margin: 0 0.05em;
+  vertical-align: -0.2em;
+}
+
+.upload-card-size {
+  font-size: var(--text-2xs);
+  color: var(--muted);
+}
+
+.upload-card-actions {
+  position: absolute;
+  inset-block-start: 10px;
+  inset-inline-end: 10px;
+  display: flex;
+  gap: 1px;
+  padding: 2px;
+  border-radius: var(--radius-lg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-1) var(--ease);
+}
+
+.upload-card:hover .upload-card-actions,
+.upload-card:focus-within .upload-card-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.upload-card-actions .popup-icon-button {
+  width: 24px;
+  height: 24px;
+}
+
+.upload-card-actions .popup-icon-button[data-tone="danger"] {
+  color: var(--danger);
+}
+
+.upload-card-actions .popup-icon-button[data-tone="danger"]:hover {
+  background-color: color-mix(in oklab, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+.upload-card-progress {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: 0;
+  height: 3px;
+  background: color-mix(in oklab, var(--foreground) 12%, transparent);
+}
+
+.upload-card-progress::after {
+  content: "";
+  display: block;
+  height: 100%;
+  width: var(--progress, 0%);
+  background: var(--accent);
+  transition: width var(--dur-2) var(--ease);
+}
+
+.upload-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.upload-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: var(--radius-row);
+  background: var(--surface-secondary);
+  color: var(--muted);
+  padding: 3px 8px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-1) var(--ease),
+    color var(--dur-1) var(--ease);
+}
+
+.upload-chip:hover,
+.upload-chip[data-popup-open] {
+  background: var(--surface-tertiary);
+  color: var(--foreground);
+}
+
+.upload-chip[data-tone="warn"] {
+  background: color-mix(in oklab, var(--warning) 14%, transparent);
+  color: var(--warning);
+  cursor: default;
+}
+
+.upload-note {
+  max-width: 260px;
+  padding-block: 6px 4px;
+  padding-inline: 8px;
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--muted);
+  white-space: normal;
+}
+
+.upload-drop {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  padding: 12px;
+  pointer-events: none;
+  background: color-mix(in oklab, var(--background) 74%, transparent);
+  backdrop-filter: blur(2px);
+  animation: upload-drop-in var(--dur-2) var(--ease-rise);
+}
+
+.upload-drop-inner {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 2px dashed color-mix(in oklab, var(--accent) 50%, transparent);
+  border-radius: var(--radius-card);
+  background: color-mix(in oklab, var(--accent) 7%, transparent);
+  text-align: center;
+  padding: 16px;
+}
+
+.upload-drop-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-2xl);
+  background: color-mix(in oklab, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+
+.upload-drop-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--foreground);
+}
+
+.upload-drop-line {
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+@keyframes upload-drop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

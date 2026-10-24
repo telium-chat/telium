@@ -1,0 +1,7 @@
+{
+  "authorization": "<signature>",
+  "content-type": "application/json",
+  "x-telium-protocol": "v2",
+  "x-telium-min-protocol": "v2",
+  "x-telium-capabilities": "migrate.try_again,some.capability.this.build.has.never.heard.of"
+}

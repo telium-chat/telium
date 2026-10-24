@@ -1,0 +1,185 @@
+---
+import { URLS } from '../config'
+import Wordmark from './Wordmark.astro'
+import ThemeToggle from './ThemeToggle.astro'
+import Icon from './Icon.astro'
+
+const path = Astro.url.pathname
+const nav = [
+  { label: 'Download', href: '/download' },
+  { label: 'Compare', href: '/#compare' },
+  { label: 'People', href: '/people' },
+  { label: 'Homeservers', href: '/servers' },
+  { label: 'Docs', href: URLS.docs, external: true },
+]
+---
+
+<header id="site-header" class="sticky top-0 z-40">
+  <div
+    class="header-shell mx-auto flex h-14 max-w-[1120px] items-center justify-between px-5 sm:px-8"
+  >
+    <a href="/" class="flex h-full items-center rounded-lg leading-none" aria-label="Telium, home">
+      <Wordmark size={32} />
+    </a>
+
+    <nav class="flex items-center gap-1.5" aria-label="Main">
+      <ul class="mr-1 hidden items-center gap-0.5 sm:flex">
+        {
+          nav.map((item) => (
+            <li>
+              <a
+                href={item.href}
+                aria-current={path === item.href ? 'page' : undefined}
+                class="nav-row"
+                {...(item.external ? { rel: 'noreferrer' } : {})}
+              >
+                {item.label}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+
+      <a href={URLS.client} class="btn btn-primary hidden sm:inline-flex">
+        Open Telium
+        <Icon name="arrow-right" size={15} />
+      </a>
+      <a href={URLS.client} class="btn btn-primary size-9 !px-0 sm:hidden" aria-label="Open Telium">
+        <Icon name="arrow-right" size={16} />
+      </a>
+
+      <button
+        id="mobile-nav-toggle"
+        type="button"
+        class="icon-btn size-9 sm:hidden"
+        aria-label="Open menu"
+        aria-haspopup="true"
+        aria-expanded="false"
+        aria-controls="mobile-nav-menu"
+      >
+        <span data-menu-icon="closed" class="contents"><Icon name="menu" size={18} /></span>
+        <span data-menu-icon="open" class="contents"><Icon name="x" size={18} /></span>
+      </button>
+
+      <ThemeToggle />
+    </nav>
+  </div>
+
+  <div id="mobile-nav-menu" class="mobile-nav-menu sm:hidden" role="menu" aria-label="Main" hidden>
+    <ul class="flex flex-col gap-0.5 p-2">
+      {
+        nav.map((item) => (
+          <li>
+            <a
+              href={item.href}
+              role="menuitem"
+              aria-current={path === item.href ? 'page' : undefined}
+              class="nav-row w-full !min-h-11 !text-[14.5px]"
+              {...(item.external ? { rel: 'noreferrer' } : {})}
+            >
+              {item.label}
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</header>
+
+<script>
+  const header = document.getElementById('site-header')
+  if (header) {
+    let scrolled = false
+    const update = () => {
+      const next = window.scrollY > 8
+      if (next === scrolled) return
+      scrolled = next
+      if (next) header.setAttribute('data-scrolled', '')
+      else header.removeAttribute('data-scrolled')
+    }
+    update()
+    addEventListener('scroll', update, { passive: true })
+  }
+
+  const toggle = document.getElementById('mobile-nav-toggle')
+  const menu = document.getElementById('mobile-nav-menu')
+  if (toggle && menu) {
+    const setOpen = (open: boolean) => {
+      menu.hidden = !open
+      toggle.setAttribute('aria-expanded', String(open))
+      toggle.setAttribute('aria-label', open ? 'Close menu' : 'Open menu')
+      toggle.dataset.open = open ? 'true' : 'false'
+    }
+
+    toggle.addEventListener('click', () => setOpen(menu.hidden))
+
+    menu.querySelectorAll('a').forEach((link) => link.addEventListener('click', () => setOpen(false)))
+
+    document.addEventListener('click', (event) => {
+      if (!menu.hidden && !menu.contains(event.target as Node) && !toggle.contains(event.target as Node)) {
+        setOpen(false)
+      }
+    })
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !menu.hidden) {
+        setOpen(false)
+        toggle.focus()
+      }
+    })
+
+    matchMedia('(min-width: 640px)').addEventListener('change', (event) => {
+      if (event.matches) setOpen(false)
+    })
+  }
+</script>
+
+<style>
+  /* The bar is the page's chrome, and the client's chrome is flat: a full-width
+     band on the page's own ground with a separator under it, not a card. This
+     was a rounded 16px slab inset two pixels from the window, floating over the
+     content — a marketing-site device, and the one thing up there that
+     announced the page was not the product. It now sits flush, edge to edge,
+     and the only thing that happens on scroll is that the ground goes opaque
+     and the separator arrives, so the nav never sits on top of running text.
+
+     The fill is `--background` rather than `--surface`: the bar is not a panel
+     laid on the page, it *is* the page continued upward. The old bar faded in a
+     tinted border, a 34px drop shadow, an inset white hairline and a 16px
+     backdrop blur to say the same thing, on an element fixed to the viewport
+     and therefore repainting all four on every scroll. */
+  #site-header {
+    background: transparent;
+    border-bottom: 1px solid transparent;
+    transition:
+      background-color var(--dur-3) var(--ease),
+      border-color var(--dur-3) var(--ease);
+  }
+
+  #site-header[data-scrolled] {
+    background: var(--color-background);
+    border-bottom-color: var(--color-separator);
+  }
+
+  #mobile-nav-toggle [data-menu-icon] {
+    display: none;
+  }
+  #mobile-nav-toggle[data-open='true'] [data-menu-icon='open'],
+  #mobile-nav-toggle:not([data-open='true']) [data-menu-icon='closed'] {
+    display: contents;
+  }
+
+  .mobile-nav-menu {
+    position: absolute;
+    left: 0.75rem;
+    right: 0.75rem;
+    top: calc(100% + 0.5rem);
+    z-index: 30;
+    border-radius: var(--radius-card);
+    /* The one surface on the site that floats over arbitrary content rather
+       than sitting in the flow, so it takes the step *above* the bar it drops
+       from — an opaque one, because a translucent menu over a paragraph is
+       unreadable at any blur radius. */
+    background: var(--color-surface-secondary);
+  }
+</style>

@@ -1,0 +1,7 @@
+{
+  "op": "IDENTIFY",
+  "d": {
+    "token": "<token>",
+    "intents": ["GUILD_PRESENCES"]
+  }
+}

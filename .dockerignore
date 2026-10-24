@@ -1,0 +1,32 @@
+# The build context is the repository root, because the image needs both `web/`
+# and `server/`. Everything that is neither is excluded, so that editing a
+# roadmap neither invalidates a build cache nor ships a stray file.
+
+*
+!web/
+!server/
+# `server` depends on it by path, so it is part of the server's source whether
+# or not it looks like it from here.
+!telium-protocol/
+# The compose file and the reference config ship inside the image so that
+# `update.sh` can compare what a release wants against what the box has without
+# cloning the repository onto every homeserver. They are two small text files;
+# the cache invalidation they cost is the cache invalidation of editing them,
+# which is exactly when a box needs to hear about them.
+!deploy/compose.yml
+!server/telium.example.toml
+
+# Build output and dependencies, which the stages produce for themselves. The
+# host's `target/` in particular is gigabytes of a different libc's artifacts,
+# and `node_modules/` is a platform's worth of binaries the image would ignore.
+web/node_modules/
+web/dist/
+web/dist-electron/
+web/electron/node_modules/
+web/src-tauri/target/
+web/src-tauri/gen/
+server/target/
+
+.git/
+**/.DS_Store
+**/*.log

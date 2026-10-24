@@ -1,0 +1,55 @@
+{
+  "family": "relocation-record",
+  "produced_by": "relocation::sign_record / relocation::check_signatures",
+  "rule": "Sign the body with the successor key using the signed-json rule. Move that signature to a member named `new_signature`. Sign the result — `new_signature` included — with the old domain's key using the signed-json rule, which adds `key_id` and `signature`. To verify: check `signature` against the old key over the whole record minus `signature`/`key_id`; then remove `new_signature`, put its value in `signature` and the successor's id in `key_id`, and check that against the successor key.",
+  "vectors": [
+    {
+      "body": {
+        "announced_at": 1767225600000,
+        "cutover_at": 1767830400000,
+        "kind": "relocation",
+        "new_domain": "new.example",
+        "new_key": "oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA",
+        "new_key_id": "ed25519:spec-successor",
+        "old_domain": "old.example"
+      },
+      "name": "announced-relocation",
+      "new_key": {
+        "algorithm": "ed25519",
+        "key_id": "ed25519:spec-successor",
+        "public_b64u": "oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA",
+        "seed_b64u": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI"
+      },
+      "new_signature_b64u": "pXDPCfecvtlSW5cX2f44sepLu_JIwHkWdYB8fj-reXTUw72OiR3-PTbB2ciEGRUAGIaB36TupVdHghXDOGlHDw",
+      "old_canonical": {
+        "hex": "7b22616e6e6f756e6365645f6174223a313736373232353630303030302c226375746f7665725f6174223a313736373833303430303030302c226b696e64223a2272656c6f636174696f6e222c226e65775f646f6d61696e223a226e65772e6578616d706c65222c226e65775f6b6579223a226f4a716c3948706e575941762d56583433433071464b584a6e534f2d6c5f686b456e5f354f445256705041222c226e65775f6b65795f6964223a22656432353531393a737065632d737563636573736f72222c226e65775f7369676e6174757265223a22705844504366656376746c5357356358326634347365704c755f4a4977486b5764594238666a2d72655854557737324f6952332d505462423263694547525541474961423336547570566448676858444f476c484477222c226f6c645f646f6d61696e223a226f6c642e6578616d706c65227d",
+        "length": 330,
+        "utf8": "{\"announced_at\":1767225600000,\"cutover_at\":1767830400000,\"kind\":\"relocation\",\"new_domain\":\"new.example\",\"new_key\":\"oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA\",\"new_key_id\":\"ed25519:spec-successor\",\"new_signature\":\"pXDPCfecvtlSW5cX2f44sepLu_JIwHkWdYB8fj-reXTUw72OiR3-PTbB2ciEGRUAGIaB36TupVdHghXDOGlHDw\",\"old_domain\":\"old.example\"}"
+      },
+      "old_key": {
+        "algorithm": "ed25519",
+        "key_id": "ed25519:spec-primary",
+        "public_b64u": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+        "seed_b64u": "ERERERERERERERERERERERERERERERERERERERERERE"
+      },
+      "record": {
+        "announced_at": 1767225600000,
+        "cutover_at": 1767830400000,
+        "key_id": "ed25519:spec-primary",
+        "kind": "relocation",
+        "new_domain": "new.example",
+        "new_key": "oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA",
+        "new_key_id": "ed25519:spec-successor",
+        "new_signature": "pXDPCfecvtlSW5cX2f44sepLu_JIwHkWdYB8fj-reXTUw72OiR3-PTbB2ciEGRUAGIaB36TupVdHghXDOGlHDw",
+        "old_domain": "old.example",
+        "signature": "XHMMLdUVch5uboSRcqP_mhhp2W5BhI4dQF7FIVUggKCK98n-rqpYJT5fI7s8F0zQBr7zcx7ogDaCczQE6LC6Dg"
+      },
+      "signature_b64u": "XHMMLdUVch5uboSRcqP_mhhp2W5BhI4dQF7FIVUggKCK98n-rqpYJT5fI7s8F0zQBr7zcx7ogDaCczQE6LC6Dg",
+      "successor_canonical": {
+        "hex": "7b22616e6e6f756e6365645f6174223a313736373232353630303030302c226375746f7665725f6174223a313736373833303430303030302c226b696e64223a2272656c6f636174696f6e222c226e65775f646f6d61696e223a226e65772e6578616d706c65222c226e65775f6b6579223a226f4a716c3948706e575941762d56583433433071464b584a6e534f2d6c5f686b456e5f354f445256705041222c226e65775f6b65795f6964223a22656432353531393a737065632d737563636573736f72222c226f6c645f646f6d61696e223a226f6c642e6578616d706c65227d",
+        "length": 225,
+        "utf8": "{\"announced_at\":1767225600000,\"cutover_at\":1767830400000,\"kind\":\"relocation\",\"new_domain\":\"new.example\",\"new_key\":\"oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA\",\"new_key_id\":\"ed25519:spec-successor\",\"old_domain\":\"old.example\"}"
+      }
+    }
+  ]
+}

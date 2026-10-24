@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://telium.chat/registry/schema.json",
+  "title": "Telium homeserver registry",
+  "description": "Operator-supplied facts and preferences about a homeserver. Everything a machine can verify — registration status, version, roles, feature flags, uptime — is probed rather than declared.",
+  "type": "array",
+  "items": { "$ref": "#/$defs/entry" },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain", "name", "description", "region", "size_band", "operator", "added"],
+      "properties": {
+        "domain": {
+          "type": "string",
+          "description": "The server's Telium domain — the part after the colon in @user:domain. Not a URL, and not the API host if the domain delegates via .well-known.",
+          "pattern": "^(?!-)[a-z0-9-]{1,63}(?<!-)(\\.(?!-)[a-z0-9-]{1,63}(?<!-))+$",
+          "maxLength": 253
+        },
+        "name": { "type": "string", "minLength": 2, "maxLength": 40 },
+        "description": {
+          "type": "string",
+          "description": "One sentence. Who runs it and who it is for.",
+          "minLength": 10,
+          "maxLength": 160
+        },
+        "region": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["label", "code"],
+          "properties": {
+            "label": {
+              "type": "string",
+              "description": "Where the server physically is, as a person would say it.",
+              "examples": ["Frankfurt, DE", "Oregon, US"],
+              "maxLength": 40
+            },
+            "code": {
+              "type": "string",
+              "enum": [
+                "af-south",
+                "ap-east",
+                "ap-south",
+                "ap-southeast",
+                "eu-central",
+                "eu-north",
+                "eu-west",
+                "me-central",
+                "na-central",
+                "na-east",
+                "na-west",
+                "oc-southeast",
+                "sa-east"
+              ]
+            }
+          }
+        },
+        "size_band": {
+          "type": "string",
+          "description": "Approximate registered accounts. Self-reported by the operator: the server exposes no account count, so there is nothing to verify this against and the directory labels it as declared.",
+          "enum": ["<100", "100-1k", "1k-10k", "10k+"]
+        },
+        "operator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "contact"],
+          "properties": {
+            "name": { "type": "string", "minLength": 2, "maxLength": 60 },
+            "contact": {
+              "type": "string",
+              "description": "A URL a person can actually reach you at — homepage, contact page, or mailto:.",
+              "pattern": "^(https://|mailto:)"
+            }
+          }
+        },
+        "recommendations": {
+          "type": "object",
+          "description": "Explicit operator consent for this server to be considered for automatic beginner account-home recommendations. Omit it or set opt_in=false to stay directory-only. Live server capabilities must independently opt in too.",
+          "additionalProperties": false,
+          "required": ["opt_in"],
+          "properties": {
+            "opt_in": { "type": "boolean" }
+          }
+        },
+        "added": {
+          "type": "string",
+          "description": "Date this entry was merged, ISO 8601.",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        }
+      }
+    }
+  }
+}

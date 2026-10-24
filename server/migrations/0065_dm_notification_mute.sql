@@ -1,0 +1,22 @@
+-- Muting one conversation, so a DM can stop waking a phone.
+--
+-- Guild notifications have had a mute since 0007: `read_state.muted` is keyed
+-- by channel, and the guild authority consults it before a notification is ever
+-- emitted. Conversations have no channel row and never had the equivalent, which
+-- did not matter for as long as DMs produced no background notification at all.
+-- It matters the moment they do: a twelve-person group chat that cannot be
+-- silenced is a group chat people leave, and "leave the conversation" is not an
+-- acceptable substitute for "stop buzzing".
+--
+-- It lives on the membership row rather than in a table of its own because mute
+-- is a fact about one person's relationship to one conversation, which is
+-- exactly what `conversation_members` already is -- and because the row is
+-- already loaded by every path that would consult the flag. It is deliberately
+-- local to the account home: the sequencer is not told, because the sequencer
+-- does not decide who gets woken and has no business knowing which of its
+-- members have gone quiet on a conversation. That also means mute survives
+-- sequencer re-anchoring for free, since re-anchoring moves the ordering
+-- authority and never touches this server's own membership rows.
+--
+-- Default 0, because a conversation somebody is in is one they agreed to be in.
+ALTER TABLE conversation_members ADD COLUMN muted INTEGER NOT NULL DEFAULT 0;

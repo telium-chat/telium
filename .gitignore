@@ -1,0 +1,32 @@
+# Planning notes: working documents, not part of the project.
+plan-draft.md
+brief.md
+gap-plan.md
+
+# server/, web/ and site/ carry their own ignores for build output, the local
+# database, the running server's config and the screenshot scratch directory.
+
+.DS_Store
+
+# Agent worktrees and local session state.
+.claude/
+
+# Staging directory for the release workflow's native tarballs. Untracked on
+# purpose: it holds build output, and the release step commits exactly one file
+# (`deploy/releases.json`) by name.
+.native/
+
+# Local Android toolchains used for workspace-only builds.
+.android-ndk-staging/
+.android-rustup/
+.android-cargo/
+web/src-tauri/resources/
+
+# Signing keys, if somebody runs scripts/create-android-keystore.sh in the
+# wrong directory. The script defaults to the current directory, so this is a
+# real possibility rather than a theoretical one -- and a committed signing key
+# is not recoverable by rewriting history once it has been pushed.
+*.p12
+*.p12.b64
+*.jks
+*.keystore

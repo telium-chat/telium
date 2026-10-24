@@ -1,0 +1,310 @@
+.emoji-popup {
+  padding: 0;
+  overflow: hidden;
+}
+
+.emoji-panel {
+  display: flex;
+  flex-direction: column;
+  width: 356px;
+  height: 424px;
+  max-height: min(424px, calc(100vh - 96px));
+  overflow: hidden;
+}
+
+.emoji-panel--fill {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+}
+
+.emoji-sheet {
+  display: flex;
+  min-height: 0;
+  height: min(68dvh, 520px);
+}
+
+@media (min-width: 640px) {
+  .emoji-sheet {
+    height: 424px;
+  }
+}
+
+.emoji-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px 4px;
+}
+
+.emoji-head > *:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.emoji-tones {
+  display: flex;
+  flex: none;
+  gap: 1px;
+}
+
+.emoji-tone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+
+.emoji-tone:hover,
+.emoji-tone:focus-visible {
+  background: var(--surface-secondary);
+  outline: none;
+}
+
+.emoji-tone[aria-pressed="true"] {
+  background: var(--accent-soft);
+}
+
+.emoji-loading {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--surface);
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+.emoji-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.emoji-rail {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  width: 34px;
+  padding: 3px 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  box-shadow: inset -1px 0 0 var(--separator);
+}
+
+.emoji-rail::-webkit-scrollbar {
+  display: none;
+}
+
+.emoji-rail-button {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  cursor: pointer;
+}
+
+.emoji-rail-button:hover,
+.emoji-rail-button:focus-visible {
+  background: var(--surface);
+  outline: none;
+}
+
+.emoji-rail-button[aria-current="true"] {
+  background: var(--surface-secondary);
+}
+
+.emoji-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 5px 6px;
+}
+
+.emoji-section {
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--emoji-section-height, 320px);
+}
+
+.emoji-section-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 6px 4px 3px;
+  background: var(--overlay);
+}
+
+.emoji-section-head .emoji {
+  width: 1.1em;
+  height: 1.1em;
+  margin: 0 0.05em;
+  vertical-align: -0.2em;
+}
+
+.emoji-grid {
+  display: grid;
+  gap: 2px;
+}
+
+.emoji-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  cursor: pointer;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  font-size: 1.1875rem;
+  line-height: 1;
+}
+
+.emoji-cell:hover,
+.emoji-cell:focus-visible,
+.emoji-cell[data-cursor="true"] {
+  background: var(--surface-secondary);
+  outline: none;
+}
+
+.emoji-cell:active {
+  background: var(--surface-tertiary);
+}
+
+.emoji-cell-image {
+  width: 21px;
+  height: 21px;
+  object-fit: contain;
+}
+
+.emoji-cell[data-broken] > .emoji-cell-image {
+  display: none;
+}
+
+.emoji-cell[data-broken]::after {
+  content: attr(data-native);
+}
+
+.emoji-cell--sticker {
+  border-radius: var(--radius-row);
+}
+
+.emoji-cell-sticker-image {
+  max-width: 100%;
+  max-height: 100%;
+  padding: 3px;
+  object-fit: contain;
+}
+
+.emoji-sticker {
+  position: relative;
+}
+
+.emoji-sticker-star {
+  position: absolute;
+  inset-block-start: 2px;
+  inset-inline-end: 2px;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--overlay) 82%, transparent);
+  backdrop-filter: blur(4px);
+  opacity: 0;
+  transition: opacity var(--dur-1) var(--ease);
+}
+
+.emoji-sticker:hover .emoji-sticker-star,
+.emoji-sticker-star:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .emoji-sticker-star {
+    opacity: 1;
+  }
+}
+
+.emoji-note {
+  padding: 24px 12px;
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: var(--radius-xl);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.msg-actions[data-open="true"] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.msg-actions .msg-quick .emoji {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+.msg-actions-rule {
+  align-self: center;
+  width: 1px;
+  height: 16px;
+  margin-inline: 3px;
+  background: var(--border);
+}
+
+.msg-actions .shift-only {
+  display: none;
+}
+:root.shift-held .msg-actions .shift-only {
+  display: flex;
+}
+.msg-actions .popup-icon-button[data-tone="danger"] {
+  color: var(--danger);
+}
+.msg-actions .popup-icon-button[data-tone="danger"]:hover {
+  background-color: color-mix(in oklab, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+.emoji-foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  font-size: var(--text-xs);
+  box-shadow: inset 0 1px 0 var(--separator);
+}
+
+.emoji-foot-image {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  object-fit: contain;
+}

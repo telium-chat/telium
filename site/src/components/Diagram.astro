@@ -1,0 +1,96 @@
+---
+/* Where a message actually goes.
+ *
+ * The whole argument of the section next to this is that the hot path is one
+ * hop, so the drawing says that with line weight rather than with a caption:
+ * the connection that carries every message and every frame of voice is solid
+ * and accented, and the two that are touched rarely are dashed. The prose
+ * beside it carries the same information for anyone not reading pictures.
+ */
+---
+
+<svg
+  viewBox="0 0 462 288"
+  role="img"
+  aria-labelledby="diagram-title diagram-desc"
+  class="h-auto w-full max-w-[462px]"
+>
+  <title id="diagram-title">How a client connects</title>
+  <desc id="diagram-desc">
+    A client connects directly and continuously to the homeserver hosting a guild, which holds that
+    guild's messages, roles and voice. It contacts its own homeserver only to obtain a short-lived
+    signed identity assertion, and a media origin only when a file is uploaded or fetched.
+  </desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0.5 L7 4 L0 7.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+    </marker>
+  </defs>
+
+  <g stroke="currentColor" fill="none" stroke-width="1.25" class="edge">
+    <path d="M112 132 C 168 132, 178 40, 240 40" stroke-dasharray="3 4" marker-end="url(#arrow)" />
+    <path d="M112 156 C 168 156, 178 248, 240 248" stroke-dasharray="3 4" marker-end="url(#arrow)" />
+  </g>
+
+  <!-- The one line that is under load. Everything else on this page follows
+       from it being short. -->
+  <path
+    d="M112 144 H 240"
+    fill="none"
+    stroke="var(--color-accent)"
+    stroke-width="1.75"
+    marker-end="url(#arrow)"
+    class="hot"
+  />
+
+  <g class="node">
+    <rect x="1" y="116" width="110" height="56" rx="9" />
+    <text x="56" y="140" text-anchor="middle" class="node-name">your client</text>
+    <text x="56" y="156" text-anchor="middle" class="node-sub">browser or app</text>
+  </g>
+
+  <g class="node">
+    <rect x="240" y="9" width="212" height="62" rx="9" />
+    <text x="256" y="34" class="node-name">home.example</text>
+    <text x="256" y="52" class="node-sub">signs who you are, then steps aside</text>
+  </g>
+
+  <g class="node node-hot">
+    <rect x="240" y="113" width="212" height="62" rx="9" />
+    <text x="256" y="138" class="node-name">guilds.example</text>
+    <text x="256" y="156" class="node-sub">messages · roles · voice · presence</text>
+  </g>
+
+  <g class="node">
+    <rect x="240" y="217" width="212" height="62" rx="9" />
+    <text x="256" y="242" class="node-name">media origin</text>
+    <text x="256" y="260" class="node-sub">the files you uploaded</text>
+  </g>
+</svg>
+
+<style>
+  .edge {
+    color: var(--color-muted);
+  }
+  .hot {
+    color: var(--color-accent);
+  }
+  .node rect {
+    fill: none;
+    stroke: var(--color-border);
+    stroke-width: 1;
+  }
+  .node-hot rect {
+    stroke: var(--color-accent);
+  }
+  .node-name {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    fill: var(--color-foreground);
+  }
+  .node-sub {
+    font-size: 11.5px;
+    fill: var(--color-muted);
+  }
+</style>

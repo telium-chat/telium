@@ -1,0 +1,29 @@
+.md .spoiler:not(.revealed) {
+  background: var(--color-surface-tertiary);
+  border-radius: 0.3rem;
+  color: transparent;
+  cursor: pointer;
+  user-select: none;
+}
+.md .spoiler:not(.revealed) .mention,
+.md .spoiler:not(.revealed) .mention.self {
+  color: transparent;
+  background: transparent;
+}
+.md .spoiler:not(.revealed) code {
+  background: transparent;
+  border-color: transparent;
+}
+.md .spoiler:not(.revealed) img {
+  visibility: hidden;
+}
+
+.msg-preview .spoiler {
+  background: var(--color-surface-tertiary);
+  border-radius: 0.3rem;
+  color: transparent;
+  user-select: none;
+}
+.msg-preview .spoiler img {
+  visibility: hidden;
+}

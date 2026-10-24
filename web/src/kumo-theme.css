@@ -1,0 +1,69 @@
+:root {
+  --color-kumo-canvas: var(--background);
+  --color-kumo-recessed: var(--rail);
+  --color-kumo-base: var(--surface);
+  --color-kumo-elevated: var(--surface-secondary);
+  --color-kumo-tint: var(--surface-tertiary);
+  --color-kumo-fill: var(--surface-secondary);
+  --color-kumo-fill-hover: var(--surface-tertiary);
+
+  --color-kumo-overlay: var(--overlay);
+
+  --color-kumo-control: var(--field-background);
+
+  --color-kumo-interact: color-mix(in oklab, var(--foreground) 9%, transparent);
+
+  --color-kumo-line: var(--border);
+  --color-kumo-hairline: var(--separator);
+  --color-kumo-contrast: var(--foreground);
+
+  --color-kumo-brand: var(--accent);
+  --color-kumo-brand-hover: var(--accent-hover);
+  --color-kumo-focus: var(--focus);
+
+  --color-kumo-danger: var(--danger);
+  --color-kumo-danger-tint: var(--danger-soft);
+  --color-kumo-success: var(--success);
+  --color-kumo-success-tint: color-mix(in oklab, var(--success) 18%, var(--surface));
+  --color-kumo-warning: var(--warning);
+  --color-kumo-warning-tint: color-mix(in oklab, var(--warning) 18%, var(--surface));
+  --color-kumo-info: var(--link);
+  --color-kumo-info-tint: color-mix(in oklab, var(--link) 16%, var(--surface));
+
+  --color-kumo-banner-info: color-mix(in oklab, var(--link) 14%, var(--surface));
+  --color-kumo-banner-warning: color-mix(in oklab, var(--warning) 16%, var(--surface));
+
+  --color-kumo-arrow-edge: var(--overlay);
+  --color-kumo-arrow-stroke: var(--border);
+
+  --color-kumo-shadow-drop: color-mix(in oklab, black 32%, transparent);
+  --color-kumo-shadow-edge: color-mix(in oklab, black 12%, transparent);
+
+  --color-kumo-badge-neutral: var(--surface-tertiary);
+  --color-kumo-badge-blue: var(--link);
+  --color-kumo-badge-green: var(--success);
+  --color-kumo-badge-red: var(--danger);
+  --color-kumo-badge-orange: var(--warning);
+  --color-kumo-badge-purple: var(--accent);
+  --color-kumo-badge-teal: var(--success);
+  --color-kumo-badge-inverted: var(--foreground);
+
+  --text-color-kumo-default: var(--foreground);
+  --text-color-kumo-strong: var(--foreground);
+  --text-color-kumo-subtle: var(--muted);
+  --text-color-kumo-inactive: color-mix(in oklab, var(--muted) 55%, transparent);
+  --text-color-kumo-placeholder: color-mix(in oklab, var(--muted) 80%, transparent);
+  --text-color-kumo-inverse: var(--background);
+
+  --text-color-kumo-brand: var(--accent);
+  --text-color-kumo-link: var(--link);
+  --text-color-kumo-info: var(--link);
+  --text-color-kumo-success: var(--success);
+  --text-color-kumo-danger: var(--danger);
+  --text-color-kumo-warning: var(--warning);
+
+  --text-color-kumo-badge-inverted: var(--background);
+  --text-color-kumo-badge-neutral-subtle: var(--foreground);
+  --text-color-kumo-badge-orange-subtle: var(--warning);
+  --text-color-kumo-badge-teal-subtle: var(--success);
+}

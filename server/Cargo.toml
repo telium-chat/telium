@@ -1,0 +1,86 @@
+[package]
+name = "telium-server"
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Telium reference homeserver: identity provider, guild host, and media origin in one binary"
+license = "Apache-2.0"
+
+[dependencies]
+filetime = "0.2"
+axum = { version = "0.8", features = ["ws", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "sync", "fs"] }
+tokio-util = { version = "0.7", features = ["io"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "fs", "timeout"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ed25519-dalek = { version = "2", features = ["pkcs8"] }
+telium-protocol = { path = "../telium-protocol" }
+blake3 = "1"
+argon2 = "0.5"
+opaque-ke = { version = "4.0.1", default-features = false, features = ["argon2", "ristretto255"] }
+rand = "0.8"
+ulid = "1"
+base64 = "0.22"
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+toml = "0.8"
+clap = { version = "4", features = ["derive"] }
+futures-util = "0.3"
+hex = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "charset", "http2", "multipart", "stream"] }
+url = "2"
+regex = "1"
+hmac = "0.12"
+sha1 = "0.10"
+sha2 = "0.10"
+flate2 = "1"
+mime_guess = "2"
+# Web Push: P-256 for the VAPID signature and the ECDH with the browser, HKDF
+# for the key schedule, AES-128-GCM for the payload itself.
+p256 = { version = "0.13", features = ["ecdh", "ecdsa"] }
+hkdf = "0.12"
+# Only the FCM HTTP v1 service-account assertion needs this: Google signs those
+# with RS256 and accepts nothing else. Nothing in Telium's own protocol uses RSA,
+# and nothing else in this workspace should acquire a use for it.
+rsa = { version = "0.9", features = ["sha2"] }
+aes-gcm = "0.10"
+# Backup archives: a tar of the database snapshot and the on-disk stores.
+tar = "0.4"
+# Expression normalization (src/expression.rs): decode whatever a guild uploads
+# as an emoji or sticker and re-encode it into one deterministic safe output.
+# Only the codecs the boundary accepts are compiled in. `gif` and `color_quant`
+# are the crates `image` itself uses for GIF; they are named directly because
+# the animated output is written with one global palette, which `image`'s
+# per-frame encoder cannot do.
+image = { version = "0.25", default-features = false, features = ["png", "gif", "webp", "jpeg"] }
+gif = "0.14"
+color_quant = "1.1"
+# `getuid`/`geteuid`, for the actor on a rotation record. A CLI rotation has no
+# session to name, and the only claim about who ran it that the caller cannot
+# choose is the one the kernel makes. There is no std API for it.
+libc = "0.2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tokio-tungstenite = "0.24"
+# `getrusage`, for the relay cost measurement. A relay's running cost is the
+# number an operator decides on, and CPU seconds is the half of it a stopwatch
+# cannot give you.
+libc = "0.2"
+ed25519-dalek = "2"
+base64 = "0.22"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# The PNG encoder `image` uses, named directly so the expression tests can
+# write fixtures with text, ICC and EXIF chunks and APNG frames.
+png = "0.18"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

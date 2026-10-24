@@ -1,0 +1,10 @@
+:root {
+  --telium-deep-purple: #1A1230;
+  --telium-amethyst: #4B2E83;
+  --telium-violet: #7A5BC2;
+  --telium-lilac: #B68DF0;
+  --telium-mist: #E9E2F7;
+  --telium-ui-dark: #17191D;
+  --telium-ui-light: #F8F7FA;
+  --telium-logo-gradient: linear-gradient(180deg, #C9AEFF 0%, #8B5FE8 36%, #6740C7 72%, #3F218D 100%);
+}

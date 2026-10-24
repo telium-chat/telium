@@ -1,0 +1,10 @@
+.ink-codeblock {
+  background: var(--surface-tertiary);
+  color: var(--accent-soft-foreground);
+}
+
+.ink-codeblock.ink-marker {
+  background: var(--surface-tertiary);
+  color: var(--muted);
+  opacity: 1;
+}
