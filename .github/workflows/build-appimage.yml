@@ -82,15 +82,18 @@ jobs:
         working-directory: web
 
     steps:
+      # The job default points at `web/`, which does not exist until the
+      # checkout below -- a run step here cannot even start bash in it.
+      - name: Free disk space
+        working-directory: ${{ github.workspace }}
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
       # Every `uses:` below names a commit, not a tag. A tag is a mutable
       # pointer that the action's owner -- or anyone who takes their account
       # -- can move onto new code, and this repository's runs would then
       # execute it without a diff, a review, or a notification. The trailing
       # comment is the release that commit was, so the pin is still readable;
       # `docs/supply-chain.md` explains how to move one forward.
-      - name: Free disk space
-        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install desktop build and run dependencies
