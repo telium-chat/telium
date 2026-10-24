@@ -158,15 +158,18 @@ if gh release view desktop-latest --repo "$repo" >/dev/null 2>&1; then
 fi
 
 # No release yet. The tag may still exist -- an earlier run can have created it
-# and then failed before the release landed -- and in that case `--target`
-# would be an attempt to move a tag that is already there. Supply it only when
-# the tag is genuinely absent.
-target_args=()
-if [ -n "$commit" ]; then
-  target_args=(--target "$commit")
-fi
-if gh api "repos/$repo/git/ref/tags/desktop-latest" >/dev/null 2>&1; then
-  target_args=()
+# and then failed before the release landed -- so create it only when genuinely
+# absent, and the release then attaches to it.
+#
+# The tag is made through the refs API rather than the release's `--target`,
+# because with a target the release API resolves every commit between the
+# target and the default branch's head and demands `workflows: write` -- a
+# scope GITHUB_TOKEN can never hold -- whenever one of those commits touched a
+# workflow file. The failure surfaces as a bare 403 that names no missing
+# permission (cli/cli#9514).
+if ! gh api "repos/$repo/git/ref/tags/desktop-latest" >/dev/null 2>&1; then
+  sha="${commit:-$(gh api "repos/$repo/commits/$tag" --jq .sha)}"
+  gh api -X POST "repos/$repo/git/refs" -f ref=refs/tags/desktop-latest -f sha="$sha" >/dev/null
 fi
 
 # A normal release, and explicitly not the "Latest" one. The Latest slot is
@@ -176,7 +179,6 @@ fi
 # without needing a prerelease marker.
 gh release create desktop-latest "${assets[@]}" \
   --repo "$repo" \
-  ${target_args[@]+"${target_args[@]}"} \
   --title "$title" \
   --notes-file "$notes" \
   --latest=false
