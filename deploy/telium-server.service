@@ -36,7 +36,7 @@
 
 [Unit]
 Description=Telium homeserver
-Documentation=https://github.com/telium-chat/telium/blob/main/docs/production.md
+Documentation=https://docs.telium.chat/production
 # Both, because either may be the one that is present. `network-online.target`
 # alone is a no-op on a box where nothing pulls it in, and the server binds a
 # specific address at startup rather than retrying, so starting before the
