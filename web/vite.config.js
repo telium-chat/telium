@@ -52,6 +52,7 @@ function serviceWorker() {
       const shell = ['/index.html', ...critical];
       const source = readFileSync('src/sw.js', 'utf8')
         .replace('self.__PRECACHE__', JSON.stringify(shell))
+        .replace('self.__SHELL_URL__', JSON.stringify(shell[0]))
         // The version is the manifest itself: a build that emits identical
         // assets should not evict a cache that already holds them.
         .replace('self.__PRECACHE_VERSION__', JSON.stringify(hash(shell.join('|'))));

@@ -43,3 +43,15 @@ export function displayHomeserver(value) {
   const bare = prettyHost(value);
   return normalizeHomeserver(bare) === normalizeHomeserver(value) ? bare : String(value ?? '').trim();
 }
+
+/// Whether this page is the portal: the same client build, served by the official site rather
+/// than by a homeserver. The merge that puts the client on the site stamps the marker into the
+/// shell, so the invite screen knows that a code with no `@server` behind it names nothing —
+/// on a homeserver's own copy, the page origin is the server.
+export function isPortalHost() {
+  try {
+    return document.querySelector('meta[name="telium-portal"]')?.content === '1';
+  } catch {
+    return false;
+  }
+}

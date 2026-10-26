@@ -70,7 +70,8 @@ export function publicProfileLink(userId) {
     && !isNativeShell
     && /^https?:$/.test(window.location.protocol)
     ? window.location.origin
-    : 'https://app.telium.chat';
+    // Profile links are pages on the official site, beside the app itself.
+    : 'https://telium.chat';
   return `${webOrigin}${publicProfilePath(userId)}`;
 }
 

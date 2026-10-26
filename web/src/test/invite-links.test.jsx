@@ -42,6 +42,7 @@ describe('links and invites in messages', () => {
   it('recognizes generated tilde-prefixed invite URLs as invite links', () => {
     expect(isInviteUrl('https://guilds.example/invite/~m3a2yuvn')).toBe(true);
     expect(isInviteUrl('https://guilds.example/invite/rc5sejf3')).toBe(true);
+    expect(isInviteUrl('https://telium.chat/invite/~m3a2yuvn@guilds.example')).toBe(true);
   });
 
   it('renders a URL in a DM as a clickable link, like a guild channel does', async () => {
@@ -66,6 +67,19 @@ describe('links and invites in messages', () => {
     await user.click(join);
     await waitFor(() => expect(server.state.joins).toEqual(['INVITE1']));
     expect(await screen.findByText('Joined.')).toBeTruthy();
+    expect(store.session.servers['guilds.example']).toBeTruthy();
+  });
+
+  it('renders a portal invite link as a card for the server the link names', async () => {
+    const { server, store, user } = await bootDm();
+    await openDm(server, store, user, 'come hang out https://telium.chat/invite/INVITE1@guilds.example');
+
+    const join = await screen.findByRole('button', { name: 'Join Telium' });
+    const card = join.closest('.invite-card');
+    expect(card.textContent).toContain('2 members');
+
+    await user.click(join);
+    await waitFor(() => expect(server.state.joins).toEqual(['INVITE1']));
     expect(store.session.servers['guilds.example']).toBeTruthy();
   });
 

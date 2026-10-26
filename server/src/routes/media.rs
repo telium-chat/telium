@@ -1476,6 +1476,7 @@ pub async fn capabilities(State(state): State<AppState>, headers: HeaderMap) -> 
     Ok(Json(json!({
         "server_name": state.cfg.server_name,
         "gateway": format!("{}/gateway/v1", state.cfg.public_base_url.replace("http", "ws")),
+        "invite_portal": state.cfg.invite_portal_field(),
         "roles": {
             "identity": state.cfg.roles.identity,
             "guild": state.cfg.roles.guild,

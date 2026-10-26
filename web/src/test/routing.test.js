@@ -8,11 +8,19 @@ describe('route paths', () => {
       { ...BLANK, guildId: 'G1', channelId: 'C1' },
       { ...BLANK, guildId: 'G1' },
       { ...BLANK, view: 'dms', conversationId: 'V1' },
-      { ...BLANK, view: 'invite', inviteCode: 'INVITE1' },
+      { ...BLANK, view: 'invite', inviteCode: 'INVITE1', inviteServer: null },
+      { ...BLANK, view: 'invite', inviteCode: 'INVITE1', inviteServer: 'guilds.example' },
+      { ...BLANK, view: 'invite', inviteCode: 'gaming', inviteServer: 'guilds.example:8448' },
       { ...BLANK, view: 'profile-link', userId: '@alice:home.example' },
       { ...HOME },
     ];
     for (const route of routes) expect(routeFrom(pathFor(route))).toEqual(route);
+  });
+
+  it('keeps a portal invite link one readable segment', () => {
+    const route = { ...BLANK, view: 'invite', inviteCode: 'gaming', inviteServer: 'guilds.example:8448' };
+    expect(pathFor(route)).toBe('/invite/gaming@guilds.example:8448');
+    expect(routeFrom('/invite/gaming@guilds.example:8448')).toEqual(route);
   });
 
   it('keeps a federated identity intact in a profile URL', () => {

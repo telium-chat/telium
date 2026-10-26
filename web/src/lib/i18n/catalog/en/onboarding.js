@@ -72,6 +72,14 @@ export const onboarding = {
   'onboarding.invite.expiredTitle': 'This invite is no longer valid',
   'onboarding.invite.expiredBody': 'It may have expired, reached its use limit, or been revoked.',
 
+  // A portal link with nothing after the code: the server half of the address is missing,
+  // so there is nothing to ask and nothing worth guessing. Never suggests a server of its
+  // own -- a guessed server is exactly the wrong answer to a stripped link.
+  'onboarding.invite.incompleteTitle': 'This invite link is incomplete',
+  'onboarding.invite.incompleteBody':
+    'It names a guild but not the server that holds it. Ask for the full link — it should '
+  + 'look like telium.chat/invite/CODE@SERVER.',
+
   // Anything else: the guild server did not answer, answered with something
   // this client could not read, or refused for a reason it did explain. The
   // heading is deliberately about the invite rather than about the server,

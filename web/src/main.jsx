@@ -70,7 +70,9 @@ function boot() {
       const prev = store;
       for (const off of unbind) off?.();
       prev.dispose();
-      window.history.replaceState(null, '', '/');
+      // The app's own front door, not `/`: the portal root is the marketing site, and a
+      // server-served copy opens the same route either way.
+      window.history.replaceState(null, '', '/channels/@me');
       mount(new Store());
       publishProtectedHosts();
       render();

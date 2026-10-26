@@ -1,6 +1,12 @@
 node_modules/
 dist/
+dist-portal/
 .astro/
+
+# Generated at deploy time by `recommendations:write` (and by
+# local-test-feed.mjs for local runs): a signed feed whose bytes belong to the
+# environment that built it, never to the repository.
+public/.well-known/
 
 # Scratch homeserver for scripts/capture/run.mjs: its own config, its own
 # database, its own media. Recreated from nothing every run.

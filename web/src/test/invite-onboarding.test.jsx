@@ -69,6 +69,46 @@ describe('public invite onboarding', () => {
     expect(screen.queryByLabelText('Home server')).toBeNull();
   });
 
+  it('opens a portal link by discovering the server the link names', async () => {
+    const server = createFakeServer({});
+    server.install();
+    const store = freshStore();
+    const user = userEvent.setup();
+    // No `base`: on the portal the link carries only a server name, and the page has to
+    // discover the API from it. The preview must land on guilds.example regardless.
+    renderInvite(store, { base: undefined, serverName: 'guilds.example' });
+
+    expect(await screen.findByRole('heading', { name: 'Telium' })).toBeTruthy();
+    expect(screen.getByText(/alice invited you to join/i)).toBeTruthy();
+
+    await user.type(screen.getByLabelText('Display name'), 'New Person');
+    await user.type(screen.getByLabelText('Username'), 'new');
+    await user.type(screen.getByLabelText('Password'), 'hunter2hunter2');
+    await user.click(screen.getByRole('button', { name: 'Create account & join Telium' }));
+
+    await waitFor(() => expect(server.state.joins).toContain('INVITE1'), { timeout: 15_000 });
+    expect(store.route).toMatchObject({ view: 'chat', guildId: 'g1' });
+  });
+
+  it('refuses a bare code on the portal instead of guessing a server', async () => {
+    const meta = document.createElement('meta');
+    meta.name = 'telium-portal';
+    meta.content = '1';
+    document.head.appendChild(meta);
+    try {
+      const server = createFakeServer({});
+      server.install();
+      const store = freshStore();
+      renderInvite(store, { base: undefined });
+
+      expect(await screen.findByText('This invite link is incomplete')).toBeTruthy();
+      expect(screen.getByText(/names a guild but not the server/i)).toBeTruthy();
+      expect(server.state.joins).toEqual([]);
+    } finally {
+      meta.remove();
+    }
+  });
+
   it('lets a visitor choose another account home without leaving the invite', async () => {
     const server = createFakeServer({ suggestAlternatives: true });
     server.install();
