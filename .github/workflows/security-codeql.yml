@@ -21,6 +21,13 @@ permissions:
 
 jobs:
   analyze:
+    # The analysis runs and its log is readable, but uploading the results
+    # requires GitHub Advanced Security, which a private repository does not
+    # have — so this job fails at the upload step on every run, on main and
+    # in PRs alike, whatever the code actually did. Advisory until that
+    # changes: when the repository goes public (or Advanced Security is
+    # enabled), delete this line and the gate returns to enforcing.
+    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
