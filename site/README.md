@@ -200,21 +200,28 @@ From the repository root:
 
 ## Deploying
 
-**telium.chat is served by the portal Worker, not by GitHub Pages.** `.github/workflows/site.yml`
-builds the portal artifact and deploys it — worker and assets together — on every push to
-`main`, once three repository settings exist:
+**telium.chat is served by the portal Worker, not by GitHub Pages**, and deploying it
+takes no credential in this repository. Something has to authenticate the call to
+Cloudflare — a deploy *is* an instruction to replace the worker and assets on the
+domain — and the ordinary way is to make it as yourself, from your own machine:
 
 ```sh
-gh variable set PORTAL_ENABLED --body true      # gates the portal build and deploy
-gh variable set CLOUDFLARE_ACCOUNT_ID --body <account id>
-gh secret set CLOUDFLARE_API_TOKEN              # Workers Scripts Edit, same account as the zone
+npm run build:portal     # builds web + site into dist-portal/
+npx wrangler deploy      # first time opens a browser login; the credential stays local
 ```
 
 `wrangler.jsonc` attaches `telium.chat` as a custom domain, so the first deploy moves the
 hostname's DNS to the Worker — whatever serves the domain at that moment stops. The
 workers.dev preview URL is switched off, so there is exactly one name serving this content.
-To deploy by hand instead of by push: `npm run build:portal && npx wrangler deploy` from
-this directory.
+Nothing is stored in the repository: no token, no secret, and no repository setting is
+required to deploy.
+
+Push-to-deploy is opt-in, not the default. If CI should deploy on merge — worth it when
+more than one person merges, unnecessary for one operator — set
+`gh variable set PORTAL_DEPLOY --body true` and give the workflow a scoped token
+(`CLOUDFLARE_API_TOKEN` secret, Workers Scripts Edit, same account as the zone, with
+`CLOUDFLARE_ACCOUNT_ID` as a variable). Until then the workflow builds and archives the
+portal artifact under `PORTAL_ENABLED` and deploys nothing.
 
 The workflow also validates the registry, tests/checks recommendation generation, and runs
 the third-party request check before any of that. The separate Pages publish in the same

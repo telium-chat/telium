@@ -147,15 +147,16 @@ jobs:
           path: site/dist-portal
           retention-days: 14
 
-      # Publishing is the same push, not a second pipeline: the worker and the
-      # assets go out together from the directory this job just built. The
-      # token needs the Cloudflare "Workers Scripts Edit" permission for the
-      # account that holds the telium.chat zone, and the account id comes with
-      # it — a deploy that cannot name its account is refused before anything
-      # is uploaded. Deploys attach the telium.chat custom domain, so this
-      # intentionally happens only for pushes to main.
+      # Deploying from CI is an explicit opt-in (`PORTAL_DEPLOY`), because the
+      # ordinary path needs no credential here at all: an operator runs
+      # `npx wrangler deploy` as themselves, and the login never leaves their
+      # machine. Only someone who wants merges to deploy without a person
+      # present accepts the cost of a token in this repository's secrets —
+      # Workers Scripts Edit, same account as the zone, with the account id as
+      # a variable. Deploys attach the telium.chat custom domain, so this
+      # happens only for pushes to main.
       - name: Deploy the portal to telium.chat
-        if: vars.PORTAL_ENABLED == 'true' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: vars.PORTAL_DEPLOY == 'true' && vars.PORTAL_ENABLED == 'true' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         run: npx wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
