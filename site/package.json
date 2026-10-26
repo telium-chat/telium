@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
+    "build:portal": "bun run --cwd ../web build && astro build && node scripts/build-portal.mjs",
+    "preview:portal": "node scripts/preview-portal.mjs",
     "preview": "astro preview",
     "validate": "node scripts/validate-registry.mjs",
     "probe": "node scripts/probe.mjs",

@@ -17,8 +17,10 @@ export const SITE = {
 export const URLS = {
   /* The client we host. A convenience, not a destination — it is the same
      static bundle anyone else can serve, pointed at whichever homeserver you
-     give it. */
-  client: 'https://app.telium.chat',
+     give it. It lives on this domain, at the app's own front door: a visitor
+     who is signed in gets the app there, one who is not gets its sign-in
+     screen. The site stays where it is. */
+  client: '/channels/@me',
   servers: '/servers',
   download: '/download',
   github: 'https://github.com/telium-chat/telium',

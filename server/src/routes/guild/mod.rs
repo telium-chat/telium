@@ -238,11 +238,8 @@ pub async fn guild_json(state: &AppState, guild_id: &str) -> ApiResult<Value> {
         "id": id,
         "origin": state.cfg.server_name,
         "alias": alias.as_ref().map(|a| format!("#{}:{}", a, state.cfg.server_name)),
-        "vanity_url": alias.as_ref().map(|a| format!(
-            "{}/invite/{}",
-            state.cfg.public_base_url.trim_end_matches('/'),
-            a
-        )),
+        "vanity_url": alias.as_ref().map(|a| state.cfg.invite_link(a)),
+        "invite_portal": state.cfg.invite_portal_field(),
         "public_base_url": state.cfg.public_base_url,
         "name": name,
         "icon_ref": icon_ref,
@@ -262,6 +259,7 @@ pub fn moved_guild_stub(origin: &str, guild_id: &str, new_id: &str) -> Value {
         "origin": origin,
         "alias": Value::Null,
         "vanity_url": Value::Null,
+        "invite_portal": Value::Null,
         "public_base_url": Value::Null,
         "name": Value::Null,
         "icon_ref": Value::Null,
@@ -546,11 +544,7 @@ pub async fn vanity_join_preview(
     let address = crate::vanity::format_address(&alias, &state.cfg.server_name);
     Ok(Json(json!({
         "address": address,
-        "url": format!(
-            "{}/invite/{}",
-            state.cfg.public_base_url.trim_end_matches('/'),
-            alias
-        ),
+        "url": state.cfg.invite_link(&alias),
         "guild": {
             "id": guild_id,
             "name": name,

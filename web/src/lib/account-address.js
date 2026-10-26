@@ -1,7 +1,7 @@
 // Parses the desktop sign-in field: handle, server, invite link or bare name. Pure; network lookups run on commit.
 
 import { discover, request } from './api.js';
-import { normalizeHomeserver } from './homeserver.js';
+import { isPortalHost, normalizeHomeserver } from './homeserver.js';
 import { readStored } from './local-state.js';
 
 export const DEFAULT_HOME = 'telium.chat';
@@ -42,7 +42,19 @@ function located(host, path, base) {
   if (!addressable(lower)) return { kind: 'invalid' };
   const extra = base ? { base } : {};
   const code = inviteCode(path);
-  if (code) return { kind: 'invite', host: lower, code, ...extra };
+  if (code) {
+    // A portal link names its server after the code: `telium.chat/invite/CODE@server`.
+    // Neither invite codes nor aliases contain `@`, so a separator is unambiguous, and
+    // the named server replaces the portal host — the portal only carries the link, so
+    // its origin is deliberately not kept: discovery must aim at the named server.
+    const at = code.lastIndexOf('@');
+    if (at !== -1) {
+      const server = code.slice(at + 1).toLowerCase();
+      if (at === 0 || !addressable(server)) return { kind: 'invalid' };
+      return { kind: 'invite', host: server, code: code.slice(0, at) };
+    }
+    return { kind: 'invite', host: lower, code, ...extra };
+  }
   return { kind: 'server', host: lower, ...extra };
 }
 
@@ -174,7 +186,9 @@ export function suggestedHomes() {
     const h = host.toLowerCase();
     if (!hosts.includes(h)) hosts.push(h);
   }
-  if (!hosts.includes(DEFAULT_HOME)) hosts.push(DEFAULT_HOME);
+  // The default home is a suggestion, and on the portal it is a dead one: the
+  // site there runs no server, so it is not offered as a place to sign in.
+  if (!hosts.includes(DEFAULT_HOME) && !isPortalHost()) hosts.push(DEFAULT_HOME);
   return hosts.slice(0, SUGGEST_MAX);
 }
 
@@ -199,7 +213,9 @@ export function searchCandidates({ recent = recentAccounts(), recommended = [], 
   if (here) add(here, null);
   for (const account of recent) add(account.host, account.base);
   for (const server of recommended) add(server?.domain, server?.api_origin);
-  add(DEFAULT_HOME, null);
+  // Not on the portal: the default home is the official site there, which runs
+  // no server, and a bare-name search must not knock on its door.
+  if (!isPortalHost()) add(DEFAULT_HOME, null);
   return out;
 }
 

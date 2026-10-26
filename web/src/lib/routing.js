@@ -1,4 +1,4 @@
-// Maps the store's route to a path and back (`/channels/<guild>/<channel>`, `/channels/@me/<conversation>`, `/invite/<code>`, `/u/<user-id>`). Pure.
+// Maps the store's route to a path and back (`/channels/<guild>/<channel>`, `/channels/@me/<conversation>`, `/invite/<code>`, `/invite/<code>@<server>`, `/u/<user-id>`). Pure.
 
 const DM = '@me';
 
@@ -12,7 +12,12 @@ export function pathFor(route = {}) {
   const seg = (s) => encodeURIComponent(s);
   // Keep the Matrix user-id separators readable while encoding the rest.
   const profileId = (s) => seg(s).replace(/%40/gi, '@').replace(/%3A/gi, ':');
-  if (route.view === 'invite' && route.inviteCode) return `/invite/${seg(route.inviteCode)}`;
+  if (route.view === 'invite' && route.inviteCode) {
+    const code = seg(route.inviteCode);
+    // A server after an `@` is the portal form: the link stays one segment, and the
+    // server reads as itself the way a user id does.
+    return route.inviteServer ? `/invite/${code}@${profileId(route.inviteServer)}` : `/invite/${code}`;
+  }
   if (route.view === 'profile-link' && route.userId) return `/u/${profileId(route.userId)}`;
   if (route.view === 'dms') {
     return route.conversationId ? `/channels/${DM}/${seg(route.conversationId)}` : `/channels/${DM}`;
@@ -28,7 +33,19 @@ export function routeFrom(pathname) {
   const parts = decodeURI(pathname || '/').split('/').filter(Boolean).map(decodeURIComponent);
   if (!parts.length) return { ...HOME };
   if (parts[0] === 'invite' && parts.length === 2 && parts[1]) {
-    return { ...BLANK, view: 'invite', inviteCode: parts[1] };
+    // Invite codes and vanity aliases contain no `@`, so one is a portal separator.
+    // The server half is not validated here: a malformed name is routing's to carry
+    // and the invite screen's to refuse with a sentence.
+    const at = parts[1].lastIndexOf('@');
+    if (at > 0) {
+      return {
+        ...BLANK,
+        view: 'invite',
+        inviteCode: parts[1].slice(0, at),
+        inviteServer: parts[1].slice(at + 1),
+      };
+    }
+    return { ...BLANK, view: 'invite', inviteCode: parts[1], inviteServer: null };
   }
   if (parts[0] === 'u' && parts.length === 2 && /^@[^:]+:.+$/.test(parts[1])) {
     return { ...BLANK, view: 'profile-link', userId: parts[1] };

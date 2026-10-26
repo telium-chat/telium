@@ -29,8 +29,13 @@ media_dir = "/var/lib/telium/media"
 
 # The client the server serves itself, built into the image beside the binary.
 # Mounted as a fallback behind the API routes, so it cannot shadow /_telium.
+#
+# invite_portal defaults to the official portal, so invites mint here would already
+# point at telium.chat. It stays `self` until that portal actually serves the client;
+# flipping early turns every staging invite link into a 404.
 [web]
 dir = "/srv/telium/web"
+invite_portal = "self"
 
 [archive]
 dir = "/var/lib/telium/cold"

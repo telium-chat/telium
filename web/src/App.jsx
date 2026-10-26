@@ -231,6 +231,7 @@ function Phases({ covered = false, onSettled }) {
   const connectingLabel = tr('app.boot.connecting', { domain: store.session?.home?.domain });
 
   const inviteCode = store.route?.view === 'invite' ? store.route.inviteCode : null;
+  const inviteServer = store.route?.view === 'invite' ? store.route.inviteServer || null : null;
   const profileUserId = store.route?.view === 'profile-link' ? store.route.userId : null;
 
   useEffect(() => {
@@ -288,12 +289,26 @@ function Phases({ covered = false, onSettled }) {
   }
 
   if (inviteCode && (pendingRecovery || !store.signedIn)) {
-    return <InviteLanding code={inviteCode} onEntered={() => setPhase('shell')} />;
+    return (
+      <InviteLanding
+        code={inviteCode}
+        serverName={inviteServer || undefined}
+        onEntered={() => setPhase('shell')}
+      />
+    );
   }
   if (phase === 'login') return <LoginView onSignedIn={boot} onInvite={setPastedInvite} />;
   if (phase === 'connecting') return <Connecting label={connectingLabel} />;
   if (phase === 'unreachable') return <Unreachable error={error} onRetry={boot} />;
-  if (inviteCode) return <InviteLanding code={inviteCode} onEntered={() => setPhase('shell')} />;
+  if (inviteCode) {
+    return (
+      <InviteLanding
+        code={inviteCode}
+        serverName={inviteServer || undefined}
+        onEntered={() => setPhase('shell')}
+      />
+    );
+  }
   return (
     <>
       <Shell />

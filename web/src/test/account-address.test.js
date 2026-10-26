@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   parseAddress, findHome, lookupAccount, fullHandle,
-  recentAccounts, rememberAccount, forgetAccount, suggestedHomes,
+  recentAccounts, rememberAccount, forgetAccount, suggestedHomes, searchCandidates,
 } from '../lib/account-address.js';
 
 describe('parseAddress', () => {
@@ -79,6 +79,16 @@ describe('parseAddress', () => {
   });
 
   it.each([
+    // A portal link carries its server after the code; the portal host is only a carrier,
+    // and is not kept — discovery aims at the server the link names.
+    ['https://telium.chat/invite/AbC123@guilds.example', { kind: 'invite', host: 'guilds.example', code: 'AbC123' }],
+    ['telium.chat/invite/gaming@guilds.example:8448', { kind: 'invite', host: 'guilds.example:8448', code: 'gaming' }],
+    ['https://portal.example/invite/x@Atlas.NYC/', { kind: 'invite', host: 'atlas.nyc', code: 'x' }],
+  ])('reads %j as an invite for the server it names', (input, want) => {
+    expect(parseAddress(input)).toEqual(want);
+  });
+
+  it.each([
     'ada lovelace',
     '@ada :telium.chat',
     'ada:foo',
@@ -96,6 +106,8 @@ describe('parseAddress', () => {
     'ada@999.1.1.1',
     'localhost:99999',
     'foo/invite/x',
+    'https://telium.chat/invite/@guilds.example',
+    'telium.chat/invite/x@notahost',
     '#general',
     '@',
   ])('reads %j as invalid', (input) => {
@@ -299,5 +311,38 @@ describe('recent accounts', () => {
       rememberAccount({ userId: `@x:${h}.example`, host: `${h}.example` });
     }
     expect(suggestedHomes()).toEqual(['five.example', 'four.example', 'three.example', 'two.example']);
+  });
+});
+
+describe('the portal is not a home', () => {
+  beforeEach(() => { localStorage.clear(); });
+  afterEach(() => { localStorage.clear(); });
+
+  // The marker the portal build stamps into the shell: there, the default home
+  // is the official site itself, which runs no server, so it is offered
+  // nowhere — not as a suggestion, not as a search candidate.
+  function bePortal() {
+    const marker = document.createElement('meta');
+    marker.name = 'telium-portal';
+    marker.content = '1';
+    document.head.appendChild(marker);
+    return marker;
+  }
+
+  it('leaves the default home out of suggestions and search candidates', () => {
+    const marker = bePortal();
+    try {
+      expect(suggestedHomes()).toEqual([]);
+      const candidates = searchCandidates({
+        recent: [{ userId: '@a:one.example', host: 'one.example', base: 'https://one.example', at: 1 }],
+      }).map((candidate) => candidate.host);
+      expect(candidates).toEqual(['one.example']);
+    } finally {
+      marker.remove();
+    }
+  });
+
+  it('still suggests the default home away from the portal', () => {
+    expect(suggestedHomes()).toEqual(['telium.chat']);
   });
 });

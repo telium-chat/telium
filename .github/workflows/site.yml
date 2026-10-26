@@ -121,6 +121,35 @@ jobs:
         with:
           path: site/dist
 
+      # The artifact a telium.chat deployment actually serves: site and client
+      # merged, the client's app routes answering on the same domain. Gated like
+      # the Pages publish, since the directory probe re-runs this workflow every
+      # hour and an ungated build would rebuild the whole client each time. The
+      # recommendation public key is a repository variable and is public by
+      # nature; it is pinned into the client here exactly as the desktop build
+      # workflows pin it, so the signup recommender works in this artifact when
+      # the signed feed has servers to name. To deploy:
+      #
+      #   gh variable set PORTAL_ENABLED --body true
+      #   wrangler deploy   # from site/, against the downloaded artifact
+      - name: Build the portal artifact
+        if: vars.PORTAL_ENABLED == 'true'
+        run: |
+          cd ../web
+          bun install --frozen-lockfile
+          cd ../site
+          npm run build:portal
+        env:
+          VITE_TELIUM_RECOMMENDATION_PUBLIC_KEY: ${{ vars.TELIUM_RECOMMENDATION_PUBLIC_KEY }}
+          VITE_TELIUM_RECOMMENDATION_URL: ${{ vars.TELIUM_RECOMMENDATION_URL }}
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: vars.PORTAL_ENABLED == 'true'
+        with:
+          name: portal-dist-${{ github.run_id }}
+          path: site/dist-portal
+          retention-days: 14
+
   # Off until GitHub Pages is turned on for this repository. `deploy-pages`
   # fails rather than skips when it is not, so the gate is a repository
   # variable instead of a comment. To publish:

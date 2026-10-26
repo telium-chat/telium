@@ -209,6 +209,49 @@ in this repository** — every host in the code and the specs is a placeholder �
 `telium.chat` is the intended domain, following from the `telium-chat` org, not a confirmed
 one. Change it there and in `astro.config.mjs` and the site follows.
 
+## The portal build
+
+The same domain also carries the web client: invite links minted anywhere on the network
+point at `telium.chat/invite/<code>@<server>`, and the client answers its own routes here
+rather than on a separate origin. Whoever opens one runs this site's copy of the client
+instead of a page served by whatever server minted the link, which is the point — a guild
+server's operator otherwise chooses the HTML behind its own invite.
+
+`bun run build:portal` builds the client (`../web`) and the site and merges them into
+`dist-portal/`, which `wrangler deploy` publishes with `worker.ts`:
+
+- `/channels`, `/invite`, `/u` and `/login` (with their subpaths) answer with `app.html` —
+  the client's index.html under a name the site does not use, stamped with a
+  `<meta name="telium-portal">` marker the client reads to know a bare invite code names
+  no server.
+- everything else serves the site as built; an unknown path gets the site's 404.
+- every response carries the client's security headers, mirrored from
+  `server/src/security_headers.rs`.
+
+Locally, `bun run preview:portal` serves `dist-portal` with those same rules at
+http://localhost:8787 (`PORT` overrides), and `npx wrangler dev` runs the production
+worker against it. The plain site build (`dist/`, which is what the Pages workflow
+publishes) deliberately does not carry the client: pointing a domain's root at it leaves
+every app route — and the "Open Telium" button — a 404, so a domain that hosts the
+client must be served from the portal build.
+
+To exercise the signup recommender locally without the production key,
+`node scripts/local-test-feed.mjs https://your-server.example "Name"` mints an
+ephemeral key, writes a signed feed naming that server into `public/.well-known/`
+(gitignored — the production feed is written by `recommendations:write` at deploy
+time), and pins the matching public key into `web/.env.local`. Then rebuild and
+preview as above; "Create an account" will offer the server you named. Delete the
+two files to return to the dormant recommender.
+
+The merge is byte-checked where both builds ship the same public file (brand marks,
+favicons): a difference fails the build rather than one build quietly serving the other's
+asset. The client's service worker is rewritten to precache and fall back to `app.html`,
+so an offline visitor at an app route gets the app and never the homepage.
+
+Homeservers mint portal-form links because `web.invite_portal` in the server config
+defaults to `https://telium.chat`; an operator can name a different portal — this build,
+run anywhere, is a portal — or set `self` to keep links on their own domain.
+
 ## Licence
 
 Apache-2.0, matching the project.

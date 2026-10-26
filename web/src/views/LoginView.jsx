@@ -48,7 +48,7 @@ import { looksLikeRecoveryKey, normalizeRecoveryKey } from '../lib/account-recov
 import { Trans, useT } from '../lib/i18n/react.jsx';
 import { codeOf, errorMessage } from '../lib/i18n/errors.js';
 
-import { displayHomeserver, normalizeHomeserver, prettyHost } from '../lib/homeserver.js';
+import { displayHomeserver, isPortalHost, normalizeHomeserver, prettyHost } from '../lib/homeserver.js';
 import { isTauriRuntime } from '../lib/platform.js';
 import { pendingHandoff } from '../lib/handoff.js';
 import { AccountHomePicker, RecommendedHome } from './AccountHomePicker.jsx';
@@ -73,6 +73,9 @@ export function LoginView({
   const [handoff] = useState(() => pendingHandoff());
   const [findFlow] = useState(() => !handoff);
   const [native] = useState(() => isTauriRuntime());
+  // The portal serves the client without being a homeserver, so signup there
+  // needs a recommended account home rather than a page-origin default.
+  const [portal] = useState(() => isPortalHost());
   const [initialHome] = useState(() => knownServer(handoff));
   const [server, setServer] = useState(initialHome);
   const [picked, setPicked] = useState(initialHome);
@@ -577,11 +580,17 @@ export function LoginView({
   const recommendHome = () => {
     if (rec.phase === 'ready') { applyRecommended(rec.selected); return; }
     if (rec.phase === 'loading') return;
-    if (!hasPinnedRecommendationKey()) { setRec({ phase: 'none', servers: [], selected: null }); return; }
+    const nowhere = () => {
+      setRec({ phase: 'none', servers: [], selected: null });
+      // On the portal an empty pick means there is nothing to prefill: the manual
+      // server step is the honest next screen, never a chip for a dead origin.
+      if (portal && !regNow.current.serverExplicit && !server.trim()) setStep('server');
+    };
+    if (!hasPinnedRecommendationKey()) { nowhere(); return; }
     setRec({ phase: 'loading', servers: [], selected: null });
     verifiedHomes().then((servers) => {
       const choice = servers.length ? chooseAccountHome(servers, homeRandom) : null;
-      if (!choice) { setRec({ phase: 'none', servers: [], selected: null }); return; }
+      if (!choice) { nowhere(); return; }
       setRec({ phase: 'ready', servers, selected: choice });
       if (regNow.current.registering && !regNow.current.serverExplicit) applyRecommended(choice);
     });
@@ -598,7 +607,7 @@ export function LoginView({
       const accounts = await searchName(name, searchCandidates({
         recent: recentAccounts(),
         recommended,
-        here: native ? null : initialHome,
+        here: native || portal ? null : initialHome,
       }));
       if (stale()) return;
       if (accounts.length) setFound({ user: name, accounts });
@@ -643,7 +652,7 @@ export function LoginView({
     setMode('register');
     setStep('identity');
     regNow.current = { registering: true, serverExplicit: Boolean(home) };
-    if (!home && native) recommendHome();
+    if (!home && (native || portal)) recommendHome();
   };
 
   const checkRecovery = async (e) => {

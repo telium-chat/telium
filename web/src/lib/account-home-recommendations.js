@@ -1,10 +1,21 @@
 import { ed25519 } from '@noble/curves/ed25519.js';
+import { isPortalHost } from './homeserver.js';
 import { unb64 } from './util.js';
 
 export const RECOMMENDATION_KIND = 'telium.account_home_recommendations';
 export const RECOMMENDATION_VERSION = 1;
-export const DEFAULT_RECOMMENDATION_URL = import.meta.env.VITE_TELIUM_RECOMMENDATION_URL
+const ENV_RECOMMENDATION_URL = import.meta.env.VITE_TELIUM_RECOMMENDATION_URL || '';
+export const DEFAULT_RECOMMENDATION_URL = ENV_RECOMMENDATION_URL
   || 'https://telium.chat/.well-known/telium/account-home-recommendations.json';
+/// Where the signed feed lives for this page. The build that serves the client
+/// from the portal publishes the feed beside it, so the portal reads its own
+/// list same-origin; a homeserver's copy of the client has no feed of its own
+/// and asks the official one. An explicit build-time URL always wins.
+export const PORTAL_RECOMMENDATION_PATH = '/.well-known/telium/account-home-recommendations.json';
+export const recommendationUrl = () => (
+  ENV_RECOMMENDATION_URL
+  || (isPortalHost() ? PORTAL_RECOMMENDATION_PATH : DEFAULT_RECOMMENDATION_URL)
+);
 export const DEFAULT_RECOMMENDATION_PUBLIC_KEY = import.meta.env.VITE_TELIUM_RECOMMENDATION_PUBLIC_KEY || '';
 export const RECOMMENDATION_CACHE_PREFIX = 'telium.account-home-recommendations.v1:';
 
@@ -206,7 +217,7 @@ const useVerifiedDocument = (document, publicKey, nowMs) => {
 };
 
 export const loadAccountHomeRecommendations = async ({
-  url = DEFAULT_RECOMMENDATION_URL,
+  url = recommendationUrl(),
   // Read at call time, like `hasPinnedRecommendationKey`.
   publicKey = pinnedRecommendationKey(),
   fetchImpl = fetch,

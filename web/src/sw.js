@@ -4,6 +4,9 @@
 const VERSION = self.__PRECACHE_VERSION__;
 const SHELL = self.__PRECACHE__;
 const CACHE = `telium-shell-${VERSION}`;
+// The cached page that boots the app. Same file the precache carries; the portal build
+// renames it, so it is a placeholder rather than a literal.
+const SHELL_URL = self.__SHELL_URL__ ?? '/index.html';
 importScripts('/notification-inbox-runtime.js');
 const notificationInbox = self.TeliumNotificationInboxRuntime;
 
@@ -71,6 +74,15 @@ function isShellAsset(url) {
   return url.pathname.startsWith('/assets/') || url.pathname === '/manifest.webmanifest';
 }
 
+// The paths the client routes itself. Offline navigation to one of them falls back to the
+// cached shell; the rest of the origin -- on the portal, the marketing site -- is
+// network-only, because the cached shell is the app, not that page.
+const APP_ROUTES = ['/channels', '/invite', '/u', '/login'];
+
+function isAppRoute(pathname) {
+  return APP_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
@@ -83,11 +95,12 @@ self.addEventListener('fetch', (event) => {
     || url.pathname.startsWith('/.well-known/')) return;
 
   if (request.mode === 'navigate') {
+    const app = isAppRoute(url.pathname);
     event.respondWith((async () => {
       try {
         return await fetch(request);
       } catch {
-        return (await caches.match('/index.html')) || Response.error();
+        return (app && (await caches.match(SHELL_URL))) || Response.error();
       }
     })());
     return;
@@ -160,7 +173,8 @@ self.addEventListener('notificationclick', (event) => {
   const guildId = destination?.guild_id || data.guild_id || null;
   const channelId = destination?.channel_id || data.channel_id || null;
   const conversationId = destination?.conversation_id || data.conversation_id || null;
-  let target = '/';
+  // The app's own front door: on the portal, `/` is the marketing site.
+  let target = '/channels/@me';
   if ((destination?.type === 'conversation' || conversationId) && conversationId) {
     target = `/channels/@me/${encodeURIComponent(conversationId)}`;
   } else if ((destination?.type === 'guild_message' || (guildId && channelId)) && guildId && channelId) {
