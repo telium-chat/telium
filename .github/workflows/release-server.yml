@@ -579,7 +579,7 @@ jobs:
             else
               echo "This release **cannot be rolled back** by starting the previous binary:"
               echo "$ROLLBACK_REASON. The undo is the pre-upgrade backup; see"
-              echo "[docs/upgrade.md](https://docs.telium.chat/upgrade)."
+              echo "[docs/upgrade.md](https://docs.telium.chat/self-hosting/upgrades/)."
             fi
             echo
             echo "### Updating"
@@ -588,7 +588,7 @@ jobs:
             echo "(container) and \`deploy/update-native.sh\` (native) both read"
             echo "[deploy/releases.json](https://github.com/$GITHUB_REPOSITORY/blob/main/deploy/releases.json)"
             echo "and move to the highest release. See"
-            echo "[docs/updates.md](https://docs.telium.chat/updates)."
+            echo "[docs/updates.md](https://docs.telium.chat/self-hosting/updates/)."
             if [ -n "$PREVIOUS" ]; then
               echo
               echo "**Full changelog:** [\`$PREVIOUS...$TAG\`](https://github.com/$GITHUB_REPOSITORY/compare/$PREVIOUS...$TAG)"
