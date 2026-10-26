@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "build:portal": "bun run --cwd ../web build && astro build && node scripts/build-portal.mjs",
+    "build:portal": "bun install --cwd ../web --frozen-lockfile && bun run --cwd ../web build && astro build && node scripts/build-portal.mjs",
+    "build:production": "npm run recommendations:write && npm run build:portal",
     "preview:portal": "node scripts/preview-portal.mjs",
     "preview": "astro preview",
     "validate": "node scripts/validate-registry.mjs",

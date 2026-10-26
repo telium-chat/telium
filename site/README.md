@@ -200,34 +200,35 @@ From the repository root:
 
 ## Deploying
 
-**telium.chat is served by the portal Worker, not by GitHub Pages**, and deploying it
-takes no credential in this repository. Something has to authenticate the call to
-Cloudflare — a deploy *is* an instruction to replace the worker and assets on the
-domain — and the ordinary way is to make it as yourself, from your own machine:
+**telium.chat is served by Cloudflare's git integration watching this directory.** There
+is no deploy step in this repository's workflows and no credential in it: the Cloudflare
+dashboard holds the connection to this repo, runs the build, and deploys with the
+`wrangler.jsonc` beside this file, which attaches `telium.chat` as a custom domain — so
+the first deploy after that connection exists moves the hostname's DNS to the Worker,
+and whatever served the domain until then stops.
 
-```sh
-npm run build:portal     # builds web + site into dist-portal/
-npx wrangler deploy      # first time opens a browser login; the credential stays local
-```
+What the dashboard needs to build the portal rather than the marketing site alone:
 
-`wrangler.jsonc` attaches `telium.chat` as a custom domain, so the first deploy moves the
-hostname's DNS to the Worker — whatever serves the domain at that moment stops. The
-workers.dev preview URL is switched off, so there is exactly one name serving this content.
-Nothing is stored in the repository: no token, no secret, and no repository setting is
-required to deploy.
+- **Build command**: `npm run build:production` — one command that writes the signed
+  account-home recommendation feed, then builds the client (`../web`, installing its
+  dependencies itself) and the site, and merges them into `dist-portal/`.
+- **Variables** (Production): `TELIUM_RECOMMENDATION_SIGNING_KEY`, `TELIUM_RECOMMENDATION_PUBLIC_KEY`
+  and `TELIUM_RECOMMENDATION_KEY_ID` for the feed — the names `scripts/recommendations.mjs`
+  reads — and `VITE_TELIUM_RECOMMENDATION_PUBLIC_KEY`, which the client build pins so it
+  can verify that feed. Without the signing variables the build fails loudly rather than
+  deploying a site that cannot produce a feed; drop `recommendations:write` from the
+  command if you want the opposite — a site that deploys with the recommender dormant.
+- **Watch paths**: everything the build reads, `site/**` and `web/**`. A watch path of
+  `site/**` alone would ship a stale client after web-only changes.
 
-Push-to-deploy is opt-in, not the default. If CI should deploy on merge — worth it when
-more than one person merges, unnecessary for one operator — set
-`gh variable set PORTAL_DEPLOY --body true` and give the workflow a scoped token
-(`CLOUDFLARE_API_TOKEN` secret, Workers Scripts Edit, same account as the zone, with
-`CLOUDFLARE_ACCOUNT_ID` as a variable). Until then the workflow builds and archives the
-portal artifact under `PORTAL_ENABLED` and deploys nothing.
+The workflow in this repository (`.github/workflows/site.yml`) is not a deploy pipeline:
+it validates the registry, tests/checks recommendation generation, and builds the
+marketing-only artifact for the optional Pages publish. That publish stays off; it is a
+fallback for a domain that is not carrying the client (no app routes, so its "Open Telium"
+button is a 404) and must not be pointed at telium.chat.
 
-The workflow also validates the registry, tests/checks recommendation generation, and runs
-the third-party request check before any of that. The separate Pages publish in the same
-workflow stays off; it is a marketing-only fallback (no app routes, so its "Open Telium"
-button is a 404) for a domain that is not carrying the client, and must not be pointed at
-telium.chat.
+Deploying by hand — `npx wrangler deploy` from this directory, as yourself — still works
+and needs no credential in any repository.
 
 `src/config.ts` holds every outbound URL. **No canonical domain is committed anywhere else
 in this repository** — every host in the code and the specs is a placeholder — so

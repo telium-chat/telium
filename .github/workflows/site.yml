@@ -121,52 +121,17 @@ jobs:
         with:
           path: site/dist
 
-      # The artifact a telium.chat deployment actually serves: site and client
-      # merged, the client's app routes answering on the same domain. Gated like
-      # the Pages publish, since the directory probe re-runs this workflow every
-      # hour and an ungated build would rebuild the whole client each time. The
-      # recommendation public key is a repository variable and is public by
-      # nature; it is pinned into the client here exactly as the desktop build
-      # workflows pin it, so the signup recommender works in this artifact when
-      # the signed feed has servers to name.
-      - name: Build the portal artifact
-        if: vars.PORTAL_ENABLED == 'true'
-        run: |
-          cd ../web
-          bun install --frozen-lockfile
-          cd ../site
-          npm run build:portal
-        env:
-          VITE_TELIUM_RECOMMENDATION_PUBLIC_KEY: ${{ vars.TELIUM_RECOMMENDATION_PUBLIC_KEY }}
-          VITE_TELIUM_RECOMMENDATION_URL: ${{ vars.TELIUM_RECOMMENDATION_URL }}
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: vars.PORTAL_ENABLED == 'true'
-        with:
-          name: portal-dist-${{ github.run_id }}
-          path: site/dist-portal
-          retention-days: 14
-
-      # Deploying from CI is an explicit opt-in (`PORTAL_DEPLOY`), because the
-      # ordinary path needs no credential here at all: an operator runs
-      # `npx wrangler deploy` as themselves, and the login never leaves their
-      # machine. Only someone who wants merges to deploy without a person
-      # present accepts the cost of a token in this repository's secrets —
-      # Workers Scripts Edit, same account as the zone, with the account id as
-      # a variable. Deploys attach the telium.chat custom domain, so this
-      # happens only for pushes to main.
-      - name: Deploy the portal to telium.chat
-        if: vars.PORTAL_DEPLOY == 'true' && vars.PORTAL_ENABLED == 'true' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        run: npx wrangler deploy
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+  # telium.chat itself is not deployed from here. Cloudflare's git integration
+  # watches this directory and deploys it — build command, environment
+  # variables and the wrangler configuration all live in the Cloudflare
+  # dashboard, and the credentials for the deploy are Cloudflare's own. See
+  # site/README.md, "Deploying", for what that pipeline runs.
 
   # The Pages publish is a marketing-only fallback and is not what serves
-  # telium.chat — the portal deploy above is. Off until GitHub Pages is turned
-  # on for this repository, and it should only ever be pointed at a domain
-  # that is not carrying the client, because a Pages artifact has no app
-  # routes: its "Open Telium" button is a 404. To publish:
+  # telium.chat. Off until GitHub Pages is turned on for this repository, and
+  # it should only ever be pointed at a domain that is not carrying the
+  # client, because a Pages artifact has no app routes: its "Open Telium"
+  # button is a 404. To publish:
   #
   #   Settings → Pages → Source: GitHub Actions
   #   gh variable set PAGES_ENABLED --body true
