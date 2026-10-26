@@ -128,10 +128,7 @@ jobs:
       # recommendation public key is a repository variable and is public by
       # nature; it is pinned into the client here exactly as the desktop build
       # workflows pin it, so the signup recommender works in this artifact when
-      # the signed feed has servers to name. To deploy:
-      #
-      #   gh variable set PORTAL_ENABLED --body true
-      #   wrangler deploy   # from site/, against the downloaded artifact
+      # the signed feed has servers to name.
       - name: Build the portal artifact
         if: vars.PORTAL_ENABLED == 'true'
         run: |
@@ -150,9 +147,25 @@ jobs:
           path: site/dist-portal
           retention-days: 14
 
-  # Off until GitHub Pages is turned on for this repository. `deploy-pages`
-  # fails rather than skips when it is not, so the gate is a repository
-  # variable instead of a comment. To publish:
+      # Publishing is the same push, not a second pipeline: the worker and the
+      # assets go out together from the directory this job just built. The
+      # token needs the Cloudflare "Workers Scripts Edit" permission for the
+      # account that holds the telium.chat zone, and the account id comes with
+      # it — a deploy that cannot name its account is refused before anything
+      # is uploaded. Deploys attach the telium.chat custom domain, so this
+      # intentionally happens only for pushes to main.
+      - name: Deploy the portal to telium.chat
+        if: vars.PORTAL_ENABLED == 'true' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+
+  # The Pages publish is a marketing-only fallback and is not what serves
+  # telium.chat — the portal deploy above is. Off until GitHub Pages is turned
+  # on for this repository, and it should only ever be pointed at a domain
+  # that is not carrying the client, because a Pages artifact has no app
+  # routes: its "Open Telium" button is a 404. To publish:
   #
   #   Settings → Pages → Source: GitHub Actions
   #   gh variable set PAGES_ENABLED --body true

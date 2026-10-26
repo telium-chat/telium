@@ -2,11 +2,24 @@
   "name": "telium",
   "compatibility_date": "2026-09-26",
   "main": "worker.ts",
+  // This worker IS telium.chat. Attaching the custom domain moves the
+  // hostname's DNS to the worker on deploy, which is the intent — but it
+  // also means whatever serves telium.chat today stops doing so the moment
+  // this goes out. The workers.dev preview URL is off so there is exactly
+  // one name serving this content.
+  "workers_dev": false,
+  "routes": [
+    { "pattern": "telium.chat", "custom_domain": true }
+  ],
   "assets": {
     // The merged build from scripts/build-portal.mjs, not ./dist: the plain
     // site build has no client and no app shell, so the app routes would 404.
     "directory": "./dist-portal",
     "binding": "ASSETS",
+    // Unknown paths serve the site's own 404 page rather than a bare one;
+    // the worker passes unknown paths through to the assets, and this is
+    // what the assets answer with.
+    "not_found_handling": "404-page",
     // The worker runs ahead of every asset: it rewrites the app routes to the
     // shell and sets the client's security headers on what leaves. Passthrough
     // for everything else is one ASSETS.fetch, so the marketing site pays only

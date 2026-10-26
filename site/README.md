@@ -200,9 +200,27 @@ From the repository root:
 
 ## Deploying
 
-`.github/workflows/site.yml`, at the repository root, builds the public site and publishes
-its Pages artifact. It validates the registry, tests/checks recommendation generation and
-runs the third-party request check before publishing.
+**telium.chat is served by the portal Worker, not by GitHub Pages.** `.github/workflows/site.yml`
+builds the portal artifact and deploys it — worker and assets together — on every push to
+`main`, once three repository settings exist:
+
+```sh
+gh variable set PORTAL_ENABLED --body true      # gates the portal build and deploy
+gh variable set CLOUDFLARE_ACCOUNT_ID --body <account id>
+gh secret set CLOUDFLARE_API_TOKEN              # Workers Scripts Edit, same account as the zone
+```
+
+`wrangler.jsonc` attaches `telium.chat` as a custom domain, so the first deploy moves the
+hostname's DNS to the Worker — whatever serves the domain at that moment stops. The
+workers.dev preview URL is switched off, so there is exactly one name serving this content.
+To deploy by hand instead of by push: `npm run build:portal && npx wrangler deploy` from
+this directory.
+
+The workflow also validates the registry, tests/checks recommendation generation, and runs
+the third-party request check before any of that. The separate Pages publish in the same
+workflow stays off; it is a marketing-only fallback (no app routes, so its "Open Telium"
+button is a 404) for a domain that is not carrying the client, and must not be pointed at
+telium.chat.
 
 `src/config.ts` holds every outbound URL. **No canonical domain is committed anywhere else
 in this repository** — every host in the code and the specs is a placeholder — so
@@ -230,10 +248,7 @@ server's operator otherwise chooses the HTML behind its own invite.
 
 Locally, `bun run preview:portal` serves `dist-portal` with those same rules at
 http://localhost:8787 (`PORT` overrides), and `npx wrangler dev` runs the production
-worker against it. The plain site build (`dist/`, which is what the Pages workflow
-publishes) deliberately does not carry the client: pointing a domain's root at it leaves
-every app route — and the "Open Telium" button — a 404, so a domain that hosts the
-client must be served from the portal build.
+worker against it.
 
 To exercise the signup recommender locally without the production key,
 `node scripts/local-test-feed.mjs https://your-server.example "Name"` mints an
