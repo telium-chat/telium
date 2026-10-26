@@ -313,10 +313,19 @@ export const serverMethods = {
 
   async previewInvite(raw) {
     const text = String(raw).trim();
-    const code = (text.split('/').pop() || '').trim();
+    let code = (text.split('/').pop() || '').trim();
     if (!code) return null;
+    // A portal link names its server after the code (`.../invite/CODE@server`); the portal
+    // host itself carries nothing and is never asked.
     let host = null;
-    try { host = new URL(text).host; } catch { host = null; }
+    const at = code.lastIndexOf('@');
+    if (at > 0) {
+      host = code.slice(at + 1).toLowerCase();
+      if (!host) return null;
+      code = code.slice(0, at);
+    } else {
+      try { host = new URL(text).host; } catch { host = null; }
+    }
 
     let candidates;
     if (host) {

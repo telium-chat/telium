@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Api, discover } from '../lib/api.js';
 import { shortName } from '../lib/util.js';
-import { displayHomeserver, normalizeHomeserver, prettyHost } from '../lib/homeserver.js';
+import { displayHomeserver, isPortalHost, normalizeHomeserver, prettyHost } from '../lib/homeserver.js';
+import { findHome } from '../lib/account-address.js';
 import { copyToClipboard } from '../lib/clipboard.js';
 import { PENDING_RECOVERY_STORAGE_KEY } from '../lib/account-recovery.js';
 import { useStore } from '../hooks/useStore.jsx';
@@ -72,7 +73,8 @@ async function resolveHomeServer(raw, { registering, t }) {
 export function InviteLanding({
   code,
   onEntered,
-  base: inviteOrigin = inviteBase(),
+  base: inviteBaseProp = null,
+  serverName = null,
   onBack,
   loadHomeRecommendations,
   homeRandom,
@@ -90,7 +92,12 @@ export function InviteLanding({
   const [legacyAuth, setLegacyAuth] = useState(null);
   const [legacyApproved, setLegacyApproved] = useState(false);
   const [initialHome] = useState(
-    () => sessionStorage.getItem('telium.lastHome') || inviteOrigin,
+    // The guild's own server is the standing default account home, wherever the page is
+    // served from: on a homeserver it is the origin, on the portal it is the named server.
+    () => sessionStorage.getItem('telium.lastHome')
+      || serverName
+      || inviteBaseProp
+      || inviteBase(),
   );
   const [customHome, setCustomHome] = useState(initialHome);
   const [changingHome, setChangingHome] = useState(false);
@@ -110,12 +117,35 @@ export function InviteLanding({
 
   useEffect(() => {
     let live = true;
-    const base = inviteOrigin;
-    const originHost = (() => {
-      try { return new URL(base).host; } catch { return window.location.host; }
-    })();
-    const api = new Api({ base, domain: originHost });
     const load = async () => {
+      // A bare code names no server of its own. On a homeserver's copy of the client the
+      // page origin is the server; on the portal it is nobody's, and only a link that
+      // carries its server after the `@` can be opened at all.
+      if (!inviteBaseProp && !serverName && isPortalHost()) {
+        setState({ status: 'incomplete' });
+        return;
+      }
+      let base = inviteBaseProp;
+      let host = null;
+      if (base) {
+        host = serverName || (() => {
+          try { return new URL(base).host; } catch { return window.location.host; }
+        })();
+      } else if (serverName) {
+        try {
+          let home = await findHome(serverName);
+          if (home.movedTo) home = await findHome(home.movedTo);
+          base = home.api;
+          host = home.serverName || serverName;
+        } catch (discoveryError) {
+          if (live) setState({ status: 'error', error: discoveryError });
+          return;
+        }
+      } else {
+        base = window.location.origin;
+        host = window.location.host;
+      }
+      const api = new Api({ base, domain: host });
       try {
         const value = await api.invitePreview(code);
         if (!live) return;
@@ -124,7 +154,7 @@ export function InviteLanding({
           kind: 'invite',
           code,
           base,
-          domain: value.guild?.host || originHost,
+          domain: value.guild?.host || host,
         };
         setState({ status: 'ready', preview });
       } catch (previewError) {
@@ -134,7 +164,9 @@ export function InviteLanding({
           return;
         }
         try {
-          const value = await store.previewGuildJoin(`#${code}:${originHost}`);
+          // Not an invite code on this server: a vanity alias, maybe. The address is built
+          // from the server the link named — never from where the page happens to be served.
+          const value = await store.previewGuildJoin(`#${code}:${host}`);
           if (!live) return;
           if (!value) {
             setState({ status: 'error', error: previewError });
@@ -149,7 +181,7 @@ export function InviteLanding({
     };
     load();
     return () => { live = false; };
-  }, [code, inviteOrigin, store]);
+  }, [code, inviteBaseProp, serverName, store]);
 
   const preview = state.preview;
 
@@ -341,6 +373,31 @@ export function InviteLanding({
           <img src="/brand/telium-mark-gradient.svg" alt="" className="size-10" />
           <div className="text-base font-medium">{t('onboarding.invite.opening')}</div>
           <Hint>{t('onboarding.invite.openingHint')}</Hint>
+        </div>
+      </InviteFrame>
+    );
+  }
+
+  if (state.status === 'incomplete') {
+    return (
+      <InviteFrame>
+        <div className="flex flex-col items-center gap-3 py-12 text-center">
+          <img src="/brand/telium-mark-gradient.svg" alt="" className="size-10" />
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {t('onboarding.invite.incompleteTitle')}
+          </h1>
+          <p className="max-w-[360px] text-sm leading-[1.6] text-muted">
+            {t('onboarding.invite.incompleteBody')}
+          </p>
+          {onBack ? (
+            <Button variant="secondary" onClick={onBack}>
+              {t('onboarding.invite.backToSignIn')}
+            </Button>
+          ) : (
+            <Button variant="secondary" onClick={() => window.location.assign('/')}>
+              {t('onboarding.invite.goToTelium')}
+            </Button>
+          )}
         </div>
       </InviteFrame>
     );

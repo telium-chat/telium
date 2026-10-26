@@ -517,13 +517,40 @@ pub struct Apns {
 }
 
 /// Serves the bundled web client; off unless a directory is set.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Web {
     /// Static files directory, relative to the working directory.
     pub dir: Option<PathBuf>,
     /// Where the web client lives if not `public_base_url`; published as `client` in discovery.
     pub client_url: Option<String>,
+    /// Where invite and vanity links point. Every link this server mints names this server
+    /// inside a URL on the portal: `https://telium.chat/invite/{code}@{server_name}`. Whoever
+    /// opens the link then runs Telium's own page rather than this server's web directory, so
+    /// a malicious or compromised guild server cannot put a lookalike login in front of the
+    /// credentials it is about to receive, and a server hosting no web client at all still
+    /// hands out working links. `self` restores the older shape, on `public_base_url`.
+    pub invite_portal: String,
+}
+
+impl Default for Web {
+    /// The portal default lives here rather than in a field-level `#[serde(default)]`,
+    /// because the container-level default on this struct is what fills a missing `[web]`
+    /// table -- a field-level default would only fire when the table exists but is half
+    /// written, and a server that never mentions `[web]` still deserves the safe shape.
+    fn default() -> Self {
+        Self {
+            dir: None,
+            client_url: None,
+            invite_portal: default_invite_portal(),
+        }
+    }
+}
+
+/// The official portal. A server that never edits this line still mints the safe link shape;
+/// naming another URL hosts the portal yourself, and `self` is the deliberate opt-out.
+fn default_invite_portal() -> String {
+    "https://telium.chat".into()
 }
 
 /// The Klipy API key is an application credential, not a secret: the web client sends it directly.
@@ -1538,12 +1565,40 @@ impl Config {
         Ok(cfg)
     }
 
+    /// The URL an invite or vanity link is shared as. The portal form names this server inside
+    /// the portal's URL, so the page that opens is Telium's build whatever server minted the
+    /// link; `self` is the old shape, served by this server's own web directory.
+    pub fn invite_link(&self, token: &str) -> String {
+        let portal = self.web.invite_portal.trim().trim_end_matches('/');
+        if portal == "self" || portal.is_empty() {
+            format!("{}/invite/{}", self.public_base_url.trim_end_matches('/'), token)
+        } else {
+            format!("{portal}/invite/{token}@{}", self.server_name)
+        }
+    }
+
+    /// The portal as clients should name links, or None when links are minted on this server.
+    pub fn invite_portal_field(&self) -> Option<String> {
+        match self.web.invite_portal.trim() {
+            "self" | "" => None,
+            portal => Some(portal.trim_end_matches('/').to_string()),
+        }
+    }
+
     pub fn validate(&self) -> anyhow::Result<()> {
         if self.server_name.is_empty() {
             anyhow::bail!("server_name must be set");
         }
         if !(self.roles.identity || self.roles.guild || self.roles.media) {
             anyhow::bail!("at least one role must be enabled");
+        }
+        if self.web.invite_portal != "self"
+            && !self.web.invite_portal.starts_with("https://")
+        {
+            anyhow::bail!(
+                "web.invite_portal must be an https URL, or \"self\" to mint invite links \
+                 on public_base_url"
+            );
         }
 
         // Malformed key would make every signature check look like a bad project signature.
@@ -1926,5 +1981,53 @@ browser_direct = false
 
         // Shape of the compiled-in default (no [voice] section).
         assert_eq!(Config::default().voice.addressed_regions().count(), 0);
+    }
+
+    #[test]
+    fn invite_links_name_the_server_on_the_portal_unless_the_operator_opts_out() {
+        let mut cfg: Config = toml::from_str("").expect("default config parses");
+        cfg.server_name = "guilds.example".into();
+        cfg.public_base_url = "https://guilds.example".into();
+
+        // A config that never mentions the portal mints the safe shape.
+        assert_eq!(cfg.web.invite_portal, "https://telium.chat");
+        assert_eq!(
+            cfg.invite_link("~k7m2pxqa"),
+            "https://telium.chat/invite/~k7m2pxqa@guilds.example"
+        );
+        assert_eq!(cfg.invite_portal_field().as_deref(), Some("https://telium.chat"));
+
+        cfg.web.invite_portal = "self".into();
+        assert_eq!(cfg.invite_link("~k7m2pxqa"), "https://guilds.example/invite/~k7m2pxqa");
+        assert_eq!(cfg.invite_portal_field(), None);
+
+        cfg.web.invite_portal = "https://portal.example/".into();
+        assert_eq!(
+            cfg.invite_link("~k7m2pxqa"),
+            "https://portal.example/invite/~k7m2pxqa@guilds.example"
+        );
+    }
+
+    #[test]
+    fn the_invite_portal_is_https_or_self() {
+        let cfg_with = |portal: &str| {
+            let mut cfg: Config = toml::from_str("").expect("default config parses");
+            cfg.server_name = "guilds.example".into();
+            cfg.public_base_url = "https://guilds.example".into();
+            cfg.web.invite_portal = portal.into();
+            cfg
+        };
+        for accepted in ["https://telium.chat", "https://portal.example", "self"] {
+            if let Err(err) = cfg_with(accepted).validate() {
+                assert!(!err.to_string().contains("web.invite_portal"), "{err}");
+            }
+        }
+        for refused in ["http://portal.example", "", "telium.chat", "ftp://portal.example"] {
+            let err = cfg_with(refused)
+                .validate()
+                .err()
+                .expect("a non-https portal is refused");
+            assert!(err.to_string().contains("web.invite_portal"), "{err}");
+        }
     }
 }

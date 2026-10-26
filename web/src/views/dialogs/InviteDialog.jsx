@@ -3,7 +3,7 @@ import { useStore, useStoreEvent } from '../../hooks/useStore.jsx';
 import { reportError, toast } from '../../hooks/useToast.jsx';
 import { copyToClipboard } from '../../lib/clipboard.js';
 import { faceOf } from '../../lib/faces.js';
-import { DEFAULT_INVITE_EXPIRY, INVITE_EXPIRY_OPTIONS, inviteCreateBody } from '../../lib/invites.js';
+import { DEFAULT_INVITE_EXPIRY, INVITE_EXPIRY_OPTIONS, inviteCreateBody, portalInviteLink } from '../../lib/invites.js';
 import { shortName } from '../../lib/util.js';
 import {
   Avatar, Button, CheckIcon, CopyIcon, Hint, ModalShell, Pill, Select, TextInput,
@@ -38,7 +38,11 @@ export function InviteDialog({ guild, invite: initialInvite = null, close }) {
   const copyTimer = useRef(null);
   const urlRef = useRef(null);
 
-  const url = invite ? (invite.url || `${guild.domain}/invite/${invite.code}`) : '';
+  const url = invite
+    ? (invite.url
+      || portalInviteLink(guild.invite_portal, guild.origin, invite.code)
+      || `${guild.domain}/invite/${invite.code}`)
+    : '';
   const members = store.members.get(guild.id);
   const friends = store.friendsIn('accepted');
 
@@ -55,7 +59,9 @@ export function InviteDialog({ guild, invite: initialInvite = null, close }) {
       inviteCreateBody(maxUses, expiry),
     );
     setInvite(created);
-    return created.url || `${guild.domain}/invite/${created.code}`;
+    return created.url
+      || portalInviteLink(guild.invite_portal, guild.origin, created.code)
+      || `${guild.domain}/invite/${created.code}`;
   };
 
   const create = async () => {

@@ -91,6 +91,14 @@ pub fn router(state: AppState) -> Router {
         app = app.route("/_telium/v1/sessions/local", post(guild::local_session));
     }
 
+    // An old-format invite link landing here upgrades to the portal: same code, but the page
+    // the visitor runs comes from Telium rather than this server. Only full-page loads arrive
+    // at this route -- the client's own navigation to /invite/... is pushState and never hits
+    // the server -- so nothing that uses the served client loses anything.
+    if state.cfg.web.invite_portal.trim() != "self" {
+        app = app.route("/invite/{token}", get(invite_redirect));
+    }
+
     if let Some(dir) = &state.cfg.web.dir {
         let index = dir.join("index.html");
         app = app.fallback_service(
@@ -119,6 +127,31 @@ pub fn router(state: AppState) -> Router {
         ))
         .layer(DefaultBodyLimit::max(state.cfg.limits.max_request_bytes))
         .with_state(state)
+}
+
+/// Old-format links redirect; the token is re-encoded rather than trusted, because it is
+/// attacker-shaped input off the URL and a Location header must not smuggle CRLF or a
+/// different path.
+async fn invite_redirect(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::extract::Path(token): axum::extract::Path<String>,
+) -> axum::response::Redirect {
+    axum::response::Redirect::to(&state.cfg.invite_link(&encode_path_segment(&token)))
+}
+
+/// Unreserved characters pass; everything else becomes one escaped byte. `%` is produced,
+/// never accepted, so a crafted segment cannot carry a second escape round through.
+fn encode_path_segment(token: &str) -> String {
+    let mut out = String::with_capacity(token.len());
+    for byte in token.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 fn demotion_guard(

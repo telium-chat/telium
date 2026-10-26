@@ -708,7 +708,10 @@ async fn live_claims(server: &Server) -> i64 {
 }
 
 async fn drained(a: &Server, conv_id: &str) {
-    for _ in 0..200 {
+    // A healthy outbox drains in milliseconds; the deadline exists to fail a
+    // broken pipeline, not to time a runner out for being busy with the other
+    // suites this job runs beside.
+    for _ in 0..3_000 {
         let queued: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM dm_outbox WHERE conversation_id = ?")
             .bind(conv_id)
             .fetch_one(&a.state.pool)

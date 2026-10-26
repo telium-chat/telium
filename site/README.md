@@ -200,14 +200,80 @@ From the repository root:
 
 ## Deploying
 
-`.github/workflows/site.yml`, at the repository root, builds the public site and publishes
-its Pages artifact. It validates the registry, tests/checks recommendation generation and
-runs the third-party request check before publishing.
+**telium.chat is served by Cloudflare's git integration watching this directory.** There
+is no deploy step in this repository's workflows and no credential in it: the Cloudflare
+dashboard holds the connection to this repo, runs the build, and deploys with the
+`wrangler.jsonc` beside this file, which attaches `telium.chat` as a custom domain — so
+the first deploy after that connection exists moves the hostname's DNS to the Worker,
+and whatever served the domain until then stops.
+
+What the dashboard needs to build the portal rather than the marketing site alone:
+
+- **Build command**: `npm run build:production` — one command that writes the signed
+  account-home recommendation feed, then builds the client (`../web`, installing its
+  dependencies itself) and the site, and merges them into `dist-portal/`.
+- **Variables** (Production): `TELIUM_RECOMMENDATION_SIGNING_KEY`, `TELIUM_RECOMMENDATION_PUBLIC_KEY`
+  and `TELIUM_RECOMMENDATION_KEY_ID` for the feed — the names `scripts/recommendations.mjs`
+  reads — and `VITE_TELIUM_RECOMMENDATION_PUBLIC_KEY`, which the client build pins so it
+  can verify that feed. Without the signing variables the build fails loudly rather than
+  deploying a site that cannot produce a feed; drop `recommendations:write` from the
+  command if you want the opposite — a site that deploys with the recommender dormant.
+- **Watch paths**: everything the build reads, `site/**` and `web/**`. A watch path of
+  `site/**` alone would ship a stale client after web-only changes.
+
+The workflow in this repository (`.github/workflows/site.yml`) is not a deploy pipeline:
+it validates the registry, tests/checks recommendation generation, and builds the
+marketing-only artifact for the optional Pages publish. That publish stays off; it is a
+fallback for a domain that is not carrying the client (no app routes, so its "Open Telium"
+button is a 404) and must not be pointed at telium.chat.
+
+Deploying by hand — `npx wrangler deploy` from this directory, as yourself — still works
+and needs no credential in any repository.
 
 `src/config.ts` holds every outbound URL. **No canonical domain is committed anywhere else
 in this repository** — every host in the code and the specs is a placeholder — so
 `telium.chat` is the intended domain, following from the `telium-chat` org, not a confirmed
 one. Change it there and in `astro.config.mjs` and the site follows.
+
+## The portal build
+
+The same domain also carries the web client: invite links minted anywhere on the network
+point at `telium.chat/invite/<code>@<server>`, and the client answers its own routes here
+rather than on a separate origin. Whoever opens one runs this site's copy of the client
+instead of a page served by whatever server minted the link, which is the point — a guild
+server's operator otherwise chooses the HTML behind its own invite.
+
+`bun run build:portal` builds the client (`../web`) and the site and merges them into
+`dist-portal/`, which `wrangler deploy` publishes with `worker.ts`:
+
+- `/channels`, `/invite`, `/u` and `/login` (with their subpaths) answer with `app.html` —
+  the client's index.html under a name the site does not use, stamped with a
+  `<meta name="telium-portal">` marker the client reads to know a bare invite code names
+  no server.
+- everything else serves the site as built; an unknown path gets the site's 404.
+- every response carries the client's security headers, mirrored from
+  `server/src/security_headers.rs`.
+
+Locally, `bun run preview:portal` serves `dist-portal` with those same rules at
+http://localhost:8787 (`PORT` overrides), and `npx wrangler dev` runs the production
+worker against it.
+
+To exercise the signup recommender locally without the production key,
+`node scripts/local-test-feed.mjs https://your-server.example "Name"` mints an
+ephemeral key, writes a signed feed naming that server into `public/.well-known/`
+(gitignored — the production feed is written by `recommendations:write` at deploy
+time), and pins the matching public key into `web/.env.local`. Then rebuild and
+preview as above; "Create an account" will offer the server you named. Delete the
+two files to return to the dormant recommender.
+
+The merge is byte-checked where both builds ship the same public file (brand marks,
+favicons): a difference fails the build rather than one build quietly serving the other's
+asset. The client's service worker is rewritten to precache and fall back to `app.html`,
+so an offline visitor at an app route gets the app and never the homepage.
+
+Homeservers mint portal-form links because `web.invite_portal` in the server config
+defaults to `https://telium.chat`; an operator can name a different portal — this build,
+run anywhere, is a portal — or set `self` to keep links on their own domain.
 
 ## Licence
 

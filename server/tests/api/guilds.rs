@@ -254,6 +254,79 @@ async fn permissions_are_enforced_and_invisible_channels_are_not_hinted_at() {
 }
 
 #[tokio::test]
+async fn invite_links_name_the_server_on_the_portal() {
+    let s = start_with(|cfg| cfg.web.invite_portal = "https://portal.example".into()).await;
+    let alice = s.user("alice").await;
+
+    let (_, guild) =
+        s.post("/_telium/v1/guilds", Some(&alice.token), json!({ "name": "Guild" })).await;
+    let gid = guild["id"].as_str().unwrap().to_string();
+    assert_eq!(guild["invite_portal"], "https://portal.example");
+    assert!(guild["vanity_url"].is_null());
+
+    let (_, invite) =
+        s.post(&format!("/_telium/v1/guilds/{gid}/invites"), Some(&alice.token), json!({})).await;
+    let code = invite["code"].as_str().unwrap().to_string();
+    assert_eq!(
+        invite["url"],
+        format!("https://portal.example/invite/{code}@test.example")
+    );
+
+    let (_, caps) = s.get("/_telium/v1/capabilities", None).await;
+    assert_eq!(caps["invite_portal"], "https://portal.example");
+
+    // An old-format link landing on the server upgrades itself to the portal form.
+    let no_redirect = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let resp = no_redirect
+        .get(format!("{}/invite/{code}", s.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 303, "old links upgrade, they do not break");
+    assert_eq!(
+        resp.headers().get("location").unwrap().to_str().unwrap(),
+        format!("https://portal.example/invite/{code}@test.example")
+    );
+
+    // The token is attacker-shaped input off the URL: it is re-encoded, never passed through.
+    let resp = no_redirect
+        .get(format!("{}/invite/ab%3Fc", s.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 303);
+    assert_eq!(
+        resp.headers().get("location").unwrap().to_str().unwrap(),
+        "https://portal.example/invite/ab%3Fc@test.example"
+    );
+}
+
+#[tokio::test]
+async fn invite_portal_self_keeps_links_on_the_server() {
+    let s = start_with(|cfg| cfg.web.invite_portal = "self".into()).await;
+    let alice = s.user("alice").await;
+
+    let (_, guild) =
+        s.post("/_telium/v1/guilds", Some(&alice.token), json!({ "name": "Guild" })).await;
+    assert!(guild["invite_portal"].is_null());
+
+    let (_, invite) =
+        s.post(&format!("/_telium/v1/guilds/{}/invites", guild["id"].as_str().unwrap()), Some(&alice.token), json!({})).await;
+    let code = invite["code"].as_str().unwrap().to_string();
+    assert_eq!(invite["url"], format!("{}/invite/{code}", s.base));
+
+    let (_, caps) = s.get("/_telium/v1/capabilities", None).await;
+    assert!(caps["invite_portal"].is_null());
+
+    // No redirect route is registered, and with no web dir there is nothing to fall through to.
+    let (status, _) = s.get("/invite/whatever", None).await;
+    assert_eq!(status, 404);
+}
+
+#[tokio::test]
 async fn a_moderator_may_delete_but_never_rewrite() {
     let s = start().await;
     let alice = s.user("alice").await;

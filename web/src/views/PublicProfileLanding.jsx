@@ -70,7 +70,7 @@ export function publicProfileLink(userId) {
     && !isNativeShell
     && /^https?:$/.test(window.location.protocol)
     ? window.location.origin
-    // A copied profile link names the public site, not the app host.
+    // Profile links are pages on the official site, beside the app itself.
     : 'https://telium.chat';
   return `${webOrigin}${publicProfilePath(userId)}`;
 }

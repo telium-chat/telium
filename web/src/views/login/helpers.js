@@ -1,5 +1,5 @@
 import { parseAddress, fullHandle } from '../../lib/account-address.js';
-import { normalizeHomeserver, prettyHost } from '../../lib/homeserver.js';
+import { isPortalHost, normalizeHomeserver, prettyHost } from '../../lib/homeserver.js';
 import { isTauriRuntime } from '../../lib/platform.js';
 
 export const PENDING_RECOVERY_KEY = 'telium.pending-account-recovery.v1';
@@ -40,6 +40,9 @@ export function knownServer(handoff) {
   const remembered = readHome(sessionStorage)
     || (isTauriRuntime() ? readHome(localStorage) : null);
   if (remembered) return remembered;
+  // The portal is a static site: its own origin is not anybody's account home,
+  // so signup there starts from nothing and takes a recommendation instead.
+  if (isPortalHost()) return '';
   return isTauriRuntime() ? FLAGSHIP_HOME : location.origin;
 }
 

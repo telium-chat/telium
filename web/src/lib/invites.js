@@ -14,3 +14,11 @@ export function inviteCreateBody(maxUses, expiry) {
     expires_in_secs: expiry ? Number(expiry) : null,
   };
 }
+
+/// The portal form of an invite or vanity link: the portal's URL naming the server that
+/// mints it, so whoever opens it runs Telium's page rather than that server's. Null when
+/// the server has no portal, and the caller keeps the link shape it always used.
+export function portalInviteLink(portal, origin, token) {
+  if (!portal || !origin) return null;
+  return `${String(portal).replace(/\/+$/, '')}/invite/${encodeURIComponent(token)}@${origin}`;
+}

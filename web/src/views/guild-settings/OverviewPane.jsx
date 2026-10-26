@@ -4,6 +4,7 @@ import { useModal } from '../../hooks/useModal.jsx';
 import { reportError, toast } from '../../hooks/useToast.jsx';
 import { uploadGuildIcon } from '../../lib/upload.js';
 import { copyToClipboard } from '../../lib/clipboard.js';
+import { portalInviteLink } from '../../lib/invites.js';
 import { t } from '../../lib/i18n/index.js';
 import { useT } from '../../lib/i18n/react.jsx';
 import {
@@ -257,8 +258,9 @@ function VanityLinkEditor({ guildId, api, guild, onChanged }) {
     ? `#${localpart}:${guild.origin}`
     : null;
   const publicBase = String(guild.public_base_url || api.base || '').replace(/\/+$/, '');
-  const browserLink = enabled && localpart && publicBase
-    ? `${publicBase}/invite/${encodeURIComponent(localpart)}`
+  const browserLink = enabled && localpart
+    ? (portalInviteLink(guild.invite_portal, guild.origin, localpart)
+      || (publicBase ? `${publicBase}/invite/${encodeURIComponent(localpart)}` : null))
     : null;
 
   return (

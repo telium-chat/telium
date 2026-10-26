@@ -8,6 +8,7 @@ import { HttpError } from '../lib/api.js';
 import { recentAccounts, rememberAccount } from '../lib/account-address.js';
 import {
   DEFAULT_RECOMMENDATION_URL,
+  PORTAL_RECOMMENDATION_PATH,
   RECOMMENDATION_KIND,
   RECOMMENDATION_VERSION,
   canonicalRecommendationJson,
@@ -35,6 +36,12 @@ const SERVERS = [
     serverName: 'example.org',
     api: 'https://chat.example.org',
     accounts: { '@ada:example.org': { status: 'active' } },
+  },
+  {
+    origin: 'https://chat.example.org',
+    serverName: 'chat.example.org',
+    api: 'https://chat.example.org',
+    accounts: { '@ada:chat.example.org': { status: 'active' } },
   },
   {
     origin: 'https://telium.chat',
@@ -117,7 +124,9 @@ const reply = (body, status = 200) => ({
 
 function installNetwork() {
   const fetch = vi.fn(async (url) => {
-    if (String(url) === DEFAULT_RECOMMENDATION_URL) return reply(signedFeed());
+    if (String(url) === DEFAULT_RECOMMENDATION_URL || String(url) === PORTAL_RECOMMENDATION_PATH) {
+      return reply(signedFeed());
+    }
     const { origin, pathname } = new URL(url);
     if (pathname === '/.well-known/telium/server') {
       const server = SERVERS.find((s) => s.origin === origin);
@@ -271,6 +280,16 @@ describe('the desktop first screen', () => {
     const onInvite = vi.fn();
     const { user } = mount({ onInvite });
     await enterAddress(user, 'https://example.org/invite/welcome-code');
+    await waitFor(() => expect(onInvite).toHaveBeenCalledWith({
+      base: 'https://chat.example.org',
+      code: 'welcome-code',
+    }));
+  });
+
+  it('hands a portal invite link to the invite landing with the server it names', async () => {
+    const onInvite = vi.fn();
+    const { user } = mount({ onInvite });
+    await enterAddress(user, 'https://telium.chat/invite/welcome-code@chat.example.org');
     await waitFor(() => expect(onInvite).toHaveBeenCalledWith({
       base: 'https://chat.example.org',
       code: 'welcome-code',
@@ -618,5 +637,83 @@ describe('the plumbing the web flow shares', () => {
     expect(document.querySelector('.stage__cur .auth-host').textContent).toContain(HERE_HOST);
     expect(screen.getByRole('button', { name: 'Choose a different home' })).toBeTruthy();
     vi.unstubAllEnvs();
+  });
+});
+
+describe('signup on the portal', () => {
+  // The portal serves the client without being a homeserver: no page-origin
+  // default, a recommendation instead, and the manual server step as the only
+  // fallback. The marker is what the merge stamps into the shell.
+  let marker;
+
+  beforeEach(() => {
+    marker = document.createElement('meta');
+    marker.name = 'telium-portal';
+    marker.content = '1';
+    document.head.appendChild(marker);
+    vi.stubEnv('VITE_TELIUM_RECOMMENDATION_PUBLIC_KEY', FEED_KEY);
+    installNetwork();
+  });
+
+  afterEach(() => {
+    marker.remove();
+    sessionStorage.clear();
+    localStorage.clear();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  const recommended = () => screen.findByTestId('recommended-home');
+
+  it('recommends a server instead of defaulting to the site itself', async () => {
+    const { user, signIn } = mount({ homeRandom: () => 0.9 });
+    await user.click(await screen.findByRole('button', { name: 'Create an account' }));
+    const card = await recommended();
+    expect(card.textContent).toContain('Ridge Commons');
+    expect(card.textContent).toContain('ridge.example');
+    expect(document.querySelector('.stage__cur .auth-host')).toBeNull();
+
+    const field = await screen.findByRole('textbox', { name: 'Username' });
+    await user.type(field, 'ada');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.type(await screen.findByLabelText('Password'), PASSWORD);
+    await user.type(screen.getByLabelText('Confirm password'), PASSWORD);
+    await user.click(screen.getByRole('button', { name: 'Create account' }));
+    await waitFor(() => expect(signIn).toHaveBeenCalled());
+    expect(signIn.mock.calls[0][0]).toBe('https://api.ridge.example');
+    expect(signIn.mock.calls[0][3]).toMatchObject({ register: true });
+  });
+
+  it('asks for a server directly when there is nothing to recommend', async () => {
+    vi.stubEnv('VITE_TELIUM_RECOMMENDATION_PUBLIC_KEY', '');
+    const network = installNetwork();
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Create an account' }));
+    expect(await screen.findByRole('textbox', { name: 'Home server' })).toBeTruthy();
+    expect(screen.queryByTestId('recommended-home')).toBeNull();
+    expect(document.querySelector('.stage__cur .auth-host')).toBeNull();
+    // Dormant is fail-closed: with no key pinned, the feed is not even asked.
+    expect(network.mock.calls.map(([url]) => String(url)))
+      .not.toContain(PORTAL_RECOMMENDATION_PATH);
+  });
+
+  it('keeps a remembered home when there is nothing to recommend', async () => {
+    sessionStorage.setItem('telium.lastHome', 'https://atlas.example');
+    vi.stubEnv('VITE_TELIUM_RECOMMENDATION_PUBLIC_KEY', '');
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Create an account' }));
+    await waitFor(() => expect(document.querySelector('.stage__cur .auth-host')).toBeTruthy());
+    expect(document.querySelector('.stage__cur .auth-host').textContent).toContain('atlas.example');
+    expect(screen.queryByRole('textbox', { name: 'Home server' })).toBeNull();
+  });
+
+  it('does not ask the site itself when searching for a bare name', async () => {
+    const network = installNetwork();
+    const { user } = mount();
+    await enterAddress(user, 'mo');
+    await waitFor(() => expect(network.mock.calls.length).toBeGreaterThan(0));
+    const urls = network.mock.calls.map(([url]) => String(url));
+    expect(urls.some((url) => url.startsWith(HERE))).toBe(false);
+    expect(urls.some((url) => url.includes('ridge.example'))).toBe(true);
   });
 });

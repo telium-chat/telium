@@ -138,6 +138,29 @@ pub fn audit(cfg: &Config, config_path: Option<&Path>) -> Audit {
         Some(_) => {}
     }
 
+    // `validate` refuses a non-https portal outright, so what is left to catch here is an
+    // https portal that still points at the machine itself: every link minted against it
+    // opens nothing on anybody else's browser.
+    if cfg.web.invite_portal != "self" {
+        if let Some(host) = host_of(&cfg.web.invite_portal) {
+            if prod && is_loopback_host(&host) {
+                f.push(Finding {
+                    key: "web.invite_portal".into(),
+                    level: Level::Danger,
+                    exposes: format!(
+                        "invite and vanity links are minted against `{}`, which every \
+                         recipient's browser resolves on their own machine, where nothing \
+                         is listening for them.",
+                        cfg.web.invite_portal
+                    ),
+                    remedy: "set `web.invite_portal` to the public portal URL, or to `self` \
+                             to mint links on this server again."
+                        .into(),
+                });
+            }
+        }
+    }
+
     let wildcard = cfg.bind.starts_with("0.0.0.0:")
         || cfg.bind.starts_with("[::]:")
         || cfg.bind.starts_with(":::");
@@ -776,6 +799,7 @@ mod tests {
             ("backup.dir", |c| { c.media_dir = "/srv/media".into(); c.database_url = "sqlite:///var/lib/telium/telium.db?mode=rwc".into(); c.backup.dir = "/var/lib/telium/backups".into() }, None),
             ("bind", |c| { c.bind = "0.0.0.0:8448".into(); c.public_base_url = "http://telium.example".into() }, Some(|c| c.public_base_url = "https://telium.example".into())),
             ("rate_limit.trusted_proxies", |c| c.bind = "0.0.0.0:8448".into(), Some(|c| c.rate_limit.trusted_proxies = vec!["127.0.0.1".into()])),
+            ("web.invite_portal", |c| c.web.invite_portal = "https://localhost:8448".into(), Some(|c| c.web.invite_portal = "self".into())),
         ];
         for (key, breaks, fixes) in cases {
             let mut cfg = production();

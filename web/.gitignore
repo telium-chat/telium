@@ -1,6 +1,12 @@
 node_modules/
 dist/
 dist-electron/
+
+# Local build configuration: keys pinned into the bundle for a local run, e.g.
+# by site/scripts/local-test-feed.mjs. Production keys arrive from CI variables.
+.env.local
+.env.*.local
+
 # The release-shaped APK and its checksum, staged by the Android workflow from
 # the Gradle output. Build output, not source.
 dist-android/

@@ -121,9 +121,17 @@ jobs:
         with:
           path: site/dist
 
-  # Off until GitHub Pages is turned on for this repository. `deploy-pages`
-  # fails rather than skips when it is not, so the gate is a repository
-  # variable instead of a comment. To publish:
+  # telium.chat itself is not deployed from here. Cloudflare's git integration
+  # watches this directory and deploys it — build command, environment
+  # variables and the wrangler configuration all live in the Cloudflare
+  # dashboard, and the credentials for the deploy are Cloudflare's own. See
+  # site/README.md, "Deploying", for what that pipeline runs.
+
+  # The Pages publish is a marketing-only fallback and is not what serves
+  # telium.chat. Off until GitHub Pages is turned on for this repository, and
+  # it should only ever be pointed at a domain that is not carrying the
+  # client, because a Pages artifact has no app routes: its "Open Telium"
+  # button is a 404. To publish:
   #
   #   Settings → Pages → Source: GitHub Actions
   #   gh variable set PAGES_ENABLED --body true

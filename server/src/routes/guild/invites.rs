@@ -86,7 +86,7 @@ pub async fn create_invite(
 
     Ok(Json(json!({
         "code": code,
-        "url": format!("{}/invite/{}", state.cfg.public_base_url, code),
+        "url": state.cfg.invite_link(&code),
         "guild_id": guild_id,
         "expires_at": expires_at,
         "max_uses": req.max_uses,
@@ -112,7 +112,7 @@ pub async fn list_invites(
             let expired = expires_at.is_some_and(|e| e <= now) || max_uses.is_some_and(|m| uses >= m);
             json!({
                 "code": code,
-                "url": format!("{}/invite/{}", state.cfg.public_base_url, code),
+                "url": state.cfg.invite_link(&code),
                 "channel_id": channel_id,
                 "creator": creator,
                 "uses": uses,
