@@ -929,6 +929,10 @@ pub struct Voice {
     pub enabled: bool,
     pub default_region: String,
     pub regions: Vec<VoiceRegion>,
+    /// Lifetime of a join token. Bounds only the replay window at the SFU's
+    /// `/session`; the client renews it mid-call (`voice/token`), so a call
+    /// never sits on an expired LiveKit grant, which would turn the first
+    /// network blip into a full reconnect.
     pub token_ttl_secs: i64,
     /// Handed to every client; without a reflexive address a peer can only
     /// offer its own network's addresses.
@@ -1342,7 +1346,7 @@ impl Default for Voice {
             default_region: "local".into(),
             // The operator supplies regions; with none addressed, calls are mesh-only.
             regions: Vec::new(),
-            token_ttl_secs: 120,
+            token_ttl_secs: 600,
             stun_servers: vec!["stun:stun.l.google.com:19302".into()],
             turn_secret: None,
             turn_ttl_secs: 3600,
