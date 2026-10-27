@@ -72,6 +72,10 @@ export class SfuCall {
     this.tokenTtl = Number(tokenTtl) > 0 ? Number(tokenTtl) : 0;
     this.renewToken = renewToken || null;
     this.renewTimer = null;
+    // Set once `renew` finds the room engine without its token property: the
+    // grant was minted but could not be installed, said once rather than
+    // silently on every renewal.
+    this.renewInstallBroken = false;
 
     this.room = null;
     this.live = false;
@@ -300,9 +304,17 @@ export class SfuCall {
       const session = await this.fetchSession();
       if (!this.live || !this.room) return false;
       // livekit-client re-reads `engine.token` on every resume and full
-      // reconnect; the property is public on both classes.
+      // reconnect; the property is public on both classes. If an upgrade
+      // takes it away, say so once — a silent skip here would leave the call
+      // renewing grants it can never install, and the first blip after the
+      // token's expiry would drop it for no visible reason.
       const engine = this.room.engine;
-      if (engine && typeof engine === 'object' && 'token' in engine) engine.token = session.token;
+      if (engine && typeof engine === 'object' && 'token' in engine) {
+        engine.token = session.token;
+      } else if (!this.renewInstallBroken) {
+        this.renewInstallBroken = true;
+        console.warn('livekit-client no longer exposes engine.token; the renewed join token could not be installed on the live session');
+      }
       this.settleBudget(session);
       return true;
     } catch {

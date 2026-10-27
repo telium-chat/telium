@@ -1074,4 +1074,27 @@ describe('SfuCall token renewal', () => {
     vi.advanceTimersByTime(10_000_000);
     expect(call.renewToken).toHaveBeenCalledTimes(1, 'no renewal after the call is gone');
   });
+
+  it('says so once when the fresh grant cannot be installed on the room', async () => {
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { call } = await renewingCall();
+    // An engine without its token property: what a livekit-client upgrade
+    // that renamed it would look like.
+    call.room = { engine: {}, localParticipant: { attributes: {} } };
+
+    await expect(call.renew()).resolves.toBe(true, 'the grant was minted either way');
+    expect(call.joinToken).toBe('join-2');
+    expect(warned).toHaveBeenCalledTimes(1);
+    expect(warned.mock.calls[0][0]).toContain('engine.token');
+
+    await call.renew();
+    expect(warned).toHaveBeenCalledTimes(1, 'the second renewal stays quiet');
+
+    // A room with a usable engine installs again without another word.
+    call.room = { engine: { token: 'lk-old' }, localParticipant: { attributes: {} } };
+    await call.renew();
+    expect(call.room.engine.token).toBe('lk-next');
+    expect(warned).toHaveBeenCalledTimes(1);
+    warned.mockRestore();
+  });
 });
