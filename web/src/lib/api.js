@@ -433,6 +433,10 @@ export class Api {
   voiceStates(channelId) { return this.get(`/_telium/v1/channels/${channelId}/voice`); }
   voiceJoin(channelId, body) { return this.post(`/_telium/v1/channels/${channelId}/voice/join`, body || {}).then(joined); }
   voiceLeave(channelId) { return this.post(`/_telium/v1/channels/${channelId}/voice/leave`, {}); }
+  /// A fresh join token for the session this device already holds, so a call
+  /// never runs on an expired LiveKit grant (the resume that follows a network
+  /// blip is refused once it has expired).
+  voiceRefreshToken(channelId) { return this.post(`/_telium/v1/channels/${channelId}/voice/token`, {}); }
   voiceState(channelId, body) { return this.post(`/_telium/v1/channels/${channelId}/voice/state`, body); }
   voiceStream(channelId, body) { return this.post(`/_telium/v1/channels/${channelId}/voice/stream`, body); }
   voiceWatch(channelId, body) { return this.post(`/_telium/v1/channels/${channelId}/voice/watch`, body); }
@@ -449,6 +453,10 @@ export class Api {
   }
   /// The committer saying a waiting package will never be added.
   voiceE2eeRefuse(channelId, body) { return this.post(`/_telium/v1/channels/${channelId}/voice/e2ee/refuse`, body); }
+  /// A member asking for the call's encryption group to be re-founded, for
+  /// when this device can no longer follow it. The server refuses while the
+  /// group is re-keying happily.
+  voiceE2eeReset(channelId) { return this.post(`/_telium/v1/channels/${channelId}/voice/e2ee/reset`, {}); }
 
   /// Same names against a conversation, so `store.voiceApi` can hand either to the same code.
   conversationVoiceStates(id) { return this.get(`/_telium/v1/conversations/${id}/voice`); }

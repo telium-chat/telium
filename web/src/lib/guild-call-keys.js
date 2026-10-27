@@ -154,7 +154,13 @@ export class GuildCallKeys {
       return;
     }
     if (d.op === 'committer') {
-      if (d.group_id && d.group_id !== this.groupId) return;
+      if (d.group_id && d.group_id !== this.groupId) {
+        // An announcement from a group this device is not part of: it missed
+        // the move (a reset or a commit while its gateway was quiet). Ask the
+        // server where things stand now rather than at the next roster move.
+        this.check();
+        return;
+      }
       this.committer = d.committer || null;
       // Named to write, perhaps because the last went quiet: look now. Not awaited; already queued.
       if (this.committer === this.me) this.tend();
@@ -165,7 +171,11 @@ export class GuildCallKeys {
       if (d.user_id === this.me && !this.state) this.lose();
       return;
     }
-    if (d.op !== 'commit' || d.group_id !== this.groupId) return;
+    if (d.op !== 'commit') return;
+    if (d.group_id !== this.groupId) {
+      this.check();
+      return;
+    }
     if (!this.state) {
       await this.enter(d);
       return;
