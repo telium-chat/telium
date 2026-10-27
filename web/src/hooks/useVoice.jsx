@@ -1130,11 +1130,19 @@ export function VoiceProvider({ children }) {
     const ladder = () => (joinUnanswered(lastJoinErrorRef.current)
       ? RETAKE_UNREACHABLE_BACKOFF_MS
       : RETAKE_BACKOFF_MS);
+    // The caller has escaped on their own — joining another channel sets
+    // `channelRef` without touching `movingRef`. The ladder stands down
+    // rather than tear that call down on its next rung, and it settles: a
+    // bare return would leave `movingRef` raised and park every later
+    // retake in `pendingRetakeRef` for good.
+    const escaped = () => channelRef.current !== null && channelRef.current !== current;
     for (let attempt = 0; ; attempt += 1) {
+      if (escaped()) { settleMove(); return; }
       if (attempt > 0) {
         if (!movingRef.current) return;
         const rungs = ladder();
         await sleep(rungs[Math.min(attempt - 1, rungs.length - 1)]);
+        if (escaped()) { settleMove(); return; }
         if (!movingRef.current) return;
         setPhase('connecting');
       }
