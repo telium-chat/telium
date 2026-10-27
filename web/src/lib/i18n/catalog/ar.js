@@ -4678,6 +4678,9 @@ export const messages = {
   // in a sentence that also contains an interrogative, and interrogative word
   // order is where a misresolved neutral is hardest to spot.
   'voice.call.sfuAddressUnknown': 'هذه المحادثة لا تحدّد أي SFU يُتصل به.',
+  // A guild's server offered an SFU without end-to-end encryption. Refused
+  // outright: the alternative is a call the server can listen to.
+  'voice.call.sfuNotEncrypted': 'لم يعرض هذا الخادم مكالمة مشفّرة من طرف إلى طرف، لذلك لم يتم توصيلك.',
 
   // The call moved while you were in it. Three separate facts, three messages,
   // because a person who sees the same sentence twice assumes the second is a
@@ -5357,6 +5360,11 @@ export const messages = {
   // and distributing a new key, which is what «تجديد المفاتيح» says. The word
   // «مفاتيح» matches `voice.call.noKeys` above.
   'voice.error.rekey': 'تعذّر تجديد مفاتيح المكالمة',
+  // Rejoining kept failing, so the seat is given up; `errors.context` names
+  // what the last attempt hit.
+  'voice.error.rejoin': 'تعذّرت إعادة الانضمام إلى المكالمة',
+  // The server says this device is no longer in the channel it was calling from.
+  'voice.call.removed': 'تمت إزالتك من القناة الصوتية',
   // The device panel's four. `readRoutes` and `switchOutput` are shared with
   // Android's output sheet, which asks the same two questions of a different
   // implementation -- so both use «مخرج الصوت», the same phrase as

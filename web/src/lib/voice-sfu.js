@@ -16,11 +16,15 @@ import {
 
 // SFU voice via the LiveKit engine behind `telium-sfu`; the guild join token is spent at `POST {endpoint}/session`. Same surface as `MeshCall`.
 
+/// A renewal that could not land is retried after this long, so the grant the
+/// call resumes with never expires.
+const RENEW_RETRY_MS = 30_000;
+
 export class SfuCall {
   constructor({
     me, onSpeaking, onPeers, onScreen, onCamera, onScreenEnd, onCameraEnd, onError,
-    onAudioBlocked, onNoiseFallback, onDropped, endpoint, joinToken, iceServers, maxBitrate, policy,
-    e2ee, noiseMode,
+    onAudioBlocked, onNoiseFallback, onDropped, onRemoved, onKeyTrouble, endpoint, joinToken,
+    iceServers, maxBitrate, policy, e2ee, noiseMode, tokenTtl, renewToken,
   }) {
     this.me = me;
     this.endpoint = endpoint;
@@ -29,7 +33,13 @@ export class SfuCall {
     this.e2ee = e2ee || null;
     // Media we can't open, reported once it outlasts a key-rotation lag, once per person per key.
     this.unopened = new KeyTrouble({
-      report: (e, who) => this.onError(new Error(unopenedMedia(e, who))),
+      report: (e, who) => {
+        // The report is the symptom of this device sitting behind the group;
+        // the caller asks the server where the group stands before the toast
+        // is even read.
+        try { this.onKeyTrouble?.(who); } catch { /* a UI callback must not break the call */ }
+        this.onError(new Error(unopenedMedia(e, who)));
+      },
     });
     this.cryptorTrouble = new Set();
     // Who has sent media in the clear, reported once.
@@ -50,6 +60,22 @@ export class SfuCall {
     this.onNoiseFallback = onNoiseFallback || (() => {});
     // Called when the connection is gone for good, instead of reporting.
     this.onDropped = onDropped || null;
+    // The server removed this seat (a moderator, or a sweep that raced a
+    // reconnect); the caller checks with the guild server before reacting.
+    this.onRemoved = onRemoved || null;
+    // Media failed to open for longer than a key-rotation lag; the caller
+    // asks the encryption group where it stands.
+    this.onKeyTrouble = onKeyTrouble || null;
+    // The join token TTL in seconds; `renewToken` mints a fresh one for the
+    // session this call already holds. LiveKit checks the token on every
+    // resume, so an expired one turns the first network blip into a drop.
+    this.tokenTtl = Number(tokenTtl) > 0 ? Number(tokenTtl) : 0;
+    this.renewToken = renewToken || null;
+    this.renewTimer = null;
+    // Set once `renew` finds the room engine without its token property: the
+    // grant was minted but could not be installed, said once rather than
+    // silently on every renewal.
+    this.renewInstallBroken = false;
 
     this.room = null;
     this.live = false;
@@ -144,6 +170,7 @@ export class SfuCall {
     }
     await this.room.connect(url, token, { autoSubscribe: false });
     this.settleBudget(session);
+    this.scheduleRenew();
     // TrackPublished only fires for later publications; reconcile existing ones.
     for (const participant of this.room.remoteParticipants.values()) {
       for (const pub of participant.trackPublications.values()) {
@@ -242,10 +269,58 @@ export class SfuCall {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ token: this.joinToken }),
     });
-    if (!resp.ok) throw new Error(`SFU /session returned ${resp.status}`);
+    if (!resp.ok) {
+      const failed = new Error(`SFU /session returned ${resp.status}`);
+      // So a caller can tell an SFU that answered 'no' from one that is down.
+      failed.status = resp.status;
+      throw failed;
+    }
     const data = await resp.json();
     if (!data.url || !data.token) throw new Error('SFU /session returned no url/token');
     return data;
+  }
+
+  /// Mid-call: swap in a fresh grant so the resume after the next network blip
+  /// is not refused as expired. A failed renewal is retried after a short
+  /// pause rather than at the next half-TTL, so the grant never lapses.
+  scheduleRenew(after) {
+    clearTimeout(this.renewTimer);
+    if (!this.renewToken || !this.tokenTtl || !this.live) return;
+    const wait = after ?? Math.max(60_000, (this.tokenTtl / 2) * 1000);
+    this.renewTimer = setTimeout(() => {
+      this.renewTimer = null;
+      if (!this.live) return;
+      this.renew()
+        .then((ok) => this.scheduleRenew(ok ? undefined : RENEW_RETRY_MS))
+        .catch(() => this.scheduleRenew(RENEW_RETRY_MS));
+    }, wait);
+  }
+
+  /// True when the call is holding a fresh grant.
+  async renew() {
+    if (!this.room) return false;
+    try {
+      this.joinToken = await this.renewToken();
+      const session = await this.fetchSession();
+      if (!this.live || !this.room) return false;
+      // livekit-client re-reads `engine.token` on every resume and full
+      // reconnect; the property is public on both classes. If an upgrade
+      // takes it away, say so once — a silent skip here would leave the call
+      // renewing grants it can never install, and the first blip after the
+      // token's expiry would drop it for no visible reason.
+      const engine = this.room.engine;
+      if (engine && typeof engine === 'object' && 'token' in engine) {
+        engine.token = session.token;
+      } else if (!this.renewInstallBroken) {
+        this.renewInstallBroken = true;
+        console.warn('livekit-client no longer exposes engine.token; the renewed join token could not be installed on the live session');
+      }
+      this.settleBudget(session);
+      return true;
+    } catch {
+      // The next tick tries again; nothing is lost until a blip forces a resume.
+      return false;
+    }
   }
 
   /// The ring keeps earlier keys for peers a commit behind.
@@ -314,11 +389,17 @@ export class SfuCall {
         if (!this.live) return;
         // Deliberate teardowns are not voice trouble.
         if (
-          reason === DisconnectReason.CLIENT_INITIATED ||
-          reason === DisconnectReason.PARTICIPANT_REMOVED ||
-          reason === DisconnectReason.ROOM_CLOSED ||
-          reason === DisconnectReason.ROOM_DELETED
+          reason === DisconnectReason.CLIENT_INITIATED
+          || reason === DisconnectReason.ROOM_CLOSED
+          || reason === DisconnectReason.ROOM_DELETED
         ) {
+          return;
+        }
+        // The server removed the seat: a moderator, or the sweeper racing a
+        // reconnect. The caller asks the guild server which, then rejoins or
+        // leaves — staying connected to nothing is the one wrong answer.
+        if (reason === DisconnectReason.PARTICIPANT_REMOVED) {
+          this.onRemoved?.();
           return;
         }
         // LiveKit already tried to resume; another device taking the seat is not a drop, and rejoining would take it back.
@@ -672,6 +753,8 @@ export class SfuCall {
   stop() {
     // Idempotent; a throwing UI callback must not abort teardown.
     this.live = false;
+    clearTimeout(this.renewTimer);
+    this.renewTimer = null;
     const room = this.room;
     this.room = null;
     // The processor and its AudioContext are ours; LiveKit won't close them.

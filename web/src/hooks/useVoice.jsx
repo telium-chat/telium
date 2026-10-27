@@ -13,6 +13,7 @@ import {
 } from '../lib/screenShare.js';
 import { neuralCapability, normalizeNoiseMode } from '../lib/denoise.js';
 import { chooseVoiceRegion } from '../lib/voiceRegion.js';
+import { sleep } from '../lib/util.js';
 import { ScreenShareDialog } from '../views/dialogs/ScreenShareDialog.jsx';
 import {
   isAndroid,
@@ -34,6 +35,42 @@ const VoiceContext = createContext(null);
 export const PING_WINDOW = 40;
 
 export const RETAKE_WINDOW_MS = 60_000;
+
+/// Between retake attempts the join is re-run after these waits, so an SFU
+/// that is restarting is outlived instead of ejecting everyone from the
+/// channel. One attempt per entry; the last one failing gives the seat up.
+export const RETAKE_BACKOFF_MS = [3000, 6000, 10_000, 15_000, 20_000];
+
+/// When the join cannot even reach a server — a homeserver or SFU restarting
+/// for a couple of minutes — the seat is bridged along this longer ladder
+/// rather than given up, because the answer will change when it comes back.
+export const RETAKE_UNREACHABLE_BACKOFF_MS = [
+  ...RETAKE_BACKOFF_MS, 30_000, 45_000, 60_000, 90_000, 90_000, 90_000,
+];
+
+/// True when a join failed for a reason that time can fix: nobody answered,
+/// or the answer was 'busy'. A server that answered 'no' (permissions, a full
+/// channel, an unsupported browser) gets the short ladder instead — retrying
+/// cannot change that answer. Join guards that already know the call cannot
+/// be dialled mark their error `answered` to say so.
+export function joinUnanswered(error) {
+  if (error?.answered) return false;
+  const status = Number(error?.status);
+  if (Number.isFinite(status) && status > 0) {
+    return status === 408 || status === 429 || status >= 500;
+  }
+  // No status: the request never got an answer (fetch failed, socket died).
+  return true;
+}
+
+/// A drop landing this soon after a recovery waits this long instead of
+/// retaking at once, so a flapping call cannot hammer the server.
+export const RETAKE_REPEAT_DELAY_MS = 5000;
+
+/// How often a guild call asks the server where its encryption group stands,
+/// so a device that missed a commit without its gateway noticing does not
+/// stay a commit behind for the rest of the call.
+export const GUILD_CHECK_INTERVAL_MS = 45_000;
 
 export const CATCH_UP_WAIT_MS = 3000;
 
@@ -87,6 +124,8 @@ export function VoiceProvider({ children }) {
   const leaveRef = useRef(null);
   const retakeRef = useRef(null);
   const retakenAtRef = useRef(0);
+  const retakeRepeatRef = useRef(null);
+  const lastJoinErrorRef = useRef(null);
   const movingRef = useRef(false);
   const pendingRetakeRef = useRef(null);
   const settleMove = () => {
@@ -156,8 +195,15 @@ export function VoiceProvider({ children }) {
         reportError(e, t('voice.error.trouble'));
         leaveRef.current?.(targetChannelId);
       },
-      onLost: (e) => {
+      onLost: async (e) => {
         if (guildKeysRef.current !== keys) return;
+        // This device can no longer follow the group, and the group used to
+        // rebuild only once its last member had left — so one stuck device
+        // stranded everyone's media. Ask for a fresh group, best effort, then
+        // retake; the server refuses while the call is re-keying happily.
+        try {
+          await store.voiceApi(targetChannelId).voiceE2eeReset(targetChannelId);
+        } catch { /* busy or offline: the retake still repairs this device alone */ }
         retakeRef.current?.(targetChannelId, e);
       },
     });
@@ -381,18 +427,28 @@ export function VoiceProvider({ children }) {
       let { endpoint } = voiceServer;
       let e2ee = null;
       let policy = 'all';
+      // A guard that already knows this call cannot be dialled marks its
+      // error `answered`: a retake ladder must not outlast the answer.
+      const refused = (message) => {
+        const e = new Error(message);
+        e.answered = true;
+        return e;
+      };
       if (held) {
         if (voiceServer.custom) endpoint = store.callSfuIn(targetChannelId);
         if (!endpoint) {
-          throw new Error(t('voice.call.sfuAddressUnknown'));
+          throw refused(t('voice.call.sfuAddressUnknown'));
         }
         e2ee = await sealMedia(targetChannelId);
         if (rank(held.own) >= rank('relay') && voiceServer.relay) policy = 'relay';
       } else {
         if (voiceServer.e2ee !== 'required') {
-          throw new Error(t('voice.call.sfuNotEncrypted'));
+          throw refused(t('voice.call.sfuNotEncrypted'));
         }
-        e2ee = await callE2EE();
+        e2ee = await callE2EE().catch((e) => {
+          e.answered = true;
+          throw e;
+        });
         guildProviderRef.current = e2ee.keyProvider;
         const latest = guildKeysRef.current?.latest;
         if (latest) await e2ee.keyProvider.setEpochKey(latest.raw, latest.epoch);
@@ -404,12 +460,47 @@ export function VoiceProvider({ children }) {
           if (callRef.current === call) retakeRef.current?.(targetChannelId, e);
           else onError(e);
         },
+        onRemoved: () => {
+          if (callRef.current !== call || movingRef.current) return;
+          // The server tore this seat down: a moderator, or the sweeper racing
+          // a reconnect. Its answer decides between rejoining and leaving;
+          // staying connected to a dead room is the one wrong reaction.
+          store.voiceApi(targetChannelId)?.voiceStates?.(targetChannelId)
+            .then((resp) => {
+              if (callRef.current !== call || movingRef.current) return;
+              const states = resp?.voice_states || [];
+              if (states.some((v) => v.user_id === me)) {
+                retakeRef.current?.(targetChannelId, new Error('the server ended this call’s media session'));
+              } else {
+                toast(t('voice.call.removed'));
+                leaveRef.current?.(targetChannelId);
+              }
+            })
+            .catch(() => { /* the room is gone either way; the roster settles it */ });
+        },
+        onKeyTrouble: () => {
+          // This device is opening nobody's media: it is probably a commit
+          // behind. Ask the group where it stands now, not at the next roster
+          // move.
+          if (conversationCall(targetChannelId)) return;
+          guildKeysRef.current?.check?.().catch?.(() => {});
+        },
         endpoint,
         joinToken: voiceServer.token,
         iceServers: voiceServer.ice_servers,
         maxBitrate: voiceServer.max_bitrate,
         policy,
         e2ee,
+        // Only a guild channel has the renewal endpoint; a conversation's SFU
+        // session cannot be re-minted mid-call.
+        ...(!conversationCall(targetChannelId) && voiceServer.mode === 'sfu' ? {
+          tokenTtl: voiceServer.token_ttl,
+          renewToken: async () => {
+            const fresh = await store.voiceApi(targetChannelId).voiceRefreshToken(targetChannelId);
+            if (!fresh?.token) throw new Error('the server returned no join token');
+            return fresh.token;
+          },
+        } : {}),
       });
     } else {
       return;
@@ -529,12 +620,18 @@ export function VoiceProvider({ children }) {
     generationRef.current = null;
     hellosRef.current = new Map();
     greetedRef.current = new Set();
+    // The call is over: no retake may finish after it, least of all one
+    // waiting out a backoff for a channel nobody is in.
+    movingRef.current = false;
+    pendingRetakeRef.current = null;
+    clearTimeout(retakeRepeatRef.current);
+    retakeRepeatRef.current = null;
     if (wasLive) playCallTone('leave');
   }, [store, hangUp, dropGuildKeys]);
   leaveRef.current = coreLeave;
   useEffect(() => store.beforeAway(() => leaveRef.current?.()), [store]);
 
-  const join = useCallback(async (targetChannelId) => {
+  const join = useCallback(async (targetChannelId, { quiet = false } = {}) => {
     if (callRef.current && channelRef.current === targetChannelId) return;
     if (callRef.current) await coreLeave();
     const me = store.me?.user_id;
@@ -571,7 +668,11 @@ export function VoiceProvider({ children }) {
       const refused = privacyRef.current
         ? refusalCode(privacyRef.current.own, resp.voice_server)
         : null;
-      if (refused) throw new Error(t(`voice.refusal.${refused}`));
+      if (refused) {
+        const e = new Error(t(`voice.refusal.${refused}`));
+        e.answered = true;
+        throw e;
+      }
       serverRef.current = resp.voice_server;
       generationRef.current = resp.voice_server?.generation ?? null;
       setServer(resp.voice_server);
@@ -599,8 +700,11 @@ export function VoiceProvider({ children }) {
       }
       setPhase('connected');
       setJoinedAt(Date.now());
+      lastJoinErrorRef.current = null;
       playCallTone('join');
     } catch (e) {
+      // A retake reads this to tell 'nobody answered' from 'the answer was no'.
+      lastJoinErrorRef.current = e;
       if (joinedOnServer) {
         store.releaseVoiceSeat(targetChannelId);
         try { await store.voiceApi(targetChannelId).voiceLeave(targetChannelId); } catch { /* best effort rollback */ }
@@ -625,7 +729,7 @@ export function VoiceProvider({ children }) {
       setPrivacy(null);
       generationRef.current = null;
       dropGuildKeys();
-      reportError(e, t('voice.error.join'));
+      if (!quiet) reportError(e, t('voice.error.join'));
       setPhase('idle');
     }
   }, [store, dial, coreLeave, hangUp, reposture, greet, armGuildKeys, dropGuildKeys]);
@@ -901,7 +1005,13 @@ export function VoiceProvider({ children }) {
         hangUp();
         await dial(resp.voice_server, currentChannelId);
         toast(t('voice.call.movedRegion', { region: resp.voice_server.region }));
-      } catch (e) { reportError(e, t('voice.error.followRegion')); }
+      } catch (e) {
+        reportError(e, t('voice.error.followRegion'));
+        // The old room is already torn down; rejoining is what is left. It
+        // retries on its own, so a region that is still failing over is
+        // outlived rather than dropping the caller from the channel.
+        retakeRef.current?.(currentChannelId, e);
+      }
     }
   }), [store, dial, hangUp, follow, armGuildKeys]);
 
@@ -938,6 +1048,16 @@ export function VoiceProvider({ children }) {
     keys.tend();
   }), [store]);
 
+  useEffect(() => {
+    if (!channelId || conversationCall(channelId)) return undefined;
+    const id = setInterval(() => {
+      const keys = guildKeysRef.current;
+      if (keys?.channelId !== channelRef.current) return;
+      keys.check().catch(() => { /* the next interval asks again */ });
+    }, GUILD_CHECK_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [channelId]);
+
   useEffect(() => store.on('dm', async (d) => {
     const conv = channelRef.current;
     if (!conv || d?.conversation_id !== conv || !privacyRef.current || !store.mls) return;
@@ -959,7 +1079,21 @@ export function VoiceProvider({ children }) {
       && store.channels.get(roomId)?.guild_id === currentGuild
       && states.some((v) => v.user_id === me)
     ))?.[0];
-    if (!destination) return;
+    if (!destination) {
+      // The server says this seat is gone and there is nowhere to move to.
+      // Confirm before ending the call — a moderator's disconnect and a
+      // sweeper that outran a reconnect both look like this — but do not
+      // linger in a call the server has already ended.
+      if (conversationCall(current)) return;
+      store.voiceApi(current)?.voiceStates?.(current)
+        .then((resp) => {
+          if (channelRef.current !== current || movingRef.current) return;
+          if ((resp?.voice_states || []).some((v) => v.user_id === me)) return;
+          leaveRef.current?.(current);
+        })
+        .catch(() => { /* the next voice event retries the check */ });
+      return;
+    }
 
     movingRef.current = true;
     store.releaseVoiceSeat(current);
@@ -980,7 +1114,7 @@ export function VoiceProvider({ children }) {
       .finally(settleMove);
   }), [store, join, hangUp]);
 
-  const retakeSeat = useCallback((current) => {
+  const retakeSeat = useCallback(async (current) => {
     movingRef.current = true;
     store.releaseVoiceSeat(current);
     channelRef.current = null;
@@ -988,7 +1122,39 @@ export function VoiceProvider({ children }) {
     setServer(null);
     setPhase('connecting');
     setJoinedAt(null);
-    join(current).finally(settleMove);
+    // The join is the recovery, so it is retried until the entries run out.
+    // An SFU that is restarting, or a region that is failing over, is
+    // outlived rather than ejecting the caller from the channel — and an
+    // outage that lasts minutes bridges for minutes. A server that answered
+    // 'no' gets the short ladder: the answer will not change.
+    const ladder = () => (joinUnanswered(lastJoinErrorRef.current)
+      ? RETAKE_UNREACHABLE_BACKOFF_MS
+      : RETAKE_BACKOFF_MS);
+    // The caller has escaped on their own — joining another channel sets
+    // `channelRef` without touching `movingRef`. The ladder stands down
+    // rather than tear that call down on its next rung, and it settles: a
+    // bare return would leave `movingRef` raised and park every later
+    // retake in `pendingRetakeRef` for good.
+    const escaped = () => channelRef.current !== null && channelRef.current !== current;
+    for (let attempt = 0; ; attempt += 1) {
+      if (escaped()) { settleMove(); return; }
+      if (attempt > 0) {
+        if (!movingRef.current) return;
+        const rungs = ladder();
+        await sleep(rungs[Math.min(attempt - 1, rungs.length - 1)]);
+        if (escaped()) { settleMove(); return; }
+        if (!movingRef.current) return;
+        setPhase('connecting');
+      }
+      await join(current, { quiet: attempt > 0 });
+      if (channelRef.current === current && callRef.current) {
+        settleMove();
+        return;
+      }
+      if (attempt >= ladder().length) break;
+    }
+    reportError(new Error(t('voice.error.rejoin')), t('voice.error.trouble'));
+    leaveRef.current?.(current);
   }, [store, join, hangUp]);
 
   const retake = useCallback((target, error) => {
@@ -998,9 +1164,20 @@ export function VoiceProvider({ children }) {
     }
     const current = channelRef.current;
     if (current !== target) return;
-    if (!callRef.current || Date.now() - retakenAtRef.current < RETAKE_WINDOW_MS) {
-      reportError(error, t('voice.error.trouble'));
-      leaveRef.current?.(target);
+    if (callRef.current && Date.now() - retakenAtRef.current < RETAKE_WINDOW_MS) {
+      // A second drop right after one recovery: pause, then try again.
+      // Ejecting the caller from the channel is the one outcome nobody wants;
+      // `retakeSeat`'s own retries are the backstop if the call is gone for good.
+      if (!retakeRepeatRef.current) {
+        retakeRepeatRef.current = setTimeout(() => {
+          retakeRepeatRef.current = null;
+          if (channelRef.current === target && !movingRef.current) {
+            retakenAtRef.current = Date.now();
+            console.warn('Rejoining the call after a repeated drop:', error);
+            retakeSeat(target);
+          }
+        }, RETAKE_REPEAT_DELAY_MS);
+      }
       return;
     }
     retakenAtRef.current = Date.now();

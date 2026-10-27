@@ -534,6 +534,27 @@ describe('guild call keys', () => {
     expect(bob.trouble).toBeUndefined();
   });
 
+  it('notices a group it was never told about from the announcement alone', async () => {
+    const cs = await getCiphersuiteImpl(getCiphersuiteFromName(SUITE));
+    const call = new FakeCall('chan');
+    await call.join(await engine(cs, 'alice', 'a1'));
+    // Bob joins while unreachable: the group moves on without him ever hearing.
+    call.away.add('bob');
+    const bob = await call.join(await engine(cs, 'bob', 'b1'));
+    call.away.delete('bob');
+    expect(bob.state).toBe(null);
+
+    // The group is re-founded elsewhere. The first bob hears of it is an
+    // announcement naming a group he holds nothing from — that alone must
+    // make him ask the server where things stand, not wait for a roster move.
+    call.groupId = 'g2';
+    const asked = call.asked.filter((who) => who === 'bob').length;
+    call.relay({ op: 'committer', channel_id: 'chan', group_id: 'g2', committer: 'carol' });
+    await vi.waitFor(() => expect(bob.lostWith).toBeTruthy());
+    expect(call.asked.filter((who) => who === 'bob').length).toBeGreaterThan(asked);
+    expect(bob.trouble).toBeUndefined();
+  });
+
   it('asks to be readmitted when nobody adds it, and only then', async () => {
     const cs = await getCiphersuiteImpl(getCiphersuiteFromName(SUITE));
     const call = new FakeCall('chan');

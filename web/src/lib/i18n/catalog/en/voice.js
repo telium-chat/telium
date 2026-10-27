@@ -818,6 +818,11 @@ export const voice = {
   'voice.error.followServer': 'Could not follow the call to its new server',
   'voice.error.followRegion': 'Could not follow the call to its new region',
   'voice.error.rekey': 'Could not re-key the call',
+  // Rejoining kept failing, so the seat is given up; `errors.context` names
+  // what the last attempt hit.
+  'voice.error.rejoin': 'Could not rejoin the call',
+  // The server says this device is no longer in the channel it was calling from.
+  'voice.call.removed': 'You were removed from the voice channel',
   // The device panel's four. `readRoutes` and `switchOutput` are shared with
   // Android's output sheet, which asks the same two questions of a different
   // implementation.

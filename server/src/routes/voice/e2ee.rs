@@ -102,6 +102,12 @@ pub(crate) async fn settle_group(
 
 pub const COMMITTER_SILENT_MS: i64 = 8000;
 
+/// How long the group must have been still before a member may re-found it.
+/// Commits bump `updated_at`, so a call that is re-keying happily refuses
+/// resets; a stalled group (the state one full leave-and-rejoin round used to
+/// be the only cure for) is old enough immediately.
+pub const RESET_QUIET_MS: i64 = 15_000;
+
 const E2EE_LOG_KEEP: i64 = 256;
 
 pub(crate) async fn elect(
@@ -402,6 +408,89 @@ pub async fn e2ee_commits(
 pub struct Refuse {
     pub user_id: String,
     pub key_package: String,
+}
+
+/// A member of the call asks for the encryption group to be re-founded: every
+/// device drops back to waiting and the founding member rebuilds from the
+/// packages already on file. This is what used to take everybody leaving the
+/// voice channel — the group was only rebuilt once no member remained — so a
+/// device that lost track of the group could strand the whole call's media.
+pub async fn e2ee_reset(
+    State(state): State<AppState>,
+    auth: GuildAuth,
+    Path(channel_id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let ctx = voice_channel(&state, &channel_id, &auth.user_id).await?;
+    in_call(&state, &channel_id, &auth.user_id).await?;
+    let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let row: Option<(String, i64)> =
+        sqlx::query_as("SELECT group_id, updated_at FROM voice_e2ee_groups WHERE channel_id = ?")
+            .bind(&channel_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let Some((_, updated_at)) = row else {
+        drop(tx);
+        settle_group(&state, &ctx.guild_id, &channel_id, None).await?;
+        return Ok(Json(json!({ "reset": true })));
+    };
+    if now_ms() - updated_at < RESET_QUIET_MS {
+        return Err(ApiError::Conflict(
+            "the call's encryption re-keyed moments ago; give it a moment before resetting".into(),
+        ));
+    }
+    sqlx::query("UPDATE voice_states SET e2ee_member = 0 WHERE channel_id = ?")
+        .bind(&channel_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM voice_e2ee_log WHERE channel_id = ?")
+        .bind(&channel_id)
+        .execute(&mut *tx)
+        .await?;
+    let founder: Option<String> = sqlx::query_scalar(
+        "SELECT user_id FROM voice_states WHERE channel_id = ? AND e2ee_package IS NOT NULL \
+         ORDER BY joined_at, user_id LIMIT 1",
+    )
+    .bind(&channel_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(founder) = founder else {
+        sqlx::query("DELETE FROM voice_e2ee_groups WHERE channel_id = ?")
+            .bind(&channel_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        return Ok(Json(json!({ "reset": true })));
+    };
+    let group_id = ulid();
+    let now = now_ms();
+    sqlx::query(
+        "INSERT INTO voice_e2ee_groups (channel_id, group_id, epoch, updated_at, committer, committer_at) \
+         VALUES (?, ?, 0, ?, ?, ?) \
+         ON CONFLICT(channel_id) DO UPDATE SET group_id = excluded.group_id, epoch = 0, \
+             updated_at = excluded.updated_at, committer = excluded.committer, \
+             committer_at = excluded.committer_at",
+    )
+    .bind(&channel_id)
+    .bind(&group_id)
+    .bind(now)
+    .bind(&founder)
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("UPDATE voice_states SET e2ee_member = 1 WHERE channel_id = ? AND user_id = ?")
+        .bind(&channel_id)
+        .bind(&founder)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    announce(
+        &state,
+        &ctx.guild_id,
+        &channel_id,
+        json!({ "op": "reset", "channel_id": channel_id, "group_id": group_id, "epoch": 0, "founder": founder }),
+    )
+    .await?;
+    Ok(Json(json!({ "reset": true, "group_id": group_id, "founder": founder })))
 }
 
 pub async fn e2ee_refuse(

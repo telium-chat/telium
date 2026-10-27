@@ -1131,6 +1131,97 @@ async fn a_guild_call_on_an_sfu_keeps_one_encryption_group() {
 }
 
 #[tokio::test]
+async fn a_member_that_lost_the_group_can_ask_for_it_to_be_refounded() {
+    let s = start().await;
+    let alice = s.user("reset-alice").await;
+    let bob = s.user("reset-bob").await;
+    let carol = s.user("reset-carol").await;
+    let (_, guild) = s.post("/_telium/v1/guilds", Some(&alice.token), json!({ "name": "G" })).await;
+    let gid = guild["id"].as_str().unwrap().to_string();
+    let (_, invite) =
+        s.post(&format!("/_telium/v1/guilds/{gid}/invites"), Some(&alice.token), json!({})).await;
+    let code = invite["code"].as_str().unwrap().to_string();
+    for who in [&bob, &carol] {
+        s.post(&format!("/_telium/v1/invites/{code}/join"), Some(&who.token), json!({})).await;
+    }
+    s.post(&format!("/_telium/v1/guilds/{gid}/voice/regions"), Some(&alice.token), json!({
+        "name": "mine", "sfu": "https://my.sfu", "set_default": true
+    }))
+    .await;
+    let (_, ch) = s
+        .post(&format!("/_telium/v1/guilds/{gid}/channels"), Some(&alice.token), json!({
+            "name": "Lounge", "type": "voice", "voice_region": "mine"
+        }))
+        .await;
+    let cid = ch["id"].as_str().unwrap().to_string();
+    let join = |token: &str, package: &str| {
+        let s = &s;
+        let path = format!("/_telium/v1/channels/{cid}/voice/join");
+        let token = token.to_string();
+        let package = package.to_string();
+        async move {
+            s.post(&path, Some(&token), json!({ "key_package": package })).await
+        }
+    };
+    let e2ee = format!("/_telium/v1/channels/{cid}/voice/e2ee");
+    let reset = format!("/_telium/v1/channels/{cid}/voice/e2ee/reset");
+
+    let (_, first) = join(&alice.token, "pkg-alice").await;
+    let group = first["e2ee"]["group_id"].as_str().unwrap().to_string();
+    join(&bob.token, "pkg-bob").await;
+    let (status, _) = s.post(&e2ee, Some(&alice.token), json!({
+        "group_id": group, "epoch": 0, "commit": "c1", "welcome": "w1",
+        "added": [{ "user_id": bob.user_id, "key_package": "pkg-bob" }],
+    })).await;
+    assert_eq!(status, 200);
+
+    // A call that is re-keying happily refuses the reset.
+    join(&carol.token, "pkg-carol").await;
+    let (status, busy) = s.post(&reset, Some(&carol.token), json!({})).await;
+    assert_eq!(status, 409, "{busy:?}");
+
+    // Once the group has been still, a stuck member re-founds it: everybody
+    // back to waiting, the founding member rebuilds from offered packages.
+    let long_ago = telium_server::util::now_ms() - telium_server::routes::voice::RESET_QUIET_MS - 1000;
+    sqlx::query("UPDATE voice_e2ee_groups SET updated_at = ? WHERE channel_id = ?")
+        .bind(long_ago).bind(&cid).execute(&s.state.pool).await.unwrap();
+    let (status, done) = s.post(&reset, Some(&carol.token), json!({})).await;
+    assert_eq!(status, 200, "{done:?}");
+    let fresh = done["group_id"].as_str().unwrap().to_string();
+    assert_ne!(fresh, group);
+    assert_eq!(done["founder"], alice.user_id.as_str());
+
+    let (_, view) = s.get(&e2ee, Some(&bob.token)).await;
+    assert_eq!(view["group_id"], fresh, "{view}");
+    assert_eq!(view["epoch"], 0);
+    assert_eq!(view["member"], false, "bob waits to be added again");
+    let waiting: Vec<&str> = view["participants"].as_array().unwrap().iter()
+        .filter(|p| p["member"] == false)
+        .map(|p| p["user_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(waiting, vec![bob.user_id.as_str(), carol.user_id.as_str()], "packages stay on file");
+
+    // The founder rebuilds: both waiting members are added in one commit.
+    let (status, _) = s.post(&e2ee, Some(&alice.token), json!({
+        "group_id": fresh, "epoch": 0, "commit": "c1-fresh", "welcome": "w1-fresh",
+        "added": [
+            { "user_id": bob.user_id, "key_package": "pkg-bob" },
+            { "user_id": carol.user_id, "key_package": "pkg-carol" },
+        ],
+    })).await;
+    assert_eq!(status, 200);
+    let (_, view) = s.get(&e2ee, Some(&carol.token)).await;
+    assert_eq!(view["member"], true, "{view:?}");
+    assert_eq!(view["epoch"], 1);
+
+    // A stranger cannot reset a call they are not in.
+    let dave = s.user("reset-dave").await;
+    s.post(&format!("/_telium/v1/invites/{code}/join"), Some(&dave.token), json!({})).await;
+    let (status, _) = s.post(&reset, Some(&dave.token), json!({})).await;
+    assert_eq!(status, 409, "someone not connected to the channel cannot reset");
+}
+
+#[tokio::test]
 async fn a_guild_call_keeps_its_commits_and_names_a_live_committer() {
     let s = start().await;
     let alice = s.user("log-alice").await;
