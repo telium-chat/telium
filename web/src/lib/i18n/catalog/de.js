@@ -4412,6 +4412,9 @@ export const messages = {
   // `guild.nav.voice` argued above. Feminine here and everywhere below, per
   // `channel.voice.regionHint`: *die SFU*, agreeing with Einheit.
   'voice.call.sfuAddressUnknown': 'Diese Unterhaltung sagt nicht, welche SFU angerufen werden soll.',
+  // A guild's server offered an SFU without end-to-end encryption. Refused
+  // outright: the alternative is a call the server can listen to.
+  'voice.call.sfuNotEncrypted': 'Dieser Server hat kein Ende-zu-Ende-verschlüsseltes Gespräch angeboten, deshalb wurdest du nicht verbunden.',
 
   // Three separate things can move and they stay three messages, because a
   // person who sees the same sentence twice assumes the second one is a
@@ -4845,6 +4848,11 @@ export const messages = {
   // term of art and is the right trade, because „Schlüsselwechsel“ in a toast
   // title would send people looking for a setting by that name.
   'voice.error.rekey': 'Das Gespräch ließ sich nicht neu verschlüsseln',
+  // Rejoining kept failing, so the seat is given up; `errors.context` names
+  // what the last attempt hit.
+  'voice.error.rejoin': 'Der erneute Beitritt zum Gespräch schlug fehl',
+  // The server says this device is no longer in the channel it was calling from.
+  'voice.call.removed': 'Du wurdest aus dem Sprachkanal entfernt',
   // The device panel's four. `readRoutes` and `switchOutput` are shared with
   // Android's output sheet, which asks the same two questions of a different
   // implementation — so the German has to work in both, and neither of them

@@ -4434,6 +4434,9 @@ export const messages = {
   // in every deployment guide the reader has open; no language translates it,
   // and the sibling fragment settled it at `guild.voice.colSfu`.
   'voice.call.sfuAddressUnknown': 'この会話には、どの SFU に接続するかが書かれていません。',
+  // A guild's server offered an SFU without end-to-end encryption. Refused
+  // outright: the alternative is a call the server can listen to.
+  'voice.call.sfuNotEncrypted': 'このサーバーはエンドツーエンドで暗号化された通話を提供しなかったため、接続されませんでした。',
 
   // The call moved while you were in it. Three separate things can move and they
   // are three messages, because a person who sees the same sentence twice assumes
@@ -4879,6 +4882,11 @@ export const messages = {
   // need to know that a new key was derived, only that the call failed to move
   // onto one.
   'voice.error.rekey': '通話の鍵を更新できませんでした',
+  // Rejoining kept failing, so the seat is given up; `errors.context` names
+  // what the last attempt hit.
+  'voice.error.rejoin': '通話に再参加できませんでした',
+  // The server says this device is no longer in the channel it was calling from.
+  'voice.call.removed': 'ボイスチャンネルから外されました',
   // The device panel's four. `readRoutes` and `switchOutput` are shared with
   // Android's output sheet, which asks the same two questions of a different
   // implementation — so 出力先 here is the same 出力先 as `voice.route.title`,
