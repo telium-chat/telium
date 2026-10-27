@@ -929,3 +929,149 @@ describe('SfuCall local preview', () => {
       .toEqual([true, false, true, false, true, false]);
   });
 });
+
+describe('SfuCall seat removal', () => {
+  function removedCall() {
+    const listeners = new Map();
+    const onError = vi.fn();
+    const onDropped = vi.fn();
+    const onRemoved = vi.fn();
+    const call = new SfuCall({
+      me: '@a:h', endpoint: 'https://sfu.example', joinToken: 'token', iceServers: [],
+      onError, onDropped, onRemoved,
+    });
+    call.room = {
+      on(event, fn) {
+        if (!listeners.has(event)) listeners.set(event, []);
+        listeners.get(event).push(fn);
+        return call.room;
+      },
+    };
+    call.wireEvents();
+    call.live = true;
+    const disconnect = (reason) => {
+      for (const fn of listeners.get(RoomEvent.Disconnected) || []) fn(reason);
+    };
+    return { disconnect, onError, onDropped, onRemoved };
+  }
+
+  it('hands a server-initiated removal to the caller, not to the error list', () => {
+    const { disconnect, onError, onDropped, onRemoved } = removedCall();
+    disconnect(DisconnectReason.PARTICIPANT_REMOVED);
+    expect(onRemoved).toHaveBeenCalledTimes(1);
+    expect(onDropped).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('reports nothing when nobody can react to a removal', () => {
+    const listeners = new Map();
+    const call = new SfuCall({
+      me: '@a:h', endpoint: 'https://sfu.example', joinToken: 'token', iceServers: [],
+    });
+    call.room = {
+      on(event, fn) {
+        if (!listeners.has(event)) listeners.set(event, []);
+        listeners.get(event).push(fn);
+        return call.room;
+      },
+    };
+    call.wireEvents();
+    call.live = true;
+    for (const fn of listeners.get(RoomEvent.Disconnected) || []) {
+      fn(DisconnectReason.PARTICIPANT_REMOVED);
+    }
+    call.stop();
+  });
+});
+
+describe('SfuCall token renewal', () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+  const renewingCall = async ({ sessionOk = true, renewOk = true } = {}) => {
+    const sessions = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      const body = init?.body ? JSON.parse(init.body) : {};
+      sessions.push({ url: String(url), body });
+      if (!sessionOk) return { ok: false, status: 503, json: async () => ({}) };
+      return {
+        ok: true,
+        json: async () => ({ url: 'wss://lk.example', token: 'lk-next', max_bitrate: 64_000 }),
+      };
+    }));
+    const call = new SfuCall({
+      me: '@a:h', endpoint: 'https://sfu.example', joinToken: 'join-1', iceServers: [],
+      tokenTtl: 600,
+      renewToken: renewOk ? vi.fn(async () => 'join-2') : vi.fn(async () => {
+        throw new Error('offline');
+      }),
+    });
+    call.live = true;
+    call.room = { engine: { token: 'lk-old' }, localParticipant: { attributes: {} } };
+    return { call, sessions };
+  };
+
+  it('spends a fresh join token at the session and installs the new grant', async () => {
+    const { call, sessions } = await renewingCall();
+    await call.renew();
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].body.token).toBe('join-2');
+    expect(call.joinToken).toBe('join-2');
+    expect(call.room.engine.token).toBe('lk-next');
+  });
+
+  it('keeps the call on its feet when the renewal cannot land', async () => {
+    const { call, sessions } = await renewingCall({ renewOk: false });
+    await expect(call.renew()).resolves.toBe(false);
+    expect(sessions).toHaveLength(0, 'no session is spent without a fresh token');
+    expect(call.room.engine.token).toBe('lk-old');
+
+    const failed = await renewingCall({ sessionOk: false });
+    await expect(failed.call.renew()).resolves.toBe(false);
+    expect(failed.call.room.engine.token).toBe('lk-old');
+  });
+
+  it('retries a failed renewal after a short pause, not a full half-TTL', async () => {
+    vi.useFakeTimers();
+    // A renewal that fails once, then lands.
+    const call = new SfuCall({
+      me: '@a:h', endpoint: 'https://sfu.example', joinToken: 'join-1', iceServers: [],
+      tokenTtl: 600,
+      renewToken: vi.fn()
+        .mockImplementationOnce(async () => { throw new Error('offline'); })
+        .mockImplementationOnce(async () => 'join-2'),
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ url: 'wss://lk.example', token: 'lk-next', max_bitrate: 64_000 }),
+    })));
+    call.live = true;
+    call.room = { engine: { token: 'lk-old' }, localParticipant: { attributes: {} } };
+
+    call.scheduleRenew();
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(call.renewToken).toHaveBeenCalledTimes(1);
+    expect(call.room.engine.token).toBe('lk-old', 'the first attempt failed');
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(call.renewToken).toHaveBeenCalledTimes(2);
+    expect(call.room.engine.token).toBe('lk-next');
+    call.stop();
+  });
+
+  it('renews at half the token lifetime and stops when the call does', async () => {
+    vi.useFakeTimers();
+    const { call } = await renewingCall();
+    call.scheduleRenew();
+    expect(call.renewTimer).not.toBeNull();
+
+    vi.advanceTimersByTime(299_999);
+    expect(call.renewToken).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    await vi.waitFor(() => expect(call.room.engine.token).toBe('lk-next'));
+
+    call.stop();
+    expect(call.renewTimer).toBeNull();
+    vi.advanceTimersByTime(10_000_000);
+    expect(call.renewToken).toHaveBeenCalledTimes(1, 'no renewal after the call is gone');
+  });
+});
