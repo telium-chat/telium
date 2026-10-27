@@ -14,12 +14,10 @@ hands, not which PRs merged.
 
 ## 26 October 2026
 
-- Fixed: a guild call whose encryption fell out of step no longer needs everybody to leave and rejoin. A device that lost track of the call's key group can now ask for the group to be re-founded on the spot — everybody is re-added within seconds, and the call re-keys itself — instead of the group only rebuilding once its last member had left.
-- Fixed: a device that falls a commit behind now catches up the moment anything points at it — media that fails to open, an announcement naming a group it doesn't know, or the periodic audit (at most 45 seconds) — instead of staying deaf to the call until someone joined or left.
-- Fixed: a homeserver or SFU outage of a few minutes no longer ends the call. Rejoining now distinguishes "nobody answered" from "the answer was no" and keeps bridging the seat while the servers come back, instead of ejecting everyone from the channel.
-- Fixed: a second call drop landing within a minute of a recovery no longer removes you from the voice channel; it tries again after a short pause.
-- Fixed: guild calls renew their media session's token mid-call. A call longer than the token's lifetime used to turn the first network hiccup into a surprise reconnect, with the join sound in the middle of the conversation.
-- Fixed: if the server ends your seat (a moderator's disconnect, or a sweep that raced your reconnect), the client now asks the server and either rejoins or leaves cleanly, instead of sitting in a call that no longer carries sound.
+- Fixed: calls in a voice channel now stay up through server trouble. If a server the call runs on goes down or restarts for a few minutes, the call waits for it and rejoins on its own when it's back, instead of ending and taking everyone out of the voice channel. And a call that drops twice in a row now pauses briefly and tries again, instead of removing you from the channel.
+- Fixed: long calls no longer reconnect out of nowhere. A call that had been going for a while used to be knocked into a full reconnect — join sound and all — by the first small network hiccup. The call now renews its connection quietly in the background, and the conversation just continues.
+- Fixed: sound that breaks mid-call now repairs itself. If a glitch left you unable to hear the call, or the call unable to hear you, it used to stay broken until everyone left the channel and joined again. The call now fixes itself in place — usually within seconds, at most within a minute.
+- Fixed: being removed from a voice channel now ends the call clearly. If a moderator disconnects you, the app tells you what happened and leaves the call with you, instead of leaving you sitting in a call that has quietly gone silent.
 
 ## 22 October 2026
 
