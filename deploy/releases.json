@@ -1,7 +1,29 @@
 {
   "channel": "releases",
-  "generated_at": 1792870307455,
+  "generated_at": 1793209959100,
   "releases": [
+    {
+      "version": "0.2.1",
+      "commit": "63957b61e6087521462da27b1e202188ec07ce93",
+      "released_at": 1793207722000,
+      "security": false,
+      "summary": "docs: make README a directory to docs.telium.chat",
+      "image": "sha256:e74e046feee85c6aef955b59dcc294f64d794c9369a9053f0649d9893f6c0768",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "server-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/server-v0.2.1/telium-server-linux-x86_64.tar.gz",
+          "sha256": "b24af056631a18ec9f91177f74a2a72bdeeeeb26ae6cadf61a702a940f87da0a",
+          "size": 13143816
+        },
+        "server-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/server-v0.2.1/telium-server-linux-aarch64.tar.gz",
+          "sha256": "ac16610d23f8e3a546046c514a88b0e824c2ad4ccc97278c61102feda9da228d",
+          "size": 12184300
+        }
+      }
+    },
     {
       "version": "0.2.0",
       "commit": "31483a2505e564accc5d2fc5491d0e3d29d6727f",
