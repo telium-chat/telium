@@ -1,0 +1,15 @@
+[Unit]
+Description=Check for a new Telium release every minute
+Documentation=https://github.com/telium-chat/telium/blob/main/deploy/standalone/README.md
+
+[Timer]
+# A minute after boot, then every minute. A pull with nothing to fetch is one
+# manifest request, so the cost of checking this often is close to nothing and
+# the payoff is that a release is live before you have switched windows.
+OnBootSec=60s
+OnUnitActiveSec=60s
+AccuracySec=10s
+Unit=telium-update.service
+
+[Install]
+WantedBy=timers.target

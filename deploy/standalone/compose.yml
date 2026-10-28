@@ -1,0 +1,177 @@
+# The standalone Telium kit: the homeserver, an optional Caddy front and an
+# optional SFU, as one Compose project.
+#
+# Three services, of which the server is the only one always on. Which of the
+# other two run is decided by COMPOSE_PROFILES in .env -- the installer writes
+# it from your answers, and `docker compose up -d` applies any later edit:
+#
+#   COMPOSE_PROFILES=proxy        the kit's Caddy, with certificates
+#   COMPOSE_PROFILES=voice        the SFU and the LiveKit it launches
+#   COMPOSE_PROFILES=proxy,voice  both
+#
+# Every ${...} below is filled from .env. Domains, image pins and the profile
+# list are settings of this deployment; this file is not where they belong.
+
+name: telium
+
+networks:
+  telium:
+    name: telium
+    ipam:
+      config:
+        # Fixed, and deliberately tiny: sixteen addresses, three of them used.
+        # The gateway (.1) and the services below have addresses a config file
+        # can write down, which is what lets `rate_limit.trusted_proxies` in
+        # telium.toml name the front by address instead of guessing at whatever
+        # Docker handed out this week.
+        - subnet: 172.31.241.0/28
+
+services:
+  server:
+    image: ${TELIUM_IMAGE:-ghcr.io/telium-chat/telium:server-latest}
+    restart: unless-stopped
+
+    # On SIGTERM the server closes its gateway sockets at once and gives
+    # in-flight requests up to its own `shutdown.grace_secs` (15s default).
+    # Twenty seconds is a backstop longer than that worst case, not a race
+    # against it.
+    stop_grace_period: 20s
+
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+
+    # telium.toml reads its identity from these (${env:TELIUM_CHAT_DOMAIN} and
+    # friends), so the container needs the file as environment and not only as
+    # compose interpolation.
+    env_file:
+      - .env
+
+    volumes:
+      - ./telium.toml:/etc/telium/telium.toml:ro
+      # The live data -- SQLite, uploaded media, caches, the cold archive. This
+      # is the thing that gets lost.
+      - telium-data:/var/lib/telium
+      # The backups, deliberately not in the volume above: an archive inside
+      # the thing it archives survives file corruption and nothing else. A
+      # named volume still dies with `compose down -v`, so the volume is a
+      # floor; [backup.remote] in telium.toml is the answer off this box.
+      - telium-backups:/var/backups/telium
+
+    # Loopback only, always. What is public is the front's decision; this port
+    # is for the front (in the kit, or yours on the host) and for curl.
+    ports:
+      - "127.0.0.1:8448:8448"
+
+    networks:
+      telium:
+        ipv4_address: 172.31.241.3
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  caddy:
+    # The kit's front door: publishes 80/443, fetches and renews certificates
+    # for the domains in .env, proxies WebSocket upgrades without being told.
+    # Off unless COMPOSE_PROFILES includes "proxy"; the shipped configs in
+    # deploy/reverse-proxy/ work against 127.0.0.1:8448 when you front it
+    # yourself instead.
+    image: caddy:2
+    restart: unless-stopped
+
+    profiles:
+      - proxy
+
+    depends_on:
+      - server
+
+    # The domains the Caddyfile serves, and the ACME account address.
+    environment:
+      TELIUM_CHAT_DOMAIN: ${TELIUM_CHAT_DOMAIN}
+      TELIUM_SFU_DOMAIN: ${TELIUM_SFU_DOMAIN}
+      TELIUM_LIVEKIT_DOMAIN: ${TELIUM_LIVEKIT_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+    networks:
+      telium:
+        ipv4_address: 172.31.241.2
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  sfu:
+    # telium-sfu and the livekit-server it launches and supervises, one
+    # container. Media goes straight out of this container to the internet --
+    # no proxy carries UDP -- while its HTTP surface stays private behind
+    # whatever front is on.
+    image: ${TELIUM_SFU_IMAGE:-ghcr.io/telium-chat/telium:sfu-latest}
+    restart: unless-stopped
+
+    profiles:
+      - voice
+
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+
+    volumes:
+      - ./sfu.toml:/etc/telium/sfu.toml:ro
+      # livekit.yaml and the generated API keys live here. Keys that vanished
+      # on every restart would strand every join token minted against them.
+      - sfu-state:/var/lib/telium-sfu
+
+    ports:
+      # The HTTP surface: API, dashboard, LiveKit signalling. Loopback only --
+      # the front reaches them from here, the internet does not reach them at
+      # all except through the front.
+      - "127.0.0.1:7890:7890"
+      - "127.0.0.1:7891:7891"
+      - "127.0.0.1:7880:7880"
+      # Media, published straight onto the host. These are the ports a firewall
+      # must open for calls to carry audio.
+      - "7881:7881"
+      - "3478:3478/udp"
+      - "50000-60000:50000-60000/udp"
+
+    networks:
+      telium:
+        ipv4_address: 172.31.241.4
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  telium-data:
+  telium-backups:
+  sfu-state:
+  caddy-data:
+  caddy-config:

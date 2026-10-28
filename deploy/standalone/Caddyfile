@@ -1,0 +1,57 @@
+# The kit's Caddy. Domains come from .env at container start ({$VAR} reads the
+# container's environment), so there is nothing to edit here except the marked
+# SFU block, which the installer uncomments when it turns the voice profile on.
+#
+# Caddy fetches and renews certificates by itself, forwards WebSocket upgrades
+# without being told, streams rather than buffers, and has no read timeout to
+# trip over -- which is why this file is short. What remains is what is about
+# Telium rather than about the proxy.
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$TELIUM_CHAT_DOMAIN} {
+	# One listener server-side -- API, federation, the WebSocket gateway, admin
+	# routes and the static client all share it.
+	reverse_proxy server:8448 {
+		# Caddy sets X-Forwarded-For itself; telium.toml's
+		# rate_limit.trusted_proxies already lists this container's fixed
+		# address, so the server believes it.
+		transport http {
+			# A gateway connection is idle between heartbeats, 45s apart.
+			# Stated so that anyone who adds a timeout later knows what it
+			# has to clear.
+			read_timeout 0
+			write_timeout 0
+		}
+	}
+
+	# The biggest upload the server accepts plus its multipart envelope.
+	request_body {
+		max_size 128MB
+	}
+
+	# The server sends its own security headers. Do not add a
+	# Content-Security-Policy here: two policies intersect rather than merge,
+	# and the usual result is a client that half-loads with nothing in any
+	# log to say why.
+
+	encode zstd gzip
+}
+
+# --- SFU: uncomment when the voice profile is on (the installer does this) ---
+#{$TELIUM_SFU_DOMAIN} {
+#	handle /admin* {
+#		reverse_proxy sfu:7891
+#	}
+#	handle {
+#		reverse_proxy sfu:7890
+#	}
+#}
+#
+## Browser-facing call signalling. A long-lived WebSocket; Caddy's defaults
+## (no read timeout, no buffering) are already right for it.
+#{$TELIUM_LIVEKIT_DOMAIN} {
+#	reverse_proxy sfu:7880
+#}
