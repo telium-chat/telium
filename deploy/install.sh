@@ -20,6 +20,11 @@
 # The files that are ours (the scripts, the units) are replaced every time,
 # which is how an upgrade of this machinery happens: pull the repository, run
 # this again.
+#
+# An optional domain argument -- `sudo ./install.sh chat.example.com` -- is
+# written into a freshly seeded telium.toml, so the config that comes up is
+# this deployment's rather than the staging box's. The native path has its
+# own installer, install-native.sh, which takes the domain the same way.
 
 set -euo pipefail
 
@@ -57,7 +62,26 @@ command -v docker    >/dev/null 2>&1 || die "docker is not installed"
 command -v systemctl >/dev/null 2>&1 || die "this box does not use systemd; the timer has no equivalent here"
 docker compose version >/dev/null 2>&1 || die "the docker compose plugin is not installed"
 
-step "Installing for $RUN_AS ($RUN_GROUP), home $RUN_HOME"
+# An optional domain: the one fact about this deployment a human has and the
+# config cannot guess. Given, it is written into the freshly seeded
+# telium.toml so the box comes up knowing its own name; left out, the seeded
+# file keeps its placeholder values and has to be edited by hand before the
+# server means anything. An existing telium.toml is never touched, with or
+# without the argument -- it is the operator's from the moment it exists.
+DOMAIN=
+if [ $# -gt 0 ]; then
+  [ $# -eq 1 ] || { echo "usage: sudo $0 [domain]   e.g. sudo $0 chat.example.com" >&2; exit 2; }
+  DOMAIN="${1#*://}"          # tolerate a pasted URL
+  DOMAIN="${DOMAIN%%/*}"      # drop any path
+  DOMAIN="${DOMAIN%.}"        # drop a trailing dot
+  case "$DOMAIN" in
+    *[!a-zA-Z0-9.-]*) die "'$DOMAIN' does not look like a domain name" ;;
+    *.*) : ;;
+    *) die "refusing a dotless name ($DOMAIN)" ;;
+  esac
+fi
+
+step "Installing for $RUN_AS ($RUN_GROUP), home $RUN_HOME${DOMAIN:+, domain $DOMAIN}"
 
 # ------------------------------------------------------------------- the files
 
@@ -80,8 +104,26 @@ for f in compose.yml telium.toml update.conf; do
   else
     install -o "$RUN_AS" -g "$RUN_GROUP" -m 644 "$here/$f" "$PREFIX/$f"
     say "$f installed"
+    [ "$f" = telium.toml ] && seeded_toml=1 || true
   fi
 done
+
+# The seeded config is the staging box's file; its identity lines are the two
+# that cannot stay. Rewritten through install rather than sed -i so the file
+# keeps the owning account -- sed -i would silently hand it to root, and the
+# update timer that runs as that account would lose the ability to reconcile
+# the file it reconciles.
+if [ -n "$DOMAIN" ] && [ "${seeded_toml:-0}" -eq 1 ]; then
+  tmp="$(mktemp)"
+  sed -e "s|^server_name = .*|server_name = \"$DOMAIN\"|" \
+      -e "s|^public_base_url = .*|public_base_url = \"https://$DOMAIN\"|" \
+      "$here/telium.toml" > "$tmp"
+  install -o "$RUN_AS" -g "$RUN_GROUP" -m 644 "$tmp" "$PREFIX/telium.toml"
+  rm -f "$tmp"
+  say "telium.toml installed with identity $DOMAIN"
+elif [ -n "$DOMAIN" ]; then
+  say "telium.toml already existed, so $DOMAIN was not applied to it"
+fi
 
 # ----------------------------------------------------------------- the backups
 
@@ -138,6 +180,10 @@ fi
 
 say "read $PREFIX/telium.toml before the tunnel connects -- registration.open is true,"
 say "and the first account created on a fresh server becomes its admin."
+if [ -n "$DOMAIN" ]; then
+  say "identity is set to $DOMAIN; the rest of the file is worth a look anyway,"
+  say "notably [voice], which names this deployment's SFU and is not yours."
+fi
 say ""
 say "updates are ON. $PREFIX/update.conf says so in a field with a name;"
 say "'$PREFIX/update.sh --status' will tell you what this box currently thinks."

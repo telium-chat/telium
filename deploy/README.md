@@ -101,8 +101,19 @@ mesh — the first thing to check if voice breaks the day this region is added.
 ## Installing
 
 ```sh
-sudo ./install.sh
+sudo ./install.sh [domain]
 ```
+
+The optional domain is written into a freshly seeded `telium.toml` -- the
+seeded file is this staging box's config, and its `server_name` and
+`public_base_url` are the two lines that cannot stay. An existing
+`telium.toml` is never touched, with or without the argument.
+
+The native (no Docker) counterpart is `install-native.sh`, which takes the
+domain the same way: `sudo ./install-native.sh chat.example.com` downloads
+the release binary, creates the `telium` user, writes `/etc/telium/telium.toml`
+from that domain, installs the unit and the native update timer, and starts
+the server.
 
 That is the whole thing. It puts the files in `/opt/telium`, creates
 `/srv/telium-backups` owned by the container's uid, writes the systemd units
