@@ -258,13 +258,13 @@ test('a verified artifact replaces the running AppImage atomically', async () =>
   const target = join(directory, 'Telium.AppImage')
   writeFileSync(target, 'the old build')
 
-  const phases = []
+  const states = []
   const service = updater.createUpdateService({
     publisher: { url: 'https://downloads.example/clients.json', publicKey: PUBLIC_KEY },
     currentVersion: '1.0.0',
     appImagePath: target,
     downloadDirectory: join(directory, 'download'),
-    onChange: (state) => phases.push(state.phase),
+    onChange: (state) => states.push(state),
     fetchImpl: async (url) => {
       if (url.endsWith('.sig')) return { ok: true, text: async () => JSON.stringify(signature) }
       if (url.endsWith('.json')) return { ok: true, arrayBuffer: async () => bytes }
@@ -275,7 +275,16 @@ test('a verified artifact replaces the running AppImage atomically', async () =>
   assert.equal(state.fault, '')
   assert.equal(state.phase, updater.Phase.Ready)
   assert.equal(require('node:fs').readFileSync(target, 'utf8'), payload.toString('utf8'))
-  assert.deepEqual(phases, ['checking', 'downloading', 'verifying', 'ready'])
+  // Byte progress publishes inside the downloading phase; the phases themselves stay in order.
+  assert.deepEqual([...new Set(states.map((state) => state.phase))],
+    ['checking', 'downloading', 'verifying', 'ready'])
+  const downloading = states.filter((state) => state.phase === updater.Phase.Downloading)
+  // The stub sends no Content-Length, so the bar sizes from the manifest's signed size.
+  assert.equal(downloading.at(-1).total, 1234)
+  assert.equal(downloading.at(-1).received, payload.length, 'the bar is fed to the end')
+  // Once staged nothing carries the counts; the reader is told to restart, not that a download hangs.
+  assert.equal(states.at(-1).received, 0)
+  assert.equal(states.at(-1).total, 0)
   // Once staged, the only verb is restart; a second check would report "up to date".
   assert.equal((await service.check()).phase, updater.Phase.Ready)
 })
