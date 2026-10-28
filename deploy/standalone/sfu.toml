@@ -1,0 +1,56 @@
+# The standalone kit's SFU configuration. Mounted read-only into the sfu
+# container; the installer writes the three marked values from your answers.
+#
+# Unlike telium.toml, this file cannot read environment variables, so the
+# domains are written here in full. Edit the marked lines if the domain ever
+# changes, then `docker compose up -d` again.
+
+# The control API, inside the container only. The front reaches it at
+# https://<TELIUM_SFU_DOMAIN>.
+bind = "0.0.0.0:7890"
+
+[livekit]
+# telium-sfu writes livekit.yaml and launches livekit-server itself, minting
+# the API keys into the state volume on first start. Nothing for you to share
+# between config files, which is the point of spawn mode.
+mode = "spawn"
+url = "http://127.0.0.1:7880"
+# EDIT: browser-facing signalling address -- the LiveKit domain, https.
+public_url = "https://livekit.example.com"
+binary = "livekit-server"
+# Writable, and a volume: the generated keys must outlive a restart, or every
+# token minted against them stops working.
+config_dir = "/var/lib/telium-sfu"
+
+[livekit.rtc]
+# The container sits behind Docker's NAT, so LiveKit must advertise the host's
+# public address to clients and not its own. This is not optional in Docker.
+use_external_ip = true
+# 50000-60000/udp, tcp 7881 and turn 3478/udp are the defaults and are exactly
+# what compose.yml publishes; no need to restate them.
+
+[livekit.turn]
+# The embedded relay for clients that cannot do direct UDP.
+enabled = true
+udp_port = 3478
+
+[trust]
+# The SFU fetches the homeserver's signing key from its own public URL and
+# follows rotation, so no keys are copied by hand.
+discovery = true
+cache_ttl_secs = 86400
+# Strictly this server only. `public = true` turns the SFU into shared
+# infrastructure for every homeserver on the internet; see the SFU docs before
+# even thinking about it.
+public = false
+
+[[trust.origins]]
+# EDIT: your homeserver, in both lines.
+server_name = "chat.example.com"
+discovery_url = "https://chat.example.com"
+
+[admin]
+# The dashboard, at https://<TELIUM_SFU_DOMAIN>/admin through the front. The
+# first-run setup URL is in the container's logs on first start.
+enabled = true
+bind = "0.0.0.0:7891"

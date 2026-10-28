@@ -1,0 +1,15 @@
+[Unit]
+Description=Update the Telium containers if the registry has a newer release
+Documentation=https://github.com/telium-chat/telium/blob/main/deploy/standalone/README.md
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# Replaced by install.sh with the account that owns /opt/telium. The pull
+# credential, if one is needed, lives in that account's Docker config, so the
+# unit needs a HOME to find it in.
+User=TELIUM_RUN_AS
+Environment=HOME=/home/TELIUM_RUN_AS
+ExecStart=/opt/telium/update.sh
+TimeoutStartSec=600

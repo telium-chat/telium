@@ -1,0 +1,60 @@
+# syntax=docker/dockerfile:1
+
+# The SFU's own image: telium-sfu and the livekit-server it launches and
+# supervises, in one container. Spawn mode is the point -- the whole zero-config
+# story of the SFU is that it writes livekit.yaml, mints the API keys itself and
+# raises the engine, and splitting LiveKit into its own service would hand that
+# job back to the operator in the form of two config files that have to agree
+# about one shared secret.
+#
+# Builds beside Dockerfile, from the same root context, for the same reason:
+# telium-protocol is a path dependency of the sfu crate.
+
+FROM rust:1-slim-bookworm AS build
+
+WORKDIR /src
+
+COPY telium-protocol/ telium-protocol/
+COPY sfu/ sfu/
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/src/sfu/target,sharing=locked \
+    cargo build --release --locked --manifest-path sfu/Cargo.toml --bin telium-sfu \
+ && install -Dm755 sfu/target/release/telium-sfu /out/telium-sfu
+
+
+# The engine, lifted out of the official image rather than built here. LiveKit
+# is a Go project with its own release engineering; vendoring its build into
+# this Dockerfile would be a second pipeline to keep honest for no gain.
+FROM livekit/livekit-server AS livekit
+
+
+FROM debian:bookworm-slim
+
+# curl is here for the healthcheck and nothing else, as in the server image.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --system --uid 10001 --user-group \
+      --home-dir /var/lib/telium-sfu --shell /usr/sbin/nologin telium
+
+COPY --from=build   /out/telium-sfu       /usr/local/bin/telium-sfu
+COPY --from=livekit /livekit-server       /usr/local/bin/livekit-server
+
+# LiveKit's binary in the official image expects its data nowhere in
+# particular; it is driven entirely by the livekit.yaml the SFU writes into
+# config_dir, so the only writable path this image needs is that directory.
+RUN install -d -o telium -g telium /var/lib/telium-sfu
+
+USER telium
+WORKDIR /var/lib/telium-sfu
+
+EXPOSE 7880 7881 7890 7891 3478/udp 50000-60000/udp
+
+# A real probe of the control API, which probes LiveKit in turn (see the /health
+# row in the SFU docs) -- so a wedged engine fails the container, not just the
+# container's process table.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:7890/health || exit 1
+
+ENTRYPOINT ["telium-sfu", "serve", "--config", "/etc/telium/sfu.toml"]

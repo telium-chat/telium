@@ -1,0 +1,66 @@
+# The standalone kit's server configuration. Mounted read-only into the
+# container; identity comes from .env through ${env:...}, so there is nothing
+# to edit here for an ordinary install.
+#
+# No secrets live here. The federation signing key and the Web Push key are
+# minted into the data volume on first start; the backup key onto the backup
+# volume beside the archives.
+
+# The half after the @ in user ids. Set in .env -- it is an identity, not a
+# hostname, and changing it later is a migration, not an edit.
+server_name = "${env:TELIUM_CHAT_DOMAIN}"
+
+# Where clients actually reach us; published at /.well-known/telium/server.
+# Behind the kit's Caddy this is always the https name. Fronting the server
+# some other way that does not do TLS? Change the scheme here to match.
+public_base_url = "https://${env:TELIUM_CHAT_DOMAIN}"
+
+# Every interface inside the container's namespace. The host sees only
+# 127.0.0.1:8448 (see compose.yml).
+bind = "0.0.0.0:8448"
+
+# All paths name the two volumes from compose.yml. The defaults would be
+# relative to a working directory that does not survive a redeploy.
+database_url = "sqlite:///var/lib/telium/telium.db?mode=rwc"
+media_dir = "/var/lib/telium/media"
+
+# The client the server serves itself, built into the image beside the binary.
+[web]
+dir = "/srv/telium/web"
+
+[archive]
+dir = "/var/lib/telium/cold"
+
+[backup]
+# On the backups volume, not the data volume: `docker volume rm telium-data`
+# must not take the archives with it. See compose.yml for why the volume is
+# still only a floor.
+dir = "/var/backups/telium/archives"
+key_file = "/var/backups/telium/backup.key"
+
+[rate_limit]
+# Whose X-Forwarded-For the server believes: exactly one entry, the front.
+#
+#   172.31.241.2  the kit's Caddy (proxy profile on)     -- this is the default
+#   172.31.241.1  a front on the host, reaching the published
+#                 127.0.0.1:8448 through the network gateway
+#
+# The addresses are constants because compose.yml pins the subnet. Get this
+# wrong and nothing errors: every client just shares one rate-limit budget.
+trusted_proxies = ["172.31.241.2"]
+# trusted_proxies = ["172.31.241.1"]
+
+[registration]
+# Open on a fresh install, and the first account becomes the administrator.
+# Register, then set this to false and `docker compose up -d` again.
+open = true
+
+# --- Voice: uncomment when the voice profile is on (the installer does this) ---
+#[voice]
+#enabled = true
+#default_region = "local"
+#
+#[[voice.regions]]
+#name = "local"
+# The SFU's public API address -- what clients and this server dial.
+#sfu = "https://${env:TELIUM_SFU_DOMAIN}"
