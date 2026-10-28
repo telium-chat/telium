@@ -2,7 +2,7 @@
 # Runs the native-build step's inner script -- the one inside `docker run
 # rust:1-slim-bookworm` in release-server.yml -- exactly as extracted from
 # the workflow, against stub tools standing in for the container's
-# apt/curl/sha256sum/rustup/cargo.
+# apt/rustup/cargo, once per matrix architecture.
 #
 # Why this exists: that script's control flow cannot be executed anywhere
 # cheaper than the real CI run, and each of the three times it went wrong
@@ -14,14 +14,20 @@
 # that matters most -- cargo standing in the checkout where the manifest
 # is -- is checked on every run.
 #
-# Real tools where the real tool is under test: tar and install run out
-# of a bind-mounted /usr, and the stub curl hands them a real tarball in
-# the layout the real toolchain archives carry. The pinned sha256 sums
-# cannot match stub tarballs (their match against the real ones is proven
-# in CI's own log), so that stub checks only which file the check aims
-# at. The script's absolute paths (/src checkout, /tmp scratch, /target
-# cargo output) are why this runs as mapped root inside a user namespace,
-# in a tmpfs rootfs of its own.
+# The script is now parameterized by NATIVE_ARCH (the workflow's matrix
+# hands each runner its own architecture; the harness runs both values,
+# because a variable that only ever took one value in rehearsal is a
+# variable that breaks on the second runner). The toolchain downloads the
+# old harness stubbed -- musl.cc tarballs and their sha256 pins, now the
+# Wayback fallback -- are gone from the workflow entirely, so their stubs
+# are gone from here; what remains to rehearse is the parameterization,
+# the CARGO_TARGET_DIR contract, and the staging layout the packaging
+# loop consumes.
+#
+# Real tools where the real tool is under test: install and chown run out
+# of a bind-mounted /usr. The script's absolute paths (/src checkout,
+# /target cargo output) are why this runs as mapped root inside a user
+# namespace, in a tmpfs rootfs of its own.
 #
 # Usage: scripts/native-build-harness.sh   # no arguments; exits non-zero
 #                                          # with a FAIL: line on breakage
@@ -57,39 +63,6 @@ chmod 666 "$R/dev/null"
 # -- stubs ----------------------------------------------------------------
 S=$R/stubs
 printf '#!/bin/sh\nexit 0\n' > "$S/apt-get"
-
-# curl: lands a REAL tarball where -o points, carrying the tree the real
-# toolchain tarballs carry. The pack lives under the rootfs's own /tmp,
-# which is the /tmp the script's chrooted curl will see.
-mkdir -p "$R/tmp/pack/x86_64-linux-musl-cross/bin" "$R/tmp/pack/aarch64-linux-musl-cross/bin"
-for arch in x86_64 aarch64; do
-  printf '#!/bin/sh\nexit 0\n' > "$R/tmp/pack/${arch}-linux-musl-cross/bin/${arch}-linux-musl-gcc"
-  chmod +x "$R/tmp/pack/${arch}-linux-musl-cross/bin/${arch}-linux-musl-gcc"
-done
-cat > "$S/curl" <<'STUB'
-#!/bin/sh
-out=""
-prev=""
-for arg in "$@"; do
-  if [ "$prev" = "-o" ]; then out="$arg"; fi
-  prev="$arg"
-done
-[ -n "$out" ] || { echo "stub curl: no -o" >&2; exit 2; }
-root="$(basename "$out")"
-root="${root%.tgz}"
-[ -d "/tmp/pack/$root" ] || { echo "stub curl: unexpected download $(basename "$out")" >&2; exit 2; }
-exec /usr/bin/tar -czf "$out" -C /tmp/pack "$root"
-STUB
-
-cat > "$S/sha256sum" <<'STUB'
-#!/bin/sh
-[ "${1:-}" = "--check" ] && [ "${2:-}" = "-" ] || { echo "stub sha256sum: unexpected args: $*" >&2; exit 2; }
-line="$(cat)"
-case "$line" in
-  *"  x86_64-linux-musl-cross.tgz"|*"  aarch64-linux-musl-cross.tgz") exit 0 ;;
-  *) echo "stub sha256sum: unexpected input: $line" >&2; exit 1 ;;
-esac
-STUB
 
 cat > "$S/rustup" <<'STUB'
 #!/bin/sh
@@ -141,33 +114,38 @@ ENVLINES="$(awk '/docker run --rm/{f=1} f && /(^ *)-e /{sub(/^ *-e /,""); sub(/ 
   "$REPO/.github/workflows/release-server.yml")"
 [ -n "$ENVLINES" ] || { echo "harness: found no -e flags -- did the docker run shape change?" >&2; exit 2; }
 
-EXPORTS=()
 COMMIT=harness0000000000000000000000000000
 COMMIT_TIME=1700000000
 BUILD_TIME=1700000000
-while IFS= read -r line; do
-  [ -n "$line" ] || continue
-  key="${line%%=*}"
-  case "$key" in
-    # The harness is the container's root, so it supplies these itself.
-    HOST_UID|HOST_GID) continue ;;
-  esac
-  eval "value=${line#*=}"
-  EXPORTS+=("$key=$value")
-done <<< "$ENVLINES"
 
 # The checkout the script must not leave.
 mkdir -p "$R/src/server"
 printf '#[package]\nname = "x"\n' > "$R/src/server/Cargo.toml"
 printf 'example = true\n' > "$R/src/server/telium.example.toml"
 
-# -- run ------------------------------------------------------------------
-BODY="$(cat "$R/inner.sh")"
-chroot "$R" /usr/bin/env -i \
-  PATH=/stubs:/usr/bin:/bin \
-  HOST_UID="$(id -u)" HOST_GID="$(id -g)" \
-  "${EXPORTS[@]}" \
-  /usr/bin/bash -euc "cd /src; $BODY"
+# One rehearsal per matrix leg: the same script, the same environment
+# shape, a different NATIVE_ARCH -- which is the whole cross-cutting
+# surface the workflow hands each runner.
+for ARCH in x86_64 aarch64; do
+  EXPORTS=()
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    key="${line%%=*}"
+    case "$key" in
+      # The harness is the container's root, so it supplies these itself.
+      HOST_UID|HOST_GID) continue ;;
+    esac
+    eval "value=${line#*=}"
+    EXPORTS+=("$key=$value")
+  done <<< "$ENVLINES"
+
+  BODY="$(cat "$R/inner.sh")"
+  chroot "$R" /usr/bin/env -i \
+    PATH=/stubs:/usr/bin:/bin \
+    HOST_UID="$(id -u)" HOST_GID="$(id -g)" \
+    "${EXPORTS[@]}" \
+    /usr/bin/bash -euc "cd /src; $BODY"
+done
 
 # What the script owes the host-side packaging loop that follows it.
 test -x "$R/src/.native/stage/x86_64/telium-server" || { echo "FAIL: x86_64 binary not staged" >&2; exit 1; }

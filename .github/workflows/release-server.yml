@@ -35,6 +35,23 @@ name: Server release
 # `workflow_dispatch` takes a tag so a failed run can be retried without
 # re-tagging, and `dry_run` runs every step up to the build and stops before
 # anything is published.
+#
+# JOB SHAPE
+#
+#   validate -- one cheap job that answers every question the expensive jobs
+#     would otherwise each re-derive (is the tag on main, does the version
+#     agree, is the gate green, can the release be rolled back). Nothing builds
+#     until it is done, so a refused tag costs seconds, not a build.
+#
+#   image -- the container build -- and native -- the two native tarball
+#     builds, one per architecture, each on a hosted runner of that
+#     architecture. The three builds share nothing, so they run at once; the
+#     wall clock of a release is the slowest build, not the sum of them.
+#
+#   publish -- gathers what the builders made and does every write: the
+#     release, its assets, `server-latest`, and the `deploy/releases.json`
+#     commit-back. Keeping the writers separate from the builders also keeps
+#     the builders from ever holding the token that can publish.
 
 on:
   push:
@@ -85,13 +102,26 @@ env:
   TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
-  release:
+  # ------------------------------------------------------------------ validate
+  validate:
+    name: Validate the tag and the gate
     runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.tag.outputs.commit }}
+      version: ${{ steps.tag.outputs.version }}
+      moves_latest: ${{ steps.tag.outputs.moves_latest }}
+      commit_time: ${{ steps.commit-time.outputs.commit_time }}
+      breaking: ${{ steps.release-notes.outputs.breaking }}
+      notes: ${{ steps.release-notes.outputs.notes }}
+      security: ${{ steps.release-notes.outputs.security }}
+      trailers: ${{ steps.release-notes.outputs.trailers }}
+      previous: ${{ steps.rollback.outputs.previous }}
+      rollbackable: ${{ steps.rollback.outputs.rollbackable }}
+      rollback_reason: ${{ steps.rollback.outputs.rollback_reason }}
     steps:
       # Full history, for three things: proving the tag's commit is on `main`,
       # diffing against the previous release to decide whether rollback is
-      # possible, and the commit-back at the end. The runner is self-hosted and
-      # keeps its workspace, so this is one deep fetch ever.
+      # possible, and reading the tag's annotation for the trailers.
       #
       # Every `uses:` below names a commit, not a tag. A tag is a mutable
       # pointer that the action's owner -- or anyone who takes their account --
@@ -102,10 +132,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-          # `fetch-depth: 0` already brings tags, but the rollback step reads the
-          # tag list to find the previous release and `git for-each-ref` reads
-          # the tag message for the trailers. Naming it means a future change to
-          # the depth does not quietly remove the only copy of both.
+          # `fetch-depth: 0` already brings tags, but `git for-each-ref` reads
+          # the tag message for the trailers and the rollback step reads the
+          # tag list to find the previous release. Naming it means a future
+          # change to the depth does not quietly remove the only copy of both.
           fetch-tags: true
           # On a tag push this is the tag; on a dispatch it is the tag input.
           # Explicit rather than relying on the default, because the default for
@@ -113,19 +143,10 @@ jobs:
           ref: ${{ github.event.inputs.tag || github.ref_name }}
 
       # The release-record step is Node, and GitHub's JavaScript actions carry
-      # their own runtime but do not put `node` on PATH for shell steps on a
-      # self-hosted runner.
+      # their own runtime but do not put `node` on PATH for shell steps.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
-
-      # Named and stateful, which matters more here than on a hosted runner:
-      # the Dockerfile's cargo cache is a BuildKit cache mount, and a cache
-      # mount lives in the builder rather than in an exported layer.
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
-        with:
-          name: telium
-          keep-state: true
 
       # The publisher is ordinary code in this repository, so it gets the same
       # treatment as any other: its decisions are tested, and the test runs here
@@ -137,7 +158,7 @@ jobs:
 
       # Resolve the tag through the API rather than `github.sha`, because an
       # annotated tag's SHA is the tag object, not the commit. The commit is
-      # what everything else in this job is about.
+      # what everything else in this workflow is about.
       - id: tag
         name: Validate the tag
         env:
@@ -199,9 +220,12 @@ jobs:
           COMMIT="${{ steps.tag.outputs.commit }}"
           # The gate runs on the push to main, so it may still be finishing when
           # the tag arrives. Wait for it rather than failing on a race, but not
-          # forever: ten minutes is longer than the suite takes and short enough
-          # that a genuinely missing run is found while somebody is watching.
-          for attempt in $(seq 1 40); do
+          # forever: twenty minutes covers the gate being queued behind the
+          # desktop builds on the same push -- which is exactly what happened
+          # to the first server-v0.2.1 tag, whose release run spent its whole
+          # ten-minute window saying "missing" about a job that was sitting in
+          # the queue and then failed on its own flake.
+          for attempt in $(seq 1 80); do
             conclusion="$(gh api \
               "repos/$GITHUB_REPOSITORY/commits/$COMMIT/check-runs?per_page=100" \
               --jq '[.check_runs[] | select(.name == "unit-tests")] | sort_by(.started_at) | last | .conclusion // "missing"')"
@@ -215,42 +239,41 @@ jobs:
                 exit 1
                 ;;
             esac
-            echo "attempt $attempt/40: unit-tests is '$conclusion' on ${COMMIT:0:12}; waiting"
+            # A missing check-run does not mean a missing gate: a check-run only
+            # exists once a runner has picked the job up, so a queued run is
+            # invisible to the lookup above. Ask the workflow run itself what
+            # it is doing, so "queued" reads as waiting, and only a commit that
+            # truly never triggered the gate counts down the clock.
+            state="$(gh api \
+              "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$COMMIT" \
+              --jq '[.workflow_runs[] | select(.name == "Unit tests")] | sort_by(.created_at) | last | .status // "none"')"
+            echo "attempt $attempt/80: unit-tests is '$conclusion' (workflow run: $state) on ${COMMIT:0:12}; waiting"
             sleep 15
           done
-          echo "::error::no successful unit-tests run on ${COMMIT:0:12} after ten minutes."
+          echo "::error::no successful unit-tests run on ${COMMIT:0:12} after twenty minutes."
           echo "Merge the version bump and let the gate pass, then re-run this workflow."
           echo "If the gate cannot run, dispatch with skip_checks and say why in the release notes."
           exit 1
 
-      # What the image will say it is when asked. The build context has no
-      # `.git` -- it is excluded, because a directory that moves on every commit
-      # would invalidate the source layer on every commit -- so the commit and
-      # its timestamp are handed to the build rather than discovered by it. The
-      # commit *time*, not the build time, is what a release is dated by.
-      - id: build-id
-        name: What build is this
+      # The commit *time*, not the build time, is what a release is dated by --
+      # `deploy/releases.json` records it and the downgrade check in
+      # `update-native.sh` compares it. Each builder stamps its own build time;
+      # this is the one clock shared by everything in the release.
+      - id: commit-time
+        name: When the released commit was made
         env:
           COMMIT: ${{ steps.tag.outputs.commit }}
         run: |
           set -euo pipefail
-          {
-            echo "commit=$COMMIT"
-            echo "commit_time=$(git log -1 --format=%ct "$COMMIT")"
-            echo "build_time=$(date -u +%s)"
-          } >> "$GITHUB_OUTPUT"
+          echo "commit_time=$(git log -1 --format=%ct "$COMMIT")" >> "$GITHUB_OUTPUT"
 
-      # What the release says about itself, put on the image as labels.
+      # What the release says about itself, put on the image as labels and read
+      # back into the manifest by `publish`.
       #
       # The trailers are read from the annotated tag message first and the commit
       # body second. The tag is where an operator writes them, in the same
       # command that cuts the release, so a trailer cannot be lost by a squash
       # merge of the bump commit.
-      #
-      # Labels rather than a fetch of the release manifest, because
-      # `deploy/update.sh` has the image in its hands already and reading a
-      # label needs nothing but docker -- no network call, no JSON parser, no
-      # second source of truth that can be unreachable at the moment it matters.
       - id: release-notes
         name: Read the release trailers
         env:
@@ -264,7 +287,6 @@ jobs:
           BODY="$(git log -1 --format=%B "$COMMIT")"
           NOTES_TEXT="${TAG_MESSAGE:-$BODY}"
           [ -n "$(printf '%s' "$NOTES_TEXT" | tr -d '[:space:]')" ] || NOTES_TEXT="$BODY"
-          printf '%s' "$NOTES_TEXT" > /tmp/tag-message
 
           breaking=false
           if printf '%s' "$NOTES_TEXT" | grep -qiE '^Breaking-change:[ \t]*(yes|true)[ \t]*$'; then
@@ -280,10 +302,16 @@ jobs:
           if printf '%s' "$NOTES_TEXT" | grep -qiE '^Security-relevant:[ \t]*(yes|true)[ \t]*$'; then
             security=true
           fi
+          # The raw trailers cross a job boundary, which needs the multiline
+          # output form -- a bare `echo` would stop at the first newline and
+          # the manifest would record half a message.
           {
             echo "breaking=$breaking"
             echo "notes=$notes"
             echo "security=$security"
+            echo "trailers<<TRAILERS_EOF"
+            printf '%s\n' "$NOTES_TEXT"
+            echo "TRAILERS_EOF"
           } >> "$GITHUB_OUTPUT"
 
       # Whether a release can be undone by starting the previous binary is a
@@ -323,11 +351,39 @@ jobs:
             --migrations-added "$MIGRATIONS" --state-format-changed "$STATE_FORMAT" \
             >> "$GITHUB_OUTPUT"
 
+  # --------------------------------------------------------------------- image
+  image:
+    name: Build the container image
+    needs: validate
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      # Shallow: this job reads the working tree into a build context and needs
+      # no history. Everything it says about the build's identity it inherits
+      # from `validate`, which already did the history-heavy work.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+
+      # The Dockerfile's cargo cache is a BuildKit cache mount, and a cache
+      # mount lives in the builder rather than in an exported layer. The
+      # builder itself is disposable -- hosted runners are ephemeral -- which
+      # is exactly why the compile cache crosses runs through `type=gha` below
+      # instead of through the machine.
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: build-id
+        name: What build is this
+        run: |
+          set -euo pipefail
+          echo "build_time=$(date -u +%s)" >> "$GITHUB_OUTPUT"
 
       # Three tags on one digest. The version is the release. `sha-<commit>` is
       # how you say "that one" afterwards, when the channel has already moved
@@ -336,19 +392,20 @@ jobs:
       # may move it -- re-running an old release repairs it without handing new
       # installs an older build.
       #
-      # The commit tag is written as `raw` from the commit resolved above rather
-      # than with the action's `type=sha`, because that type reads `github.sha`:
-      # on a tag push those agree, but on a dispatch `github.sha` is the head of
-      # the default branch, and a release labelled with whatever `main` happened
-      # to be is wrong about the one fact this tag exists to record.
+      # The commit tag is written as `raw` from the commit resolved in
+      # `validate` rather than with the action's `type=sha`, because that type
+      # reads `github.sha`: on a tag push those agree, but on a dispatch
+      # `github.sha` is the head of the default branch, and a release labelled
+      # with whatever `main` happened to be is wrong about the one fact this
+      # tag exists to record.
       - id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=raw,value=server-v${{ steps.tag.outputs.version }}
-            type=raw,value=sha-${{ steps.build-id.outputs.commit }}
-            type=raw,value=server-latest,enable=${{ steps.tag.outputs.moves_latest }}
+            type=raw,value=server-v${{ needs.validate.outputs.version }}
+            type=raw,value=sha-${{ needs.validate.outputs.commit }}
+            type=raw,value=server-latest,enable=${{ needs.validate.outputs.moves_latest }}
 
       - id: push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
@@ -358,11 +415,11 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: |
             ${{ steps.meta.outputs.labels }}
-            chat.telium.release.breaking=${{ steps.release-notes.outputs.breaking }}
-            chat.telium.release.notes=${{ steps.release-notes.outputs.notes }}
+            chat.telium.release.breaking=${{ needs.validate.outputs.breaking }}
+            chat.telium.release.notes=${{ needs.validate.outputs.notes }}
           build-args: |
-            TELIUM_BUILD_COMMIT=${{ steps.build-id.outputs.commit }}
-            TELIUM_BUILD_COMMIT_TIME=${{ steps.build-id.outputs.commit_time }}
+            TELIUM_BUILD_COMMIT=${{ needs.validate.outputs.commit }}
+            TELIUM_BUILD_COMMIT_TIME=${{ needs.validate.outputs.commit_time }}
             TELIUM_BUILD_TIME=${{ steps.build-id.outputs.build_time }}
           # The Rust dependency tree is the expensive half of this build and it
           # changes only when a lockfile does.
@@ -383,118 +440,138 @@ jobs:
           sbom: true
           provenance: mode=max
 
-      # The same release, built for boxes that have no Docker.
-      #
-      # A homeserver is one static binary and one SQLite file, which is
-      # precisely the shape systemd is good at. Statically linked against musl
-      # rather than reusing the image's glibc binary, because the image's binary
-      # needs bookworm's glibc or newer and that silently excludes an Ubuntu
-      # 22.04 host -- exactly the failure an "easy update" must not have. Two
-      # architectures, because the boxes that most want this path are the small
-      # ones: x86_64 for the VPS majority, aarch64 for the Raspberry Pi class.
-      # 32-bit arm is left out on purpose -- no target-support story worth
-      # defending and almost no audience that can run this server comfortably.
-      #
-      # The cross toolchains come from musl.cc and are pinned by sha256 the way
-      # every `uses:` is pinned by commit: the checksum is the trust anchor, and
-      # a moved tarball fails the build rather than compiling.
-      #
-      # The volumes are named because this runner keeps its state: the
-      # dependency tree costs the same here as in the image build, and there is
-      # no reason to pay it twice. The outputs are chowned back to the runner
-      # user, because a root-owned `.native/` left behind by the container would
-      # be the next step's problem and the cleanup after it.
-      - id: native
-        name: Build the native artifacts
+  # -------------------------------------------------------------------- native
+  # The same release, built for boxes that have no Docker.
+  #
+  # A homeserver is one static binary and one SQLite file, which is precisely
+  # the shape systemd is good at. Statically linked against musl rather than
+  # reusing the image's glibc binary, because the image's binary needs
+  # bookworm's glibc or newer and that silently excludes an Ubuntu 22.04 host --
+  # exactly the failure an "easy update" must not have. Two architectures,
+  # because the boxes that most want this path are the small ones: x86_64 for
+  # the VPS majority, aarch64 for the Raspberry Pi class. 32-bit arm is left out
+  # on purpose -- no target-support story worth defending and almost no audience
+  # that can run this server comfortably.
+  #
+  # WHERE THE TOOLCHAIN COMES FROM
+  #
+  # From the sources this pipeline already trusts, and nowhere else. Each
+  # architecture builds on a hosted runner *of that architecture* -- free for
+  # public repositories -- so nothing is cross-compiled: the build inside the
+  # container is a native build whose libc is musl, supplied by Debian's
+  # `musl-tools` package (the same archive the base images come from), and the
+  # Rust standard library for the target comes from rustup, the same channel
+  # the `rust:1` image's own toolchain comes from. This replaces a scheme that
+  # downloaded cross-compiler tarballs from musl.cc, with the Wayback Machine
+  # as fallback; musl.cc began refusing connections from GitHub's runners,
+  # which left every release's toolchain arriving from a snapshot site. A
+  # release build should not depend on a host whose outage is recovered by an
+  # archaeology service.
+  #
+  # The container is still `rust:1-slim-bookworm` on both runners -- pulled in
+  # the runner's native architecture -- so the native binary and the image
+  # binary are compiled by the same rustc. And the caches are bind-mounted
+  # workspace directories rather than named volumes: hosted runners are
+  # ephemeral, so anything that must survive a run has to leave through the
+  # cache API, which the pinned `Swatinem/rust-cache` below wraps -- the same
+  # pin every other workflow in this repository uses.
+  native:
+    name: Build native artifacts (${{ matrix.arch }})
+    needs: validate
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      # One leg failing must not eat the other's finished work: a re-run
+      # replays only the failed leg.
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runs-on: ubuntu-latest
+          - arch: aarch64
+            runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+
+      # Pre-created by the runner user so that the container's root can write
+      # into them and the cache step can still traverse and tar what lands
+      # there. Everything the cache keeps has to live under the workspace --
+      # on an ephemeral runner, there is nowhere else.
+      - name: Make the cache directories
+        run: mkdir -p .native-cargo-registry .native-cargo-target
+
+      - name: Restore the Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: server
+          cache-directories: |
+            .native-cargo-registry
+            .native-cargo-target
+          # The two matrix legs are different machines building different
+          # objects; without the arch in the key they would thrash one shared
+          # entry, each save overwriting the other's restore.
+          prefix-key: native-${{ matrix.arch }}
+          cache-on-failure: true
+
+      - name: Build the native artifact
         env:
-          COMMIT: ${{ steps.build-id.outputs.commit }}
-          COMMIT_TIME: ${{ steps.build-id.outputs.commit_time }}
-          BUILD_TIME: ${{ steps.build-id.outputs.build_time }}
+          COMMIT: ${{ needs.validate.outputs.commit }}
+          COMMIT_TIME: ${{ needs.validate.outputs.commit_time }}
+          ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
-          # Without CARGO_TARGET_DIR, cargo puts build output next to the
-          # manifest -- /src/server/target, inside the checkout the runner
-          # reuses, written as root -- and the /target volume below is silently
-          # dead weight. The install inside the container already looks in
-          # /target; this is what makes that path true.
+          BUILD_TIME="$(date -u +%s)"
+          # Bind mounts rather than named volumes: on an ephemeral runner a
+          # named volume is a lie -- it dies with the machine -- while a
+          # workspace directory is something the cache step above can take
+          # with it. Without CARGO_TARGET_DIR, cargo puts build output next to
+          # the manifest -- /src/server/target, inside the checkout -- and the
+          # /target mount below is silently dead weight. The install inside
+          # the container already looks in /target; this is what makes that
+          # path true.
           docker run --rm \
             -v "$PWD:/src" -w /src \
-            -v telium-native-cargo-registry:/usr/local/cargo/registry \
-            -v telium-native-cargo-target:/target \
+            -v "$PWD/.native-cargo-registry:/usr/local/cargo/registry" \
+            -v "$PWD/.native-cargo-target:/target" \
             -e TELIUM_BUILD_COMMIT="$COMMIT" \
             -e TELIUM_BUILD_COMMIT_TIME="$COMMIT_TIME" \
             -e TELIUM_BUILD_TIME="$BUILD_TIME" \
+            -e NATIVE_ARCH="$ARCH" \
             -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
             -e CARGO_TARGET_DIR=/target \
             rust:1-slim-bookworm bash -euc '
-              # The image is Debian slim: no curl, and nothing else that
-              # fetches. The first thing this script does with the network is
-              # the toolchain download below, so curl has to be here first.
+              triple="${NATIVE_ARCH}-unknown-linux-musl"
+              # The image is Debian slim: musl-tools is one package carrying
+              # musl-gcc (a gcc wrapper that retargets the host compiler at
+              # musl) plus the libc headers and startup files. The build is
+              # native in every sense but the libc.
               apt-get update -qq
-              apt-get install -y -qq --no-install-recommends curl >/dev/null
-              # The downloads happen in a scratch directory and stay there: the
-              # subshell keeps their `cd` from leaking into the build below,
-              # which addresses everything relative to the checkout. This exact
-              # leak is what killed the first real run of the rewrite -- cargo
-              # was asked for `server/Cargo.toml` while standing in
-              # /tmp/toolchains -- so the containment is load-bearing, not style.
-              (
-                mkdir -p /tmp/toolchains && cd /tmp/toolchains
-                # <tarball> <sha256 it must have>. Move one forward by
-                # downloading the new tarball, computing its checksum, and
-                # replacing the line -- with a note saying why, the way an
-                # action pin carries its release.
-                for entry in \
-                  "x86_64-linux-musl-cross.tgz c5d410d9f82a4f24c549fe5d24f988f85b2679b452413a9f7e5f7b956f2fe7ea" \
-                  "aarch64-linux-musl-cross.tgz c909817856d6ceda86aa510894fa3527eac7989f0ef6e87b5721c58737a06c38"
-                do
-                  set -- $entry
-                  # musl.cc is the origin and the least reliable host in this
-                  # pipeline: a release has already lost a run to it answering
-                  # nothing for nine minutes. The Wayback Machine copy of the
-                  # same file is the fallback, verified byte-identical to the
-                  # pinned checksum. Neither URL is trusted -- the sha256sum
-                  # below decides, and a mirror serving other bytes fails
-                  # here rather than reaching the build. The connect timeout
-                  # is what makes the fallback reachable in one run: without
-                  # it each retry sits out a full TCP timeout, and four of
-                  # those were the whole step.
-                  curl -fsSL --retry 3 --connect-timeout 20 -o "$1" "https://musl.cc/$1" \
-                    || curl -fsSL --retry 3 --connect-timeout 20 -o "$1" \
-                        "https://web.archive.org/web/2024id_/https://musl.cc/$1"
-                  echo "$2  $1" | sha256sum --check -
-                  tar -xzf "$1"
-                done
-              )
-              export PATH="/tmp/toolchains/x86_64-linux-musl-cross/bin:/tmp/toolchains/aarch64-linux-musl-cross/bin:$PATH"
+              apt-get install -y -qq --no-install-recommends musl-tools >/dev/null
+              rustup target add "$triple"
+              # The env-var names cargo and cc-rs read are the triple with
+              # hyphens folded to underscores, uppercased for the target dir
+              # -- fold first, uppercase second. The linker is the musl
+              # wrapper, which is what makes the binary static; `ar` is
+              # binutils, arch-generic for same-architecture archives.
+              u="${triple//-/_}"
               export RUSTFLAGS="-C target-feature=+crt-static"
-              for arch in x86_64 aarch64; do
-                triple="${arch}-unknown-linux-musl"
-                gcc="${arch}-linux-musl-gcc"
-                rustup target add "$triple"
-                # The env-var names cargo reads are the triple with hyphens
-                # folded to underscores, uppercased -- fold first, uppercase
-                # second, because `${triple^^}` would happily hand cargo an env
-                # name full of hyphens and the default host linker instead,
-                # which fails three minutes later in link-land.
-                u="${triple//-/_}"
-                export "CC_$u=$gcc"
-                export "AR_$u=${arch}-linux-musl-ar"
-                export "CARGO_TARGET_${u^^}_LINKER=$gcc"
-                cargo build --release --locked --manifest-path server/Cargo.toml \
-                  --target "$triple"
-                # `-D`, not bare `-m`: install does not create missing parent
-                # directories in file-copy form, and nothing else makes the
-                # per-architecture staging directory.
-                install -Dm755 "/target/$triple/release/telium-server" \
-                  "/src/.native/stage/$arch/telium-server"
-              done
+              export "CC_$u=musl-gcc"
+              export "AR_$u=ar"
+              export "CARGO_TARGET_${u^^}_LINKER=musl-gcc"
+              cargo build --release --locked --manifest-path server/Cargo.toml \
+                --target "$triple"
+              # `-D`, not bare `-m`: install does not create missing parent
+              # directories in file-copy form, and nothing else makes the
+              # staging directory.
+              install -Dm755 "/target/$triple/release/telium-server" \
+                "/src/.native/stage/$NATIVE_ARCH/telium-server"
               chown -R "$HOST_UID:$HOST_GID" /src/.native
             '
           # Two members at the root, no wrapper directory: the updater unpacks
           # into a staging directory it created for the purpose, and a name it
           # does not have to guess at is one less thing to get wrong. The
-          # checksum files are in `sha256sum -c` format, so an operator can
+          # checksum file is in `sha256sum -c` format, so an operator can
           # verify a manual download with the tool they already have.
           #
           # The asset name is stable within a release -- `telium-server-linux-
@@ -502,22 +579,58 @@ jobs:
           # version-scoped: the tag is the identity, so the file inside it does
           # not need the commit in its name. That is what lets `server-latest`
           # mirror it with `--clobber` and lets the docs name one path.
-          for arch in x86_64 aarch64; do
-            ASSET="telium-server-linux-${arch}.tar.gz"
-            cp server/telium.example.toml ".native/stage/$arch/"
-            tar -C ".native/stage/$arch" -czf ".native/$ASSET" telium-server telium.example.toml
-            ( cd .native && sha256sum "$ASSET" > "$ASSET.sha256" )
-          done
+          ASSET="telium-server-linux-${ARCH}.tar.gz"
+          cp server/telium.example.toml ".native/stage/$ARCH/"
+          tar -C ".native/stage/$ARCH" -czf ".native/$ASSET" telium-server telium.example.toml
+          ( cd .native && sha256sum "$ASSET" > "$ASSET.sha256" )
           rm -rf .native/stage
-          # One file an operator can check both architectures against with a
-          # single command, in the format `sha256sum -c` expects.
-          ( cd .native && sha256sum telium-server-linux-*.tar.gz > SHA256SUMS-server )
+
+      # `download-artifact@v4` is the one unpinned action by documented
+      # exception; `upload` gets the same pin treatment as everything else.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-${{ matrix.arch }}
+          path: |
+            .native/telium-server-linux-*.tar.gz
+            .native/telium-server-linux-*.tar.gz.sha256
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------- publish
+  publish:
+    name: Publish the release
+    needs: [validate, image, native]
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: the record step commits `deploy/releases.json` to `main`
+      # and reads the protocol constants out of the released commit.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      # `download-artifact@v4` is the one unpinned action by documented
+      # exception in `docs/supply-chain.md`.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          merge-multiple: true
+          path: .native
+
+      # One file an operator can check both architectures against with a
+      # single command, in the format `sha256sum -c` expects.
+      - name: Assemble SHA256SUMS-server
+        run: ( cd .native && sha256sum telium-server-linux-*.tar.gz > SHA256SUMS-server )
 
       - name: Stop before publishing
         if: inputs.dry_run == true
         run: |
           echo "### Dry run" >> "$GITHUB_STEP_SUMMARY"
-          echo "Validated $TAG and built both artifacts. Nothing was published." >> "$GITHUB_STEP_SUMMARY"
+          echo "Validated $TAG and built the image and both artifacts. Nothing was published." >> "$GITHUB_STEP_SUMMARY"
           echo "dry run: stopping before publish"
 
       # The release itself. Immutable by construction: the tag names a commit,
@@ -534,15 +647,15 @@ jobs:
         if: inputs.dry_run != true
         env:
           GH_TOKEN: ${{ github.token }}
-          COMMIT: ${{ steps.build-id.outputs.commit }}
-          VERSION: ${{ steps.tag.outputs.version }}
-          PREVIOUS: ${{ steps.rollback.outputs.previous }}
-          ROLLBACKABLE: ${{ steps.rollback.outputs.rollbackable }}
-          ROLLBACK_REASON: ${{ steps.rollback.outputs.rollback_reason }}
-          SECURITY: ${{ steps.release-notes.outputs.security }}
-          BREAKING: ${{ steps.release-notes.outputs.breaking }}
-          UPGRADE_NOTES: ${{ steps.release-notes.outputs.notes }}
-          DIGEST: ${{ steps.push.outputs.digest }}
+          COMMIT: ${{ needs.validate.outputs.commit }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          PREVIOUS: ${{ needs.validate.outputs.previous }}
+          ROLLBACKABLE: ${{ needs.validate.outputs.rollbackable }}
+          ROLLBACK_REASON: ${{ needs.validate.outputs.rollback_reason }}
+          SECURITY: ${{ needs.validate.outputs.security }}
+          BREAKING: ${{ needs.validate.outputs.breaking }}
+          UPGRADE_NOTES: ${{ needs.validate.outputs.notes }}
+          DIGEST: ${{ needs.image.outputs.digest }}
         run: |
           set -euo pipefail
           NOTES="$(mktemp)"
@@ -631,11 +744,11 @@ jobs:
       # so a box that pinned a release downloads immutable bytes even if it
       # fetched the manifest from the pointer.
       - name: Point server-latest at this release
-        if: inputs.dry_run != true && steps.tag.outputs.moves_latest == 'true'
+        if: inputs.dry_run != true && needs.validate.outputs.moves_latest == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.tag.outputs.version }}
-          COMMIT: ${{ steps.tag.outputs.commit }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          COMMIT: ${{ needs.validate.outputs.commit }}
         run: |
           set -euo pipefail
           NOTES="$(mktemp)"
@@ -689,20 +802,21 @@ jobs:
       # The entry is keyed on the commit -- that is what a running binary
       # reports -- with the version attached as the name a person reads. The
       # protocol window is read from the protocol crate's own constants at the
-      # commit being released, so the number a release announces and the number
-      # its code enforces cannot drift.
+      # commit being released, so the number a release announces and the
+      # number its code enforces cannot drift.
       - id: record
         name: Record the release
         if: inputs.dry_run != true
         env:
           GH_TOKEN: ${{ github.token }}
-          COMMIT: ${{ steps.build-id.outputs.commit }}
-          COMMIT_TIME: ${{ steps.build-id.outputs.commit_time }}
-          DIGEST: ${{ steps.push.outputs.digest }}
-          VERSION: ${{ steps.tag.outputs.version }}
-          SECURITY: ${{ steps.release-notes.outputs.security }}
-          BREAKING: ${{ steps.release-notes.outputs.breaking }}
-          UPGRADE_NOTES: ${{ steps.release-notes.outputs.notes }}
+          COMMIT: ${{ needs.validate.outputs.commit }}
+          COMMIT_TIME: ${{ needs.validate.outputs.commit_time }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          SECURITY: ${{ needs.validate.outputs.security }}
+          BREAKING: ${{ needs.validate.outputs.breaking }}
+          UPGRADE_NOTES: ${{ needs.validate.outputs.notes }}
+          TRAILERS: ${{ needs.validate.outputs.trailers }}
         run: |
           set -euo pipefail
           # The run is on a tag ref (detached). The manifest lives on `main`, so
@@ -741,7 +855,6 @@ jobs:
           SIZE_X86="$(stat -c %s .native/telium-server-linux-x86_64.tar.gz)"
           SIZE_ARM="$(stat -c %s .native/telium-server-linux-aarch64.tar.gz)"
 
-          TRAILERS="$(cat /tmp/tag-message)"
           node scripts/release-server.mjs record \
             --tag "$TAG" \
             --commit "$COMMIT" \
@@ -778,9 +891,8 @@ jobs:
         if: steps.record.outputs.changed == 'true' && vars.RELEASE_SIGNING_ENABLED == 'true'
         env:
           # The seed never reaches a command line -- argv is readable by every
-          # other process on the machine, and this runner is self-hosted and
-          # long-lived. It goes into the environment of one step and into
-          # node:crypto, and nowhere else.
+          # other process on the machine. It goes into the environment of one
+          # step and into node:crypto, and nowhere else.
           TELIUM_RELEASE_SIGNING_KEY: ${{ secrets.TELIUM_RELEASE_SIGNING_KEY }}
           TELIUM_RELEASE_PUBLIC_KEY: ${{ vars.TELIUM_RELEASE_PUBLIC_KEY }}
           TELIUM_RELEASE_KEY_ID: ${{ vars.TELIUM_RELEASE_KEY_ID }}
@@ -805,8 +917,8 @@ jobs:
       - name: Commit the release record
         if: steps.record.outputs.changed == 'true'
         env:
-          VERSION: ${{ steps.tag.outputs.version }}
-          COMMIT: ${{ steps.build-id.outputs.commit }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          COMMIT: ${{ needs.validate.outputs.commit }}
         run: |
           set -euo pipefail
           # `-A` so a signature the step above removed is staged as a deletion.
