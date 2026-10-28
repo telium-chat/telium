@@ -3,7 +3,7 @@
 // The half of the updater allowed to write to disk. Accepts no URL, digest or version from the renderer: everything is re-derived from the publisher URL and public key baked into this build.
 
 const { createHash, createPublicKey, verify: edVerify } = require('node:crypto');
-const { chmodSync, createWriteStream, mkdirSync, renameSync, rmSync, statSync } = require('node:fs');
+const { chmodSync, copyFileSync, createWriteStream, mkdirSync, renameSync, rmSync, statSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { dirname, join } = require('node:path');
 const { pipeline } = require('node:stream/promises');
@@ -17,6 +17,8 @@ const MANIFEST_VERSION = 1;
 const MAX_MANIFEST_BYTES = 512 * 1024;
 /// Generous: the digest is the real check; this only stops an endpoint streaming until the disk fills.
 const MAX_ARTIFACT_BYTES = 512 * 1024 * 1024;
+/// Progress is throttled to this many ms between reports; the renderer renders at most that stale.
+const PROGRESS_THROTTLE_MS = 200;
 
 const SPKI_ED25519_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 
@@ -177,11 +179,13 @@ async function checkForUpdate({
 }
 
 /// Digest computed as bytes stream past; written to a temp directory so a half-written file never sits beside a running AppImage.
+/// `onProgress` gets `{ received, total }` at most every `PROGRESS_THROTTLE_MS`, plus one final report; `total` is 0 when nothing declares a size and the renderer must fall back to an indeterminate state.
 async function downloadArtifact({
   artifact,
   fetchImpl = globalThis.fetch,
   directory = join(tmpdir(), 'telium-update'),
   platform = process.platform,
+  onProgress = null,
 }) {
   let response;
   try {
@@ -191,6 +195,12 @@ async function downloadArtifact({
     return { fault: Fault.Unreachable };
   }
 
+  // Content-Length when the endpoint sends one; the manifest's signed size otherwise.
+  const headerTotal = Number(response.headers?.get?.('content-length'));
+  const total = Number.isFinite(headerTotal) && headerTotal > 0
+    ? headerTotal
+    : Number(artifact.size) > 0 ? Number(artifact.size) : 0;
+
   mkdirSync(directory, { recursive: true });
   // On Windows the staged installer is executed by name, so the extension matters.
   const extension = platform === 'win32' ? '.exe' : '.AppImage';
@@ -198,6 +208,18 @@ async function downloadArtifact({
   const hash = createHash('sha256');
   let seen = 0;
   let aborted = false;
+  let reportedAt = 0;
+  const report = (force = false) => {
+    if (typeof onProgress !== 'function') return;
+    const at = Date.now();
+    if (!force && at - reportedAt < PROGRESS_THROTTLE_MS) return;
+    reportedAt = at;
+    try {
+      onProgress({ received: seen, total });
+    } catch {
+      // A progress listener that throws must not fail the download.
+    }
+  };
   try {
     const source = typeof response.body.getReader === 'function'
       ? Readable.fromWeb(response.body)
@@ -210,6 +232,7 @@ async function downloadArtifact({
           // Checked as it arrives: Content-Length is the endpoint's own claim and absent on chunked responses.
           if (seen > MAX_ARTIFACT_BYTES) { aborted = true; return; }
           hash.update(chunk);
+          report();
           yield chunk;
         }
       },
@@ -223,6 +246,8 @@ async function downloadArtifact({
     rmSync(target, { force: true });
     return { fault: Fault.Unreachable };
   }
+  // Always, past the throttle: a bar left short of the end reads as a stalled download.
+  report(true);
 
   const digest = hash.digest('hex');
   if (digest !== artifact.sha256.toLowerCase()) {
@@ -240,8 +265,11 @@ function stageAppImage({ downloaded, appImagePath }) {
   const staged = join(directory, '.telium-update.AppImage');
   const previous = `${appImagePath}.previous`;
   try {
-    // Moved into the target directory first: a cross-filesystem rename is a non-atomic copy.
-    renameSync(downloaded, staged);
+    // Copied, not renamed: the download sits in the temp directory, which on most
+    // distributions is a tmpfs while the AppImage sits on the root or home
+    // filesystem, and a rename across filesystems fails outright (EXDEV). The
+    // final swap below stays inside `directory`, so it stays atomic.
+    copyFileSync(downloaded, staged);
     chmodSync(staged, 0o755);
     renameSync(appImagePath, previous);
     try {
@@ -303,7 +331,7 @@ function createUpdateService({
 }) {
   // Windows runs a downloaded installer; Linux needs an AppImage to swap.
   const canInstall = platform === 'win32' || Boolean(appImagePath);
-  let state = { phase: Phase.Idle, version: '', fault: '', canInstall };
+  let state = { phase: Phase.Idle, version: '', fault: '', received: 0, total: 0, canInstall };
   let inFlight = null;
   let staged = '';
 
@@ -342,19 +370,20 @@ function createUpdateService({
       return state;
     }
 
-    publish({ phase: Phase.Downloading, version: found.release.version });
+    publish({ phase: Phase.Downloading, version: found.release.version, received: 0, total: 0 });
     const downloaded = await downloadArtifact({
       artifact: found.artifact,
       fetchImpl,
       ...(downloadDirectory ? { directory: downloadDirectory } : {}),
       ...(platform === 'win32' ? { platform } : {}),
+      onProgress: ({ received, total }) => publish({ received, total }),
     });
     if (downloaded.fault) {
-      publish({ phase: Phase.Failed, fault: downloaded.fault });
+      publish({ phase: Phase.Failed, fault: downloaded.fault, received: 0, total: 0 });
       return state;
     }
 
-    publish({ phase: Phase.Verifying });
+    publish({ phase: Phase.Verifying, received: 0, total: 0 });
     const placed = platform === 'win32'
       ? stageInstaller({
         downloaded: downloaded.path,
@@ -363,11 +392,13 @@ function createUpdateService({
       : stageAppImage({ downloaded: downloaded.path, appImagePath });
     if (placed.fault) {
       rmSync(downloaded.path, { force: true });
-      publish({ phase: Phase.Failed, fault: placed.fault });
+      publish({ phase: Phase.Failed, fault: placed.fault, received: 0, total: 0 });
       return state;
     }
+    // The staging copy leaves the temp download behind; nothing else will remove it.
+    rmSync(downloaded.path, { force: true });
     staged = placed.path;
-    publish({ phase: Phase.Ready, fault: '' });
+    publish({ phase: Phase.Ready, fault: '', received: 0, total: 0 });
     return state;
   }
 

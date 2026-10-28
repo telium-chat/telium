@@ -110,11 +110,16 @@ export const updates = {
 
   // ------------------------------------------------------ while it installs
 
-  // Present tense and no percentage. A progress bar on a 125MB download that
-  // stalls at 94% generates more support questions than it answers, and the
-  // honest thing to report is the phase rather than a number that will be
-  // wrong.
+  // Present tense, and stays on screen alongside the bar: a bar without words
+  // reads as decoration, and words without a bar made a multi-minute download
+  // read as a hung button -- the complaint that put the bar there.
   'updates.state.downloading': 'Downloading Telium {version}…',
+  // Under the line above, fed by the download's actual byte counts
+  // (`electron/updater.cjs`). Bytes rather than a bare percentage: they let a
+  // reader on a slow link estimate the wait, and they come from the transfer
+  // itself, so they cannot quietly disagree with it. Absent when the endpoint
+  // sends no size at all, which leaves the phase line alone.
+  'updates.state.progress': '{received} of {total}',
   'updates.state.verifying': 'Checking the signature…',
   // Deliberately says the update is ready rather than that it is installed:
   // nothing has replaced anything until the app restarts, and a reader who
