@@ -25,6 +25,7 @@
 
 > [!WARNING]
 > Telium is alpha. Expect breaking changes, and keep backups you have tested — [Stability](https://docs.telium.chat/start/stability/) explains what that means in practice.
+> Feedback, issues, and pull requests are appreciated!
 
 ## Documentation
 
