@@ -566,7 +566,12 @@ jobs:
               # staging directory.
               install -Dm755 "/target/$triple/release/telium-server" \
                 "/src/.native/stage/$NATIVE_ARCH/telium-server"
-              chown -R "$HOST_UID:$HOST_GID" /src/.native
+              # The container runs as root, so everything it wrote through the
+              # bind mounts is root-owned; the cache step after this runs as the
+              # runner user and would fail to read its own save back. chown the
+              # mounts, not just the stage: on a persistent runner the next
+              # container inherits the files either way, but the cache does not.
+              chown -R "$HOST_UID:$HOST_GID" /src/.native /usr/local/cargo/registry /target
             '
           # Two members at the root, no wrapper directory: the updater unpacks
           # into a staging directory it created for the purpose, and a name it
@@ -587,6 +592,12 @@ jobs:
 
       # `download-artifact@v4` is the one unpinned action by documented
       # exception; `upload` gets the same pin treatment as everything else.
+      #
+      # `include-hidden-files` is not paranoia: since v4.4.0 the upload's file
+      # search skips hidden files *and directories*, and the staging directory
+      # here is `.native` -- the first dry run of this workflow uploaded
+      # nothing, from a step that had just built the artifacts, for exactly
+      # that reason.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: native-${{ matrix.arch }}
@@ -594,6 +605,7 @@ jobs:
             .native/telium-server-linux-*.tar.gz
             .native/telium-server-linux-*.tar.gz.sha256
           if-no-files-found: error
+          include-hidden-files: true
 
   # ------------------------------------------------------------------- publish
   publish:

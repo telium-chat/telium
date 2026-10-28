@@ -55,6 +55,13 @@ mount --bind /usr "$R/usr"
 ln -s usr/bin "$R/bin"
 ln -s usr/lib64 "$R/lib64"
 ln -s usr/lib "$R/lib"
+# The inner script chowns the container's cargo registry back to the host
+# user, and the rehearsal must be able to run that same line: shadow
+# usr/local with a tmpfs -- writing through the /usr bind would touch the
+# real /usr -- then give it the path the rust image has.
+[ -d "$R/usr/local" ] || { echo "harness: /usr/local missing from the /usr bind" >&2; exit 2; }
+mount -t tmpfs none "$R/usr/local"
+mkdir -p "$R/usr/local/cargo/registry"
 if ! mknod "$R/dev/null" c 1 3 2>/dev/null; then
   : > "$R/dev/null"
 fi
