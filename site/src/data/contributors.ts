@@ -22,8 +22,8 @@ export type ContributorGroup = {
  * a leaderboard. Keep the wording concrete and update it when somebody's role
  * in the project changes.
  *
- * Empty groups are intentional: the People page keeps the stable four-panel
- * credits layout without inventing contributors just to fill a slot.
+ * Empty groups are intentional: the People page keeps the credits layout
+ * without inventing contributors just to fill a slot.
  */
 export const contributorGroups: ContributorGroup[] = [
   {
@@ -58,6 +58,23 @@ export const contributorGroups: ContributorGroup[] = [
     icon: 'code',
     tone: 'green',
     contributors: [],
+  },
+  {
+    title: 'Ecosystem / Clients',
+    description: 'Building independent clients and apps on top of Telium.',
+    icon: 'app-window',
+    tone: 'violet',
+    contributors: [
+      {
+        name: 'alp',
+        handle: 'alpwrk',
+        role: 'Ecosystem / client developer',
+        majorContribution: 'Rhein, a native Telium client for Linux — Rust and GPUI, with encrypted DMs and calls',
+        href: 'https://github.com/alpwrk',
+        avatarUrl: 'https://avatars.githubusercontent.com/u/200269902?v=4&s=160',
+        initials: 'A',
+      },
+    ],
   },
   {
     title: 'Web & Reliability',
