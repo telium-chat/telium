@@ -148,13 +148,13 @@ const featuredPeople = groups.flatMap((group) => group.contributors).slice(0, 3)
                   group.contributors.length === 0 && (
                     <a
                       class="history-card"
-                      href="https://github.com/telium-chat/telium/graphs/contributors"
+                      href="https://github.com/telium-chat/telium"
                       rel="noreferrer"
                     >
-                      <span class="history-icon"><Icon name="git-branch" size={17} /></span>
+                      <span class="history-icon"><Icon name="user-plus" size={17} /></span>
                       <span>
-                        <strong>Complete contribution history</strong>
-                        <small>See every contributor and commit on GitHub.</small>
+                        <strong>Your name could be here!</strong>
+                        <small>Contribute to Telium and claim a spot on this page.</small>
                       </span>
                       <Icon name="arrow-up-right" size={13} class="history-arrow" />
                     </a>
@@ -204,7 +204,7 @@ const featuredPeople = groups.flatMap((group) => group.contributors).slice(0, 3)
   /* This page had its own design system: four hues where the site spends one,
      a 1px outline around every object, and a type scale running from 8.6px to
      14.7px against the 13-16px the rest of the site is set in. The structure
-     below is untouched — same hero, same four panels, same cards, same closing
+     below is untouched — same hero, same five panels, same cards, same closing
      strip — but it is now drawn in the site's tokens, at the site's sizes, and
      separated by fill steps rather than by borders. */
   .credits-page {
@@ -305,11 +305,11 @@ const featuredPeople = groups.flatMap((group) => group.contributors).slice(0, 3)
     background: var(--color-separator);
   }
 
-  /* `align-items: start` because two of these four groups have no featured
-     contributors and carry a single link card instead. Grid's default stretch
-     made those panels as tall as the populated one beside them, so the page
-     showed two columns of empty fill the height of a member card. A panel is
-     as tall as what is in it. */
+  /* `align-items: start` because a group with no featured contributors carried
+     a single link card, and grid's default stretch pulled such a panel up to
+     the populated one beside it, showing two columns of empty fill. Panels
+     stay content-sized — with one exception, below: an invitation panel opts
+     back into stretching so it doesn't read as a stub next to a full one. */
   .category-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -330,6 +330,36 @@ const featuredPeople = groups.flatMap((group) => group.contributors).slice(0, 3)
     border-radius: var(--radius-card);
     background: var(--color-surface);
     overflow: hidden;
+  }
+
+  /* An odd panel count on a two-column grid leaves the last panel alone at
+     half width, which reads as a layout fault rather than as a closing slot.
+     Spanning the row turns it into the page's full-width closer — the natural
+     place for the invitation card. `:nth-child(odd)` keeps the rule quiet the
+     moment a sixth group makes the count even again. The member grid follows:
+     its fixed 320px tracks would otherwise strand the card at 652px inside a
+     panel twice that wide. */
+  .category-panel:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+
+  .category-panel:last-child:nth-child(odd) .member-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* An invitation panel has no member cards sizing it, so at content height it
+     sits as a stub beside a column of real ones. Stretched to its row it
+     matches the populated panel beside it, and the card centers in the space
+     under the header instead of hugging it with a dead gap below. */
+  .category-panel:has(.history-card) {
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .category-panel:has(.history-card) .member-grid {
+    flex: 1;
+    align-content: center;
   }
 
   .category-header {
@@ -520,8 +550,8 @@ const featuredPeople = groups.flatMap((group) => group.contributors).slice(0, 3)
   }
 
   /* The one dashed edge on the site, and it is carrying meaning a fill step
-     cannot: this card is a placeholder for a group with no listed contributors,
-     so it has to read as an empty slot rather than as a person. */
+     cannot: this card is an invitation for a group with no listed contributors,
+     so it has to read as an open slot rather than as a person. */
   .history-card {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
@@ -539,10 +569,9 @@ const featuredPeople = groups.flatMap((group) => group.contributors).slice(0, 3)
     background: var(--color-surface-secondary);
   }
 
-  /* Two of the four groups have nobody featured, so the placeholder is the
-     whole of their panel. Held to a single card's width it sat in the left
-     half of a panel twice as wide, which reads as a layout fault rather than
-     as an empty slot. Alone, it takes the row. */
+  /* The empty groups' invitation is the whole of their panel. Held to a single
+     card's width it sat in the left half of a panel twice as wide, which reads
+     as a layout fault rather than as an open slot. Alone, it takes the row. */
   .history-card:only-child {
     grid-column: 1 / -1;
     max-width: none;
