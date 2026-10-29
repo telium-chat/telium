@@ -221,6 +221,22 @@ pub fn audit(cfg: &Config, config_path: Option<&Path>) -> Audit {
         });
     }
 
+    if cfg.media_policy.attachment_max_age_days > 0 {
+        f.push(Finding {
+            key: "media_policy.attachment_max_age_days".into(),
+            level: Level::Warn,
+            exposes: format!(
+                "attachment media older than {} day(s) is swept whether or not a message \
+                 still refers to it, so live messages will lose their files past that age.",
+                cfg.media_policy.attachment_max_age_days
+            ),
+            remedy: "`media_policy.attachment_max_age_days = 0` keeps attachments for as long \
+                     as their messages live; the unreferenced sweep alone reclaims what \
+                     deletions free."
+                .into(),
+        });
+    }
+
     for (key, value) in [
         ("push.fcm.base_url", cfg.push.fcm.base_url.as_ref()),
         ("push.fcm.token_url", cfg.push.fcm.token_url.as_ref()),

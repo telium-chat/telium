@@ -188,6 +188,10 @@ pub async fn store_bytes(
             .await?;
 
     let ttl = requested_ttl(headers)?;
+    // An origin that sets a default applies it only where the client did not
+    // choose: a requested TTL is never widened, and both still narrow against
+    // the destination's cap below.
+    let ttl = ttl.or_else(|| state.cfg.media_policy.default_expiry_secs.non_zero());
     let (destination, local_dest) = destination_limit(state, headers).await?;
     let expires_at = expires_at_from(now_ms(), ttl, &[destination]);
 
@@ -1387,6 +1391,34 @@ pub async fn sweep_unreferenced_before(state: &AppState, cutoff_ms: i64) -> anyh
     Ok(swept)
 }
 
+/// Reclaims attachment media past the operator's age ceiling, references or
+/// not. Off (`0`) by default and deliberately destructive when on: a message
+/// past the age shows a dead file. Preflight warns, so leaving it set is a
+/// decision somebody made twice.
+pub async fn sweep_aged_attachments(state: &AppState) -> anyhow::Result<u64> {
+    let days = state.cfg.media_policy.attachment_max_age_days;
+    if days <= 0 {
+        return Ok(0);
+    }
+    let cutoff = now_ms() - days.saturating_mul(24 * 60 * 60 * 1000);
+    let doomed: Vec<String> =
+        sqlx::query_scalar("SELECT hash FROM media WHERE purpose = 'attachment' AND created_at <= ?")
+            .bind(cutoff)
+            .fetch_all(&state.pool)
+            .await?;
+    let mut swept = 0u64;
+    for hash in &doomed {
+        sqlx::query("DELETE FROM media WHERE hash = ?").bind(hash).execute(&state.pool).await?;
+        let _ = state.media_store.delete(&media_key(state, hash)).await;
+        broadcast_purge_quietly(state, hash);
+        swept += 1;
+    }
+    if swept > 0 {
+        tracing::info!(target: crate::logcat::MAINTENANCE, count = swept, days, "swept aged attachment media");
+    }
+    Ok(swept)
+}
+
 pub async fn sweep_expired(state: &AppState) -> anyhow::Result<u64> {    let doomed: Vec<String> = sqlx::query_scalar(
         "SELECT hash FROM media WHERE expires_at IS NOT NULL AND expires_at <= ?",
     )
@@ -1592,6 +1624,8 @@ pub async fn capabilities(State(state): State<AppState>, headers: HeaderMap) -> 
             "default_policy": state.cfg.media_policy.default,
             "max_file_bytes": state.cfg.media_policy.max_file_bytes,
             "max_expiry_secs": state.cfg.media_policy.max_expiry_secs,
+            "default_expiry_secs": state.cfg.media_policy.default_expiry_secs,
+            "attachment_max_age_days": state.cfg.media_policy.attachment_max_age_days,
             "upload_scanning": true,
             "hash_list_entries": state.hash_lists.entries(),
             "abuse_contact": state.cfg.moderation.abuse_contact,

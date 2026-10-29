@@ -12,6 +12,9 @@ pub fn spawn_slow_housekeeping(state: AppState) {
             if let Err(e) = crate::routes::media::sweep_unreferenced(&state).await {
                 tracing::warn!(target: crate::logcat::MAINTENANCE, error = %e, "unreferenced media sweep failed");
             }
+            if let Err(e) = crate::routes::media::sweep_aged_attachments(&state).await {
+                tracing::warn!(target: crate::logcat::MAINTENANCE, error = %e, "aged attachment sweep failed");
+            }
             if let Err(e) = crate::migration::sweep_claims(&state).await {
                 tracing::warn!(target: crate::logcat::MAINTENANCE, error = %e, "import claim sweep failed");
             }

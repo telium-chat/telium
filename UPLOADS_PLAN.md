@@ -35,7 +35,7 @@ a test, and leaves a log line.
   Verify: test with two uploads of identical bytes — owner delete → 409; admin delete → 200,
   row + bytes gone; single-owner delete unaffected.
 
-- [ ] **O3 — Retention knobs: default TTL and age-based attachment expiry (both off by default)** **[DECISION]**
+- [x] **O3 — Retention knobs: default TTL and age-based attachment expiry (both off by default)** **[DECISION]**
   Files: `server/src/config.rs` (MediaPolicy: `default_expiry_secs`, `attachment_max_age_days`),
   `server/src/routes/media.rs` (apply default TTL when the client sends no `X-Telium-Ttl-Secs`;
   age sweep), `server/src/federation/maintenance.rs`, `server/src/preflight.rs` (warn when on),

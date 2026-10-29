@@ -814,6 +814,92 @@ async fn an_owner_may_delete_a_file_their_own_message_still_holds() {
     assert_eq!(status, 200, "{gone}");
 }
 
+#[tokio::test]
+async fn a_default_expiry_applies_only_where_the_client_chose_none() {
+    let s = start_with(|cfg| cfg.media_policy.default_expiry_secs = 3_600).await;
+    let alice = s.user("alice").await;
+    let upload = |ttl: Option<&str>| {
+        let mut req = s
+            .client
+            .post(format!("{}/_telium/v1/media", s.base))
+            .bearer_auth(&alice.home)
+            .header("Content-Type", "text/plain")
+            .body("kept for a while".to_string());
+        if let Some(ttl) = ttl {
+            req = req.header("X-Telium-Ttl-Secs", ttl);
+        }
+        async move { req.send().await.unwrap().json::<Value>().await.unwrap() }
+    };
+
+    let now = telium_server::util::now_ms();
+    let defaulted = upload(None).await;
+    let chosen = upload(Some("60")).await;
+    // A year is the most a client may ask for (366 days is refused at the header).
+    let a_year = upload(Some("31536000")).await;
+
+    let in_hours = defaulted["expires_at"].as_i64().unwrap() - now;
+    assert!(
+        (3_000_000..4_200_000).contains(&in_hours),
+        "the default TTL lands near an hour: {in_hours}ms"
+    );
+    let in_minutes = chosen["expires_at"].as_i64().unwrap() - now;
+    assert!(
+        (30_000..90_000).contains(&in_minutes),
+        "a client's own TTL is never widened: {in_minutes}ms"
+    );
+    assert!(
+        a_year["expires_at"].as_i64().unwrap() > now + 300 * 24 * 60 * 60 * 1000,
+        "a longer request still wins over the default"
+    );
+}
+
+#[tokio::test]
+async fn the_age_sweep_takes_only_attachments_past_the_ceiling() {
+    let s = start_with(|cfg| cfg.media_policy.attachment_max_age_days = 1).await;
+    let alice = s.user("alice").await;
+
+    let old = upload_attachment(&s, &alice, None, "ancient").await;
+    let young = upload_attachment(&s, &alice, None, "recent").await;
+    let avatar = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home)
+        .header("X-Telium-Purpose", "profile")
+        .header("Content-Type", "image/png")
+        .body("pretend png".to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(avatar.status().as_u16(), 200);
+    let profile_hash = avatar.json::<Value>().await.unwrap()["hash"].as_str().unwrap().to_string();
+
+    let two_days_ago = telium_server::util::now_ms() - 2 * 24 * 60 * 60 * 1000;
+    sqlx::query("UPDATE media SET created_at = ? WHERE hash = ?")
+        .bind(two_days_ago)
+        .bind(old["hash"].as_str().unwrap())
+        .execute(&s.state.pool)
+        .await
+        .unwrap();
+
+    let swept = telium_server::routes::media::sweep_aged_attachments(&s.state).await.unwrap();
+    assert_eq!(swept, 1, "only the aged attachment goes");
+
+    let (rows,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM media WHERE hash = ?")
+        .bind(old["hash"].as_str().unwrap())
+        .fetch_one(&s.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 0);
+    for survivor in [young["hash"].as_str().unwrap(), profile_hash.as_str()] {
+        let (rows,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM media WHERE hash = ?")
+            .bind(survivor)
+            .fetch_one(&s.state.pool)
+            .await
+            .unwrap();
+        assert_eq!(rows, 1, "{survivor} is not past the ceiling, or not an attachment");
+    }
+}
+
 fn jpeg_fixture(width: u32, height: u32) -> Vec<u8> {    let image = image::RgbImage::from_fn(width, height, |x, y| image::Rgb([x as u8, y as u8, 200]));
     let mut out = std::io::Cursor::new(Vec::new());
     image::DynamicImage::ImageRgb8(image).write_to(&mut out, image::ImageFormat::Jpeg).unwrap();

@@ -656,6 +656,14 @@ pub struct MediaPolicy {
     pub max_profile_asset_bytes: usize,
     /// Longest requested upload lifetime in seconds; zero is no cap.
     pub max_expiry_secs: i64,
+    /// Lifetime applied when the client requests none; zero keeps such uploads
+    /// until something reclaims them. Never widens a client's own request and
+    /// still narrows against the destination's cap.
+    pub default_expiry_secs: i64,
+    /// Attachment media older than this many days is swept even when a message
+    /// still refers to it; zero never ages anything out. Destructive by design:
+    /// live messages will lose their files past the age.
+    pub attachment_max_age_days: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -1421,6 +1429,8 @@ impl Default for MediaPolicy {
             max_file_bytes: 100 * 1024 * 1024,
             max_profile_asset_bytes: 256 * 1024,
             max_expiry_secs: 0,
+            default_expiry_secs: 0,
+            attachment_max_age_days: 0,
         }
     }
 }
@@ -1881,6 +1891,20 @@ mod tests {
         assert!(!printed.contains("leak-"), "a credential reached Debug output");
         assert!(printed.contains("<redacted>"));
         assert!(format!("{:?}", Config::default()).contains("<unset>"));
+    }
+
+    #[test]
+    fn retention_knobs_default_off_and_parse_when_set() {
+        let default_cfg: Config = toml::from_str("").expect("default config parses");
+        assert_eq!(default_cfg.media_policy.default_expiry_secs, 0);
+        assert_eq!(default_cfg.media_policy.attachment_max_age_days, 0);
+
+        let tuned: Config = toml::from_str(
+            "[media_policy]\ndefault_expiry_secs = 604800\nattachment_max_age_days = 30\n",
+        )
+        .expect("tuned media policy parses");
+        assert_eq!(tuned.media_policy.default_expiry_secs, 604800);
+        assert_eq!(tuned.media_policy.attachment_max_age_days, 30);
     }
 
     #[test]
