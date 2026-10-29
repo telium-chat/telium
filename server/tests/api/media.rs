@@ -1079,6 +1079,75 @@ async fn an_upload_past_the_quota_is_refused_after_staging_and_leaves_nothing() 
     assert!(!leftovers, "staging bytes of a refused upload do not linger");
 }
 
+#[tokio::test]
+async fn parallel_uploads_of_one_account_never_overshoot_its_quota() {
+    let s = start_with(|cfg| {
+        cfg.media_policy.default = MediaDefault::Quota;
+        cfg.media_policy.quota_bytes = 100;
+    })
+    .await;
+    let alice = s.user("alice").await;
+    let upload = |n: usize| {
+        let client = s.client.clone();
+        let url = format!("{}/_telium/v1/media", s.base);
+        let token = alice.home.clone();
+        async move {
+            client
+                .post(url)
+                .bearer_auth(&token)
+                .header("Content-Type", "text/plain")
+                .body(format!("{:060}", n))
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .as_u16()
+        }
+    };
+
+    // Sixty-byte uploads: two fit the quota of one hundred, the rest must not
+    // ride in on a stale total while the first two are still landing.
+    let outcomes: Vec<u16> = futures_util::future::join_all((0..6).map(upload)).await;
+    let accepted = outcomes.iter().filter(|s| **s == 200).count();
+    let (total,): (i64,) =
+        sqlx::query_as("SELECT COALESCE(SUM(size), 0) FROM media").fetch_one(&s.state.pool).await.unwrap();
+    assert!(
+        total <= 100,
+        "the quota was overshoot by parallel uploads: {total} bytes, outcomes {outcomes:?}"
+    );
+    assert_eq!(accepted, total as usize / 60, "outcomes {outcomes:?}");
+}
+
+#[tokio::test]
+async fn the_operator_can_see_who_is_filling_the_disk() {
+    let s = start().await;
+    let alice = s.user("alice").await;
+    let bob = s.user("bob").await;
+    for (who, pile) in [(&alice, "alice's personal pile of bytes"), (&bob, "bob's own pile")] {
+        let resp = s
+            .client
+            .post(format!("{}/_telium/v1/media", s.base))
+            .bearer_auth(&who.home)
+            .header("Content-Type", "text/plain")
+            .body(pile.to_string())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 200);
+    }
+
+    // Alice registered first: she is the server's operator.
+    let (status, listed) = s.get("/_telium/v1/admin/storage/media-consumers", Some(&alice.home)).await;
+    assert_eq!(status, 200, "{listed}");
+    let consumers = listed["consumers"].as_array().unwrap();
+    assert_eq!(consumers.len(), 2, "{listed}");
+    assert_eq!(consumers[0]["objects"], 1);
+    assert_eq!(consumers[0]["bytes"], 30);
+
+    let (status, refused) = s.get("/_telium/v1/admin/storage/media-consumers", Some(&bob.home)).await;
+    assert_eq!(status, 403, "{refused}");
+}
+
 fn jpeg_fixture(width: u32, height: u32) -> Vec<u8> {    let image = image::RgbImage::from_fn(width, height, |x, y| image::Rgb([x as u8, y as u8, 200]));
     let mut out = std::io::Cursor::new(Vec::new());
     image::DynamicImage::ImageRgb8(image).write_to(&mut out, image::ImageFormat::Jpeg).unwrap();

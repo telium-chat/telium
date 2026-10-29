@@ -68,7 +68,7 @@ a test, and leaves a log line.
   Verify: existing upload/dedup/scanner tests pass unchanged; new test — cap-sized upload
   succeeds, over-cap upload aborts before completion, failed upload leaves no temp file or row.
 
-- [ ] **O6 — Quota check race + admin "top consumers" view**
+- [x] **O6 — Quota check race + admin "top consumers" view**
   Files: `server/src/routes/media.rs` (per-user upload lock around enforce+insert),
   `server/src/admin/` + `server/src/routes/mod.rs` (admin endpoint: top N owners by bytes),
   `web/src/views/control-plane/StoragePane.jsx` (or AccountsPane) to render it.

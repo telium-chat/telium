@@ -158,9 +158,15 @@ pub async fn upload(
     // arrive, and the size caps cut the connection mid-stream instead of
     // buffering a hostile upload in memory first. Quota is checked once the
     // size is known — an over-quota upload costs a temp file, never a stored
-    // object.
+    // object. The account's upload lock is held from that check through the
+    // row insert, so parallel uploads cannot all read a stale total.
     let (destination, local_dest, dest_cap) = destination_limit(&state, &headers).await?;
     let mut staged = stage_body(&state, &purpose, &headers, body, dest_cap).await?;
+    let quota_slot = {
+        let mut map = state.upload_locks.lock().await;
+        map.entry(auth.user_id.clone()).or_default().clone()
+    };
+    let _quota_slot = quota_slot.lock().await;
     enforce_media_policy(&state, &auth.user_id, &purpose, staged.size as i64).await?;
     crate::scan::screen_upload_digests(
         &state, &auth.user_id, &staged.digests, &staged.hash, staged.size,
