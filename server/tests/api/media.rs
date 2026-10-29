@@ -540,8 +540,202 @@ async fn the_same_image_uploaded_twice_is_one_object() {
     assert_eq!(emojis, 3);
 }
 
-fn jpeg_fixture(width: u32, height: u32) -> Vec<u8> {
-    let image = image::RgbImage::from_fn(width, height, |x, y| image::Rgb([x as u8, y as u8, 200]));
+// --- reference accounting and reclamation -----------------------------------
+
+async fn upload_attachment(s: &Server, who: &User, cid: Option<&str>, body: &str) -> Value {
+    let mut req = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&who.home)
+        .header("X-Telium-Filename", "note.txt")
+        .header("Content-Type", "text/plain")
+        .body(body.to_string());
+    if let Some(cid) = cid {
+        req = req.header("X-Telium-Channel-Id", cid);
+    }
+    let resp = req.send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+    resp.json().await.unwrap()
+}
+
+async fn attachment_entry(s: &Server, who: &User, cid: Option<&str>, body: &str) -> (Value, Value) {
+    let media = upload_attachment(s, who, cid, body).await;
+    let entry = json!({
+        "origin": media["origin"],
+        "hash": media["hash"],
+        "filename": media["filename"],
+        "mime": media["mime"],
+        "size": media["size"],
+        "capability": media["capability"],
+    });
+    (media, entry)
+}
+
+async fn media_refs(s: &Server, hash: &str) -> (i64, i64) {
+    sqlx::query_as("SELECT refs, local_dest FROM media WHERE hash = ?")
+        .bind(hash)
+        .fetch_one(&s.state.pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn deleting_a_message_releases_its_upload_for_reclamation() {
+    let (s, alice, _bob, _gid, cid) = social_fixture().await;
+    let (media, entry) = attachment_entry(&s, &alice, Some(&cid), "the bytes").await;
+    let hash = media["hash"].as_str().unwrap().to_string();
+
+    let (status, msg) = s
+        .post(&format!("/_telium/v1/channels/{cid}/messages"), Some(&alice.token), json!({
+            "content": "here you go", "attachments": [entry],
+        }))
+        .await;
+    assert_eq!(status, 200, "{msg}");
+    let (refs, local_dest) = media_refs(&s, &hash).await;
+    assert_eq!(refs, 1, "a sent message claims its upload");
+    assert_eq!(local_dest, 1, "an upload aimed at a local channel is reclaimable here");
+
+    let mid = msg["id"].as_str().unwrap().to_string();
+    let (status, _) = s
+        .delete(&format!("/_telium/v1/channels/{cid}/messages/{mid}"), &alice.token)
+        .await;
+    assert_eq!(status, 200);
+    let (refs, _) = media_refs(&s, &hash).await;
+    assert_eq!(refs, 0, "a deleted message releases its claim");
+
+    let swept = telium_server::routes::media::sweep_unreferenced_before(
+        &s.state,
+        telium_server::util::now_ms() + 1000,
+    )
+    .await
+    .unwrap();
+    assert_eq!(swept, 1);
+    let gone = s
+        .client
+        .get(format!("{}/_telium/v1/media/{hash}?cap={}", s.base, media["capability"].as_str().unwrap()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(gone.status().as_u16(), 404, "reclaimed bytes must stop serving");
+}
+
+#[tokio::test]
+async fn a_message_still_referencing_its_upload_blocks_reclamation() {
+    let (s, alice, _bob, _gid, cid) = social_fixture().await;
+    let (media, entry) = attachment_entry(&s, &alice, Some(&cid), "kept").await;
+    let hash = media["hash"].as_str().unwrap().to_string();
+
+    let (status, _) = s
+        .post(&format!("/_telium/v1/channels/{cid}/messages"), Some(&alice.token), json!({
+            "content": "still here", "attachments": [entry],
+        }))
+        .await;
+    assert_eq!(status, 200);
+
+    let swept = telium_server::routes::media::sweep_unreferenced_before(
+        &s.state,
+        telium_server::util::now_ms() + 1000,
+    )
+    .await
+    .unwrap();
+    assert_eq!(swept, 0, "a live message protects its upload");
+    let alive = s
+        .client
+        .get(format!("{}/_telium/v1/media/{}?cap={}", s.base, hash, media["capability"].as_str().unwrap()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(alive.status().as_u16(), 200);
+}
+
+#[tokio::test]
+async fn an_upload_without_a_local_destination_is_never_reference_reclaimed() {
+    let (s, alice, _bob, _gid, _cid) = social_fixture().await;
+    // No channel or guild header: the shape of an end-to-end-encrypted
+    // conversation upload or a tier-2 origin storing bytes for someone else.
+    let (media, _entry) = attachment_entry(&s, &alice, None, "sealed").await;
+    let hash = media["hash"].as_str().unwrap().to_string();
+    let (refs, local_dest) = media_refs(&s, &hash).await;
+    assert_eq!(refs, 0);
+    assert_eq!(local_dest, 0, "no local destination, no local authority");
+
+    let swept = telium_server::routes::media::sweep_unreferenced_before(
+        &s.state,
+        telium_server::util::now_ms() + 1000,
+    )
+    .await
+    .unwrap();
+    assert_eq!(swept, 0, "this server cannot see who still refers to it");
+    let alive = s
+        .client
+        .get(format!("{}/_telium/v1/media/{}?cap={}", s.base, hash, media["capability"].as_str().unwrap()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(alive.status().as_u16(), 200);
+}
+
+#[tokio::test]
+async fn deleting_a_channel_releases_every_attachment_it_held() {
+    let (s, alice, _bob, gid, cid) = social_fixture().await;
+    let mut hashes = Vec::new();
+    for body in ["first", "second"] {
+        let (media, entry) = attachment_entry(&s, &alice, Some(&cid), body).await;
+        let (status, msg) = s
+            .post(&format!("/_telium/v1/channels/{cid}/messages"), Some(&alice.token), json!({
+                "content": body, "attachments": [entry],
+            }))
+            .await;
+        assert_eq!(status, 200, "{msg}");
+        hashes.push(media["hash"].as_str().unwrap().to_string());
+    }
+
+    let (status, _) = s.delete(&format!("/_telium/v1/channels/{cid}"), &alice.token).await;
+    assert_eq!(status, 200);
+
+    let swept = telium_server::routes::media::sweep_unreferenced_before(
+        &s.state,
+        telium_server::util::now_ms() + 1000,
+    )
+    .await
+    .unwrap();
+    assert_eq!(swept, 2, "both uploads go with the channel");
+    for hash in &hashes {
+        let (rows,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM media WHERE hash = ?")
+            .bind(hash)
+            .fetch_one(&s.state.pool)
+            .await
+            .unwrap();
+        assert_eq!(rows, 0, "{hash}");
+    }
+}
+
+#[tokio::test]
+async fn expression_media_is_not_reference_reclaimed() {
+    let (s, alice, _bob, gid, _cid) = social_fixture().await;
+    let picture = png_fixture(32, 32);
+    let (status, emoji) = s
+        .post(
+            &format!("/_telium/v1/guilds/{gid}/emojis"),
+            Some(&alice.token),
+            json!({ "name": "party", "data": URL_SAFE_NO_PAD.encode(&picture), "mime": "image/png" }),
+        )
+        .await;
+    assert_eq!(status, 200, "{emoji}");
+    let hash = emoji["reference"].as_str().unwrap().rsplit('/').next().unwrap().to_string();
+
+    let swept = telium_server::routes::media::sweep_unreferenced_before(
+        &s.state,
+        telium_server::util::now_ms() + 1000,
+    )
+    .await
+    .unwrap();
+    assert_eq!(swept, 0, "expressions are not attachments; the sweep does not judge them");
+    let alive = s.client.get(format!("{}/_telium/v1/media/{hash}", s.base)).send().await.unwrap();
+    assert_eq!(alive.status().as_u16(), 200);
+}
+
+fn jpeg_fixture(width: u32, height: u32) -> Vec<u8> {    let image = image::RgbImage::from_fn(width, height, |x, y| image::Rgb([x as u8, y as u8, 200]));
     let mut out = std::io::Cursor::new(Vec::new());
     image::DynamicImage::ImageRgb8(image).write_to(&mut out, image::ImageFormat::Jpeg).unwrap();
     out.into_inner()

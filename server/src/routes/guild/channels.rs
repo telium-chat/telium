@@ -544,6 +544,7 @@ pub async fn delete_channel(
         .await?;
 
     let mut tx = state.pool.begin().await?;
+    crate::routes::media::release_message_refs(&mut *tx, "messages.channel_id = ?", &channel_id).await?;
     sqlx::query("DELETE FROM messages WHERE channel_id = ?").bind(&channel_id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM channel_overwrites WHERE channel_id = ?").bind(&channel_id).execute(&mut *tx).await?;
     sqlx::query("UPDATE channels SET parent_id = NULL WHERE parent_id = ?").bind(&channel_id).execute(&mut *tx).await?;

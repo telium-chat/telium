@@ -225,14 +225,15 @@ export function StoragePane() {
             Sweep now
           </Button>
           <Hint className="cp-bar__hint">
-            Drops expired remote-cache entries and deletes media files whose reference count has
-            reached zero.
+            Drops expired remote-cache entries, deletes media files no row accounts for, and
+            reclaims uploads no live message refers to anymore (past the grace window).
           </Hint>
         </div>
         {sweep ? (
           <Notice tone="success">
-            {`Removed ${count(sweep.cache_entries)} expired cache entries and `
-             + `${count(sweep.orphan_files)} unreferenced files.`}
+            {`Removed ${count(sweep.cache_entries)} expired cache entries, `
+             + `${count(sweep.orphan_files)} unreferenced files and `
+             + `${count(sweep.unreferenced_objects ?? 0)} uploads nothing refers to.`}
           </Notice>
         ) : null}
         {present(s?.media_cache_expired) && s.media_cache_expired > 0 ? (

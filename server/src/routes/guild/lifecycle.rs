@@ -106,6 +106,11 @@ async fn erase_guild(state: &AppState, guild_id: &str, gravestone: bool) -> ApiR
     .bind(guild_id)
     .execute(&mut *tx)
     .await?;
+    // Release the message references before the rows go. Cold-archived history
+    // keeps its references: its segments are deleted below without ever being
+    // read back for hashes, so those attachment rows stay (the conservative
+    // direction — reclamation that does not happen, never a live file pulled).
+    crate::routes::media::release_message_refs(&mut *tx, "messages.guild_id = ?", guild_id).await?;
     for sql in [
         "DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE guild_id = ?)",
         "DELETE FROM pins WHERE message_id IN (SELECT id FROM messages WHERE guild_id = ?)",

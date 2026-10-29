@@ -13,7 +13,7 @@ a test, and leaves a log line.
 
 ## Operator
 
-- [ ] **O1 — Reclaim media whose references are gone (refcount wiring)**
+- [x] **O1 — Reclaim media whose references are gone (refcount wiring)**
   Files: `server/src/routes/social.rs`, `server/src/routes/guild/channels.rs`,
   `server/src/routes/guild/lifecycle.rs`, `server/src/routes/media.rs` (new reclaim sweep),
   `server/src/federation/maintenance.rs`, `server/src/admin/health.rs`, `server/src/metrics.rs`,

@@ -658,6 +658,7 @@ pub async fn purge_thread(state: &AppState, id: &str) -> ApiResult<()> {
         unindex_message(state, message).await?;
     }
     let mut tx = state.pool.begin().await?;
+    crate::routes::media::release_message_refs(&mut *tx, "messages.channel_id = ?", id).await?;
     sqlx::query("DELETE FROM messages WHERE channel_id = ?").bind(id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM pins WHERE channel_id = ?").bind(id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM channel_overwrites WHERE channel_id = ?").bind(id).execute(&mut *tx).await?;
@@ -794,6 +795,8 @@ pub async fn crosspost(state: &AppState, source: &str, message: &Value) -> ApiRe
     for target in targets {
         let id = ulid();
         let now = now_ms();
+        let attachments = message["attachments"].to_string();
+        let mut tx = state.pool.begin().await?;
         sqlx::query(
             "INSERT INTO messages (id, channel_id, guild_id, author_id, content, attachments, sticker, \
              reply_to, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -803,12 +806,14 @@ pub async fn crosspost(state: &AppState, source: &str, message: &Value) -> ApiRe
         .bind(message["guild_id"].as_str().unwrap_or_default())
         .bind(message["author"].as_str().unwrap_or_default())
         .bind(message["content"].as_str().unwrap_or_default())
-        .bind(message["attachments"].to_string())
+        .bind(&attachments)
         .bind(message.get("sticker").filter(|v| !v.is_null()).map(ToString::to_string))
         .bind(message["id"].as_str())
         .bind(now)
-        .execute(&state.pool)
+        .execute(&mut *tx)
         .await?;
+        crate::routes::media::claim_message_refs(&mut *tx, &attachments).await?;
+        tx.commit().await?;
         let mut copy = message.clone();
         copy["id"] = json!(id);
         copy["channel_id"] = json!(target);

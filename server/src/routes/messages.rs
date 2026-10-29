@@ -373,6 +373,7 @@ pub async fn send(
     let attachments = serde_json::to_string(&req.attachments).unwrap_or_else(|_| "[]".into());
     let sticker = req.sticker.as_ref().map(ToString::to_string);
     let now = now_ms();
+    let mut tx = state.pool.begin().await?;
     sqlx::query(
         "INSERT INTO messages (id, channel_id, guild_id, author_id, content, attachments, \
          components, cards, sticker, reply_to, thread_id, author_signature, created_at) \
@@ -382,7 +383,9 @@ pub async fn send(
     .bind(&req.content).bind(&attachments).bind(&components).bind(&cards)
     .bind(&sticker).bind(&req.reply_to).bind(&req.thread_id)
     .bind(&req.author_signature).bind(now)
-    .execute(&state.pool).await?;
+    .execute(&mut *tx).await?;
+    crate::routes::media::claim_message_refs(&mut *tx, &attachments).await?;
+    tx.commit().await?;
     // The claim must stand from here or a retry duplicates the message.
     if let Some(ticket) = ticket {
         ticket.settle(crate::sendonce::Outcome::Sent(id.clone()));
@@ -462,13 +465,16 @@ pub(crate) async fn post_opening(
     let id = ulid();
     let now = now_ms();
     let attachments = serde_json::to_string(attachments).unwrap_or_else(|_| "[]".into());
+    let mut tx = state.pool.begin().await?;
     sqlx::query(
         "INSERT INTO messages (id, channel_id, guild_id, author_id, content, attachments, \
          created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id).bind(channel_id).bind(guild_id).bind(author_id)
     .bind(content).bind(&attachments).bind(now)
-    .execute(&state.pool).await?;
+    .execute(&mut *tx).await?;
+    crate::routes::media::claim_message_refs(&mut *tx, &attachments).await?;
+    tx.commit().await?;
 
     let row = MessageRow {
         id,
@@ -527,6 +533,7 @@ pub async fn publish_held(
         .to_string();
     let content = payload.get("content").and_then(Value::as_str).unwrap_or("").to_string();
     let sticker = payload.get("sticker").filter(|s| !s.is_null()).map(ToString::to_string);
+    let mut tx = state.pool.begin().await?;
     sqlx::query(
         "INSERT INTO messages (id, channel_id, guild_id, author_id, content, attachments, sticker, \
          reply_to, thread_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -536,7 +543,9 @@ pub async fn publish_held(
     .bind(payload.get("reply_to").and_then(Value::as_str))
     .bind(payload.get("thread_id").and_then(Value::as_str))
     .bind(now)
-    .execute(&state.pool).await?;
+    .execute(&mut *tx).await?;
+    crate::routes::media::claim_message_refs(&mut *tx, &attachments).await?;
+    tx.commit().await?;
 
     let row = MessageRow {
         id,
@@ -975,11 +984,15 @@ pub async fn delete(
     }
 
     // Blank the columns: archived copies are served without a deleted = 0 filter.
+    // The release reads the attachments being blanked, so both step together.
+    let mut tx = state.pool.begin().await?;
+    crate::routes::media::release_message_refs(&mut *tx, "messages.id = ? AND messages.deleted = 0", &message_id).await?;
     sqlx::query(
         "UPDATE messages SET deleted = 1, content = '', attachments = '[]', \
          components = '[]', cards = '[]', sticker = NULL WHERE id = ?",
     )
-        .bind(&message_id).execute(&state.pool).await?;
+        .bind(&message_id).execute(&mut *tx).await?;
+    tx.commit().await?;
     crate::routes::social::unindex_message(&state, &message_id).await?;
     sqlx::query("DELETE FROM pins WHERE message_id = ?")
         .bind(&message_id).execute(&state.pool).await?;

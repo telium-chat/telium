@@ -67,7 +67,13 @@ pub fn requested_ttl(headers: &HeaderMap) -> ApiResult<Option<i64>> {
     }
 }
 
-async fn destination_limit(state: &AppState, headers: &HeaderMap) -> ApiResult<Option<i64>> {
+/// The narrowest expiry ceiling the destination imposes, and whether the
+/// destination lives on this server at all. `local` is what makes message
+/// references here authoritative for reclamation: an upload aimed at a channel
+/// or guild that exists here will be referenced by rows this server owns, while
+/// a tier-2 or external upload keeps its reference record wherever the bytes
+/// were asked for.
+async fn destination_limit(state: &AppState, headers: &HeaderMap) -> ApiResult<(Option<i64>, bool)> {
     let mut limit = state.cfg.media_policy.max_expiry_secs.non_zero();
     if let Some(channel_id) = header_str(headers, "x-telium-channel-id") {
         let row: Option<(Option<i64>, Option<i64>)> = sqlx::query_as(
@@ -80,6 +86,7 @@ async fn destination_limit(state: &AppState, headers: &HeaderMap) -> ApiResult<O
         if let Some((channel_secs, guild_secs)) = row {
             limit = narrowest(limit, channel_secs);
             limit = narrowest(limit, guild_secs);
+            return Ok((limit, true));
         }
     } else if let Some(guild_id) = header_str(headers, "x-telium-guild-id") {
         let guild_secs: Option<Option<i64>> =
@@ -87,9 +94,11 @@ async fn destination_limit(state: &AppState, headers: &HeaderMap) -> ApiResult<O
                 .bind(&guild_id)
                 .fetch_optional(&state.pool)
                 .await?;
-        limit = narrowest(limit, guild_secs.flatten());
+        if let Some(guild_secs) = guild_secs {
+            return Ok((narrowest(limit, guild_secs), true));
+        }
     }
-    Ok(limit)
+    Ok((limit, false))
 }
 
 fn narrowest(a: Option<i64>, b: Option<i64>) -> Option<i64> {
@@ -179,7 +188,7 @@ pub async fn store_bytes(
             .await?;
 
     let ttl = requested_ttl(headers)?;
-    let destination = destination_limit(state, headers).await?;
+    let (destination, local_dest) = destination_limit(state, headers).await?;
     let expires_at = expires_at_from(now_ms(), ttl, &[destination]);
 
     let capability = match existing {
@@ -205,8 +214,8 @@ pub async fn store_bytes(
 
             sqlx::query(
                 "INSERT INTO media (hash, owner_user_id, filename, mime, size, width, height, \
-                 thumbhash, capability, purpose, created_at, expires_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 thumbhash, capability, purpose, created_at, expires_at, refs, local_dest) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
             )
             .bind(&hash)
             .bind(user_id)
@@ -220,6 +229,7 @@ pub async fn store_bytes(
             .bind(purpose)
             .bind(now_ms())
             .bind(expires_at)
+            .bind(local_dest)
             .execute(&state.pool)
             .await?;
             capability
@@ -232,6 +242,53 @@ pub async fn store_bytes(
     Ok(reference_json(
         state, &hash, &capability, &filename, &mime, body.len() as i64, expires_at, headers,
     ))
+}
+
+/// Claims one live reference on each local media row named by a message's
+/// attachments. Runs in the transaction that inserts the message, so a message
+/// and its references commit together. Rows for other origins do not exist
+/// here and are skipped; entries without a hash (external hosts) match nothing.
+pub async fn claim_message_refs(
+    exec: &mut sqlx::SqliteConnection,
+    attachments: &str,
+) -> ApiResult<()> {
+    let parsed: Value = match serde_json::from_str(attachments) {
+        Ok(parsed) => parsed,
+        Err(_) => return Ok(()),
+    };
+    let Some(entries) = parsed.as_array() else { return Ok(()) };
+    for entry in entries {
+        let Some(hash) = entry.get("hash").and_then(Value::as_str) else { continue };
+        if !valid_hash(hash) {
+            continue;
+        }
+        sqlx::query("UPDATE media SET refs = refs + 1 WHERE hash = ?")
+            .bind(hash)
+            .execute(&mut *exec)
+            .await?;
+    }
+    Ok(())
+}
+
+/// Releases the references held by every message matched by `predicate`, which
+/// is a compile-time constant at each call site and carries exactly one `?`
+/// placeholder for `bind`. Must run in the same transaction that deletes or
+/// blanks those rows, before it does: the release reads `attachments` out of
+/// the rows it is about to lose. Cold-archived history is not released — its
+/// segments still serve the attachment.
+pub async fn release_message_refs(
+    exec: &mut sqlx::SqliteConnection,
+    predicate: &str,
+    bind: &str,
+) -> ApiResult<()> {
+    let sql = format!(
+        "UPDATE media SET refs = MAX(refs - 1, 0) WHERE hash IN (\
+         SELECT json_extract(value, '$.hash') FROM messages, json_each(messages.attachments) \
+         WHERE {predicate} AND json_valid(messages.attachments) \
+         AND json_type(value) = 'object' AND json_extract(value, '$.hash') IS NOT NULL)"
+    );
+    sqlx::query(&sql).bind(bind).execute(exec).await?;
+    Ok(())
 }
 
 fn reference_json(
@@ -1295,8 +1352,42 @@ fn expired(expires_at: Option<i64>) -> bool {
     matches!(expires_at, Some(at) if at <= now_ms())
 }
 
-pub async fn sweep_expired(state: &AppState) -> anyhow::Result<u64> {
+/// How long an unreferenced upload is left alone before the sweep reclaims it:
+/// the window a client has between uploading a file and sending the message
+/// that claims it, and the window an operator has to notice a mass deletion.
+const RECLAIM_GRACE_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// Reclaims uploads nothing on this server refers to anymore: attachment-purpose
+/// objects whose destination was local, whose message references have all been
+/// released, and whose upload is older than the grace window. Rows this server
+/// cannot vouch for (`local_dest = 0`) are never touched — an end-to-end
+/// encrypted conversation or a foreign guild may still refer to them.
+pub async fn sweep_unreferenced(state: &AppState) -> anyhow::Result<u64> {
+    sweep_unreferenced_before(state, now_ms() - RECLAIM_GRACE_MS).await
+}
+
+pub async fn sweep_unreferenced_before(state: &AppState, cutoff_ms: i64) -> anyhow::Result<u64> {
     let doomed: Vec<String> = sqlx::query_scalar(
+        "SELECT hash FROM media WHERE purpose = 'attachment' AND local_dest = 1 \
+         AND refs <= 0 AND created_at <= ?",
+    )
+    .bind(cutoff_ms)
+    .fetch_all(&state.pool)
+    .await?;
+    let mut swept = 0u64;
+    for hash in &doomed {
+        sqlx::query("DELETE FROM media WHERE hash = ?").bind(hash).execute(&state.pool).await?;
+        let _ = state.media_store.delete(&media_key(state, hash)).await;
+        broadcast_purge_quietly(state, hash);
+        swept += 1;
+    }
+    if swept > 0 {
+        tracing::info!(target: crate::logcat::MAINTENANCE, count = swept, "swept unreferenced media");
+    }
+    Ok(swept)
+}
+
+pub async fn sweep_expired(state: &AppState) -> anyhow::Result<u64> {    let doomed: Vec<String> = sqlx::query_scalar(
         "SELECT hash FROM media WHERE expires_at IS NOT NULL AND expires_at <= ?",
     )
     .bind(now_ms())

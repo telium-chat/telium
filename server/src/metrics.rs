@@ -856,7 +856,8 @@ pub async fn admin_storage(
 
     let unreferenced: Option<(i64, i64)> = if state.cfg.roles.media {
         sqlx::query_as(
-            "SELECT COUNT(*), COALESCE(SUM(size), 0) FROM media WHERE refcount <= 0",
+            "SELECT COUNT(*), COALESCE(SUM(size), 0) FROM media \
+             WHERE purpose = 'attachment' AND local_dest = 1 AND refs <= 0",
         )
         .fetch_one(&state.pool)
         .await
@@ -920,15 +921,18 @@ pub async fn admin_storage_sweep(
     let orphans = crate::routes::media::sweep_orphans(&state)
         .await
         .map_err(ApiError::Internal)?;
+    let unreferenced = crate::routes::media::sweep_unreferenced(&state)
+        .await
+        .map_err(ApiError::Internal)?;
     crate::admin::record(
         &state,
         &auth.user_id,
         "storage.sweep",
         None,
-        json!({ "cache_entries": cache, "orphan_files": orphans }),
+        json!({ "cache_entries": cache, "orphan_files": orphans, "unreferenced_objects": unreferenced }),
     )
     .await;
-    Ok(Json(json!({ "cache_entries": cache, "orphan_files": orphans })))
+    Ok(Json(json!({ "cache_entries": cache, "orphan_files": orphans, "unreferenced_objects": unreferenced })))
 }
 
 #[cfg(test)]

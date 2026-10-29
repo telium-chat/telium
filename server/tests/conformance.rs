@@ -1089,7 +1089,7 @@ const USER_TABLES: &[(&str, &str, &[&str])] = &[
     ("key_vault", "key_vault", &["user_id", "escrow_key"]),
     ("key_backup", "key_backup", &["user_id"]),
     ("dm_outbox", "dm_outbox", &[]),
-    ("media", "media", &["owner_user_id", "refcount", "moved_to"]),
+    ("media", "media", &["owner_user_id", "refcount", "moved_to", "refs", "local_dest"]),
     ("remote_memberships", "remote_memberships", &["user_id", "updated_at"]),
 ];
 

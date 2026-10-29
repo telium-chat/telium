@@ -642,11 +642,13 @@ async fn storage(state: &AppState, f: &mut Findings) {
         return;
     }
 
-    let unreferenced: Option<(i64, i64)> =
-        sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM media WHERE refcount <= 0")
-            .fetch_one(&state.pool)
-            .await
-            .ok();
+    let unreferenced: Option<(i64, i64)> = sqlx::query_as(
+        "SELECT COUNT(*), COALESCE(SUM(size), 0) FROM media \
+         WHERE purpose = 'attachment' AND local_dest = 1 AND refs <= 0",
+    )
+    .fetch_one(&state.pool)
+    .await
+    .ok();
     if let Some((objects, bytes)) = unreferenced {
         if bytes >= RECLAIMABLE_NOTICE_BYTES {
             f.say(
@@ -654,8 +656,8 @@ async fn storage(state: &AppState, f: &mut Findings) {
                 Severity::Notice,
                 "there is media nothing refers to",
                 format!(
-                    "{objects} objects totalling {} are no longer referenced by any message, \
-                     profile or guild.",
+                    "{objects} objects totalling {} are no longer referenced by any message. \
+                     They are past or nearing the reclamation grace window.",
                     gib(bytes)
                 ),
                 "Reclaim it now with Sweep in the Storage pane; otherwise the scheduled \
