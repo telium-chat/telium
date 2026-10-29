@@ -4,6 +4,7 @@ import { useAsync, useStore } from '../../hooks/useStore.jsx';
 import { reportError, toast } from '../../hooks/useToast.jsx';
 import { copyToClipboard } from '../../lib/clipboard.js';
 import { uploadMedia, profileRef } from '../../lib/upload.js';
+import { downscaleToFit } from '../../lib/image.js';
 import { publicProfileLink } from '../PublicProfileLanding.jsx';
 import { themeOf } from '../../lib/util.js';
 import { useImageCrop } from '../dialogs/CropImageDialog.jsx';
@@ -64,8 +65,12 @@ function Editor({ me }) {
 
   const pick = async (kind, picked) => {
     if (!picked) return;
-    const file = await cropImage(picked, kind);
-    if (!file) return;
+    const cropped = await cropImage(picked, kind);
+    if (!cropped) return;
+    // The origin refuses profile assets past its cap with "crop or downscale
+    // it first"; do the downscaling here so the sentence stays unread.
+    const cap = store.caps.get(store.session?.home?.domain)?.media?.max_profile_asset_bytes ?? null;
+    const file = await downscaleToFit(cropped, cap);
     setUploading(kind);
     try {
       const media = await uploadMedia(store.home, file, 'profile');

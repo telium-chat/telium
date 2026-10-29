@@ -130,7 +130,7 @@ a test, and leaves a log line.
   client renders "X of Y used".
   Verify: server test for `used_bytes`; client test renders usage and the warn state.
 
-- [ ] **U7 — Client-side image downscaling** **[DECISION — scope]**
+- [x] **U7 — Client-side image downscaling** **[DECISION — scope]**
   Files: `web/src/lib/image.js` (canvas re-encode helper), `web/src/views/user-settings/ProfilePane.jsx`
   (avatar/banner over `max_profile_asset_bytes` downscaled before upload), attachments per
   decision, i18n.

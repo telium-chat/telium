@@ -1850,6 +1850,7 @@ pub async fn capabilities(State(state): State<AppState>, headers: HeaderMap) -> 
             "enabled": state.cfg.roles.media,
             "default_policy": state.cfg.media_policy.default,
             "max_file_bytes": state.cfg.media_policy.max_file_bytes,
+            "max_profile_asset_bytes": state.cfg.media_policy.max_profile_asset_bytes,
             "max_expiry_secs": state.cfg.media_policy.max_expiry_secs,
             "default_expiry_secs": state.cfg.media_policy.default_expiry_secs,
             "attachment_max_age_days": state.cfg.media_policy.attachment_max_age_days,
