@@ -1504,12 +1504,12 @@ pub async fn delete(
     if !valid_hash(&hash) {
         return Err(ApiError::NotFound("no such media".into()));
     }
-    let owner: Option<String> =
-        sqlx::query_scalar("SELECT owner_user_id FROM media WHERE hash = ?")
+    let row: Option<(String, i64)> =
+        sqlx::query_as("SELECT owner_user_id, refcount FROM media WHERE hash = ?")
             .bind(&hash)
             .fetch_optional(&state.pool)
             .await?;
-    let owner = owner.ok_or_else(|| ApiError::NotFound("no such media".into()))?;
+    let (owner, refcount) = row.ok_or_else(|| ApiError::NotFound("no such media".into()))?;
     let is_admin: i64 = sqlx::query_scalar("SELECT admin FROM accounts WHERE user_id = ?")
         .bind(&auth.user_id)
         .fetch_optional(&state.pool)
@@ -1517,6 +1517,19 @@ pub async fn delete(
         .unwrap_or(0);
     if owner != auth.user_id && is_admin == 0 {
         return Err(ApiError::Forbidden("only the uploader may delete this object".into()));
+    }
+    // Identical bytes are stored once and claimed by every upload of them, so
+    // the object under this hash is not the requester's alone. An owner's
+    // delete stops here rather than breaking someone else's messages; an
+    // operator's takedown does not ask.
+    if refcount > 1 && is_admin == 0 {
+        return Err(ApiError::Conflict(format!(
+            "this file's bytes are shared with {} other upload{} of the same content; \
+             deleting it here would break their messages. Each uploader can delete \
+             their own; an operator can remove it outright.",
+            refcount - 1,
+            if refcount > 2 { "s" } else { "" },
+        )));
     }
 
     sqlx::query("DELETE FROM media WHERE hash = ?").bind(&hash).execute(&state.pool).await?;

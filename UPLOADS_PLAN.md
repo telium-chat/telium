@@ -28,7 +28,7 @@ a test, and leaves a log line.
   row, bytes, and purge broadcast all gone; profile/expression references are *not* reclaimed;
   existing media tests still green; `cargo test`.
 
-- [ ] **O2 — Deleting deduplicated media must not break other uploaders** **[DECISION]**
+- [x] **O2 — Deleting deduplicated media must not break other uploaders** **[DECISION]**
   Files: `server/src/routes/media.rs` (delete handler), `server/tests/` (new).
   Approach: depends on decision — recommended: owner delete returns 409 while `refcount > 1`
   (content is shared by other uploads); server admins bypass (takedown stays possible).

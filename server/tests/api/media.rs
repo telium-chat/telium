@@ -735,6 +735,85 @@ async fn expression_media_is_not_reference_reclaimed() {
     assert_eq!(alive.status().as_u16(), 200);
 }
 
+#[tokio::test]
+async fn an_owner_cannot_delete_deduplicated_content_another_upload_holds() {
+    let s = start().await;
+    let alice = s.user("alice").await;
+    let bob = s.user("bob").await;
+    let bytes = "the same bytes twice";
+
+    let resp = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&bob.home)
+        .header("Content-Type", "text/plain")
+        .body(bytes.to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+    let hash = resp.json::<Value>().await.unwrap()["hash"].as_str().unwrap().to_string();
+
+    let resp = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home)
+        .header("Content-Type", "text/plain")
+        .body(bytes.to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 200, "dedup lands on the same object");
+    let (refcount,): (i64,) = sqlx::query_as("SELECT refcount FROM media WHERE hash = ?")
+        .bind(&hash)
+        .fetch_one(&s.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(refcount, 2, "two uploads claim one object");
+
+    // Bob owns the row but not the content: deleting would break Alice's copy.
+    let (status, refused) = s
+        .delete(&format!("/_telium/v1/media/{hash}"), &bob.home)
+        .await;
+    assert_eq!(status, 409, "{refused}");
+    assert!(refused["message"].as_str().unwrap().contains("shared"), "{refused}");
+    let (rows,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM media WHERE hash = ?")
+        .bind(&hash)
+        .fetch_one(&s.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 1, "a refused delete removes nothing");
+
+    // The operator's takedown does not ask.
+    let (status, gone) = s.delete(&format!("/_telium/v1/media/{hash}"), &alice.home).await;
+    assert_eq!(status, 200, "{gone}");
+    let (rows,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM media WHERE hash = ?")
+        .bind(&hash)
+        .fetch_one(&s.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 0);
+}
+
+#[tokio::test]
+async fn an_owner_may_delete_a_file_their_own_message_still_holds() {
+    let (s, alice, _bob, _gid, cid) = social_fixture().await;
+    let (media, entry) = attachment_entry(&s, &alice, Some(&cid), "mine to remove").await;
+    let hash = media["hash"].as_str().unwrap().to_string();
+
+    let (status, msg) = s
+        .post(&format!("/_telium/v1/channels/{cid}/messages"), Some(&alice.token), json!({
+            "content": "look at this", "attachments": [entry],
+        }))
+        .await;
+    assert_eq!(status, 200, "{msg}");
+
+    // One refcount claim (their upload) even though a message references it:
+    // pulling your own file is the point of the endpoint.
+    let (status, gone) = s.delete(&format!("/_telium/v1/media/{hash}"), &alice.home).await;
+    assert_eq!(status, 200, "{gone}");
+}
+
 fn jpeg_fixture(width: u32, height: u32) -> Vec<u8> {    let image = image::RgbImage::from_fn(width, height, |x, y| image::Rgb([x as u8, y as u8, 200]));
     let mut out = std::io::Cursor::new(Vec::new());
     image::DynamicImage::ImageRgb8(image).write_to(&mut out, image::ImageFormat::Jpeg).unwrap();
