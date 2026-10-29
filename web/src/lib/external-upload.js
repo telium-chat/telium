@@ -3,7 +3,7 @@ import { b64url, bytes } from './util.js';
 
 /// Gofile is always browser-direct: its bytes must never traverse the homeserver.
 
-export async function uploadExternal(home, host, file, { onProgress } = {}) {
+export async function uploadExternal(home, host, file, { onProgress, signal } = {}) {
   if (!home?.base || !home?.token || !host?.id) {
     throw new Error('External upload is not configured for this account.');
   }
@@ -13,8 +13,8 @@ export async function uploadExternal(home, host, file, { onProgress } = {}) {
 
   const browserDirect = host.provider === 'gofile' || host.browser_direct === true;
   const result = browserDirect
-    ? await uploadBrowserDirect(home, host, file, onProgress)
-    : await relayUpload(home, host, file, onProgress);
+    ? await uploadBrowserDirect(home, host, file, onProgress, signal)
+    : await relayUpload(home, host, file, onProgress, signal);
   const url = new URL(result.url);
   if (url.protocol !== 'https:') throw new Error('External providers must return an HTTPS file URL.');
   const origin = url.host;
@@ -37,13 +37,13 @@ export async function uploadExternal(home, host, file, { onProgress } = {}) {
   };
 }
 
-async function uploadBrowserDirect(home, host, file, onProgress) {
+async function uploadBrowserDirect(home, host, file, onProgress, signal) {
   if (host.provider !== 'gofile') {
     throw new Error(`Unsupported browser-direct upload provider: ${host.provider || 'unknown'}`);
   }
   const form = new FormData();
   form.append('file', file, file.name);
-  const payload = await multipart(host.upload_url, form, onProgress, true, file.size);
+  const payload = await multipart(host.upload_url, form, onProgress, true, file.size, signal);
   const data = payload?.data || payload;
   const direct = data?.directLink || data?.direct_link;
   if (direct && /^https:\/\//i.test(direct)) return { url: direct };
@@ -200,7 +200,7 @@ function fetchWithTimeout(url, options, timeoutMs) {
   return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
-function relayUpload(home, host, file, onProgress) {
+function relayUpload(home, host, file, onProgress, signal) {
   const url = `${home.base.replace(/\/$/, '')}/_telium/v1/media/external/${encodeURIComponent(host.id)}`;
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -208,9 +208,15 @@ function relayUpload(home, host, file, onProgress) {
     xhr.setRequestHeader('Authorization', `Bearer ${home.token}`);
     xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
     xhr.setRequestHeader('X-Telium-Filename', encodeURIComponent(file.name));
+    const onAbort = () => xhr.abort();
+    if (signal) {
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    }
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) onProgress?.(event.loaded, event.total);
     };
+    xhr.onabort = () => reject(new DOMException('The upload was cancelled.', 'AbortError'));
     xhr.onerror = () => reject(new Error('External upload relay failed.'));
     xhr.onload = () => {
       if (xhr.status < 200 || xhr.status >= 300) {
@@ -231,18 +237,25 @@ function relayUpload(home, host, file, onProgress) {
   });
 }
 
-function multipart(url, form, onProgress, json = false, fileSize = 0) {
+function multipart(url, form, onProgress, json = false, fileSize = 0, signal) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', url);
+    const onAbort = () => xhr.abort();
+    if (signal) {
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    }
     onProgress?.(0, fileSize || 0);
     xhr.upload.onprogress = (event) => {
       const total = event.lengthComputable && event.total > 0 ? event.total : fileSize;
       if (!total) return;
       onProgress?.(Math.min(event.loaded, total), total);
     };
+    xhr.onabort = () => reject(new DOMException('The upload was cancelled.', 'AbortError'));
     xhr.onerror = () => reject(new Error('External upload failed.'));
     xhr.onload = () => {
+      signal?.removeEventListener('abort', onAbort);
       if (xhr.status < 200 || xhr.status >= 300) {
         let message = 'External upload failed.';
         try { message = JSON.parse(xhr.responseText).message || message; } catch { /* text response */ }

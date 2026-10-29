@@ -90,7 +90,7 @@ a test, and leaves a log line.
   Verify: unit test — oversized file never hits the network and gets the clear message; server
   test — oversize body yields the JSON error shape.
 
-- [ ] **U2 — Cancel in-flight uploads**
+- [x] **U2 — Cancel in-flight uploads**
   Files: `web/src/lib/upload.js` (AbortController through `xhrSend` and `teliumFetch`),
   `web/src/views/chat/useStaging.jsx` (each staged entry owns a controller; removing the card
   aborts), `web/src/views/chat/StagedAttachments.jsx` (cancel affordance), i18n,

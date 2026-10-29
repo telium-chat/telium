@@ -140,8 +140,10 @@ function AttachmentCard({ item, onRemove, onRename }) {
           type="button"
           className="popup-icon-button"
           data-tone="danger"
-          title={t('chat.staged.remove')}
-          aria-label={t('chat.staged.removeOf', { name: item.name })}
+          title={t(item.status === 'uploading' ? 'chat.staged.cancelUpload' : 'chat.staged.remove')}
+          aria-label={t(item.status === 'uploading'
+            ? 'chat.staged.cancelUploadOf'
+            : 'chat.staged.removeOf', { name: item.name })}
           onClick={onRemove}
         >
           <TrashIcon className="size-3.5" />

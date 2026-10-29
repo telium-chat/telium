@@ -3252,6 +3252,8 @@ export const messages = {
   // needs no article in front of it as the subject of this construction.
   'chat.staged.uploadFailed': '{name} ließ sich nicht hochladen',
   'chat.staged.tooLarge': 'Zu groß — Anhänge sind hier auf {limit} begrenzt.',
+  'chat.staged.cancelUpload': 'Upload abbrechen',
+  'chat.staged.cancelUploadOf': 'Upload von {name} abbrechen',
 
   // -------------------------------------------------------------- expiry units
 

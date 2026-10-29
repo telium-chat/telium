@@ -810,6 +810,8 @@ export const chat = {
   // six files with one failure needs to say which one.
   'chat.staged.uploadFailed': 'Could not upload {name}',
   'chat.staged.tooLarge': 'Too large — attachments here are capped at {limit}.',
+  'chat.staged.cancelUpload': 'Cancel upload',
+  'chat.staged.cancelUploadOf': 'Cancel uploading {name}',
 
   // ------------------------------------------------------------ expiry units
 

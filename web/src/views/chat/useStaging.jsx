@@ -12,6 +12,7 @@ function previewable(file) {
 
 export function useStagedFiles(surface) {
   const [items, setItems] = useState([]);
+  const controllers = useRef(new Map());
 
   const urls = useRef(new Set());
   const mint = useCallback((file) => {
@@ -28,9 +29,12 @@ export function useStagedFiles(surface) {
   }, []);
   useEffect(() => {
     const held = urls.current;
+    const live = controllers.current;
     return () => {
       held.forEach((url) => URL.revokeObjectURL(url));
       held.clear();
+      live.forEach((controller) => controller.abort());
+      live.clear();
     };
   }, []);
 
@@ -60,10 +64,13 @@ export function useStagedFiles(surface) {
 
     for (const entry of entries) {
       if (entry.status === 'error') continue;
+      const controller = new AbortController();
+      controllers.current.set(entry.key, controller);
       try {
         const att = await surface.upload(entry.file, {
           ttlSecs: opts.ttlSecs,
           externalHost: opts.externalHost || null,
+          signal: controller.signal,
           onProgress: (loaded, total) => setItems((was) => was.map((item) => (
             item.key === entry.key
               ? { ...item, progress: total ? Math.round((loaded / total) * 100) : 0 }
@@ -74,17 +81,31 @@ export function useStagedFiles(surface) {
           item.key === entry.key ? { ...item, status: 'ready', progress: 100, att } : item
         )));
       } catch (e) {
+        // A cancel is the user's own act — remove() already took the card,
+        // and nothing was stored or charged.
+        if (controller.signal.aborted) return;
         reportError(e, t('chat.staged.uploadFailed', { name: entry.name }));
         release([entry]);
         setItems((was) => was.filter((item) => item.key !== entry.key));
+      } finally {
+        controllers.current.delete(entry.key);
       }
     }
   }, [surface, mint, release]);
 
-  const remove = useCallback((key) => setItems((was) => {
-    release(was.filter((item) => item.key === key));
-    return was.filter((item) => item.key !== key);
-  }), [release]);
+  const remove = useCallback((key) => {
+    controllers.current.get(key)?.abort();
+    controllers.current.delete(key);
+    setItems((was) => {
+      release(was.filter((item) => item.key === key));
+      return was.filter((item) => item.key !== key);
+    });
+  }, [release]);
+
+  const abortAll = useCallback(() => {
+    controllers.current.forEach((controller) => controller.abort());
+    controllers.current.clear();
+  }, []);
 
   const rename = useCallback((key, next) => {
     const name = String(next || '').trim();
@@ -100,12 +121,16 @@ export function useStagedFiles(surface) {
     }));
   }, []);
 
-  const clear = useCallback(() => setItems([]), []);
+  const clear = useCallback(() => {
+    abortAll();
+    setItems([]);
+  }, [abortAll]);
   const restore = useCallback((list) => setItems(list || []), []);
   const drop = useCallback((list) => {
+    abortAll();
     release(list);
     setItems([]);
-  }, [release]);
+  }, [abortAll, release]);
 
   const staged = useMemo(() => items.filter((i) => i.att).map((i) => i.att), [items]);
 
