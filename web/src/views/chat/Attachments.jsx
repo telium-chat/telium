@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../../hooks/useStore.jsx';
 import { reportError, toast } from '../../hooks/useToast.jsx';
-import { bytes, relative } from '../../lib/util.js';
+import { bytes } from '../../lib/util.js';
 import { fetchEncrypted } from '../../lib/upload.js';
 import { saveObjectUrl } from '../../lib/download.js';
 import { gofilePlaybackUrl, isGofileDownloadUrl } from '../../lib/external-media.js';
@@ -11,6 +11,8 @@ import { t } from '../../lib/i18n/index.js';
 import { useT } from '../../lib/i18n/react.jsx';
 import { ImagePreview } from './ImagePreview.jsx';
 import { isGofileAttachment, playableKind, PlayableAttachment } from './PlayableAttachment.jsx';
+import { teliumFetch } from '../../lib/net/transport.js';
+import { hostingNote } from '../../lib/attachment-note.js';
 
 const opened = new Map();
 
@@ -65,18 +67,24 @@ export function Attachments({ msg, base, encrypted }) {
   );
 }
 
-/// An attachment's remaining life, for files the origin will sweep. Null
-/// means the origin keeps it — there is nothing to count down.
-export function ExpiryNote({ att, now = Date.now() }) {
-  const tr = useT();
-  const at = att.expires_at;
-  if (at == null) return null;
-  if (at <= now) {
-    return <span className="text-2xs text-muted">{tr('chat.attachment.expired')}</span>;
-  }
-  return (
-    <span className="text-2xs text-muted">{tr('chat.attachment.expiresIn', { when: relative(at) })}</span>
-  );
+/// When a playable source fails, the element cannot say why. A 404 from the
+/// origin's metadata means the bytes are gone — deleted or swept — so the
+/// answer is the truth instead of "open the original file".
+function unavailableProbe(store, att, base) {
+  const hash = att.ref || att.hash;
+  if (!hash) return null;
+  const cap = att.capability ? `?cap=${encodeURIComponent(att.capability)}` : '';
+  return async () => {
+    try {
+      const resp = await teliumFetch(
+        `${base || ''}/_telium/v1/media/${encodeURIComponent(hash)}/meta${cap}`,
+        {}, { purpose: 'attachment' },
+      );
+      return resp.status === 404;
+    } catch {
+      return false;
+    }
+  };
 }
 
 function shapeOf(att) {
@@ -86,8 +94,9 @@ function shapeOf(att) {
 }
 
 function Media({
-  att, url, host, save, shape, fallbackUrl = null, onOpenOriginal = null,
+  att, url, host, save, shape, fallbackUrl = null, onOpenOriginal = null, probe = null,
 }) {
+  const tr = useT();
   if (shape === 'playable') {
     return (
       <PlayableAttachment
@@ -97,6 +106,7 @@ function Media({
         onSave={save}
         fallbackUrl={fallbackUrl}
         onOpenOriginal={onOpenOriginal}
+        probeUnavailable={probe}
       />
     );
   }
@@ -113,8 +123,10 @@ function Media({
           className="overflow-hidden rounded-xl border border-border"
           imageClassName="max-h-[320px] object-contain"
         />
-        {host ? <span className="px-1 text-2xs text-muted">{`Hosted on ${host}`}</span> : null}
-        <ExpiryNote att={att} />
+        {(() => {
+          const note = hostingNote(host, att);
+          return note ? <span className="px-1 text-2xs text-muted">{note}</span> : null;
+        })()}
       </div>
     );
   }
@@ -189,29 +201,27 @@ function PlainAttachment({ att, base }) {
         shape={shape}
         fallbackUrl={gofile ? url : null}
         onOpenOriginal={openProvider}
+        probe={gofile ? null : unavailableProbe(store, att, base)}
       />
     );
   }
 
   const fileUrl = readyUrl || (deliveryUrl === false ? url : null);
   return (
-    <div className="flex max-w-full flex-col gap-0.5">
-      <FileChip
-        href={!native && fileUrl ? fileUrl : undefined}
-        download={!native && gofile && fileUrl ? (att.name || att.ref || 'attachment') : undefined}
-        onClick={save || openProvider || undefined}
-        name={att.name || att.ref}
-        size={att.size}
-        note={
-          openProvider
-            ? tr('chat.attachment.openOnProvider', { provider: GOFILE })
-            : native
-              ? (fileUrl ? tr('chat.attachment.save') : tr('chat.attachment.preparing'))
-              : (gofile && !fileUrl ? tr('chat.attachment.preparing') : host)
-        }
-      />
-      <ExpiryNote att={att} />
-    </div>
+    <FileChip
+      href={!native && fileUrl ? fileUrl : undefined}
+      download={!native && gofile && fileUrl ? (att.name || att.ref || 'attachment') : undefined}
+      onClick={save || openProvider || undefined}
+      name={att.name || att.ref}
+      size={att.size}
+      note={
+        openProvider
+          ? tr('chat.attachment.openOnProvider', { provider: GOFILE })
+          : native
+            ? (fileUrl ? tr('chat.attachment.save') : tr('chat.attachment.preparing'))
+            : (gofile && !fileUrl ? tr('chat.attachment.preparing') : hostingNote(host, att))
+      }
+    />
   );
 }
 
@@ -261,17 +271,16 @@ export function SealedAttachment({ att }) {
   }
 
   return (
-    <div className="flex max-w-full flex-col gap-0.5">
-      <FileChip
-        href={href && !native ? href : undefined}
-        onClick={href && native ? () => saveTo(att, href) : undefined}
-        download={href && !native ? (att.name || undefined) : undefined}
-        name={att.name}
-        size={href ? att.size : null}
-        note={href ? (native ? tr('chat.attachment.save') : null) : tr('chat.attachment.decrypting')}
-      />
-      <ExpiryNote att={att} />
-    </div>
+    <FileChip
+      href={href && !native ? href : undefined}
+      onClick={href && native ? () => saveTo(att, href) : undefined}
+      download={href && !native ? (att.name || undefined) : undefined}
+      name={att.name}
+      size={href ? att.size : null}
+      note={href
+        ? (native ? tr('chat.attachment.save') : hostingNote(null, att))
+        : tr('chat.attachment.decrypting')}
+    />
   );
 }
 

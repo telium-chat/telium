@@ -3495,6 +3495,9 @@ export const messages = {
   'chat.attachment.savedUnnamed': 'تم حفظ المُرفَق.',
   'chat.attachment.saveFailed': 'تعذّر حفظ المُرفَق',
   'chat.attachment.expiresIn': 'تنتهي صلاحيتها {when}',
+  'chat.attachment.hostedExpires': 'مستضاف على {host}، تنتهي صلاحيته {when}',
+  'chat.attachment.hostedExpired': 'مستضاف على {host} — انتهت صلاحيته',
+  'chat.attachment.fileGone': 'حُذف هذا الملف أو انتهت صلاحيته',
   'chat.attachment.expired': 'انتهت صلاحية هذا الملف',
 
   // `{provider}` is a company name -- Gofile today -- never translated, always

@@ -3484,6 +3484,9 @@ export const messages = {
   'chat.attachment.savedUnnamed': 'Anhang gespeichert.',
   'chat.attachment.saveFailed': 'Der Anhang ließ sich nicht speichern',
   'chat.attachment.expiresIn': 'Läuft {when} ab',
+  'chat.attachment.hostedExpires': 'Gehostet auf {host}, läuft {when} ab',
+  'chat.attachment.hostedExpired': 'Gehostet auf {host} — abgelaufen',
+  'chat.attachment.fileGone': 'Diese Datei wurde gelöscht oder ist abgelaufen',
   'chat.attachment.expired': 'Diese Datei ist abgelaufen',
 
   // The external file host. `{provider}` is a company name — Gofile today — and

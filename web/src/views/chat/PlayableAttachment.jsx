@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { bytes } from '../../lib/util.js';
+import { hostingNote } from '../../lib/attachment-note.js';
 import { duration as mediaTime } from '../../lib/i18n/index.js';
 import { t as translate } from '../../lib/i18n/index.js';
 import { useT } from '../../lib/i18n/react.jsx';
@@ -68,7 +69,7 @@ export function isPlayableLink(url) {
 }
 
 function PersistentAudioControls({
-  player, url, name, kind, onSave = null, fallbackUrl = null, onOpenOriginal = null,
+  player, url, name, kind, onSave = null, fallbackUrl = null, onOpenOriginal = null, probeUnavailable = null, note = null,
 }) {
   const t = useT();
   const label = kind === 'video'
@@ -157,34 +158,72 @@ function PersistentAudioControls({
         />
       </div>
       {mediaError ? (
-        onSave ? (
-          <button
-            type="button"
-            onClick={onSave}
-            className="min-h-10 px-2.5 pb-2 text-start text-xs font-medium text-danger hover:underline"
-          >
-            {t('chat.player.failedSave')}
-          </button>
-        ) : onOpenOriginal ? (
-          <button
-            type="button"
-            onClick={onOpenOriginal}
-            className="min-h-10 px-2.5 pb-2 text-start text-xs font-medium text-danger hover:underline"
-          >
-            {t('chat.player.failedOpen')}
-          </button>
-        ) : (
-          <a
-            href={fallbackUrl || url}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="px-2.5 pb-2 text-2xs text-danger hover:underline"
-          >
-            {t('chat.player.failedOpen')}
-          </a>
-        )
+        <SourceFailure
+          probe={probeUnavailable}
+          url={url}
+          onSave={onSave}
+          onOpenOriginal={onOpenOriginal}
+          fallbackUrl={fallbackUrl}
+        />
       ) : null}
     </div>
+  );
+}
+
+/// The media element cannot say why a source failed — a deleted or expired
+/// file and an unsupported codec look the same through `onError`. When the
+/// caller can probe the origin's metadata, a 404 means the file is gone, and
+/// "open the original file" would be pointing at a grave.
+function SourceFailure({ probe, url, onSave, onOpenOriginal, fallbackUrl }) {
+  const t = useT();
+  const [gone, setGone] = useState(null);
+  useEffect(() => {
+    setGone(null);
+    if (!probe) return undefined;
+    let live = true;
+    probe().then((result) => { if (live) setGone(result); })
+      .catch(() => { if (live) setGone(false); });
+    return () => { live = false; };
+  }, [url, probe]);
+
+  if (gone) {
+    return (
+      <span className="px-2.5 pb-2 text-2xs text-muted">
+        {t('chat.attachment.fileGone')}
+      </span>
+    );
+  }
+  if (onSave) {
+    return (
+      <button
+        type="button"
+        onClick={onSave}
+        className="min-h-10 px-2.5 pb-2 text-start text-xs font-medium text-danger hover:underline"
+      >
+        {t('chat.player.failedSave')}
+      </button>
+    );
+  }
+  if (onOpenOriginal) {
+    return (
+      <button
+        type="button"
+        onClick={onOpenOriginal}
+        className="min-h-10 px-2.5 pb-2 text-start text-xs font-medium text-danger hover:underline"
+      >
+        {t('chat.player.failedOpen')}
+      </button>
+    );
+  }
+  return (
+    <a
+      href={fallbackUrl || url}
+      target="_blank"
+      rel="noreferrer noopener"
+      className="px-2.5 pb-2 text-2xs text-danger hover:underline"
+    >
+      {t('chat.player.failedOpen')}
+    </a>
   );
 }
 
@@ -197,7 +236,7 @@ function MediaPlayer(props) {
 }
 
 function LocalMediaPlayer({
-  kind, url, name, mime, onWidthChange, onSave = null, fallbackUrl = null,
+  kind, url, name, mime, onWidthChange, onSave = null, fallbackUrl = null, probeUnavailable = null, note = null,
   onOpenOriginal = null,
 }) {
   const t = useT();
@@ -463,32 +502,13 @@ function LocalMediaPlayer({
         ) : null}
       </div>
       {mediaError ? (
-        onSave ? (
-          <button
-            type="button"
-            onClick={onSave}
-            className="min-h-10 px-2.5 pb-2 text-start text-xs font-medium text-danger hover:underline"
-          >
-            {t('chat.player.failedSave')}
-          </button>
-        ) : onOpenOriginal ? (
-          <button
-            type="button"
-            onClick={onOpenOriginal}
-            className="min-h-10 px-2.5 pb-2 text-start text-xs font-medium text-danger hover:underline"
-          >
-            {t('chat.player.failedOpen')}
-          </button>
-        ) : (
-          <a
-            href={fallbackUrl || url}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="px-2.5 pb-2 text-2xs text-danger hover:underline"
-          >
-            {t('chat.player.failedOpen')}
-          </a>
-        )
+        <SourceFailure
+          probe={probeUnavailable}
+          url={url}
+          onSave={onSave}
+          onOpenOriginal={onOpenOriginal}
+          fallbackUrl={fallbackUrl}
+        />
       ) : null}
     </div>
   );
@@ -496,12 +516,15 @@ function LocalMediaPlayer({
 
 export function PlayableAttachment({
   att, url, host, onSave = null, fallbackUrl = null, onOpenOriginal = null,
+  probeUnavailable = null,
 }) {
   const t = useT();
   const [cardWidth, setCardWidth] = useState(null);
   const kind = playableKind(att);
   if (!kind || !url) return null;
   const name = att.name || att.filename || att.ref || t('chat.attachment.unnamed');
+  const note = hostingNote(host, att);
+
 
   return (
     <div
@@ -552,7 +575,7 @@ export function PlayableAttachment({
           </button>
         ) : null}
       </div>
-      <span className="text-2xs text-muted">{t('chat.attachment.hostedOn', { host })}</span>
+      {note ? <span className="text-2xs text-muted">{note}</span> : null}
       <MediaPlayer
         kind={kind}
         url={url}
@@ -562,6 +585,8 @@ export function PlayableAttachment({
         onSave={onSave}
         fallbackUrl={fallbackUrl}
         onOpenOriginal={onOpenOriginal}
+        probeUnavailable={probeUnavailable}
+        note={note}
       />
     </div>
   );
@@ -589,6 +614,7 @@ export function PlayableLink({ url }) {
   const name = linkFilename(url);
   const host = linkHost(url);
   const att = { name };
+  const note = hostingNote(host, att);
 
   return (
     <div
@@ -609,13 +635,14 @@ export function PlayableLink({ url }) {
           <EmojiText>{name}</EmojiText>
         </a>
       </div>
-      <span className="text-2xs text-muted">{t('chat.attachment.hostedOn', { host })}</span>
+      {note ? <span className="text-2xs text-muted">{note}</span> : null}
       <MediaPlayer
         kind={kind}
         url={url}
         name={name}
         mime={playableMime(att, kind)}
         onWidthChange={kind === 'video' ? setCardWidth : undefined}
+        note={note}
       />
     </div>
   );

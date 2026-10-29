@@ -209,6 +209,22 @@ and verified in f6bc8ebc before this audit closed.
 
 Docs commits live in the separate telium-chat-docs repository: 399ee12, 1fcf38c, 3846154.
 
+## Post-review fixes (first review round)
+
+- **A deleted or expired file no longer says "Playback failed — open the original file."**
+  The media element cannot say why a source failed, so the player now probes the origin's
+  metadata: a 404 means the bytes are gone and the card says "This file was deleted or has
+  expired" with no dead link; anything else keeps the recovery buttons.
+- **One line, everywhere.** The expiry countdown stopped being a line of its own and joined the
+  host: "Hosted on X, expires in 6 days" — on images (replacing the separate line), on video and
+  audio players (which had no indicator at all, only a host line), in file chips, and for
+  end-to-end-encrypted attachments ("Expires in 6 days" with no host to name).
+- **The quota question, answered where it is asked.** There is no default quota: with
+  `media_policy.default = "enabled"` uploads are unlimited and `quota_bytes` is inert — which is
+  why the client shows no usage line. `configuration.md` now says so, and startup gained a notice
+  naming the inert knob ("uploads are unlimited: … quota_bytes is not enforced") so an operator
+  who believed they had a ceiling finds out at boot, not in review.
+
 ## Notes
 
 - Work happens on a new branch off `kit/standalone-compose` (one commit per item); the dirty

@@ -1029,6 +1029,9 @@ export const chat = {
   'chat.attachment.savedUnnamed': 'Attachment saved.',
   'chat.attachment.saveFailed': 'Could not save attachment',
   'chat.attachment.expiresIn': 'Expires {when}',
+  'chat.attachment.hostedExpires': 'Hosted on {host}, expires in {when}',
+  'chat.attachment.hostedExpired': 'Hosted on {host} — expired',
+  'chat.attachment.fileGone': 'This file was deleted or has expired',
   'chat.attachment.expired': 'This file has expired',
 
   // The external file host. `{provider}` is a company name -- Gofile today --

@@ -3495,6 +3495,9 @@ export const messages = {
   // A context phrase, so no 。, matching every other `*Failed` in the file.
   'chat.attachment.saveFailed': '添付ファイルを保存できませんでした',
   'chat.attachment.expiresIn': '{when} に期限切れ',
+  'chat.attachment.hostedExpires': '{host} でホスト中、{when} に期限切れ',
+  'chat.attachment.hostedExpired': '{host} でホスト中 — 期限切れ',
+  'chat.attachment.fileGone': 'このファイルは削除されたか期限切れです',
   'chat.attachment.expired': 'このファイルは期限切れです',
 
   // The entry the English comment cites as its own example, and it is right: the

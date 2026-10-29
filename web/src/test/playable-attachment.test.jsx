@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { StoreProvider } from '../hooks/useStore.jsx';
 import { Attachments, SealedAttachment } from '../views/chat/Attachments.jsx';
 import {
@@ -282,5 +282,44 @@ describe('DM playable attachments', () => {
     await waitFor(() => expect(second.container.querySelector('audio')).toBeTruthy());
     expect(createObjectURL).toHaveBeenCalledTimes(1);
     second.unmount();
+  });
+});
+
+describe('a playable source that fails', () => {
+  const att = { name: 'clip.mp4', mime: 'video/mp4', size: 1024, hash: 'abc123', capability: 'cap-1' };
+
+  function renderPlayer(probe) {
+    return render(
+      <PlayableAttachment
+        att={att}
+        url="https://home.example/_telium/v1/media/abc123?cap=cap-1"
+        host="home.example"
+        probeUnavailable={probe}
+      />,
+    );
+  }
+
+  it('says a deleted or expired file is gone, and offers no dead link', async () => {
+    const probe = vi.fn(async () => true);
+    const { container } = renderPlayer(probe);
+    fireEvent.error(container.querySelector('video'));
+    await waitFor(() => expect(screen.getByText('This file was deleted or has expired')).toBeTruthy());
+    expect(screen.queryByText(/Playback failed/)).toBeNull();
+    expect(probe).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the recovery links when the origin still holds the file', async () => {
+    const probe = vi.fn(async () => false);
+    const { container } = renderPlayer(probe);
+    fireEvent.error(container.querySelector('video'));
+    await waitFor(() => expect(screen.getByText('Playback failed — open the original file')).toBeTruthy());
+  });
+
+  it('does not probe when there is nothing to probe with', () => {
+    const probe = vi.fn(async () => true);
+    const { container } = renderPlayer(null);
+    fireEvent.error(container.querySelector('video'));
+    expect(screen.getByText('Playback failed — open the original file')).toBeTruthy();
+    expect(probe).not.toHaveBeenCalled();
   });
 });
