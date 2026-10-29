@@ -43,6 +43,45 @@ impl ObjectStore {
         }
     }
 
+    /// Persists bytes that are already on local disk at `from` without holding
+    /// them in memory where avoidable: the local backend renames, the S3
+    /// backend reads the file and uploads it. The source file is left in place;
+    /// the caller owns its cleanup.
+    pub async fn put_from_file(&self, key: &str, from: &Path) -> ApiResult<()> {
+        match self {
+            ObjectStore::Local => {
+                let path = Path::new(key).to_path_buf();
+                let parent = path
+                    .parent()
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                tokio::fs::create_dir_all(&parent)
+                    .await
+                    .map_err(|e| ApiError::Internal(e.into()))?;
+                // Same volume is the normal case: a rename, atomic and free.
+                if tokio::fs::rename(from, &path).await.is_ok() {
+                    if let Ok(dir) = std::fs::File::open(&parent) {
+                        if let Err(err) = dir.sync_all() {
+                            tracing::debug!(target: crate::logcat::MEDIA, %err, dir = %parent.display(), "could not fsync object store directory");
+                        }
+                    }
+                    return Ok(());
+                }
+                // Cross-device staging: read it back and write durably.
+                let bytes = tokio::fs::read(from).await.map_err(|e| ApiError::Internal(e.into()))?;
+                tokio::task::spawn_blocking(move || write_durably(&parent, &path, &bytes))
+                    .await
+                    .map_err(|e| ApiError::Internal(e.into()))?
+                    .map_err(|e| ApiError::Internal(e.into()))
+            }
+            ObjectStore::S3(s3) => {
+                let bytes = tokio::fs::read(from).await.map_err(|e| ApiError::Internal(e.into()))?;
+                s3.put_bytes(key, bytes).await.map_err(|e| ApiError::Internal(e.into()))
+            }
+        }
+    }
+
     pub async fn get(&self, key: &str) -> ApiResult<Vec<u8>> {
         match self {
             ObjectStore::Local => tokio::fs::read(key).await.map_err(|e| ApiError::Internal(e.into())),

@@ -1007,6 +1007,78 @@ async fn the_guild_cap_does_not_cage_profile_assets() {
     assert_eq!(avatar.status().as_u16(), 200, "the cap is for attachments, not avatars");
 }
 
+#[tokio::test]
+async fn a_refused_upload_leaves_no_staging_file_or_row_behind() {
+    // Over the global cap: the stream is cut mid-flight.
+    let s = start_with(|cfg| cfg.media_policy.max_file_bytes = 8).await;
+    let alice = s.user("alice").await;
+
+    let refused = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home)
+        .header("Content-Type", "text/plain")
+        .body("these bytes are much too long for the cap".to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status().as_u16(), 413);
+    assert!(
+        refused.json::<Value>().await.unwrap()["message"].as_str().unwrap().contains("limit"),
+        "the refusal names the cap"
+    );
+
+    let (rows,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM media").fetch_one(&s.state.pool).await.unwrap();
+    assert_eq!(rows, 0, "an aborted upload stores nothing");
+    let staging = s.dir.join("media").join("tmp");
+    let leftovers = staging.exists()
+        && std::fs::read_dir(&staging).unwrap().count() > 0;
+    assert!(!leftovers, "the staging directory is empty after a refusal");
+}
+
+#[tokio::test]
+async fn an_upload_past_the_quota_is_refused_after_staging_and_leaves_nothing() {
+    let s = start_with(|cfg| {
+        cfg.media_policy.default = MediaDefault::Quota;
+        cfg.media_policy.quota_bytes = 16;
+    })
+    .await;
+    let alice = s.user("alice").await;
+
+    let first = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home)
+        .header("Content-Type", "text/plain")
+        .body("0123456789abcdef".to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status().as_u16(), 200);
+
+    let refused = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home)
+        .header("Content-Type", "text/plain")
+        .body("over the quota entirely".to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status().as_u16(), 413);
+    assert!(
+        refused.json::<Value>().await.unwrap()["message"].as_str().unwrap().contains("quota"),
+        "the refusal names the quota"
+    );
+
+    let (count, total): (i64, i64) =
+        sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM media").fetch_one(&s.state.pool).await.unwrap();
+    assert_eq!((count, total), (1, 16), "only the first upload is on the books");
+    let staging = s.dir.join("media").join("tmp");
+    let leftovers = staging.exists() && std::fs::read_dir(&staging).unwrap().count() > 0;
+    assert!(!leftovers, "staging bytes of a refused upload do not linger");
+}
+
 fn jpeg_fixture(width: u32, height: u32) -> Vec<u8> {    let image = image::RgbImage::from_fn(width, height, |x, y| image::Rgb([x as u8, y as u8, 200]));
     let mut out = std::io::Cursor::new(Vec::new());
     image::DynamicImage::ImageRgb8(image).write_to(&mut out, image::ImageFormat::Jpeg).unwrap();

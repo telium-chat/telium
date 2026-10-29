@@ -1281,27 +1281,28 @@ async fn reference_guild(a: &Home) -> String {
 
     run(pool, "INSERT INTO guilds (id, alias, name, icon_ref, owner_user_id, settings, created_at, origin_policy, \
          require_voucher, external_emoji, fallback_domain, min_account_age_days, domain_policy, screening, \
-         hold_first_messages, media_expiry_limit_secs, emoji_export_policy, emoji_export_role_id) \
+         hold_first_messages, media_expiry_limit_secs, emoji_export_policy, emoji_export_role_id, \
+         media_max_file_bytes) \
          VALUES (?, 'conformance', 'Conformance', \
          'media://a.example/guild-icon', '@ana:a.example', '{\"theme\":\"dark\"}', 1000, 'allowlist', 1, 0, \
-         'standby.example', 7, 'blocklist', '[\"why are you here\"]', 1, 86400, 'role', ?)", &[&g, &mods]).await;
+         'standby.example', 7, 'blocklist', '[\"why are you here\"]', 1, 86400, 'role', ?, 1048576)", &[&g, &mods]).await;
     run(pool, "INSERT INTO roles (id, guild_id, name, color, position, permissions, hoist, mentionable) VALUES \
          (?, ?, '@everyone', 0, 0, 1024, 0, 0), (?, ?, 'mods', 15844367, 1, 8200, 1, 1)", &[&g, &g, &mods, &g]).await;
     run(pool, "INSERT INTO channels (id, guild_id, type, name, topic, position, parent_id, slowmode, created_at, \
          voice_region, bitrate, user_limit, strip_embeds, media_expiry_limit_secs, available_tags, default_sort, \
-         default_layout, voice_status, voice_status_at, voice_status_author) VALUES \
+         default_layout, voice_status, voice_status_at, voice_status_author, media_max_file_bytes) VALUES \
          (?, ?, 'category', 'text channels', NULL, 0, NULL, 0, 1000, 'auto', NULL, 0, 0, NULL, '[]', 'activity', 'list', \
-          NULL, NULL, NULL), \
+          NULL, NULL, NULL, NULL), \
          (?, ?, 'text', 'general', 'the general channel', 1, ?, 5, 1000, 'auto', NULL, 0, 1, 3600, \
-          '[{\"id\":\"t1\",\"name\":\"bug\"}]', 'creation', 'gallery', NULL, NULL, NULL), \
+          '[{\"id\":\"t1\",\"name\":\"bug\"}]', 'creation', 'gallery', NULL, NULL, NULL, 262144), \
          (?, ?, 'text', 'announcements', NULL, 2, ?, 0, 1000, 'auto', NULL, 0, 0, NULL, '[]', 'activity', 'list', \
-          NULL, NULL, NULL), \
+          NULL, NULL, NULL, NULL), \
          (?, ?, 'voice', 'lounge', NULL, 3, ?, 0, 1000, 'eu', 96000, 10, 0, NULL, '[]', 'activity', 'list', \
-          'ranked grind in the lounge', 1500, '@ana:a.example'), \
+          'ranked grind in the lounge', 1500, '@ana:a.example', NULL), \
          (?, ?, 'thread', 'a question', NULL, 0, ?, 0, 1100, 'auto', NULL, 0, 0, NULL, '[]', 'activity', 'list', \
-          NULL, NULL, NULL), \
+          NULL, NULL, NULL, NULL), \
          (?, ?, 'text', 'ticket-0001', NULL, 4, ?, 0, 1600, 'auto', NULL, 0, 0, NULL, '[]', 'activity', 'list', \
-          NULL, NULL, NULL)",
+          NULL, NULL, NULL, NULL)",
         &[&category, &g, &general, &g, &category, &news, &g, &category, &voice, &g, &category, &thread, &g, &general,
           &ticket_channel, &g, &category]).await;
     run(pool, "INSERT INTO threads (id, parent_id, guild_id, starter_id, owner, title, tags, archived, locked, \

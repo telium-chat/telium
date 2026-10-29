@@ -9,8 +9,11 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use ed25519_dalek::Signer;
+use futures_util::StreamExt;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use sha1::Digest as _;
+use sha2::Digest as _;
 
 const PUBLIC_PURPOSES: &[&str] = &["expression"];
 
@@ -141,7 +144,7 @@ pub async fn upload(
     State(state): State<AppState>,
     auth: HomeAuth,
     headers: HeaderMap,
-    body: Bytes,
+    body: Body,
 ) -> ApiResult<Json<Value>> {
     if !state.cfg.roles.media {
         return Err(ApiError::Forbidden("this server does not host media".into()));
@@ -150,10 +153,144 @@ pub async fn upload(
     if !["attachment", "profile", "expression"].contains(&purpose.as_str()) {
         return Err(ApiError::BadRequest("purpose must be attachment, profile or expression".into()));
     }
-    enforce_media_policy(&state, &auth.user_id, &purpose, body.len() as i64).await?;
-    Ok(Json(store_bytes(&state, &auth.user_id, &purpose, &headers, body).await?))
+
+    // The body streams to a staging file: digests are computed as chunks
+    // arrive, and the size caps cut the connection mid-stream instead of
+    // buffering a hostile upload in memory first. Quota is checked once the
+    // size is known — an over-quota upload costs a temp file, never a stored
+    // object.
+    let (destination, local_dest, dest_cap) = destination_limit(&state, &headers).await?;
+    let mut staged = stage_body(&state, &purpose, &headers, body, dest_cap).await?;
+    enforce_media_policy(&state, &auth.user_id, &purpose, staged.size as i64).await?;
+    crate::scan::screen_upload_digests(
+        &state, &auth.user_id, &staged.digests, &staged.hash, staged.size,
+    )
+    .await?;
+    let out = store_payload(
+        &state, &auth.user_id, &purpose, &headers, &staged.hash, staged.size,
+        StagedBytes::File(staged.temp_path().to_path_buf()), destination, local_dest,
+    )
+    .await?;
+    Ok(Json(out))
 }
 
+/// An upload staged to disk while the request body streamed in: digests are
+/// final, the bytes sit at `temp` until `store_payload` moves them into the
+/// object store.
+struct StagedUpload {
+    hash: String,
+    digests: crate::scan::UploadDigests,
+    size: usize,
+    temp: TempFile,
+}
+
+impl StagedUpload {
+    fn temp_path(&self) -> &std::path::Path {
+        &self.temp.0
+    }
+}
+
+/// A staging file that removes itself on drop, whatever the exit: an error
+/// return, a refused upload, or the handler being dropped mid-request. The
+/// unlink is synchronous, not spawned — cleanup must survive a shutting-down
+/// runtime, and one staging-file unlink is nothing to park a worker for.
+struct TempFile(std::path::PathBuf);
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        if self.0.as_os_str().is_empty() {
+            return;
+        }
+        if let Err(err) = std::fs::remove_file(&self.0) {
+            if err.kind() != std::io::ErrorKind::NotFound {
+                tracing::debug!(target: crate::logcat::MEDIA, error = %err, path = %self.0.display(), "could not remove a staged upload");
+            }
+        }
+    }
+}
+
+enum StagedBytes {
+    Memory(Vec<u8>),
+    File(std::path::PathBuf),
+}
+
+/// Streams the request body into a staging file under `media_dir/tmp`,
+/// hashing as it goes. Aborts mid-stream once a cap the destination imposes is
+/// exceeded, so an oversized upload never finishes transferring.
+async fn stage_body(
+    state: &AppState,
+    purpose: &str,
+    headers: &HeaderMap,
+    body: Body,
+    dest_cap: Option<i64>,
+) -> ApiResult<StagedUpload> {
+    let global_cap = state.cfg.media_policy.max_file_bytes;
+    let (cap, over): (usize, String) = match purpose {
+        "profile" => {
+            let cap = global_cap.min(state.cfg.media_policy.max_profile_asset_bytes);
+            (cap, format!("profile assets are capped at {cap} bytes; crop or downscale it first"))
+        }
+        "attachment" => match dest_cap {
+            Some(dest) if usize::try_from(dest).unwrap_or(usize::MAX) < global_cap => (
+                usize::try_from(dest).unwrap_or(usize::MAX),
+                format!("this destination accepts attachments up to {dest} bytes"),
+            ),
+            _ => (global_cap, format!("file exceeds this origin's limit of {global_cap} bytes")),
+        },
+        _ => (global_cap, format!("file exceeds this origin's limit of {global_cap} bytes")),
+    };
+
+    let tmp_dir = state.cfg.media_dir.join("tmp");
+    tokio::fs::create_dir_all(&tmp_dir)
+        .await
+        .map_err(|e| ApiError::Internal(e.into()))?;
+    let temp = TempFile(tmp_dir.join(format!(
+        "upload-{}-{}",
+        std::process::id(),
+        random_token(12)
+    )));
+
+    let mut hasher_blake3 = blake3::Hasher::new();
+    let mut hasher_sha256 = sha2::Sha256::new();
+    let mut hasher_sha1 = sha1::Sha1::new();
+    let mut file = tokio::fs::File::create(&temp.0)
+        .await
+        .map_err(|e| ApiError::Internal(e.into()))?;
+    let mut size: usize = 0;
+    let mut stream = body.into_data_stream();
+    use tokio::io::AsyncWriteExt;
+    while let Some(chunk) = stream.next().await {
+        let chunk: Bytes = chunk.map_err(|e| ApiError::BadRequest(format!("upload aborted: {e}")))?;
+        size += chunk.len();
+        if size > cap {
+            return Err(ApiError::TooLarge(over));
+        }
+        hasher_blake3.update(&chunk);
+        hasher_sha256.update(&chunk);
+        hasher_sha1.update(&chunk);
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| ApiError::Internal(e.into()))?;
+    }
+    file.flush()
+        .await
+        .map_err(|e| ApiError::Internal(e.into()))?;
+
+    if size == 0 {
+        return Err(ApiError::BadRequest("empty upload".into()));
+    }
+
+    let digests = crate::scan::UploadDigests {
+        blake3: hasher_blake3.finalize().to_hex().to_string(),
+        sha256: hex::encode(hasher_sha256.finalize()),
+        sha1: hex::encode(hasher_sha1.finalize()),
+    };
+    let hash = digests.blake3.clone();
+    Ok(StagedUpload { hash, digests, size, temp })
+}
+
+/// Byte-backed twin of [`upload`]'s path, for callers that already hold the
+/// bytes: the voucher route and internal imports.
 pub async fn store_bytes(
     state: &AppState,
     user_id: &str,
@@ -187,11 +324,34 @@ pub async fn store_bytes(
         )));
     }
 
-    let hash = blake3::hash(&body).to_hex().to_string();
-    crate::scan::screen_upload(state, user_id, &hash, &body).await?;
+    let digests = crate::scan::UploadDigests::of(&body);
+    let hash = digests.blake3.clone();
+    crate::scan::screen_upload_digests(state, user_id, &digests, &hash, body.len()).await?;
+    store_payload(
+        state, user_id, purpose, headers, &hash, body.len(),
+        StagedBytes::Memory(body.to_vec()), destination, local_dest,
+    )
+    .await
+}
+
+/// The settle step shared by both ingest paths: dedup on the content hash,
+/// expiry narrowing, the media row, and the object store write. `payload`
+/// carries the bytes either in memory or as a staged file to move in.
+#[allow(clippy::too_many_arguments)]
+async fn store_payload(
+    state: &AppState,
+    user_id: &str,
+    purpose: &str,
+    headers: &HeaderMap,
+    hash: &str,
+    size: usize,
+    payload: StagedBytes,
+    destination: Option<i64>,
+    local_dest: bool,
+) -> ApiResult<Value> {
     let filename = header_str(headers, "x-telium-filename")
         .map(|raw| decode_filename(&raw))
-        .unwrap_or_else(|| hash.clone());
+        .unwrap_or_else(|| hash.to_string());
     let claimed_mime = headers
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
@@ -200,7 +360,7 @@ pub async fn store_bytes(
 
     let existing: Option<(String, String, Option<i64>)> =
         sqlx::query_as("SELECT capability, owner_user_id, expires_at FROM media WHERE hash = ?")
-            .bind(&hash)
+            .bind(hash)
             .fetch_optional(&state.pool)
             .await?;
 
@@ -214,14 +374,14 @@ pub async fn store_bytes(
     let capability = match existing {
         Some((capability, _, existing_expires)) => {
             sqlx::query("UPDATE media SET refcount = refcount + 1 WHERE hash = ?")
-                .bind(&hash)
+                .bind(hash)
                 .execute(&state.pool)
                 .await?;
             let settled = earlier_of(existing_expires, expires_at);
             if settled != existing_expires {
                 sqlx::query("UPDATE media SET expires_at = ? WHERE hash = ?")
                     .bind(settled)
-                    .bind(&hash)
+                    .bind(hash)
                     .execute(&state.pool)
                     .await?;
             }
@@ -229,19 +389,22 @@ pub async fn store_bytes(
         }
         None => {
             let capability = random_token(24);
-            let key = media_key(state, &hash);
-            state.media_store.put(&key, body.to_vec()).await?;
+            let key = media_key(state, hash);
+            match payload {
+                StagedBytes::Memory(bytes) => state.media_store.put(&key, bytes).await?,
+                StagedBytes::File(temp) => state.media_store.put_from_file(&key, &temp).await?,
+            }
 
             sqlx::query(
                 "INSERT INTO media (hash, owner_user_id, filename, mime, size, width, height, \
                  thumbhash, capability, purpose, created_at, expires_at, refs, local_dest) \
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
             )
-            .bind(&hash)
+            .bind(hash)
             .bind(user_id)
             .bind(&filename)
             .bind(&mime)
-            .bind(body.len() as i64)
+            .bind(size as i64)
             .bind(header_i64(headers, "x-telium-width"))
             .bind(header_i64(headers, "x-telium-height"))
             .bind(header_str(headers, "x-telium-thumbhash"))
@@ -257,10 +420,10 @@ pub async fn store_bytes(
     };
 
     crate::metrics::Metrics::bump(&state.metrics.media_uploads, 1);
-    crate::metrics::Metrics::bump(&state.metrics.media_upload_bytes, body.len() as u64);
+    crate::metrics::Metrics::bump(&state.metrics.media_upload_bytes, size as u64);
 
     Ok(reference_json(
-        state, &hash, &capability, &filename, &mime, body.len() as i64, expires_at, headers,
+        state, hash, &capability, &filename, &mime, size as i64, expires_at, headers,
     ))
 }
 
@@ -1514,6 +1677,22 @@ pub async fn sweep_orphans(state: &AppState) -> anyhow::Result<u64> {
     }
     if swept > 0 {
         tracing::info!(target: crate::logcat::MAINTENANCE, count = swept, "swept media objects no row accounts for");
+    }
+
+    // Staging files left by a connection that died mid-upload live in `tmp/`,
+    // outside the shard layout, so the row-matching scan above cannot see
+    // them. Anything unclaimed for a day goes the same way.
+    let staging = state.cfg.media_dir.join("tmp");
+    if let Ok(mut entries) = tokio::fs::read_dir(&staging).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let Ok(meta) = entry.metadata().await else { continue };
+            if !meta.is_file() || meta.modified().map(|m| m > cutoff).unwrap_or(true) {
+                continue;
+            }
+            if tokio::fs::remove_file(entry.path()).await.is_ok() {
+                swept += 1;
+            }
+        }
     }
     Ok(swept)
 }

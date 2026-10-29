@@ -58,7 +58,7 @@ a test, and leaves a log line.
   Verify: migration applies and reverts; test that an upload over the channel cap is rejected
   with a message naming the limit; settings UI test; existing uploads unaffected when null.
 
-- [ ] **O5 — Stream uploads to disk instead of buffering in RAM**
+- [x] **O5 — Stream uploads to disk instead of buffering in RAM**
   Files: `server/src/routes/media.rs` (upload handler: stream the body, incremental BLAKE3,
   temp file under the media dir), `server/src/objectstore.rs` (put-from-file for local and S3),
   `server/tests/`.
