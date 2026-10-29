@@ -3494,6 +3494,8 @@ export const messages = {
   'chat.attachment.savedUnnamed': '添付ファイルを保存しました。',
   // A context phrase, so no 。, matching every other `*Failed` in the file.
   'chat.attachment.saveFailed': '添付ファイルを保存できませんでした',
+  'chat.attachment.expiresIn': '{when} に期限切れ',
+  'chat.attachment.expired': 'このファイルは期限切れです',
 
   // The entry the English comment cites as its own example, and it is right: the
   // verb goes last in Japanese, so 「{provider} で開く」 is unreachable from a

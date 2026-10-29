@@ -138,7 +138,7 @@ a test, and leaves a log line.
   steps until they fit — mirrors the server's own "crop or downscale it first" message.
   Verify: unit test — an oversized image is shrunk and uploads; a fitting image is untouched.
 
-- [ ] **U8 — Show remaining lifetime on sent attachments**
+- [x] **U8 — Show remaining lifetime on sent attachments**
   Files: attachment rendering in `web/src/views/chat/` (details/menu on Attachment, image and
   playable cards), `web/src/lib/` relative-time formatting, i18n catalogs.
   Approach: attachment references already carry `expires_at`; render "expires in X" in the

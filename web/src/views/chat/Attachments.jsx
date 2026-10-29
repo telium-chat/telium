@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../../hooks/useStore.jsx';
 import { reportError, toast } from '../../hooks/useToast.jsx';
-import { bytes } from '../../lib/util.js';
+import { bytes, relative } from '../../lib/util.js';
 import { fetchEncrypted } from '../../lib/upload.js';
 import { saveObjectUrl } from '../../lib/download.js';
 import { gofilePlaybackUrl, isGofileDownloadUrl } from '../../lib/external-media.js';
@@ -65,6 +65,20 @@ export function Attachments({ msg, base, encrypted }) {
   );
 }
 
+/// An attachment's remaining life, for files the origin will sweep. Null
+/// means the origin keeps it — there is nothing to count down.
+export function ExpiryNote({ att, now = Date.now() }) {
+  const tr = useT();
+  const at = att.expires_at;
+  if (at == null) return null;
+  if (at <= now) {
+    return <span className="text-2xs text-muted">{tr('chat.attachment.expired')}</span>;
+  }
+  return (
+    <span className="text-2xs text-muted">{tr('chat.attachment.expiresIn', { when: relative(at) })}</span>
+  );
+}
+
 function shapeOf(att) {
   if (playableKind(att)) return 'playable';
   if ((att.mime || '').startsWith('image/')) return 'image';
@@ -100,6 +114,7 @@ function Media({
           imageClassName="max-h-[320px] object-contain"
         />
         {host ? <span className="px-1 text-2xs text-muted">{`Hosted on ${host}`}</span> : null}
+        <ExpiryNote att={att} />
       </div>
     );
   }
@@ -180,20 +195,23 @@ function PlainAttachment({ att, base }) {
 
   const fileUrl = readyUrl || (deliveryUrl === false ? url : null);
   return (
-    <FileChip
-      href={!native && fileUrl ? fileUrl : undefined}
-      download={!native && gofile && fileUrl ? (att.name || att.ref || 'attachment') : undefined}
-      onClick={save || openProvider || undefined}
-      name={att.name || att.ref}
-      size={att.size}
-      note={
-        openProvider
-          ? tr('chat.attachment.openOnProvider', { provider: GOFILE })
-          : native
-            ? (fileUrl ? tr('chat.attachment.save') : tr('chat.attachment.preparing'))
-            : (gofile && !fileUrl ? tr('chat.attachment.preparing') : host)
-      }
-    />
+    <div className="flex max-w-full flex-col gap-0.5">
+      <FileChip
+        href={!native && fileUrl ? fileUrl : undefined}
+        download={!native && gofile && fileUrl ? (att.name || att.ref || 'attachment') : undefined}
+        onClick={save || openProvider || undefined}
+        name={att.name || att.ref}
+        size={att.size}
+        note={
+          openProvider
+            ? tr('chat.attachment.openOnProvider', { provider: GOFILE })
+            : native
+              ? (fileUrl ? tr('chat.attachment.save') : tr('chat.attachment.preparing'))
+              : (gofile && !fileUrl ? tr('chat.attachment.preparing') : host)
+        }
+      />
+      <ExpiryNote att={att} />
+    </div>
   );
 }
 
@@ -243,14 +261,17 @@ export function SealedAttachment({ att }) {
   }
 
   return (
-    <FileChip
-      href={href && !native ? href : undefined}
-      onClick={href && native ? () => saveTo(att, href) : undefined}
-      download={href && !native ? (att.name || undefined) : undefined}
-      name={att.name}
-      size={href ? att.size : null}
-      note={href ? (native ? tr('chat.attachment.save') : null) : tr('chat.attachment.decrypting')}
-    />
+    <div className="flex max-w-full flex-col gap-0.5">
+      <FileChip
+        href={href && !native ? href : undefined}
+        onClick={href && native ? () => saveTo(att, href) : undefined}
+        download={href && !native ? (att.name || undefined) : undefined}
+        name={att.name}
+        size={href ? att.size : null}
+        note={href ? (native ? tr('chat.attachment.save') : null) : tr('chat.attachment.decrypting')}
+      />
+      <ExpiryNote att={att} />
+    </div>
   );
 }
 

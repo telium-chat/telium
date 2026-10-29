@@ -3483,6 +3483,8 @@ export const messages = {
   'chat.attachment.saved': '{name} gespeichert.',
   'chat.attachment.savedUnnamed': 'Anhang gespeichert.',
   'chat.attachment.saveFailed': 'Der Anhang ließ sich nicht speichern',
+  'chat.attachment.expiresIn': 'Läuft {when} ab',
+  'chat.attachment.expired': 'Diese Datei ist abgelaufen',
 
   // The external file host. `{provider}` is a company name — Gofile today — and
   // it is interpolated rather than baked in because German, like Japanese, puts

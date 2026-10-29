@@ -3494,6 +3494,8 @@ export const messages = {
   'chat.attachment.saved': 'تم حفظ {name}.',
   'chat.attachment.savedUnnamed': 'تم حفظ المُرفَق.',
   'chat.attachment.saveFailed': 'تعذّر حفظ المُرفَق',
+  'chat.attachment.expiresIn': 'تنتهي صلاحيتها {when}',
+  'chat.attachment.expired': 'انتهت صلاحية هذا الملف',
 
   // `{provider}` is a company name -- Gofile today -- never translated, always
   // interpolated. Arabic puts the verb first and the provider last, which is

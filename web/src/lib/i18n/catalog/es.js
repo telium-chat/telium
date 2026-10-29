@@ -458,6 +458,8 @@ export const messages = {
   'chat.attachment.saved': '{name} guardado.',
   'chat.attachment.savedUnnamed': 'Adjunto guardado.',
   'chat.attachment.saveFailed': 'No se pudo guardar el adjunto',
+  'chat.attachment.expiresIn': 'Caduca {when}',
+  'chat.attachment.expired': 'Este archivo ha caducado',
   'chat.attachment.saveNamed': 'Guardar {name}',
   'chat.attachment.unknownHost': 'servidor desconocido',
   'chat.attachment.unnamed': 'adjunto',

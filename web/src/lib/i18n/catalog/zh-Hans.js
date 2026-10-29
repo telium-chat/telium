@@ -458,6 +458,8 @@ export const messages = {
   'chat.attachment.saved': '{name} 已保存。',
   'chat.attachment.savedUnnamed': '附件已保存。',
   'chat.attachment.saveFailed': '无法保存附件',
+  'chat.attachment.expiresIn': '{when}过期',
+  'chat.attachment.expired': '此文件已过期',
   'chat.attachment.saveNamed': '保存 {name}',
   'chat.attachment.unknownHost': '未知主机',
   'chat.attachment.unnamed': '附件',

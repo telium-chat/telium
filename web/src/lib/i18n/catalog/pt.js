@@ -458,6 +458,8 @@ export const messages = {
   'chat.attachment.saved': '{name} salvo.',
   'chat.attachment.savedUnnamed': 'Anexo salvo.',
   'chat.attachment.saveFailed': 'Não foi possível salvar o anexo',
+  'chat.attachment.expiresIn': 'Expira {when}',
+  'chat.attachment.expired': 'Este arquivo expirou',
   'chat.attachment.saveNamed': 'Salvar {name}',
   'chat.attachment.unknownHost': 'host desconhecido',
   'chat.attachment.unnamed': 'anexo',

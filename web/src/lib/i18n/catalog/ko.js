@@ -458,6 +458,8 @@ export const messages = {
   'chat.attachment.saved': '{name}을(를) 저장했어요.',
   'chat.attachment.savedUnnamed': '첨부 파일을 저장했어요.',
   'chat.attachment.saveFailed': '첨부 파일을 저장할 수 없었어요',
+  'chat.attachment.expiresIn': '{when} 만료돼요',
+  'chat.attachment.expired': '이 파일은 만료됐어요',
   'chat.attachment.saveNamed': '{name} 저장',
   'chat.attachment.unknownHost': '알 수 없는 호스트',
   'chat.attachment.unnamed': '첨부 파일',

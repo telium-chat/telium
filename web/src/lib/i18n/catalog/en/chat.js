@@ -1028,6 +1028,8 @@ export const chat = {
   'chat.attachment.saved': '{name} saved.',
   'chat.attachment.savedUnnamed': 'Attachment saved.',
   'chat.attachment.saveFailed': 'Could not save attachment',
+  'chat.attachment.expiresIn': 'Expires {when}',
+  'chat.attachment.expired': 'This file has expired',
 
   // The external file host. `{provider}` is a company name -- Gofile today --
   // and it is interpolated rather than baked in for the ordinary reason: the

@@ -458,6 +458,8 @@ export const messages = {
   'chat.attachment.saved': '{name} сохранено.',
   'chat.attachment.savedUnnamed': 'Вложение сохранено.',
   'chat.attachment.saveFailed': 'Не удалось сохранить вложение',
+  'chat.attachment.expiresIn': 'Истекает {when}',
+  'chat.attachment.expired': 'Срок действия файла истёк',
   'chat.attachment.saveNamed': 'Сохранить {name}',
   'chat.attachment.unknownHost': 'неизвестный хостинг',
   'chat.attachment.unnamed': 'вложение',

@@ -1583,6 +1583,8 @@ export const messages = {
   'chat.attachment.saved': '{name} enregistré.',
   'chat.attachment.savedUnnamed': 'Pièce jointe enregistrée.',
   'chat.attachment.saveFailed': 'Impossible d’enregistrer la pièce jointe',
+  'chat.attachment.expiresIn': 'Expire {when}',
+  'chat.attachment.expired': 'Ce fichier a expiré',
   'chat.attachment.saveNamed': 'Enregistrer {name}',
   'chat.attachment.unknownHost': 'hôte inconnu',
   'chat.attachment.unnamed': 'pièce jointe',
