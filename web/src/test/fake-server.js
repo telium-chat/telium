@@ -180,6 +180,8 @@ export function createFakeServer(overrides = {}) {
     serverMediaExpirySecs: 0,
     serverMediaMaxFileBytes: 2_147_483_648,
     failNextUpload: false,
+    uploadSeen: 0,
+    uploadGate: null,
     mediaUploads: [],
     storedMedia: new Map(),
     blackhole: new Set(),
@@ -316,7 +318,7 @@ export function createFakeServer(overrides = {}) {
 
   const expiredRow = (row) => row.expires_at !== null && row.expires_at <= Date.now();
 
-  const storeUpload = (origin2, headers) => {
+  const storeUpload = async (origin2, headers) => {
     const header = headerOf(headers);
     const ttlRaw = header('x-telium-ttl-secs');
     const ttl = ttlRaw === null ? null : Number(ttlRaw);
@@ -329,6 +331,8 @@ export function createFakeServer(overrides = {}) {
     const host = new URL(origin2).host;
     const hash = `hash${state.storedMedia.size + 1}`;
     state.storedMedia.set(hash, { expires_at });
+    state.uploadSeen += 1;
+    if (state.uploadGate) await state.uploadGate;
     if (state.failNextUpload) {
       state.failNextUpload = false;
       return json({ error: 'too_large', message: 'the origin is pretending to be broken' }, 507);

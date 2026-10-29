@@ -150,6 +150,23 @@ describe('the staged-file tray', () => {
     expect(second.filename).toBe('later.txt');
   });
 
+  it('puts every staged file in flight instead of queueing them', async () => {
+    const { server, user } = await boot();
+    let release;
+    server.state.uploadGate = new Promise((resolve) => { release = resolve; });
+
+    await user.upload(document.querySelector('input[type="file"]'), [
+      new File(['a'], 'a.txt', { type: 'text/plain' }),
+      new File(['bb'], 'b.txt', { type: 'text/plain' }),
+      new File(['ccc'], 'c.txt', { type: 'text/plain' }),
+    ]);
+    await waitFor(() => expect(server.state.uploadSeen).toBe(3));
+    expect(server.state.mediaUploads.length).toBe(0);
+
+    release();
+    await waitFor(() => expect(server.state.mediaUploads.length).toBe(3));
+  });
+
   it('keeps a failed upload as a card with its reason, and Retry lands it', async () => {
     const { server, user } = await boot();
     server.state.failNextUpload = true;

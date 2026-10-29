@@ -115,7 +115,7 @@ a test, and leaves a log line.
   send with the original options instead of dropping the file.
   Verify: unit test — failure keeps the card, Retry re-sends and flips to ready.
 
-- [ ] **U5 — Upload staged files concurrently**
+- [x] **U5 — Upload staged files concurrently**
   Files: `web/src/views/chat/useStaging.jsx`, `web/src/test/upload.test.js`.
   Approach: replace the serial for-loop with a small bounded pool (3 at a time), preserving
   per-entry progress and error handling.

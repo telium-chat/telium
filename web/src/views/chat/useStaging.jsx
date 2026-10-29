@@ -5,6 +5,9 @@ import { bytes } from '../../lib/util.js';
 
 let seq = 0;
 
+/// Staged uploads in flight at once, per composer.
+const UPLOAD_CONCURRENCY = 3;
+
 function previewable(file) {
   const type = file.type || '';
   return type.startsWith('image/') || type.startsWith('video/');
@@ -97,10 +100,14 @@ export function useStagedFiles(surface) {
     });
     setItems((was) => [...was, ...entries]);
 
-    for (const entry of entries) {
-      if (entry.status === 'error') continue;
-      await send(entry);
-    }
+    // A few at a time: one big file no longer queues everything behind it,
+    // and a farm of parallel uploads does not stampede the origin.
+    const queue = entries.filter((entry) => entry.status !== 'error');
+    await Promise.all(Array.from({ length: Math.min(UPLOAD_CONCURRENCY, queue.length) }, async () => {
+      while (queue.length) {
+        await send(queue.shift());
+      }
+    }));
   }, [surface, mint, release, send]);
 
   const retry = useCallback((key) => {
