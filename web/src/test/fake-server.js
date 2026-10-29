@@ -179,6 +179,7 @@ export function createFakeServer(overrides = {}) {
     expressionLatency: 0,
     serverMediaExpirySecs: 0,
     serverMediaMaxFileBytes: 2_147_483_648,
+    failNextUpload: false,
     mediaUploads: [],
     storedMedia: new Map(),
     blackhole: new Set(),
@@ -328,6 +329,10 @@ export function createFakeServer(overrides = {}) {
     const host = new URL(origin2).host;
     const hash = `hash${state.storedMedia.size + 1}`;
     state.storedMedia.set(hash, { expires_at });
+    if (state.failNextUpload) {
+      state.failNextUpload = false;
+      return json({ error: 'too_large', message: 'the origin is pretending to be broken' }, 507);
+    }
     state.mediaUploads.push({
       purpose: header('x-telium-purpose'),
       ttl,

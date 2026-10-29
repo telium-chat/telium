@@ -1826,6 +1826,8 @@ export const messages = {
   'chat.staged.tooLarge': 'Trop volumineux — les pièces jointes sont limitées à {limit} ici.',
   'chat.staged.cancelUpload': 'Annuler l’envoi',
   'chat.staged.cancelUploadOf': 'Annuler l’envoi de {name}',
+  'chat.staged.retry': 'Réessayer l’envoi',
+  'chat.staged.retryOf': 'Réessayer l’envoi de {name}',
   'chat.staged.uploadHost': 'Hôte de mise en ligne',
   'chat.staged.uploadingOf': 'Mise en ligne de {name}',
   'chat.surface.delivery.delivered': 'Remis',

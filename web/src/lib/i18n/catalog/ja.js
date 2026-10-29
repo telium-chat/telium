@@ -3272,6 +3272,8 @@ export const messages = {
   'chat.staged.tooLarge': '大きすぎます — ここでは添付ファイルは {limit} までです。',
   'chat.staged.cancelUpload': 'アップロードをキャンセル',
   'chat.staged.cancelUploadOf': '{name} のアップロードをキャンセル',
+  'chat.staged.retry': 'アップロードを再試行',
+  'chat.staged.retryOf': '{name} のアップロードを再試行',
 
   // ---------------------------------------------------------------- expiry units
 

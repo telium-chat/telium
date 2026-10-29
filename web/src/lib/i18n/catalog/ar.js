@@ -3275,6 +3275,8 @@ export const messages = {
   'chat.staged.tooLarge': 'كبير جدًا — المرفقات هنا محدودة بـ {limit}.',
   'chat.staged.cancelUpload': 'إلغاء الرفع',
   'chat.staged.cancelUploadOf': 'إلغاء رفع {name}',
+  'chat.staged.retry': 'إعادة محاولة الرفع',
+  'chat.staged.retryOf': 'إعادة محاولة رفع {name}',
 
   // --------------------------------------------------------- وحدات الانتهاء
 

@@ -701,6 +701,8 @@ export const messages = {
   'chat.staged.tooLarge': '너무 커요 — 여기서는 첨부 파일이 {limit}까지예요.',
   'chat.staged.cancelUpload': '업로드 취소',
   'chat.staged.cancelUploadOf': '{name} 업로드 취소',
+  'chat.staged.retry': '업로드 재시도',
+  'chat.staged.retryOf': '{name} 업로드 재시도',
   'chat.staged.uploadHost': '업로드 호스트',
   'chat.staged.uploadingOf': '{name} 업로드 중',
   'chat.surface.delivery.delivered': '전달됨',

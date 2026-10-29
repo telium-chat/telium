@@ -150,6 +150,26 @@ describe('the staged-file tray', () => {
     expect(second.filename).toBe('later.txt');
   });
 
+  it('keeps a failed upload as a card with its reason, and Retry lands it', async () => {
+    const { server, user } = await boot();
+    server.state.failNextUpload = true;
+    await user.upload(document.querySelector('input[type="file"]'), notesFile());
+
+    await waitFor(() => {
+      const alerts = screen.getAllByRole('alert');
+      expect(alerts.some((el) => el.textContent.includes('pretending to be broken'))).toBe(true);
+    });
+    expect(server.state.mediaUploads.length).toBe(0);
+
+    server.state.failNextUpload = false;
+    await user.click(screen.getByTitle('Retry upload'));
+    await waitFor(() => expect(server.state.mediaUploads.length).toBe(1));
+    await waitFor(() => {
+      const alerts = screen.queryAllByRole('alert');
+      expect(alerts.every((el) => !el.textContent.includes('pretending to be broken'))).toBe(true);
+    });
+  });
+
   it('offers Delete file on your own message and takes the file off the origin', async () => {
     const { server, user } = await boot();
     await browse(user, server);

@@ -2,7 +2,7 @@ import { useId } from 'react';
 import {
   Activity, ArrowDownUp, ArrowLeftRight, ArrowLeft, AtSign, Ban, Bell, BellOff, Blocks, Bold, ChartColumn, Check, ChevronDown, ChevronRight,
   Circle, CircleMinus, Clock, Code, Copy, Cog, Ellipsis, Eye, EyeOff, Flag, Folder, FolderOpen, Gavel, Globe, Hash, Headphones,
-  HeadphoneOff, House, Image, Inbox, Info, Italic, Key, LayoutGrid, LifeBuoy, Link2, ListOrdered, LoaderCircle,
+  HeadphoneOff, House, Image, Inbox, Info, Italic, Key, LayoutGrid, LifeBuoy, Link2, ListOrdered, LoaderCircle, RotateCcw,
   HardDrive, Lock, LogOut, Megaphone, MessageSquare, MessageSquareText, Mic, MicOff, Monitor,
   MonitorOff, Moon, Paperclip, PenLine, Phone, PhoneOff, Pin, Plus, Quote, Reply, Rows3, Search,
   Scissors, Send, Server, Settings, Shield, ShieldAlert, Signal, SlidersHorizontal, Smile, Square, SquarePlus, Star,
@@ -54,6 +54,7 @@ export const VisibilityOffIcon = icon(EyeOff);
 export const ForwardIcon = icon(Forward);
 export const EditIcon = icon(PenLine);
 export const TrashIcon = icon(Trash2);
+export const RetryIcon = icon(RotateCcw);
 export const CopyIcon = icon(Copy);
 export const CutIcon = icon(Scissors);
 export const FlagIcon = icon(Flag);

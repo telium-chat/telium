@@ -4,7 +4,7 @@ import { useModal } from '../../hooks/useModal.jsx';
 import { useT } from '../../lib/i18n/react.jsx';
 import {
   AttachIcon, ClockIcon, CloseIcon, EditIcon, EmojiText, GlobeIcon, IconButton,
-  ImageIcon, MenuButton, MenuItem, PromptDialog, TrashIcon, VisibilityIcon,
+  ImageIcon, MenuButton, MenuItem, PromptDialog, RetryIcon, TrashIcon, VisibilityIcon,
 } from '../../components/index.js';
 
 const GLYPHS = [
@@ -24,7 +24,7 @@ function glyphFor(mime = '', name = '') {
 }
 
 export function StagedAttachments({
-  items = [], sticker = null, onRemove, onRemoveSticker, onRename,
+  items = [], sticker = null, onRemove, onRemoveSticker, onRename, onRetry,
   expiries = [], expiry, onExpiryChange,
   tier = 1, externalHosts = [], externalHost = null, onExternalHostChange,
 }) {
@@ -48,6 +48,7 @@ export function StagedAttachments({
             item={item}
             onRemove={() => onRemove(item.key)}
             onRename={(name) => onRename(item.key, name)}
+            onRetry={() => onRetry(item.key)}
           />
         ))}
       </div>
@@ -68,7 +69,7 @@ export function StagedAttachments({
   );
 }
 
-function AttachmentCard({ item, onRemove, onRename }) {
+function AttachmentCard({ item, onRemove, onRename, onRetry }) {
   const modal = useModal();
   const t = useT();
   const image = item.preview && item.mime.startsWith('image/');
@@ -161,7 +162,18 @@ function AttachmentCard({ item, onRemove, onRename }) {
       ) : null}
 
       {item.status === 'error' && item.error ? (
-        <span className="upload-card-error" role="alert">{item.error}</span>
+        <>
+          <span className="upload-card-error" role="alert">{item.error}</span>
+          <button
+            type="button"
+            className="popup-icon-button upload-card-retry"
+            title={t('chat.staged.retry')}
+            aria-label={t('chat.staged.retryOf', { name: item.name })}
+            onClick={onRetry}
+          >
+            <RetryIcon className="size-3.5" />
+          </button>
+        </>
       ) : null}
     </div>
   );

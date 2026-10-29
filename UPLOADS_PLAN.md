@@ -107,7 +107,7 @@ a test, and leaves a log line.
   Verify: unit test — owner sees the action and the DELETE fires with the right hash;
   non-owner doesn't see it; error surface for 409.
 
-- [ ] **U4 — Retry failed uploads**
+- [x] **U4 — Retry failed uploads**
   Files: `web/src/views/chat/useStaging.jsx` (failed entries stay with `status: 'error'`),
   `web/src/views/chat/StagedAttachments.jsx` (error card + Retry), i18n catalogs (en/de/ar/ja),
   `web/src/test/upload.test.js`.

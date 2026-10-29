@@ -3254,6 +3254,8 @@ export const messages = {
   'chat.staged.tooLarge': 'Zu groß — Anhänge sind hier auf {limit} begrenzt.',
   'chat.staged.cancelUpload': 'Upload abbrechen',
   'chat.staged.cancelUploadOf': 'Upload von {name} abbrechen',
+  'chat.staged.retry': 'Upload wiederholen',
+  'chat.staged.retryOf': 'Upload von {name} wiederholen',
 
   // -------------------------------------------------------------- expiry units
 

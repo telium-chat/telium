@@ -38,6 +38,40 @@ export function useStagedFiles(surface) {
     };
   }, []);
 
+  // One failed card stays put with its reason and a Retry, instead of
+  // vanishing with a toast and taking the picked file with it. The sentence
+  // the server gave — quota exhausted, over a channel cap — beats anything
+  // this file can invent.
+  const send = useCallback(async (entry) => {
+    const controller = new AbortController();
+    controllers.current.set(entry.key, controller);
+    try {
+      const att = await surface.upload(entry.file, {
+        ...entry.opts,
+        signal: controller.signal,
+        onProgress: (loaded, total) => setItems((was) => was.map((item) => (
+          item.key === entry.key
+            ? { ...item, progress: total ? Math.round((loaded / total) * 100) : 0 }
+            : item
+        ))),
+      });
+      setItems((was) => was.map((item) => (
+        item.key === entry.key ? { ...item, status: 'ready', progress: 100, att, error: null } : item
+      )));
+    } catch (e) {
+      // A cancel is the user's own act — remove() already took the card,
+      // and nothing was stored or charged.
+      if (controller.signal.aborted) return;
+      setItems((was) => was.map((item) => (
+        item.key === entry.key
+          ? { ...item, status: 'error', error: e.message || t('chat.staged.uploadFailed', { name: entry.name }), att: null }
+          : item
+      )));
+    } finally {
+      controllers.current.delete(entry.key);
+    }
+  }, [surface]);
+
   const add = useCallback(async (files, opts = {}) => {
     const picked = [...(files || [])].filter(Boolean);
     if (!picked.length) return;
@@ -56,6 +90,7 @@ export function useStagedFiles(surface) {
         preview: previewable(file) ? mint(file) : null,
         status: over ? 'error' : 'uploading',
         error: over ? t('chat.staged.tooLarge', { limit: bytes(limit) }) : null,
+        opts: { ttlSecs: opts.ttlSecs, externalHost: opts.externalHost || null },
         progress: 0,
         att: null,
       };
@@ -64,34 +99,18 @@ export function useStagedFiles(surface) {
 
     for (const entry of entries) {
       if (entry.status === 'error') continue;
-      const controller = new AbortController();
-      controllers.current.set(entry.key, controller);
-      try {
-        const att = await surface.upload(entry.file, {
-          ttlSecs: opts.ttlSecs,
-          externalHost: opts.externalHost || null,
-          signal: controller.signal,
-          onProgress: (loaded, total) => setItems((was) => was.map((item) => (
-            item.key === entry.key
-              ? { ...item, progress: total ? Math.round((loaded / total) * 100) : 0 }
-              : item
-          ))),
-        });
-        setItems((was) => was.map((item) => (
-          item.key === entry.key ? { ...item, status: 'ready', progress: 100, att } : item
-        )));
-      } catch (e) {
-        // A cancel is the user's own act — remove() already took the card,
-        // and nothing was stored or charged.
-        if (controller.signal.aborted) return;
-        reportError(e, t('chat.staged.uploadFailed', { name: entry.name }));
-        release([entry]);
-        setItems((was) => was.filter((item) => item.key !== entry.key));
-      } finally {
-        controllers.current.delete(entry.key);
-      }
+      await send(entry);
     }
-  }, [surface, mint, release]);
+  }, [surface, mint, release, send]);
+
+  const retry = useCallback((key) => {
+    const entry = items.find((item) => item.key === key && item.status === 'error');
+    if (!entry) return;
+    setItems((was) => was.map((item) => (
+      item.key === key ? { ...item, status: 'uploading', error: null, progress: 0 } : item
+    )));
+    void send(entry);
+  }, [items, send]);
 
   const remove = useCallback((key) => {
     controllers.current.get(key)?.abort();
@@ -135,8 +154,8 @@ export function useStagedFiles(surface) {
   const staged = useMemo(() => items.filter((i) => i.att).map((i) => i.att), [items]);
 
   return useMemo(
-    () => ({ items, staged, add, remove, rename, clear, drop, restore, release }),
-    [items, staged, add, remove, rename, clear, drop, restore, release],
+    () => ({ items, staged, add, remove, retry, rename, clear, drop, restore, release }),
+    [items, staged, add, remove, retry, rename, clear, drop, restore, release],
   );
 }
 

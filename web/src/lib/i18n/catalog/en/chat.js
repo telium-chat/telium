@@ -812,6 +812,8 @@ export const chat = {
   'chat.staged.tooLarge': 'Too large — attachments here are capped at {limit}.',
   'chat.staged.cancelUpload': 'Cancel upload',
   'chat.staged.cancelUploadOf': 'Cancel uploading {name}',
+  'chat.staged.retry': 'Retry upload',
+  'chat.staged.retryOf': 'Retry uploading {name}',
 
   // ------------------------------------------------------------ expiry units
 

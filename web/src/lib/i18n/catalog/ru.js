@@ -701,6 +701,8 @@ export const messages = {
   'chat.staged.tooLarge': 'Слишком большой — вложения здесь ограничены {limit}.',
   'chat.staged.cancelUpload': 'Отменить отправку',
   'chat.staged.cancelUploadOf': 'Отменить отправку {name}',
+  'chat.staged.retry': 'Повторить отправку',
+  'chat.staged.retryOf': 'Повторить отправку {name}',
   'chat.staged.uploadHost': 'Хостинг загрузки',
   'chat.staged.uploadingOf': 'Загружаем {name}',
   'chat.surface.delivery.delivered': 'Доставлено',

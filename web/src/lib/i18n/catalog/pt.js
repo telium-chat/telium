@@ -701,6 +701,8 @@ export const messages = {
   'chat.staged.tooLarge': 'Grande demais — os anexos aqui têm limite de {limit}.',
   'chat.staged.cancelUpload': 'Cancelar envio',
   'chat.staged.cancelUploadOf': 'Cancelar o envio de {name}',
+  'chat.staged.retry': 'Tentar envio novamente',
+  'chat.staged.retryOf': 'Tentar novamente o envio de {name}',
   'chat.staged.uploadHost': 'Host de upload',
   'chat.staged.uploadingOf': 'Enviando {name}',
   'chat.surface.delivery.delivered': 'Entregue',
