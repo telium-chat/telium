@@ -67,38 +67,45 @@ pub fn requested_ttl(headers: &HeaderMap) -> ApiResult<Option<i64>> {
     }
 }
 
-/// The narrowest expiry ceiling the destination imposes, and whether the
-/// destination lives on this server at all. `local` is what makes message
-/// references here authoritative for reclamation: an upload aimed at a channel
-/// or guild that exists here will be referenced by rows this server owns, while
-/// a tier-2 or external upload keeps its reference record wherever the bytes
-/// were asked for.
-async fn destination_limit(state: &AppState, headers: &HeaderMap) -> ApiResult<(Option<i64>, bool)> {
+/// The narrowest expiry ceiling the destination imposes, whether the
+/// destination lives on this server at all, and the narrowest per-destination
+/// size cap for attachments. `local` is what makes message references here
+/// authoritative for reclamation: an upload aimed at a channel or guild that
+/// exists here will be referenced by rows this server owns, while a tier-2 or
+/// external upload keeps its reference record wherever the bytes were asked
+/// for.
+async fn destination_limit(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> ApiResult<(Option<i64>, bool, Option<i64>)> {
     let mut limit = state.cfg.media_policy.max_expiry_secs.non_zero();
     if let Some(channel_id) = header_str(headers, "x-telium-channel-id") {
-        let row: Option<(Option<i64>, Option<i64>)> = sqlx::query_as(
-            "SELECT c.media_expiry_limit_secs, g.media_expiry_limit_secs \
+        let row: Option<(Option<i64>, Option<i64>, Option<i64>, Option<i64>)> = sqlx::query_as(
+            "SELECT c.media_expiry_limit_secs, g.media_expiry_limit_secs, \
+             c.media_max_file_bytes, g.media_max_file_bytes \
              FROM channels c JOIN guilds g ON g.id = c.guild_id WHERE c.id = ?",
         )
         .bind(&channel_id)
         .fetch_optional(&state.pool)
         .await?;
-        if let Some((channel_secs, guild_secs)) = row {
+        if let Some((channel_secs, guild_secs, channel_bytes, guild_bytes)) = row {
             limit = narrowest(limit, channel_secs);
             limit = narrowest(limit, guild_secs);
-            return Ok((limit, true));
+            let cap = narrowest(channel_bytes, guild_bytes);
+            return Ok((limit, true, cap));
         }
     } else if let Some(guild_id) = header_str(headers, "x-telium-guild-id") {
-        let guild_secs: Option<Option<i64>> =
-            sqlx::query_scalar("SELECT media_expiry_limit_secs FROM guilds WHERE id = ?")
-                .bind(&guild_id)
-                .fetch_optional(&state.pool)
-                .await?;
-        if let Some(guild_secs) = guild_secs {
-            return Ok((narrowest(limit, guild_secs), true));
+        let row: Option<(Option<i64>, Option<i64>)> = sqlx::query_as(
+            "SELECT media_expiry_limit_secs, media_max_file_bytes FROM guilds WHERE id = ?",
+        )
+        .bind(&guild_id)
+        .fetch_optional(&state.pool)
+        .await?;
+        if let Some((guild_secs, guild_bytes)) = row {
+            return Ok((narrowest(limit, guild_secs), true, guild_bytes));
         }
     }
-    Ok((limit, false))
+    Ok((limit, false, None))
 }
 
 fn narrowest(a: Option<i64>, b: Option<i64>) -> Option<i64> {
@@ -157,6 +164,16 @@ pub async fn store_bytes(
     if body.is_empty() {
         return Err(ApiError::BadRequest("empty upload".into()));
     }
+    let (destination, local_dest, dest_cap) = destination_limit(state, headers).await?;
+    if purpose == "attachment" {
+        if let Some(cap) = dest_cap {
+            if body.len() as i64 > cap {
+                return Err(ApiError::TooLarge(format!(
+                    "this destination accepts attachments up to {cap} bytes"
+                )));
+            }
+        }
+    }
     if body.len() > state.cfg.media_policy.max_file_bytes {
         return Err(ApiError::TooLarge(format!(
             "file exceeds this origin's limit of {} bytes",
@@ -192,7 +209,6 @@ pub async fn store_bytes(
     // choose: a requested TTL is never widened, and both still narrow against
     // the destination's cap below.
     let ttl = ttl.or_else(|| state.cfg.media_policy.default_expiry_secs.non_zero());
-    let (destination, local_dest) = destination_limit(state, headers).await?;
     let expires_at = expires_at_from(now_ms(), ttl, &[destination]);
 
     let capability = match existing {

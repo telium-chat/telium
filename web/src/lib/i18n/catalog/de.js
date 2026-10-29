@@ -555,6 +555,10 @@ export const messages = {
   // Nominalphrase -- also eine Nominalphrase, die für sich allein steht und
   // nichts erwartet, was hinter ihr kommt.
   'guild.overview.expiry.label': 'Längste Lebensdauer einer Datei',
+  'guild.overview.fileSize.title': 'Maximale Größe für Anhänge',
+  'guild.overview.fileSize.hint': 'Die größte Datei, die ein Mitglied in dieser Gilde anhängen darf. Kanäle dürfen eine engere Obergrenze setzen.',
+  'guild.overview.fileSize.label': 'Anhänge dürfen höchstens wiegen (Bytes)',
+  'guild.overview.fileSize.placeholder': 'Keine Grenze in dieser Gilde',
 
   // ------------------------------------------------------- moving and ownership
 
@@ -1853,6 +1857,9 @@ export const messages = {
   // the guild's cap still applies, and this says only that the channel adds none
   // of its own. A bare „Keine Grenze“ would promise something false.
   'channel.edit.expiryPlaceholder': 'Keine Grenze in diesem Kanal',
+  'channel.edit.fileSizeLabel': 'Maximale Dateigröße',
+  'channel.edit.fileSizeHint': 'Bytes. Leer heißt, es gilt die Obergrenze der Gilde oder des Servers. Nur Anhänge.',
+  'channel.edit.fileSizePlaceholder': 'Keine Grenze in diesem Kanal',
 
   // ------------------------------------------------------------- durations
   //

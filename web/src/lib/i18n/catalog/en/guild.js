@@ -207,6 +207,10 @@ export const guild = {
   // a sentence across a label and a menu should make the label a noun phrase
   // ("Maximum file lifetime") rather than leaving a fragment hanging.
   'guild.overview.expiry.label': 'Files may be kept for at most',
+  'guild.overview.fileSize.title': 'Attachment size limit',
+  'guild.overview.fileSize.hint': 'The largest file a member may attach in this guild. A channel may set a tighter cap.',
+  'guild.overview.fileSize.label': 'Attachments may weigh at most (bytes)',
+  'guild.overview.fileSize.placeholder': 'No guild limit',
 
   // ------------------------------------------------------- moving and ownership
 

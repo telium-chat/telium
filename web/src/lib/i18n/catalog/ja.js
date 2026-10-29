@@ -509,6 +509,10 @@ export const messages = {
   // layout can express. So it becomes the noun phrase the comment offers as
   // the fallback: "the longest period an attachment is kept for".
   'guild.overview.expiry.label': '添付ファイルを保持する最長期間',
+  'guild.overview.fileSize.title': '添付ファイルのサイズ上限',
+  'guild.overview.fileSize.hint': 'このギルドでメンバーが添付できる最大のファイルです。チャンネルごとに、さらに厳しくすることもできます。',
+  'guild.overview.fileSize.label': '添付ファイルの最大サイズ（バイト）',
+  'guild.overview.fileSize.placeholder': 'このギルドでは上限なし',
 
   // ------------------------------------------------------- moving and ownership
 
@@ -1814,6 +1818,9 @@ export const messages = {
   // that the channel adds none of its own. A bare 上限なし would claim the
   // opposite.
   'channel.edit.expiryPlaceholder': 'チャンネルごとの上限なし',
+  'channel.edit.fileSizeLabel': 'ファイルサイズの上限',
+  'channel.edit.fileSizeHint': '単位はバイトです。空のままにすると、ギルドまたはサーバーの上限に従います。添付ファイルのみです。',
+  'channel.edit.fileSizePlaceholder': 'このチャンネルでは上限なし',
 
   // ------------------------------------------------------------- durations
   //

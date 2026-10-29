@@ -108,6 +108,9 @@ function Overview({ channel, close }) {
   const [expiry, setExpiry] = useState(
     channel.media_expiry_limit_secs == null ? '' : String(channel.media_expiry_limit_secs),
   );
+  const [fileCap, setFileCap] = useState(
+    channel.media_max_file_bytes == null ? '' : String(channel.media_max_file_bytes),
+  );
   const [region, setRegion] = useState(channel.voice_region || '');
   const [bitrate, setBitrate] = useState(String(channel.bitrate || 64000));
   const [limit, setLimit] = useState(String(channel.user_limit || 0));
@@ -141,6 +144,11 @@ function Overview({ channel, close }) {
         'media_expiry_limit_secs',
         expiry.trim() === '' ? null : Number(expiry) || 0,
         channel.media_expiry_limit_secs ?? null,
+      );
+      put(
+        'media_max_file_bytes',
+        fileCap.trim() === '' ? null : Number(fileCap) || 0,
+        channel.media_max_file_bytes ?? null,
       );
     }
     if (forum) {
@@ -279,6 +287,13 @@ function Overview({ channel, close }) {
             value={expiry}
             placeholder={t('channel.edit.expiryPlaceholder')}
             onChange={(e) => setExpiry(e.target.value)}
+          />
+          <TextInput
+            label={t('channel.edit.fileSizeLabel')}
+            hint={t('channel.edit.fileSizeHint')}
+            value={fileCap}
+            placeholder={t('channel.edit.fileSizePlaceholder')}
+            onChange={(e) => setFileCap(e.target.value)}
           />
         </>
       )}

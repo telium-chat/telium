@@ -900,6 +900,113 @@ async fn the_age_sweep_takes_only_attachments_past_the_ceiling() {
     }
 }
 
+#[tokio::test]
+async fn the_destination_size_cap_narrows_what_the_server_accepts() {
+    let s = start().await;
+    let alice = s.user("alice").await;
+    let (_, guild) = s.post("/_telium/v1/guilds", Some(&alice.token), json!({ "name": "G" })).await;
+    let gid = guild["id"].as_str().unwrap().to_string();
+    let (_, channels) = s.get(&format!("/_telium/v1/guilds/{gid}/channels"), Some(&alice.token)).await;
+    let cid = channels["channels"][0]["id"].as_str().unwrap().to_string();
+    assert_eq!(channels["channels"][0]["media_max_file_bytes"], Value::Null);
+
+    // A guild cap alone stops an upload aimed at any of its channels.
+    let (status, patched) = s
+        .patch(&format!("/_telium/v1/guilds/{gid}"), &alice.token, json!({ "media_max_file_bytes": 10 }))
+        .await;
+    assert_eq!(status, 200, "{patched}");
+    assert_eq!(patched["media_max_file_bytes"], 10);
+
+    let refused = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home)
+        .header("X-Telium-Channel-Id", &cid)
+        .header("Content-Type", "text/plain")
+        .body("too big for this guild".to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status().as_u16(), 413, "over the guild cap");
+    assert!(refused.json::<Value>().await.unwrap()["message"].as_str().unwrap().contains("destination"));
+
+    // A channel may tighten it further, and the narrowest wins.
+    let (status, _) = s
+        .patch(&format!("/_telium/v1/channels/{cid}"), &alice.token, json!({ "media_max_file_bytes": 5 }))
+        .await;
+    assert_eq!(status, 200);
+    let refused = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home)
+        .header("X-Telium-Channel-Id", &cid)
+        .header("Content-Type", "text/plain")
+        .body("123456".to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status().as_u16(), 413, "over the channel cap, under the guild's");
+
+    let allowed = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home)
+        .header("X-Telium-Channel-Id", &cid)
+        .header("Content-Type", "text/plain")
+        .body("12345".to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(allowed.status().as_u16(), 200);
+
+    // Removing the channel cap falls back to the guild's.
+    let (status, _) = s
+        .patch(&format!("/_telium/v1/channels/{cid}"), &alice.token, json!({ "media_max_file_bytes": null }))
+        .await;
+    assert_eq!(status, 200);
+    let refused = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home)
+        .header("X-Telium-Channel-Id", &cid)
+        .header("Content-Type", "text/plain")
+        .body("12345678901".to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status().as_u16(), 413, "the guild cap is back in force");
+
+    // Zero is not a cap, it is a mistake.
+    let (status, err) = s
+        .patch(&format!("/_telium/v1/guilds/{gid}"), &alice.token, json!({ "media_max_file_bytes": 0 }))
+        .await;
+    assert_eq!(status, 400, "{err}");
+}
+
+#[tokio::test]
+async fn the_guild_cap_does_not_cage_profile_assets() {
+    let s = start().await;
+    let alice = s.user("alice").await;
+    let (_, guild) = s.post("/_telium/v1/guilds", Some(&alice.token), json!({ "name": "G" })).await;
+    let gid = guild["id"].as_str().unwrap().to_string();
+    let (status, _) = s
+        .patch(&format!("/_telium/v1/guilds/{gid}"), &alice.token, json!({ "media_max_file_bytes": 4 }))
+        .await;
+    assert_eq!(status, 200);
+
+    let avatar = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home)
+        .header("X-Telium-Purpose", "profile")
+        .header("Content-Type", "image/png")
+        .body("pretend png".to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(avatar.status().as_u16(), 200, "the cap is for attachments, not avatars");
+}
+
 fn jpeg_fixture(width: u32, height: u32) -> Vec<u8> {    let image = image::RgbImage::from_fn(width, height, |x, y| image::Rgb([x as u8, y as u8, 200]));
     let mut out = std::io::Cursor::new(Vec::new());
     image::DynamicImage::ImageRgb8(image).write_to(&mut out, image::ImageFormat::Jpeg).unwrap();

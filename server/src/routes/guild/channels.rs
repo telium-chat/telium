@@ -10,7 +10,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use super::validate_expiry_limit;
+use super::{validate_expiry_limit, validate_media_max_file_bytes};
 
 #[derive(Deserialize)]
 pub struct CreateChannel {
@@ -33,6 +33,8 @@ pub struct CreateChannel {
     pub user_limit: Option<i64>,
     #[serde(default)]
     pub media_expiry_limit_secs: Option<Option<i64>>,
+    #[serde(default)]
+    pub media_max_file_bytes: Option<i64>,
     #[serde(default)]
     pub available_tags: Option<Vec<ForumTag>>,
     #[serde(default)]
@@ -134,14 +136,15 @@ pub async fn create_channel(
         validate_region(&state, &guild_id, region).await?;
     }
     validate_expiry_limit(req.media_expiry_limit_secs.flatten())?;
+    validate_media_max_file_bytes(req.media_max_file_bytes)?;
     validate_forum_view(req.default_sort.as_ref(), req.default_layout.as_ref())?;
     let tags = normalise_tags(&req.r#type, req.available_tags.as_deref().unwrap_or(&[]))?;
     let id = ulid();
     sqlx::query(
         "INSERT INTO channels (id, guild_id, type, name, topic, position, parent_id, slowmode, \
          voice_region, bitrate, user_limit, media_expiry_limit_secs, available_tags, \
-         default_sort, default_layout, created_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         default_sort, default_layout, media_max_file_bytes, created_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(&guild_id)
@@ -158,6 +161,7 @@ pub async fn create_channel(
     .bind(&tags)
     .bind(req.default_sort.as_deref().unwrap_or("activity"))
     .bind(req.default_layout.as_deref().unwrap_or("list"))
+    .bind(req.media_max_file_bytes)
     .bind(now_ms())
     .execute(&state.pool)
     .await?;
@@ -299,6 +303,12 @@ pub async fn channel_json(state: &AppState, channel_id: &str) -> ApiResult<Value
     .await?;
     let (voice_status, voice_status_at, voice_status_author) =
         status.unwrap_or((None, None, None));
+    let max_file_bytes: Option<Option<i64>> =
+        sqlx::query_scalar("SELECT media_max_file_bytes FROM channels WHERE id = ?")
+            .bind(channel_id)
+            .fetch_optional(&state.pool)
+            .await?
+            .flatten();
     let overwrites = guildstore::channel_overwrites(&state.pool, channel_id).await?;
     Ok(json!({
         "id": id, "guild_id": guild_id, "type": kind, "name": name, "topic": topic,
@@ -308,6 +318,7 @@ pub async fn channel_json(state: &AppState, channel_id: &str) -> ApiResult<Value
         "user_limit": user_limit,
         "strip_embeds": strip_embeds != 0,
         "media_expiry_limit_secs": expiry_limit,
+        "media_max_file_bytes": max_file_bytes,
         "available_tags": serde_json::from_str::<Value>(&tags).unwrap_or(json!([])),
         "default_sort": sort,
         "default_layout": layout,
@@ -343,6 +354,8 @@ pub struct PatchChannel {
     pub strip_embeds: Option<bool>,
     #[serde(default, deserialize_with = "crate::routes::identity::double_option")]
     pub media_expiry_limit_secs: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "crate::routes::identity::double_option")]
+    pub media_max_file_bytes: Option<Option<i64>>,
     #[serde(default)]
     pub available_tags: Option<Vec<ForumTag>>,
     #[serde(default)]
@@ -427,6 +440,12 @@ pub async fn patch_channel(
         validate_expiry_limit(secs)?;
         sqlx::query("UPDATE channels SET media_expiry_limit_secs = ? WHERE id = ?")
             .bind(secs).bind(&channel_id)
+            .execute(&state.pool).await?;
+    }
+    if let Some(bytes) = req.media_max_file_bytes {
+        validate_media_max_file_bytes(bytes)?;
+        sqlx::query("UPDATE channels SET media_max_file_bytes = ? WHERE id = ?")
+            .bind(bytes).bind(&channel_id)
             .execute(&state.pool).await?;
     }
     if let Some(tags) = &req.available_tags {

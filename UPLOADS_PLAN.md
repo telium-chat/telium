@@ -47,7 +47,7 @@ a test, and leaves a log line.
   Verify: config parse round-trip; test default TTL applies only when no TTL header was sent;
   test age sweep touches only `purpose = 'attachment'` past the age; docs updated.
 
-- [ ] **O4 — Per-guild and per-channel upload size caps**
+- [x] **O4 — Per-guild and per-channel upload size caps**
   Files: `server/migrations/` (nullable `media_max_file_bytes` on `guilds` + `channels`),
   `server/src/routes/media.rs` (narrowest-of global/guild/channel, mirroring
   `destination_limit`), guild + channel API and settings UI (`web/src/views/` guild/channel

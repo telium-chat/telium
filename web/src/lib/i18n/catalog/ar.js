@@ -565,6 +565,10 @@ export const messages = {
   // way the English fragment is not. A label naming the setting works with
   // every option in the menu, which is the property a select label has to have.
   'guild.overview.expiry.label': 'أقصى مدة لبقاء الملفات',
+  'guild.overview.fileSize.title': 'حدّ حجم المرفقات',
+  'guild.overview.fileSize.hint': 'أكبر ملف يمكن لعضو إرفاقه في هذه النقابة. ويجوز للقنوات وضع حدّ أضيق.',
+  'guild.overview.fileSize.label': 'أقصى حجم للمرفقات (بالبايت)',
+  'guild.overview.fileSize.placeholder': 'لا حدّ في هذه النقابة',
 
   // ------------------------------------------------------- moving and ownership
   //
@@ -1927,6 +1931,9 @@ export const messages = {
   // only that the channel adds none of its own. «لا حدّ من القناة» keeps the
   // source of the limit in the sentence.
   'channel.edit.expiryPlaceholder': 'لا حدّ من القناة',
+  'channel.edit.fileSizeLabel': 'حد حجم الملف',
+  'channel.edit.fileSizeHint': 'بالبايت. والفارغ يرجع إلى سقف النقابة أو الخادم. للمرفقات فقط.',
+  'channel.edit.fileSizePlaceholder': 'لا حدّ في هذه القناة',
 
   // The zero rung of the slowmode ladder, and deliberately not ar.js's
   // `common.off` («معطّل»), which is the state of a toggle. This is an option

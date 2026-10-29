@@ -222,15 +222,15 @@ pub async fn create_guild(
 }
 
 pub async fn guild_json(state: &AppState, guild_id: &str) -> ApiResult<Value> {
-    let row: Option<(String, Option<String>, String, Option<String>, String, String, i64, Option<i64>)> =
+    let row: Option<(String, Option<String>, String, Option<String>, String, String, i64, Option<i64>, Option<i64>)> =
         sqlx::query_as(
             "SELECT id, alias, name, icon_ref, owner_user_id, settings, created_at, \
-             media_expiry_limit_secs FROM guilds WHERE id = ?",
+             media_expiry_limit_secs, media_max_file_bytes FROM guilds WHERE id = ?",
         )
         .bind(guild_id)
         .fetch_optional(&state.pool)
         .await?;
-    let (id, alias, name, icon_ref, owner, settings, created_at, expiry_limit) =
+    let (id, alias, name, icon_ref, owner, settings, created_at, expiry_limit, max_file_bytes) =
         row.ok_or_else(|| ApiError::NotFound("guild not found".into()))?;
     let moved_to = guildstore::moved_to(state, guild_id).await?;
     Ok(json!({
@@ -249,6 +249,7 @@ pub async fn guild_json(state: &AppState, guild_id: &str) -> ApiResult<Value> {
         "created_at": created_at,
         "member_count": guildstore::member_count(&state.pool, guild_id).await?,
         "media_expiry_limit_secs": expiry_limit,
+        "media_max_file_bytes": max_file_bytes,
     }))
 }
 
@@ -269,6 +270,7 @@ pub fn moved_guild_stub(origin: &str, guild_id: &str, new_id: &str) -> Value {
         "created_at": Value::Null,
         "member_count": 0,
         "media_expiry_limit_secs": Value::Null,
+        "media_max_file_bytes": Value::Null,
         "channels": [],
         "voice_states": [],
         "roles": [],
@@ -323,6 +325,8 @@ pub struct PatchGuild {
     pub emoji_export_role_id: Option<Option<String>>,
     #[serde(default, deserialize_with = "super::identity::double_option")]
     pub media_expiry_limit_secs: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "super::identity::double_option")]
+    pub media_max_file_bytes: Option<Option<i64>>,
 }
 
 pub async fn patch_guild(
@@ -369,6 +373,12 @@ pub async fn patch_guild(
             .bind(secs).bind(&guild_id)
             .execute(&state.pool).await?;
     }
+    if let Some(bytes) = req.media_max_file_bytes {
+        validate_media_max_file_bytes(bytes)?;
+        sqlx::query("UPDATE guilds SET media_max_file_bytes = ? WHERE id = ?")
+            .bind(bytes).bind(&guild_id)
+            .execute(&state.pool).await?;
+    }
     let g = guild_json(&state, &guild_id).await?;
     guildstore::audit(&state.pool, &guild_id, &auth.user_id, "guild.update", Some(&guild_id), json!({})).await?;
     state.hub.publish(Event::new("GUILD_UPDATE", guild_id, INTENT_GUILD_STRUCTURE, g.clone())).await;
@@ -386,6 +396,16 @@ pub(super) fn validate_expiry_limit(secs: Option<i64>) -> ApiResult<()> {
         )),
         Some(n) if n > 366 * 24 * 60 * 60 => Err(ApiError::BadRequest(
             "media_expiry_limit_secs is over a year".into(),
+        )),
+        Some(_) => Ok(()),
+    }
+}
+
+pub(super) fn validate_media_max_file_bytes(bytes: Option<i64>) -> ApiResult<()> {
+    match bytes {
+        None => Ok(()),
+        Some(n) if n <= 0 => Err(ApiError::BadRequest(
+            "media_max_file_bytes cannot be zero or negative; omit it to remove the cap".into(),
         )),
         Some(_) => Ok(()),
     }
