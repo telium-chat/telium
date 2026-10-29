@@ -334,7 +334,12 @@ function AccountSafetySections({ store, onClose }) {
   );
 }
 
-function MediaTierSection({ store, pref, hosts, feedHosts = [], externalHosts }) {
+export function MediaTierSection({ store, pref, hosts, feedHosts = [], externalHosts }) {
+  const home = store.session?.home?.domain;
+  const account = home ? store.caps.get(home)?.account : null;
+  const usage = account?.quota_bytes
+    ? { used: account.used_bytes ?? 0, quota: account.quota_bytes, home }
+    : null;
   const [tier, setTier] = useState(pref.tier || 1);
   const offered = [
     ...hosts.map((h) => ({ ...h, vouched_by: null })),
@@ -372,6 +377,16 @@ function MediaTierSection({ store, pref, hosts, feedHosts = [], externalHosts })
           />
         ))}
       </ChoiceList>
+
+      {usage ? (
+        usage.used / usage.quota > 0.9 ? (
+          <Notice tone="warn">
+            {`${bytes(usage.used)} of ${bytes(usage.quota)} used on ${usage.home}. Delete files you no longer need from your messages, or move uploads to another host.`}
+          </Notice>
+        ) : (
+          <Hint>{`${bytes(usage.used)} of ${bytes(usage.quota)} used on ${usage.home}.`}</Hint>
+        )
+      ) : null}
 
       {tier === 2 ? (
         <>

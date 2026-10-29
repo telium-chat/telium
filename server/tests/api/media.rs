@@ -1148,6 +1148,20 @@ async fn the_operator_can_see_who_is_filling_the_disk() {
     assert_eq!(status, 403, "{refused}");
 }
 
+#[tokio::test]
+async fn capabilities_report_what_the_account_stores() {
+    let s = start().await;
+    let alice = s.user("alice").await;
+
+    let (_, caps) = s.get("/_telium/v1/capabilities", Some(&alice.home)).await;
+    assert_eq!(caps["account"]["used_bytes"], 0);
+    assert_eq!(caps["account"]["quota_bytes"], Value::Null, "the default policy is unlimited");
+
+    upload_attachment(&s, &alice, None, "some bytes").await;
+    let (_, caps) = s.get("/_telium/v1/capabilities", Some(&alice.home)).await;
+    assert_eq!(caps["account"]["used_bytes"], 10);
+}
+
 fn jpeg_fixture(width: u32, height: u32) -> Vec<u8> {    let image = image::RgbImage::from_fn(width, height, |x, y| image::Rgb([x as u8, y as u8, 200]));
     let mut out = std::io::Cursor::new(Vec::new());
     image::DynamicImage::ImageRgb8(image).write_to(&mut out, image::ImageFormat::Jpeg).unwrap();

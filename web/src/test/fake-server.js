@@ -181,6 +181,8 @@ export function createFakeServer(overrides = {}) {
     serverMediaMaxFileBytes: 2_147_483_648,
     failNextUpload: false,
     uploadSeen: 0,
+    serverQuotaBytes: null,
+    serverQuotaUsed: 0,
     uploadGate: null,
     mediaUploads: [],
     storedMedia: new Map(),
@@ -579,6 +581,7 @@ export function createFakeServer(overrides = {}) {
           media_hosts: ['media.klipy.com'],
         },
         media: { max_expiry_secs: state.serverMediaExpirySecs, max_file_bytes: state.serverMediaMaxFileBytes },
+        account: { tier1_upload: true, quota_bytes: state.serverQuotaBytes, used_bytes: state.serverQuotaUsed },
       });
     }
     if (path === '/_telium/v1/assertions') return json({ assertion: 'assert-1' });

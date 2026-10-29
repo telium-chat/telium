@@ -1800,11 +1800,22 @@ pub async fn capabilities(State(state): State<AppState>, headers: HeaderMap) -> 
             .bind(now_ms())
             .fetch_optional(&state.pool)
             .await?;
+            let used = match &user_id {
+                Some(u) => sqlx::query_scalar(
+                    "SELECT COALESCE(SUM(size), 0) FROM media WHERE owner_user_id = ?",
+                )
+                .bind(u)
+                .fetch_one(&state.pool)
+                .await
+                .unwrap_or(0),
+                None => 0,
+            };
             user_id.map(|u| {
                 let quota = state.cfg.media_quota_for(&u);
                 json!({
                     "tier1_upload": quota.is_some(),
                     "quota_bytes": quota.filter(|q| *q != i64::MAX),
+                    "used_bytes": used,
                     "profile_asset_carveout_bytes": state.cfg.media_policy.profile_asset_carveout_bytes,
                 })
             })

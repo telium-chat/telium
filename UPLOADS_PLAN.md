@@ -122,7 +122,7 @@ a test, and leaves a log line.
   Verify: unit test — three staged files are all in flight before the first completes; error
   in one doesn't stop the others.
 
-- [ ] **U6 — Show quota usage ("used X of Y")**
+- [x] **U6 — Show quota usage ("used X of Y")**
   Files: `server/src/routes/media.rs` (capabilities: add `used_bytes` to `account`),
   `web/src/views/user-settings/AccountPane.jsx` (media section shows usage; warn tone near the
   cap), i18n, server capability test, client unit test.
