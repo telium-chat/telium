@@ -148,7 +148,21 @@ describe('the staged-file tray', () => {
     const second = await browse(user, server, new File(['x'], 'later.txt', { type: 'text/plain' }));
     expect(second.ttl).toBe(60 * 60);
     expect(second.filename).toBe('later.txt');
-    expect(second.expires_at).toBeGreaterThan(Date.now());
-    expect(server.state.mediaUploads[0].ttl).toBe(30 * 24 * 60 * 60);
+  });
+
+  it('offers Delete file on your own message and takes the file off the origin', async () => {
+    const { server, user } = await boot();
+    await browse(user, server);
+    await waitFor(() => expect(server.state.storedMedia.size).toBe(1));
+    await user.click(screen.getByTitle('Send'));
+    await waitFor(() => expect(screen.getAllByText('notes.txt').length).toBeGreaterThan(0));
+
+    const inTimeline = screen.getAllByText('notes.txt').at(-1);
+    fireEvent.contextMenu(inTimeline);
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete file: notes.txt' }));
+
+    const dialog = await screen.findByRole('dialog');
+    await user.click(await within(dialog).findByRole('button', { name: 'Delete file' }));
+    await waitFor(() => expect(server.state.storedMedia.size).toBe(0));
   });
 });

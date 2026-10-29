@@ -99,7 +99,7 @@ a test, and leaves a log line.
   Verify: unit test — aborting an in-flight upload removes the card and rejects; server-side
   request terminates (covered by client test with fake server).
 
-- [ ] **U3 — Users can delete their own uploads** **[DECISION — scope]**
+- [x] **U3 — Users can delete their own uploads** **[DECISION — scope]**
   Files: `web/src/lib/upload.js` (`deleteMedia` → `DELETE /_telium/v1/media/{hash}`),
   attachment context menu (`web/src/views/chat/` attachments rendering), i18n.
   Approach (recommended scope): "delete file" on your own sent attachments; O2 semantics apply

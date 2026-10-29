@@ -594,6 +594,11 @@ export function createFakeServer(overrides = {}) {
         member_count: 1,
       });
     }
+    const mediaDelete = path.match(/^\/_telium\/v1\/media\/([\w-]+)$/);
+    if (mediaDelete && method === 'DELETE') {
+      if (!state.storedMedia.delete(mediaDelete[1])) return json({ error: 'not_found', message: 'no such media' }, 404);
+      return json({ ok: true, hash: mediaDelete[1] });
+    }
     if (path === '/_telium/v1/media/preference') {
       if (method === 'PUT') {
         state.mediaWrites.push(body);
@@ -1187,6 +1192,7 @@ export function createFakeServer(overrides = {}) {
           content: body.content,
           created_at: Date.now(),
           sticker: body.sticker || null,
+          attachments: body.attachments || [],
         };
         state.messages.push(msg);
         state.sent.push(msg);

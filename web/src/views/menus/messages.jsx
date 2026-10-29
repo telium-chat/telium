@@ -12,6 +12,40 @@ import { EmojiPickerDialog } from '../dialogs/EmojiPickerDialog.jsx';
 import { quickEmoji } from '../../lib/emoji.js';
 import { muteItems } from './common.jsx';
 
+
+/// One "Delete file" item per attachment this account hosted on its own
+/// homeserver and may still remove. Files on another origin are not ours to
+/// delete from here; external providers are not either.
+function attachmentDeleteItems(env, msg) {
+  const { store, dialogs } = env;
+  const home = store.session?.home?.domain;
+  const mine = msg.author === store.me?.user_id;
+  if (!mine || !store.home) return [];
+  return (msg.attachments || [])
+    .filter((att) => !att.external && att.hash && (!att.origin || att.origin === home))
+    .map((att) => (
+      <MenuItem
+        key={att.hash}
+        icon={TrashIcon}
+        tone="danger"
+        onAction={() => dialogs.confirm({
+          title: 'Delete file',
+          body: `"${att.name || att.hash}" is removed from your homeserver. The message stays, showing the file as gone. If the same bytes were uploaded more than once here, the copy is shared and this will be refused.`,
+          confirmLabel: 'Delete file',
+          danger: true,
+          onConfirm: async () => {
+            try {
+              await store.home.deleteMedia(att.hash);
+              toast('File deleted.');
+            } catch (e) { reportError(e, e.message || 'Could not delete the file'); }
+          },
+        })}
+      >
+        {`Delete file: ${att.name || att.hash}`}
+      </MenuItem>
+    ));
+}
+
 export const post = (env, thread, { onGone } = {}) => {
   const { store, t, dialogs } = env;
   const api = () => store.apiForChannel(thread.parent_id);
@@ -306,6 +340,7 @@ export const message = (env, msg, { onReply, onEdit }) => {
       <MenuItem icon={CopyIcon} onAction={() => copyToClipboard(msg.id, 'Message id')}>
         Copy message id
       </MenuItem>
+      {attachmentDeleteItems(env, msg)}
       {mine || mayManage ? (
         <>
           <MenuSeparator />
@@ -379,6 +414,7 @@ export const conversationMessage = (env, convo, msg, { onReply, onEdit }) => {
       <MenuItem icon={CopyIcon} onAction={() => copyToClipboard(msg.id, 'Message id')}>
         Copy message id
       </MenuItem>
+      {readable ? attachmentDeleteItems(env, msg) : null}
       {mine ? (
         <>
           <MenuSeparator />
