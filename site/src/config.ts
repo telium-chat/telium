@@ -76,11 +76,15 @@ const OBTAINIUM_CONFIG = {
   url: URLS.github,
   author: 'Telium',
   name: 'Telium',
-  additionalSettings: {
+  // A string, not an object: Obtainium's importer runs `jsonDecode` on this
+  // field itself (`App.fromJson`), so a nested map dies with
+  // "_Map<String, dynamic> is not a subtype of type 'String'". This is the
+  // same double encoding Obtainium's own share-a-app-with-settings link uses.
+  additionalSettings: JSON.stringify({
     includePrereleases: true,
     filterReleaseTitlesByRegEx: '^Telium for Android [0-9]',
     apkFilterRegEx: 'arm64',
-  },
+  }),
 } as const
 
 /* The https form, not a bare `obtainium://` link. A bare one does nothing at
