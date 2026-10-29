@@ -1823,6 +1823,7 @@ export const messages = {
   'chat.staged.renameOf': 'Renommer {name}',
   'chat.staged.renameTitle': 'Renommer le fichier',
   'chat.staged.uploadFailed': 'Impossible de mettre en ligne {name}',
+  'chat.staged.tooLarge': 'Trop volumineux — les pièces jointes sont limitées à {limit} ici.',
   'chat.staged.uploadHost': 'Hôte de mise en ligne',
   'chat.staged.uploadingOf': 'Mise en ligne de {name}',
   'chat.surface.delivery.delivered': 'Remis',

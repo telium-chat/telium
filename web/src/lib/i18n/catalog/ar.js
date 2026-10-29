@@ -3272,6 +3272,7 @@ export const messages = {
   'chat.staged.dropLine': 'أفلِت للرفع',
 
   'chat.staged.uploadFailed': 'تعذّر رفع {name}',
+  'chat.staged.tooLarge': 'كبير جدًا — المرفقات هنا محدودة بـ {limit}.',
 
   // --------------------------------------------------------- وحدات الانتهاء
 

@@ -157,6 +157,10 @@ function AttachmentCard({ item, onRemove, onRename }) {
           style={{ '--progress': `${item.progress}%` }}
         />
       ) : null}
+
+      {item.status === 'error' && item.error ? (
+        <span className="upload-card-error" role="alert">{item.error}</span>
+      ) : null}
     </div>
   );
 }

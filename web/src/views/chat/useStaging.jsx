@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { reportError } from '../../hooks/useToast.jsx';
 import { t } from '../../lib/i18n/index.js';
+import { bytes } from '../../lib/util.js';
 
 let seq = 0;
 
@@ -36,7 +37,11 @@ export function useStagedFiles(surface) {
   const add = useCallback(async (files, opts = {}) => {
     const picked = [...(files || [])].filter(Boolean);
     if (!picked.length) return;
+    // The origin publishes its caps; refusing before the first byte spares
+    // everyone the transfer and the generic failure the server would give.
+    const limit = surface.uploadLimit ?? null;
     const entries = picked.map((file) => {
+      const over = limit != null && file.size > limit;
       seq += 1;
       return {
         key: `staged-${seq}`,
@@ -45,7 +50,8 @@ export function useStagedFiles(surface) {
         size: file.size,
         mime: file.type || 'application/octet-stream',
         preview: previewable(file) ? mint(file) : null,
-        status: 'uploading',
+        status: over ? 'error' : 'uploading',
+        error: over ? t('chat.staged.tooLarge', { limit: bytes(limit) }) : null,
         progress: 0,
         att: null,
       };
@@ -53,6 +59,7 @@ export function useStagedFiles(surface) {
     setItems((was) => [...was, ...entries]);
 
     for (const entry of entries) {
+      if (entry.status === 'error') continue;
       try {
         const att = await surface.upload(entry.file, {
           ttlSecs: opts.ttlSecs,

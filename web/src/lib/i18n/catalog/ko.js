@@ -698,6 +698,7 @@ export const messages = {
   'chat.staged.renameOf': '{name} 이름 바꾸기',
   'chat.staged.renameTitle': '파일 이름 바꾸기',
   'chat.staged.uploadFailed': '{name}을(를) 업로드할 수 없었어요',
+  'chat.staged.tooLarge': '너무 커요 — 여기서는 첨부 파일이 {limit}까지예요.',
   'chat.staged.uploadHost': '업로드 호스트',
   'chat.staged.uploadingOf': '{name} 업로드 중',
   'chat.surface.delivery.delivered': '전달됨',

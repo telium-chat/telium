@@ -809,6 +809,7 @@ export const chat = {
   // A staged file that never made it up. Named rather than counted: a tray of
   // six files with one failure needs to say which one.
   'chat.staged.uploadFailed': 'Could not upload {name}',
+  'chat.staged.tooLarge': 'Too large — attachments here are capped at {limit}.',
 
   // ------------------------------------------------------------ expiry units
 

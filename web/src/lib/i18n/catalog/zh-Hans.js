@@ -698,6 +698,7 @@ export const messages = {
   'chat.staged.renameOf': '重命名 {name}',
   'chat.staged.renameTitle': '重命名文件',
   'chat.staged.uploadFailed': '无法上传 {name}',
+  'chat.staged.tooLarge': '太大 — 这里附件上限为 {limit}。',
   'chat.staged.uploadHost': '上传主机',
   'chat.staged.uploadingOf': '正在上传 {name}',
   'chat.surface.delivery.delivered': '已送达',

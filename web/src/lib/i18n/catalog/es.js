@@ -698,6 +698,7 @@ export const messages = {
   'chat.staged.renameOf': 'Cambiar el nombre de {name}',
   'chat.staged.renameTitle': 'Cambiar el nombre del archivo',
   'chat.staged.uploadFailed': 'No se pudo subir {name}',
+  'chat.staged.tooLarge': 'Demasiado grande: los adjuntos aquí tienen un límite de {limit}.',
   'chat.staged.uploadHost': 'Servidor de subida',
   'chat.staged.uploadingOf': 'Subiendo {name}',
   'chat.surface.delivery.delivered': 'Entregado',

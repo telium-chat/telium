@@ -79,7 +79,7 @@ a test, and leaves a log line.
 
 ## User
 
-- [ ] **U1 — Pre-flight size/quota checks + honest oversize errors**
+- [x] **U1 — Pre-flight size/quota checks + honest oversize errors**
   Files: `server/src/routes/mod.rs` (body-limit rejection returns the API JSON error shape,
   not axum's plain-text 413), `web/src/views/chat/surface.jsx` (expose effective caps),
   `web/src/views/chat/useStaging.jsx` (reject before upload), i18n catalogs,

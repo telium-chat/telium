@@ -698,6 +698,7 @@ export const messages = {
   'chat.staged.renameOf': 'Переименовать {name}',
   'chat.staged.renameTitle': 'Переименовать файл',
   'chat.staged.uploadFailed': 'Не удалось загрузить {name}',
+  'chat.staged.tooLarge': 'Слишком большой — вложения здесь ограничены {limit}.',
   'chat.staged.uploadHost': 'Хостинг загрузки',
   'chat.staged.uploadingOf': 'Загружаем {name}',
   'chat.surface.delivery.delivered': 'Доставлено',

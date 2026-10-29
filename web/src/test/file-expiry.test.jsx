@@ -45,6 +45,27 @@ async function boot({ guildExpiry = null } = {}) {
 }
 
 describe('the staged-file tray', () => {
+  it('refuses a file the origin caps before a byte is sent', async () => {
+    const server = createFakeServer();
+    server.state.serverMediaMaxFileBytes = 4;
+    const { user } = await (async () => {
+      const { store, user } = await signedInApp(server);
+      await act(async () => { await store.addServer('guilds.example'); });
+      await user.click(await screen.findByTitle('Telium on guilds.example'));
+      await user.click(await screen.findByRole('button', { name: 'general' }));
+      return { store, user };
+    })();
+
+    const before = server.state.mediaUploads.length;
+    await user.upload(filePicker(), new File(['way too many bytes'], 'big.txt', { type: 'text/plain' }));
+    await waitFor(() => {
+      const alerts = screen.getAllByRole('alert');
+      expect(alerts.some((el) => /Too large/.test(el.textContent))).toBe(true);
+    });
+    expect(server.state.mediaUploads.length).toBe(before);
+  });
+
+
   const filePicker = () => document.querySelector('input[type="file"]');
 
   const openExpiryMenu = async (user) => {

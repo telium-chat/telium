@@ -266,7 +266,22 @@ async fn stage_body(
     let mut stream = body.into_data_stream();
     use tokio::io::AsyncWriteExt;
     while let Some(chunk) = stream.next().await {
-        let chunk: Bytes = chunk.map_err(|e| ApiError::BadRequest(format!("upload aborted: {e}")))?;
+        // The transport's own body limit (the layer mounted with the same
+        // cap) cuts the stream before we can measure it; name the limit in
+        // the answer rather than reporting a transport error.
+        let chunk: Bytes = match chunk {
+            Ok(chunk) => chunk,
+            Err(e) => {
+                let inner = e.into_inner();
+                return Err(
+                    if inner.is::<http_body_util::LengthLimitError>() {
+                        ApiError::TooLarge(over.clone())
+                    } else {
+                        ApiError::BadRequest(format!("upload aborted: {inner}"))
+                    },
+                );
+            }
+        };
         size += chunk.len();
         if size > cap {
             return Err(ApiError::TooLarge(over));

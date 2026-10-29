@@ -3251,6 +3251,7 @@ export const messages = {
   // to say which one. The „… ließ sich nicht …“ family again, and the filename
   // needs no article in front of it as the subject of this construction.
   'chat.staged.uploadFailed': '{name} ließ sich nicht hochladen',
+  'chat.staged.tooLarge': 'Zu groß — Anhänge sind hier auf {limit} begrenzt.',
 
   // -------------------------------------------------------------- expiry units
 

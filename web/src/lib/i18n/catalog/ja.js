@@ -3269,6 +3269,7 @@ export const messages = {
   'chat.staged.dropLine': 'ドロップしてアップロード',
 
   'chat.staged.uploadFailed': '{name} をアップロードできませんでした',
+  'chat.staged.tooLarge': '大きすぎます — ここでは添付ファイルは {limit} までです。',
 
   // ---------------------------------------------------------------- expiry units
 
