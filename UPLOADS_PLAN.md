@@ -149,8 +149,65 @@ a test, and leaves a log line.
 
 ## Audit (fill in at the end)
 
-Compare this file line by line against the original assessment; every item is done, blocked
-with a reason, or deferred with the operator's agreement. Outcome recorded here.
+Every item in the original assessment, line by line:
+
+**Operator**
+1. *Attachments outlive deleted messages; the `refcount <= 0` health check is dead code; the
+   Storage pane sweep copy overpromises.* → **O1, done** (05df1e8f). Messages claim and release
+   references in the same transaction as the rows they live on; the hourly sweep reclaims
+   unreferenced attachment uploads past a 24 h grace window; the health finding, the unreferenced
+   gauge and the Storage-pane sweep now state what actually gets reclaimed. Local-destination-only,
+   cold-archived history exempt — both documented in data-lifecycle.md (docs repo 399ee12).
+2. *Dedup + delete breaks the other uploader's references.* → **O2, done** (e23d9852). Owner
+   delete of shared content answers 409; admin takedown unchanged.
+3. *Whole upload buffered in RAM.* → **O5, done** (e83affc0). Streaming to a staging file with
+   all three screening digests computed on the way; caps cut mid-stream; staging files clean up
+   after every exit and are swept if a dead connection leaks one.
+4. *No per-channel/per-guild size policy.* → **O4, done** (2461fd14). `media_max_file_bytes` on
+   guilds and channels, narrowest-wins, in the settings UI, API and capabilities; documented
+   (docs repo 3846154).
+5. *Quota check race; no admin view of who fills the disk.* → **O6, done** (59bfcc40). Per-account
+   upload lock from the quota check through the insert; on-demand top-consumers table in the
+   control plane.
+
+**User**
+1. *No pre-flight size check; oversize uploads fail with a generic message.* → **U1, done**
+   (9d9391b5). Client refuses against the published caps before the first byte; server answers
+   transport-level body-limit cuts with the API's JSON 413.
+2. *No cancel; no way to reclaim space.* → **U2, done** (bcb141fe) and **U3, done** (705f373c).
+   Removing an in-flight card aborts the request on every leg (home, vouched, external) and
+   charges nothing; "Delete file" on your own attachments reaches the previously unreachable
+   DELETE endpoint through the home session. Scope as agreed: per-attachment, not a "My files" pane.
+3. *No retry.* → **U4, done** (4717d296). Failed uploads stay as cards carrying the server's
+   sentence, with Retry.
+4. *Serial uploads.* → **U5, done** (bc2defca). Bounded at three in flight, per-entry progress
+   and cancel intact.
+5. *No quota visibility.* → **U6, done** (a77a1f7c). Capabilities publish `used_bytes`; the
+   upload-host settings show "X of Y used", warning near the ceiling.
+6. *No client-side downscale.* → **U7, done** (d049d138, scope as agreed: profile assets only).
+   The pick flow re-encodes in shrinking steps against the published
+   `max_profile_asset_bytes`; GIFs and undecodable images untouched.
+7. *Expiry is set-and-forget.* → **U8, done** (cb6f6139). Sent attachments show "Expires in …"
+   or "This file has expired"; files the origin keeps show nothing.
+
+Decisions: taken as approved — refcount + reconcile (no age knob), default TTL as an off-by-default
+operator knob, refuse-while-shared for deduplicated deletes, profile-only downscaling,
+per-attachment delete scope.
+
+Deferred or blocked: none.
+
+**Verification record.** Server: `cargo test` — lib 255, api 183, conformance 7 and the rest all
+green; the federation `sequencer` tests fail sporadically under full-suite load and were shown to
+do the same on the untouched base commit (430ce9fe), passing in isolation; `bot_relocation` flaked
+once the same way. Web: full suite 2710 passing with exactly the five failures that pre-date this
+branch (pinned-key/recommendation tests, verified against a stash of all changes). i18n coverage
+holds in all ten locales for every key added.
+
+**Incident, disclosed:** the U7 commit originally overwrote the pre-existing `lib/image.js` crop
+library instead of appending to it, breaking every crop-dependent test in the full run; restored
+and verified in f6bc8ebc before this audit closed.
+
+Docs commits live in the separate telium-chat-docs repository: 399ee12, 1fcf38c, 3846154.
 
 ## Notes
 
