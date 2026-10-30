@@ -184,6 +184,31 @@ describe('uploadEncrypted', () => {
   });
 });
 
+describe('cancelling an upload', () => {
+  it('hands the signal to the transport and rejects on abort', async () => {
+    let seen;
+    vi.stubGlobal('fetch', vi.fn((url, init) => new Promise((_resolve, reject) => {
+      seen = init.signal;
+      init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+    })));
+
+    const controller = new AbortController();
+    const pending = uploadMedia(store.home, file(), 'attachment', { signal: controller.signal });
+    expect(seen).toBeInstanceOf(AbortSignal);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('resolves nothing when the signal was already aborted', async () => {
+    const fetchMock = vi.fn(async () => ok(MEDIA));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+    controller.abort();
+    const pending = uploadMedia(store.home, file(), 'attachment', { signal: controller.signal });
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  });
+});
+
 describe('profileRef', () => {
   it('keeps the capability that unlocks a profile asset', () => {
     expect(profileRef({ hash: 'abc', capability: 'cap-1' })).toBe('abc?cap=cap-1');

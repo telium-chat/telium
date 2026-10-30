@@ -43,6 +43,7 @@ export function OverviewPane({ guildId, api, close }) {
             onChanged={state.reload}
           />
           <ExpiryLimitEditor guildId={guildId} api={api} guild={guild} />
+          <FileSizeLimitEditor guildId={guildId} api={api} guild={guild} />
           <TransferPane guildId={guildId} api={api} guild={guild} onTransferred={state.reload} />
           <Section title={tr('guild.overview.move.title')}>
             <Hint>
@@ -323,6 +324,44 @@ function VanityLinkEditor({ guildId, api, guild, onChanged }) {
           } finally {
             setBusy(false);
           }
+        }}
+      >
+        {tr('common.save')}
+      </Button>
+    </Section>
+  );
+}
+
+function FileSizeLimitEditor({ guildId, api, guild }) {
+  const tr = useT();
+  const [cap, setCap] = useState(
+    guild.media_max_file_bytes == null ? '' : String(guild.media_max_file_bytes),
+  );
+  useEffect(() => {
+    setCap(guild.media_max_file_bytes == null ? '' : String(guild.media_max_file_bytes));
+  }, [guild]);
+
+  return (
+    <Section title={tr('guild.overview.fileSize.title')}>
+      <Hint>
+        {tr('guild.overview.fileSize.hint')}
+      </Hint>
+      <Field label={tr('guild.overview.fileSize.label')}>
+        <TextInput
+          value={cap}
+          placeholder={tr('guild.overview.fileSize.placeholder')}
+          onChange={(e) => setCap(e.target.value)}
+        />
+      </Field>
+      <Button
+        variant="primary"
+        className="self-start"
+        onClick={async () => {
+          const value = cap.trim() === '' ? null : Number(cap);
+          try {
+            await api.patchGuild(guildId, { media_max_file_bytes: value });
+            toast(t('common.saved'));
+          } catch (e) { reportError(e, t('guild.overview.saveFailed')); }
         }}
       >
         {tr('common.save')}

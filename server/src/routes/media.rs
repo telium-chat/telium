@@ -9,8 +9,11 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use ed25519_dalek::Signer;
+use futures_util::StreamExt;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use sha1::Digest as _;
+use sha2::Digest as _;
 
 const PUBLIC_PURPOSES: &[&str] = &["expression"];
 
@@ -67,29 +70,45 @@ pub fn requested_ttl(headers: &HeaderMap) -> ApiResult<Option<i64>> {
     }
 }
 
-async fn destination_limit(state: &AppState, headers: &HeaderMap) -> ApiResult<Option<i64>> {
+/// The narrowest expiry ceiling the destination imposes, whether the
+/// destination lives on this server at all, and the narrowest per-destination
+/// size cap for attachments. `local` is what makes message references here
+/// authoritative for reclamation: an upload aimed at a channel or guild that
+/// exists here will be referenced by rows this server owns, while a tier-2 or
+/// external upload keeps its reference record wherever the bytes were asked
+/// for.
+async fn destination_limit(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> ApiResult<(Option<i64>, bool, Option<i64>)> {
     let mut limit = state.cfg.media_policy.max_expiry_secs.non_zero();
     if let Some(channel_id) = header_str(headers, "x-telium-channel-id") {
-        let row: Option<(Option<i64>, Option<i64>)> = sqlx::query_as(
-            "SELECT c.media_expiry_limit_secs, g.media_expiry_limit_secs \
+        let row: Option<(Option<i64>, Option<i64>, Option<i64>, Option<i64>)> = sqlx::query_as(
+            "SELECT c.media_expiry_limit_secs, g.media_expiry_limit_secs, \
+             c.media_max_file_bytes, g.media_max_file_bytes \
              FROM channels c JOIN guilds g ON g.id = c.guild_id WHERE c.id = ?",
         )
         .bind(&channel_id)
         .fetch_optional(&state.pool)
         .await?;
-        if let Some((channel_secs, guild_secs)) = row {
+        if let Some((channel_secs, guild_secs, channel_bytes, guild_bytes)) = row {
             limit = narrowest(limit, channel_secs);
             limit = narrowest(limit, guild_secs);
+            let cap = narrowest(channel_bytes, guild_bytes);
+            return Ok((limit, true, cap));
         }
     } else if let Some(guild_id) = header_str(headers, "x-telium-guild-id") {
-        let guild_secs: Option<Option<i64>> =
-            sqlx::query_scalar("SELECT media_expiry_limit_secs FROM guilds WHERE id = ?")
-                .bind(&guild_id)
-                .fetch_optional(&state.pool)
-                .await?;
-        limit = narrowest(limit, guild_secs.flatten());
+        let row: Option<(Option<i64>, Option<i64>)> = sqlx::query_as(
+            "SELECT media_expiry_limit_secs, media_max_file_bytes FROM guilds WHERE id = ?",
+        )
+        .bind(&guild_id)
+        .fetch_optional(&state.pool)
+        .await?;
+        if let Some((guild_secs, guild_bytes)) = row {
+            return Ok((narrowest(limit, guild_secs), true, guild_bytes));
+        }
     }
-    Ok(limit)
+    Ok((limit, false, None))
 }
 
 fn narrowest(a: Option<i64>, b: Option<i64>) -> Option<i64> {
@@ -125,7 +144,7 @@ pub async fn upload(
     State(state): State<AppState>,
     auth: HomeAuth,
     headers: HeaderMap,
-    body: Bytes,
+    body: Body,
 ) -> ApiResult<Json<Value>> {
     if !state.cfg.roles.media {
         return Err(ApiError::Forbidden("this server does not host media".into()));
@@ -134,10 +153,165 @@ pub async fn upload(
     if !["attachment", "profile", "expression"].contains(&purpose.as_str()) {
         return Err(ApiError::BadRequest("purpose must be attachment, profile or expression".into()));
     }
-    enforce_media_policy(&state, &auth.user_id, &purpose, body.len() as i64).await?;
-    Ok(Json(store_bytes(&state, &auth.user_id, &purpose, &headers, body).await?))
+
+    // The body streams to a staging file: digests are computed as chunks
+    // arrive, and the size caps cut the connection mid-stream instead of
+    // buffering a hostile upload in memory first. Quota is checked once the
+    // size is known — an over-quota upload costs a temp file, never a stored
+    // object. The account's upload lock is held from that check through the
+    // row insert, so parallel uploads cannot all read a stale total.
+    let (destination, local_dest, dest_cap) = destination_limit(&state, &headers).await?;
+    let mut staged = stage_body(&state, &purpose, &headers, body, dest_cap).await?;
+    let quota_slot = {
+        let mut map = state.upload_locks.lock().await;
+        map.entry(auth.user_id.clone()).or_default().clone()
+    };
+    let _quota_slot = quota_slot.lock().await;
+    enforce_media_policy(&state, &auth.user_id, &purpose, staged.size as i64).await?;
+    crate::scan::screen_upload_digests(
+        &state, &auth.user_id, &staged.digests, &staged.hash, staged.size,
+    )
+    .await?;
+    let out = store_payload(
+        &state, &auth.user_id, &purpose, &headers, &staged.hash, staged.size,
+        StagedBytes::File(staged.temp_path().to_path_buf()), destination, local_dest,
+    )
+    .await?;
+    Ok(Json(out))
 }
 
+/// An upload staged to disk while the request body streamed in: digests are
+/// final, the bytes sit at `temp` until `store_payload` moves them into the
+/// object store.
+struct StagedUpload {
+    hash: String,
+    digests: crate::scan::UploadDigests,
+    size: usize,
+    temp: TempFile,
+}
+
+impl StagedUpload {
+    fn temp_path(&self) -> &std::path::Path {
+        &self.temp.0
+    }
+}
+
+/// A staging file that removes itself on drop, whatever the exit: an error
+/// return, a refused upload, or the handler being dropped mid-request. The
+/// unlink is synchronous, not spawned — cleanup must survive a shutting-down
+/// runtime, and one staging-file unlink is nothing to park a worker for.
+struct TempFile(std::path::PathBuf);
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        if self.0.as_os_str().is_empty() {
+            return;
+        }
+        if let Err(err) = std::fs::remove_file(&self.0) {
+            if err.kind() != std::io::ErrorKind::NotFound {
+                tracing::debug!(target: crate::logcat::MEDIA, error = %err, path = %self.0.display(), "could not remove a staged upload");
+            }
+        }
+    }
+}
+
+enum StagedBytes {
+    Memory(Vec<u8>),
+    File(std::path::PathBuf),
+}
+
+/// Streams the request body into a staging file under `media_dir/tmp`,
+/// hashing as it goes. Aborts mid-stream once a cap the destination imposes is
+/// exceeded, so an oversized upload never finishes transferring.
+async fn stage_body(
+    state: &AppState,
+    purpose: &str,
+    headers: &HeaderMap,
+    body: Body,
+    dest_cap: Option<i64>,
+) -> ApiResult<StagedUpload> {
+    let global_cap = state.cfg.media_policy.max_file_bytes;
+    let (cap, over): (usize, String) = match purpose {
+        "profile" => {
+            let cap = global_cap.min(state.cfg.media_policy.max_profile_asset_bytes);
+            (cap, format!("profile assets are capped at {cap} bytes; crop or downscale it first"))
+        }
+        "attachment" => match dest_cap {
+            Some(dest) if usize::try_from(dest).unwrap_or(usize::MAX) < global_cap => (
+                usize::try_from(dest).unwrap_or(usize::MAX),
+                format!("this destination accepts attachments up to {dest} bytes"),
+            ),
+            _ => (global_cap, format!("file exceeds this origin's limit of {global_cap} bytes")),
+        },
+        _ => (global_cap, format!("file exceeds this origin's limit of {global_cap} bytes")),
+    };
+
+    let tmp_dir = state.cfg.media_dir.join("tmp");
+    tokio::fs::create_dir_all(&tmp_dir)
+        .await
+        .map_err(|e| ApiError::Internal(e.into()))?;
+    let temp = TempFile(tmp_dir.join(format!(
+        "upload-{}-{}",
+        std::process::id(),
+        random_token(12)
+    )));
+
+    let mut hasher_blake3 = blake3::Hasher::new();
+    let mut hasher_sha256 = sha2::Sha256::new();
+    let mut hasher_sha1 = sha1::Sha1::new();
+    let mut file = tokio::fs::File::create(&temp.0)
+        .await
+        .map_err(|e| ApiError::Internal(e.into()))?;
+    let mut size: usize = 0;
+    let mut stream = body.into_data_stream();
+    use tokio::io::AsyncWriteExt;
+    while let Some(chunk) = stream.next().await {
+        // The transport's own body limit (the layer mounted with the same
+        // cap) cuts the stream before we can measure it; name the limit in
+        // the answer rather than reporting a transport error.
+        let chunk: Bytes = match chunk {
+            Ok(chunk) => chunk,
+            Err(e) => {
+                let inner = e.into_inner();
+                return Err(
+                    if inner.is::<http_body_util::LengthLimitError>() {
+                        ApiError::TooLarge(over.clone())
+                    } else {
+                        ApiError::BadRequest(format!("upload aborted: {inner}"))
+                    },
+                );
+            }
+        };
+        size += chunk.len();
+        if size > cap {
+            return Err(ApiError::TooLarge(over));
+        }
+        hasher_blake3.update(&chunk);
+        hasher_sha256.update(&chunk);
+        hasher_sha1.update(&chunk);
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| ApiError::Internal(e.into()))?;
+    }
+    file.flush()
+        .await
+        .map_err(|e| ApiError::Internal(e.into()))?;
+
+    if size == 0 {
+        return Err(ApiError::BadRequest("empty upload".into()));
+    }
+
+    let digests = crate::scan::UploadDigests {
+        blake3: hasher_blake3.finalize().to_hex().to_string(),
+        sha256: hex::encode(hasher_sha256.finalize()),
+        sha1: hex::encode(hasher_sha1.finalize()),
+    };
+    let hash = digests.blake3.clone();
+    Ok(StagedUpload { hash, digests, size, temp })
+}
+
+/// Byte-backed twin of [`upload`]'s path, for callers that already hold the
+/// bytes: the voucher route and internal imports.
 pub async fn store_bytes(
     state: &AppState,
     user_id: &str,
@@ -147,6 +321,16 @@ pub async fn store_bytes(
 ) -> ApiResult<Value> {
     if body.is_empty() {
         return Err(ApiError::BadRequest("empty upload".into()));
+    }
+    let (destination, local_dest, dest_cap) = destination_limit(state, headers).await?;
+    if purpose == "attachment" {
+        if let Some(cap) = dest_cap {
+            if body.len() as i64 > cap {
+                return Err(ApiError::TooLarge(format!(
+                    "this destination accepts attachments up to {cap} bytes"
+                )));
+            }
+        }
     }
     if body.len() > state.cfg.media_policy.max_file_bytes {
         return Err(ApiError::TooLarge(format!(
@@ -161,11 +345,34 @@ pub async fn store_bytes(
         )));
     }
 
-    let hash = blake3::hash(&body).to_hex().to_string();
-    crate::scan::screen_upload(state, user_id, &hash, &body).await?;
+    let digests = crate::scan::UploadDigests::of(&body);
+    let hash = digests.blake3.clone();
+    crate::scan::screen_upload_digests(state, user_id, &digests, &hash, body.len()).await?;
+    store_payload(
+        state, user_id, purpose, headers, &hash, body.len(),
+        StagedBytes::Memory(body.to_vec()), destination, local_dest,
+    )
+    .await
+}
+
+/// The settle step shared by both ingest paths: dedup on the content hash,
+/// expiry narrowing, the media row, and the object store write. `payload`
+/// carries the bytes either in memory or as a staged file to move in.
+#[allow(clippy::too_many_arguments)]
+async fn store_payload(
+    state: &AppState,
+    user_id: &str,
+    purpose: &str,
+    headers: &HeaderMap,
+    hash: &str,
+    size: usize,
+    payload: StagedBytes,
+    destination: Option<i64>,
+    local_dest: bool,
+) -> ApiResult<Value> {
     let filename = header_str(headers, "x-telium-filename")
         .map(|raw| decode_filename(&raw))
-        .unwrap_or_else(|| hash.clone());
+        .unwrap_or_else(|| hash.to_string());
     let claimed_mime = headers
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
@@ -174,25 +381,28 @@ pub async fn store_bytes(
 
     let existing: Option<(String, String, Option<i64>)> =
         sqlx::query_as("SELECT capability, owner_user_id, expires_at FROM media WHERE hash = ?")
-            .bind(&hash)
+            .bind(hash)
             .fetch_optional(&state.pool)
             .await?;
 
     let ttl = requested_ttl(headers)?;
-    let destination = destination_limit(state, headers).await?;
+    // An origin that sets a default applies it only where the client did not
+    // choose: a requested TTL is never widened, and both still narrow against
+    // the destination's cap below.
+    let ttl = ttl.or_else(|| state.cfg.media_policy.default_expiry_secs.non_zero());
     let expires_at = expires_at_from(now_ms(), ttl, &[destination]);
 
     let capability = match existing {
         Some((capability, _, existing_expires)) => {
             sqlx::query("UPDATE media SET refcount = refcount + 1 WHERE hash = ?")
-                .bind(&hash)
+                .bind(hash)
                 .execute(&state.pool)
                 .await?;
             let settled = earlier_of(existing_expires, expires_at);
             if settled != existing_expires {
                 sqlx::query("UPDATE media SET expires_at = ? WHERE hash = ?")
                     .bind(settled)
-                    .bind(&hash)
+                    .bind(hash)
                     .execute(&state.pool)
                     .await?;
             }
@@ -200,19 +410,22 @@ pub async fn store_bytes(
         }
         None => {
             let capability = random_token(24);
-            let key = media_key(state, &hash);
-            state.media_store.put(&key, body.to_vec()).await?;
+            let key = media_key(state, hash);
+            match payload {
+                StagedBytes::Memory(bytes) => state.media_store.put(&key, bytes).await?,
+                StagedBytes::File(temp) => state.media_store.put_from_file(&key, &temp).await?,
+            }
 
             sqlx::query(
                 "INSERT INTO media (hash, owner_user_id, filename, mime, size, width, height, \
-                 thumbhash, capability, purpose, created_at, expires_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 thumbhash, capability, purpose, created_at, expires_at, refs, local_dest) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
             )
-            .bind(&hash)
+            .bind(hash)
             .bind(user_id)
             .bind(&filename)
             .bind(&mime)
-            .bind(body.len() as i64)
+            .bind(size as i64)
             .bind(header_i64(headers, "x-telium-width"))
             .bind(header_i64(headers, "x-telium-height"))
             .bind(header_str(headers, "x-telium-thumbhash"))
@@ -220,6 +433,7 @@ pub async fn store_bytes(
             .bind(purpose)
             .bind(now_ms())
             .bind(expires_at)
+            .bind(local_dest)
             .execute(&state.pool)
             .await?;
             capability
@@ -227,11 +441,58 @@ pub async fn store_bytes(
     };
 
     crate::metrics::Metrics::bump(&state.metrics.media_uploads, 1);
-    crate::metrics::Metrics::bump(&state.metrics.media_upload_bytes, body.len() as u64);
+    crate::metrics::Metrics::bump(&state.metrics.media_upload_bytes, size as u64);
 
     Ok(reference_json(
-        state, &hash, &capability, &filename, &mime, body.len() as i64, expires_at, headers,
+        state, hash, &capability, &filename, &mime, size as i64, expires_at, headers,
     ))
+}
+
+/// Claims one live reference on each local media row named by a message's
+/// attachments. Runs in the transaction that inserts the message, so a message
+/// and its references commit together. Rows for other origins do not exist
+/// here and are skipped; entries without a hash (external hosts) match nothing.
+pub async fn claim_message_refs(
+    exec: &mut sqlx::SqliteConnection,
+    attachments: &str,
+) -> ApiResult<()> {
+    let parsed: Value = match serde_json::from_str(attachments) {
+        Ok(parsed) => parsed,
+        Err(_) => return Ok(()),
+    };
+    let Some(entries) = parsed.as_array() else { return Ok(()) };
+    for entry in entries {
+        let Some(hash) = entry.get("hash").and_then(Value::as_str) else { continue };
+        if !valid_hash(hash) {
+            continue;
+        }
+        sqlx::query("UPDATE media SET refs = refs + 1 WHERE hash = ?")
+            .bind(hash)
+            .execute(&mut *exec)
+            .await?;
+    }
+    Ok(())
+}
+
+/// Releases the references held by every message matched by `predicate`, which
+/// is a compile-time constant at each call site and carries exactly one `?`
+/// placeholder for `bind`. Must run in the same transaction that deletes or
+/// blanks those rows, before it does: the release reads `attachments` out of
+/// the rows it is about to lose. Cold-archived history is not released — its
+/// segments still serve the attachment.
+pub async fn release_message_refs(
+    exec: &mut sqlx::SqliteConnection,
+    predicate: &str,
+    bind: &str,
+) -> ApiResult<()> {
+    let sql = format!(
+        "UPDATE media SET refs = MAX(refs - 1, 0) WHERE hash IN (\
+         SELECT json_extract(value, '$.hash') FROM messages, json_each(messages.attachments) \
+         WHERE {predicate} AND json_valid(messages.attachments) \
+         AND json_type(value) = 'object' AND json_extract(value, '$.hash') IS NOT NULL)"
+    );
+    sqlx::query(&sql).bind(bind).execute(exec).await?;
+    Ok(())
 }
 
 fn reference_json(
@@ -1295,8 +1556,70 @@ fn expired(expires_at: Option<i64>) -> bool {
     matches!(expires_at, Some(at) if at <= now_ms())
 }
 
-pub async fn sweep_expired(state: &AppState) -> anyhow::Result<u64> {
+/// How long an unreferenced upload is left alone before the sweep reclaims it:
+/// the window a client has between uploading a file and sending the message
+/// that claims it, and the window an operator has to notice a mass deletion.
+const RECLAIM_GRACE_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// Reclaims uploads nothing on this server refers to anymore: attachment-purpose
+/// objects whose destination was local, whose message references have all been
+/// released, and whose upload is older than the grace window. Rows this server
+/// cannot vouch for (`local_dest = 0`) are never touched — an end-to-end
+/// encrypted conversation or a foreign guild may still refer to them.
+pub async fn sweep_unreferenced(state: &AppState) -> anyhow::Result<u64> {
+    sweep_unreferenced_before(state, now_ms() - RECLAIM_GRACE_MS).await
+}
+
+pub async fn sweep_unreferenced_before(state: &AppState, cutoff_ms: i64) -> anyhow::Result<u64> {
     let doomed: Vec<String> = sqlx::query_scalar(
+        "SELECT hash FROM media WHERE purpose = 'attachment' AND local_dest = 1 \
+         AND refs <= 0 AND created_at <= ?",
+    )
+    .bind(cutoff_ms)
+    .fetch_all(&state.pool)
+    .await?;
+    let mut swept = 0u64;
+    for hash in &doomed {
+        sqlx::query("DELETE FROM media WHERE hash = ?").bind(hash).execute(&state.pool).await?;
+        let _ = state.media_store.delete(&media_key(state, hash)).await;
+        broadcast_purge_quietly(state, hash);
+        swept += 1;
+    }
+    if swept > 0 {
+        tracing::info!(target: crate::logcat::MAINTENANCE, count = swept, "swept unreferenced media");
+    }
+    Ok(swept)
+}
+
+/// Reclaims attachment media past the operator's age ceiling, references or
+/// not. Off (`0`) by default and deliberately destructive when on: a message
+/// past the age shows a dead file. Preflight warns, so leaving it set is a
+/// decision somebody made twice.
+pub async fn sweep_aged_attachments(state: &AppState) -> anyhow::Result<u64> {
+    let days = state.cfg.media_policy.attachment_max_age_days;
+    if days <= 0 {
+        return Ok(0);
+    }
+    let cutoff = now_ms() - days.saturating_mul(24 * 60 * 60 * 1000);
+    let doomed: Vec<String> =
+        sqlx::query_scalar("SELECT hash FROM media WHERE purpose = 'attachment' AND created_at <= ?")
+            .bind(cutoff)
+            .fetch_all(&state.pool)
+            .await?;
+    let mut swept = 0u64;
+    for hash in &doomed {
+        sqlx::query("DELETE FROM media WHERE hash = ?").bind(hash).execute(&state.pool).await?;
+        let _ = state.media_store.delete(&media_key(state, hash)).await;
+        broadcast_purge_quietly(state, hash);
+        swept += 1;
+    }
+    if swept > 0 {
+        tracing::info!(target: crate::logcat::MAINTENANCE, count = swept, days, "swept aged attachment media");
+    }
+    Ok(swept)
+}
+
+pub async fn sweep_expired(state: &AppState) -> anyhow::Result<u64> {    let doomed: Vec<String> = sqlx::query_scalar(
         "SELECT hash FROM media WHERE expires_at IS NOT NULL AND expires_at <= ?",
     )
     .bind(now_ms())
@@ -1376,6 +1699,22 @@ pub async fn sweep_orphans(state: &AppState) -> anyhow::Result<u64> {
     if swept > 0 {
         tracing::info!(target: crate::logcat::MAINTENANCE, count = swept, "swept media objects no row accounts for");
     }
+
+    // Staging files left by a connection that died mid-upload live in `tmp/`,
+    // outside the shard layout, so the row-matching scan above cannot see
+    // them. Anything unclaimed for a day goes the same way.
+    let staging = state.cfg.media_dir.join("tmp");
+    if let Ok(mut entries) = tokio::fs::read_dir(&staging).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let Ok(meta) = entry.metadata().await else { continue };
+            if !meta.is_file() || meta.modified().map(|m| m > cutoff).unwrap_or(true) {
+                continue;
+            }
+            if tokio::fs::remove_file(entry.path()).await.is_ok() {
+                swept += 1;
+            }
+        }
+    }
     Ok(swept)
 }
 
@@ -1413,12 +1752,12 @@ pub async fn delete(
     if !valid_hash(&hash) {
         return Err(ApiError::NotFound("no such media".into()));
     }
-    let owner: Option<String> =
-        sqlx::query_scalar("SELECT owner_user_id FROM media WHERE hash = ?")
+    let row: Option<(String, i64)> =
+        sqlx::query_as("SELECT owner_user_id, refcount FROM media WHERE hash = ?")
             .bind(&hash)
             .fetch_optional(&state.pool)
             .await?;
-    let owner = owner.ok_or_else(|| ApiError::NotFound("no such media".into()))?;
+    let (owner, refcount) = row.ok_or_else(|| ApiError::NotFound("no such media".into()))?;
     let is_admin: i64 = sqlx::query_scalar("SELECT admin FROM accounts WHERE user_id = ?")
         .bind(&auth.user_id)
         .fetch_optional(&state.pool)
@@ -1426,6 +1765,19 @@ pub async fn delete(
         .unwrap_or(0);
     if owner != auth.user_id && is_admin == 0 {
         return Err(ApiError::Forbidden("only the uploader may delete this object".into()));
+    }
+    // Identical bytes are stored once and claimed by every upload of them, so
+    // the object under this hash is not the requester's alone. An owner's
+    // delete stops here rather than breaking someone else's messages; an
+    // operator's takedown does not ask.
+    if refcount > 1 && is_admin == 0 {
+        return Err(ApiError::Conflict(format!(
+            "this file's bytes are shared with {} other upload{} of the same content; \
+             deleting it here would break their messages. Each uploader can delete \
+             their own; an operator can remove it outright.",
+            refcount - 1,
+            if refcount > 2 { "s" } else { "" },
+        )));
     }
 
     sqlx::query("DELETE FROM media WHERE hash = ?").bind(&hash).execute(&state.pool).await?;
@@ -1448,11 +1800,22 @@ pub async fn capabilities(State(state): State<AppState>, headers: HeaderMap) -> 
             .bind(now_ms())
             .fetch_optional(&state.pool)
             .await?;
+            let used = match &user_id {
+                Some(u) => sqlx::query_scalar(
+                    "SELECT COALESCE(SUM(size), 0) FROM media WHERE owner_user_id = ?",
+                )
+                .bind(u)
+                .fetch_one(&state.pool)
+                .await
+                .unwrap_or(0),
+                None => 0,
+            };
             user_id.map(|u| {
                 let quota = state.cfg.media_quota_for(&u);
                 json!({
                     "tier1_upload": quota.is_some(),
                     "quota_bytes": quota.filter(|q| *q != i64::MAX),
+                    "used_bytes": used,
                     "profile_asset_carveout_bytes": state.cfg.media_policy.profile_asset_carveout_bytes,
                 })
             })
@@ -1487,7 +1850,10 @@ pub async fn capabilities(State(state): State<AppState>, headers: HeaderMap) -> 
             "enabled": state.cfg.roles.media,
             "default_policy": state.cfg.media_policy.default,
             "max_file_bytes": state.cfg.media_policy.max_file_bytes,
+            "max_profile_asset_bytes": state.cfg.media_policy.max_profile_asset_bytes,
             "max_expiry_secs": state.cfg.media_policy.max_expiry_secs,
+            "default_expiry_secs": state.cfg.media_policy.default_expiry_secs,
+            "attachment_max_age_days": state.cfg.media_policy.attachment_max_age_days,
             "upload_scanning": true,
             "hash_list_entries": state.hash_lists.entries(),
             "abuse_contact": state.cfg.moderation.abuse_contact,

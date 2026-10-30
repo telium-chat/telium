@@ -178,6 +178,12 @@ export function createFakeServer(overrides = {}) {
     latency: 0,
     expressionLatency: 0,
     serverMediaExpirySecs: 0,
+    serverMediaMaxFileBytes: 2_147_483_648,
+    failNextUpload: false,
+    uploadSeen: 0,
+    serverQuotaBytes: null,
+    serverQuotaUsed: 0,
+    uploadGate: null,
     mediaUploads: [],
     storedMedia: new Map(),
     blackhole: new Set(),
@@ -314,7 +320,7 @@ export function createFakeServer(overrides = {}) {
 
   const expiredRow = (row) => row.expires_at !== null && row.expires_at <= Date.now();
 
-  const storeUpload = (origin2, headers) => {
+  const storeUpload = async (origin2, headers) => {
     const header = headerOf(headers);
     const ttlRaw = header('x-telium-ttl-secs');
     const ttl = ttlRaw === null ? null : Number(ttlRaw);
@@ -327,6 +333,12 @@ export function createFakeServer(overrides = {}) {
     const host = new URL(origin2).host;
     const hash = `hash${state.storedMedia.size + 1}`;
     state.storedMedia.set(hash, { expires_at });
+    state.uploadSeen += 1;
+    if (state.uploadGate) await state.uploadGate;
+    if (state.failNextUpload) {
+      state.failNextUpload = false;
+      return json({ error: 'too_large', message: 'the origin is pretending to be broken' }, 507);
+    }
     state.mediaUploads.push({
       purpose: header('x-telium-purpose'),
       ttl,
@@ -568,7 +580,8 @@ export function createFakeServer(overrides = {}) {
           api_base_url: `${KLIPY}/api/v1`,
           media_hosts: ['media.klipy.com'],
         },
-        media: { max_expiry_secs: state.serverMediaExpirySecs },
+        media: { max_expiry_secs: state.serverMediaExpirySecs, max_file_bytes: state.serverMediaMaxFileBytes },
+        account: { tier1_upload: true, quota_bytes: state.serverQuotaBytes, used_bytes: state.serverQuotaUsed },
       });
     }
     if (path === '/_telium/v1/assertions') return json({ assertion: 'assert-1' });
@@ -592,6 +605,11 @@ export function createFakeServer(overrides = {}) {
         icon_ref: null,
         member_count: 1,
       });
+    }
+    const mediaDelete = path.match(/^\/_telium\/v1\/media\/([\w-]+)$/);
+    if (mediaDelete && method === 'DELETE') {
+      if (!state.storedMedia.delete(mediaDelete[1])) return json({ error: 'not_found', message: 'no such media' }, 404);
+      return json({ ok: true, hash: mediaDelete[1] });
     }
     if (path === '/_telium/v1/media/preference') {
       if (method === 'PUT') {
@@ -1186,6 +1204,7 @@ export function createFakeServer(overrides = {}) {
           content: body.content,
           created_at: Date.now(),
           sticker: body.sticker || null,
+          attachments: body.attachments || [],
         };
         state.messages.push(msg);
         state.sent.push(msg);

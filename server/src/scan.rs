@@ -75,14 +75,23 @@ impl HashLists {
     }
 
     pub fn matches(&self, bytes: &[u8]) -> Option<&str> {
+        let digests = UploadDigests::of(bytes);
+        self.matches_digests(&digests)
+    }
+
+    pub fn matches_digests(&self, digests: &UploadDigests) -> Option<&str> {
         for algorithm in [Algorithm::Blake3, Algorithm::Sha256, Algorithm::Sha1] {
             let mut of_this_algorithm =
                 self.lists.iter().filter(|l| l.algorithm == algorithm).peekable();
             if of_this_algorithm.peek().is_none() {
                 continue;
             }
-            let digest = algorithm.digest(bytes);
-            if let Some(hit) = of_this_algorithm.find(|l| l.digests.contains(&digest)) {
+            let digest = match algorithm {
+                Algorithm::Blake3 => &digests.blake3,
+                Algorithm::Sha256 => &digests.sha256,
+                Algorithm::Sha1 => &digests.sha1,
+            };
+            if let Some(hit) = of_this_algorithm.find(|l| l.digests.contains(digest)) {
                 return Some(&hit.name);
             }
         }
@@ -115,14 +124,44 @@ fn load_file(source: &HashListSource) -> anyhow::Result<HashList> {
     Ok(HashList { name: source.name.clone(), algorithm, digests })
 }
 
+/// The three digests every upload is screened against, computed once over the
+/// bytes. A streamed upload computes them while the body arrives, so nothing
+/// has to hold the whole object in memory to screen it.
+pub struct UploadDigests {
+    pub blake3: String,
+    pub sha256: String,
+    pub sha1: String,
+}
+
+impl UploadDigests {
+    pub fn of(bytes: &[u8]) -> Self {
+        Self {
+            blake3: blake3::hash(bytes).to_hex().to_string(),
+            sha256: hex::encode(sha2::Sha256::digest(bytes)),
+            sha1: hex::encode(sha1::Sha1::digest(bytes)),
+        }
+    }
+}
+
 pub async fn screen_upload(
     state: &AppState,
     uploader: &str,
     hash: &str,
     bytes: &[u8],
 ) -> ApiResult<()> {
+    let digests = UploadDigests::of(bytes);
+    screen_upload_digests(state, uploader, &digests, hash, bytes.len()).await
+}
+
+pub async fn screen_upload_digests(
+    state: &AppState,
+    uploader: &str,
+    digests: &UploadDigests,
+    hash: &str,
+    size: usize,
+) -> ApiResult<()> {
     crate::metrics::Metrics::bump(&state.metrics.media_scans, 1);
-    let Some(list) = state.hash_lists.matches(bytes) else {
+    let Some(list) = state.hash_lists.matches_digests(digests) else {
         return Ok(());
     };
     crate::metrics::Metrics::bump(&state.metrics.media_scan_matches, 1);
@@ -132,7 +171,7 @@ pub async fn screen_upload(
         list = %list,
         uploader = %uploader,
         hash = %hash,
-        size = bytes.len(),
+        size = size,
         "upload refused: content matches a hash list"
     );
     if let Err(err) = crate::federation::routes::record_scan_hit(state, uploader, hash, list).await

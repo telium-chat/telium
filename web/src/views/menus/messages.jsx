@@ -12,8 +12,42 @@ import { EmojiPickerDialog } from '../dialogs/EmojiPickerDialog.jsx';
 import { quickEmoji } from '../../lib/emoji.js';
 import { muteItems } from './common.jsx';
 
+
+/// One "Delete file" item per attachment this account hosted on its own
+/// homeserver and may still remove. Files on another origin are not ours to
+/// delete from here; external providers are not either.
+function attachmentDeleteItems(env, msg) {
+  const { store, dialogs, t: tr } = env;
+  const home = store.session?.home?.domain;
+  const mine = msg.author === store.me?.user_id;
+  if (!mine || !store.home) return [];
+  return (msg.attachments || [])
+    .filter((att) => !att.external && att.hash && (!att.origin || att.origin === home))
+    .map((att) => (
+      <MenuItem
+        key={att.hash}
+        icon={TrashIcon}
+        tone="danger"
+        onAction={() => dialogs.confirm({
+          title: tr('chat.menu.deleteFileTitle'),
+          body: tr('chat.menu.deleteFileBody', { name: att.name || att.hash }),
+          confirmLabel: tr('chat.menu.deleteFileConfirm'),
+          danger: true,
+          onConfirm: async () => {
+            try {
+              await store.home.deleteMedia(att.hash);
+              toast(tr('chat.menu.fileDeleted'));
+            } catch (e) { reportError(e, e.message || tr('chat.menu.fileDeleteFailed')); }
+          },
+        })}
+      >
+        {tr('chat.menu.deleteFileItem', { name: att.name || att.hash })}
+      </MenuItem>
+    ));
+}
+
 export const post = (env, thread, { onGone } = {}) => {
-  const { store, t, dialogs } = env;
+  const { store, t: tr, dialogs } = env;
   const api = () => store.apiForChannel(thread.parent_id);
   const moderator = has(store.permissionsIn(thread.parent_id), 'MANAGE_MESSAGES');
   const mine = thread.owner === store.me?.user_id;
@@ -24,7 +58,7 @@ export const post = (env, thread, { onGone } = {}) => {
       const list = store.threads.get(thread.parent_id) || [];
       store.threads.set(
         thread.parent_id,
-        list.map((t) => (t.id === thread.id ? { ...t, ...saved } : t)),
+        list.map((x) => (x.id === thread.id ? { ...x, ...saved } : x)),
       );
       store.emit('threads', thread.parent_id);
     } catch (e) { reportError(e, failure); }
@@ -36,69 +70,69 @@ export const post = (env, thread, { onGone } = {}) => {
         <>
           <MenuItem
             icon={PinIcon}
-            onAction={patch({ pinned: !thread.pinned }, 'Could not pin the post')}
+            onAction={patch({ pinned: !thread.pinned }, tr('chat.menu.postPinFailed'))}
           >
-            {thread.pinned ? 'Unpin post' : 'Pin post'}
+            {thread.pinned ? tr('chat.menu.unpinPost') : tr('chat.menu.pinPost')}
           </MenuItem>
           <MenuItem
             icon={thread.locked ? ThreadIcon : CloseIcon}
-            onAction={patch({ locked: !thread.locked }, 'Could not lock the post')}
+            onAction={patch({ locked: !thread.locked }, tr('chat.menu.postLockFailed'))}
           >
-            {thread.locked ? 'Unlock post' : 'Lock post'}
+            {thread.locked ? tr('chat.menu.unlockPost') : tr('chat.menu.lockPost')}
           </MenuItem>
           <MenuSeparator />
         </>
       ) : null}
-      <MenuItem icon={CopyIcon} onAction={() => copyToClipboard(thread.id, 'Post id')}>
-        Copy post id
+      <MenuItem icon={CopyIcon} onAction={() => copyToClipboard(thread.id, tr('chat.menu.copyPostId'))}>
+        {tr('chat.menu.copyPostIdItem')}
       </MenuItem>
       {moderator || mine ? (
         <MenuItem
           icon={TrashIcon}
           tone="danger"
           onAction={() => dialogs.confirm({
-            title: `Delete ${thread.title}`,
-            body: 'Replies go with it. This cannot be undone.',
-            confirmLabel: 'Delete',
+            title: tr('chat.menu.deleteNamed', { name: thread.title }),
+            body: tr('chat.menu.deleteRepliesBody'),
+            confirmLabel: tr('chat.menu.deleteConfirm'),
             danger: true,
             onConfirm: async () => {
               try {
                 await api().deleteThread(thread.id);
                 store.dropThread(thread.parent_id, thread.id);
                 onGone?.();
-              } catch (e) { reportError(e, 'Could not delete the post'); }
+              } catch (e) { reportError(e, tr('chat.menu.postDeleteFailed')); }
             },
           })}
         >
-          Delete post
+          {tr('chat.menu.deletePost')}
         </MenuItem>
       ) : null}
     </>
   );
 };
 
-export const thread = (env, t, { onOpen, onGone, onChanged } = {}) => {
-  const { store, dialogs } = env;
-  const parentId = t.parent_id;
+export const thread = (env, thread, { onOpen, onGone, onChanged } = {}) => {
+  const { store, dialogs, t: tr } = env;
+  const parentId = thread.parent_id;
   const api = () => store.apiForChannel(parentId);
   const moderator = has(store.permissionsIn(parentId), 'MANAGE_MESSAGES');
-  const mine = t.owner === store.me?.user_id;
-  const domain = store.channels.get(t.id)?.domain || store.channels.get(parentId)?.domain || '';
+  const mine = thread.owner === store.me?.user_id;
+  const domain = store.channels.get(thread.id)?.domain || store.channels.get(parentId)?.domain || '';
 
   const go = () => {
     if (onOpen) { onOpen(); return; }
-    store.channels.set(t.id, {
-      id: t.id, name: t.title, type: 'thread', parent_id: parentId,
-      guild_id: t.guild_id, domain,
+    store.channels.set(thread.id, {
+      id: thread.id, name: thread.title, type: 'thread', parent_id: parentId,
+      guild_id: thread.guild_id, domain,
     });
-    store.navigate({ view: 'chat', channelId: t.id });
+    store.navigate({ view: 'chat', channelId: thread.id });
   };
 
   const patch = (body, failure) => async () => {
     try {
-      const saved = await api().patchThread(t.id, body);
+      const saved = await api().patchThread(thread.id, body);
       const list = store.threads.get(parentId) || [];
-      store.threads.set(parentId, list.map((x) => (x.id === t.id ? { ...x, ...saved } : x)));
+      store.threads.set(parentId, list.map((x) => (x.id === thread.id ? { ...x, ...saved } : x)));
       store.emit('threads', parentId);
       onChanged?.();
     } catch (e) { reportError(e, failure); }
@@ -106,11 +140,14 @@ export const thread = (env, t, { onOpen, onGone, onChanged } = {}) => {
 
   return (
     <>
-      <MenuItem icon={ThreadIcon} onAction={go}>Open thread</MenuItem>
-      {muteItems(env, t.id, 'thread')}
-      <MenuItem icon={CheckIcon} onAction={() => store.ack(t.id)}>Mark read</MenuItem>
-      <MenuItem icon={LinkIcon} onAction={() => copyToClipboard(`${domain}/${t.id}`, 'Thread link')}>
-        Copy link
+      <MenuItem icon={ThreadIcon} onAction={go}>{tr('chat.menu.openThread')}</MenuItem>
+      {muteItems(env, thread.id, 'thread')}
+      <MenuItem icon={CheckIcon} onAction={() => store.ack(thread.id)}>{tr('chat.menu.markRead')}</MenuItem>
+      <MenuItem
+        icon={LinkIcon}
+        onAction={() => copyToClipboard(`${domain}/${thread.id}`, tr('chat.menu.copyThreadLink'))}
+      >
+        {tr('chat.menu.copyLink')}
       </MenuItem>
       {moderator || mine ? (
         <>
@@ -118,23 +155,23 @@ export const thread = (env, t, { onOpen, onGone, onChanged } = {}) => {
           <MenuItem
             icon={EditIcon}
             onAction={() => dialogs.prompt({
-              title: 'Rename thread',
-              label: 'Thread title',
-              value: t.title || '',
-              confirmLabel: 'Rename',
+              title: tr('chat.menu.renameThread'),
+              label: tr('chat.menu.threadTitle'),
+              value: thread.title || '',
+              confirmLabel: tr('chat.menu.rename'),
               onSubmit: async (title) => {
-                if (!title.trim() || title.trim() === t.title) return;
-                await patch({ title: title.trim() }, 'Could not rename the thread')();
+                if (!title.trim() || title.trim() === thread.title) return;
+                await patch({ title: title.trim() }, tr('chat.menu.renameFailed'))();
               },
             })}
           >
-            Rename thread
+            {tr('chat.menu.renameThread')}
           </MenuItem>
           <MenuItem
-            icon={t.archived ? ThreadIcon : CheckIcon}
-            onAction={patch({ archived: !t.archived }, 'Could not archive the thread')}
+            icon={thread.archived ? ThreadIcon : CheckIcon}
+            onAction={patch({ archived: !thread.archived }, tr('chat.menu.archiveFailed'))}
           >
-            {t.archived ? 'Unarchive thread' : 'Archive thread'}
+            {thread.archived ? tr('chat.menu.unarchiveThread') : tr('chat.menu.archiveThread')}
           </MenuItem>
         </>
       ) : null}
@@ -142,41 +179,41 @@ export const thread = (env, t, { onOpen, onGone, onChanged } = {}) => {
         <>
           <MenuItem
             icon={PinIcon}
-            onAction={patch({ pinned: !t.pinned }, 'Could not pin the thread')}
+            onAction={patch({ pinned: !thread.pinned }, tr('chat.menu.threadPinFailed'))}
           >
-            {t.pinned ? 'Unpin thread' : 'Pin thread'}
+            {thread.pinned ? tr('chat.menu.unpinThread') : tr('chat.menu.pinThread')}
           </MenuItem>
           <MenuItem
-            icon={t.locked ? ThreadIcon : CloseIcon}
-            onAction={patch({ locked: !t.locked }, 'Could not lock the thread')}
+            icon={thread.locked ? ThreadIcon : CloseIcon}
+            onAction={patch({ locked: !thread.locked }, tr('chat.menu.threadLockFailed'))}
           >
-            {t.locked ? 'Unlock thread' : 'Lock thread'}
+            {thread.locked ? tr('chat.menu.unlockThread') : tr('chat.menu.lockThread')}
           </MenuItem>
         </>
       ) : null}
       <MenuSeparator />
-      <MenuItem icon={CopyIcon} onAction={() => copyToClipboard(t.id, 'Thread id')}>
-        Copy thread id
+      <MenuItem icon={CopyIcon} onAction={() => copyToClipboard(thread.id, tr('chat.menu.copyThreadId'))}>
+        {tr('chat.menu.copyThreadIdItem')}
       </MenuItem>
       {moderator || mine ? (
         <MenuItem
           icon={TrashIcon}
           tone="danger"
           onAction={() => dialogs.confirm({
-            title: `Delete ${t.title}`,
-            body: 'Replies go with it. This cannot be undone.',
-            confirmLabel: 'Delete',
+            title: tr('chat.menu.deleteNamed', { name: thread.title }),
+            body: tr('chat.menu.deleteRepliesBody'),
+            confirmLabel: tr('chat.menu.deleteConfirm'),
             danger: true,
             onConfirm: async () => {
               try {
-                await api().deleteThread(t.id);
-                store.dropThread(parentId, t.id);
+                await api().deleteThread(thread.id);
+                store.dropThread(parentId, thread.id);
                 onGone?.();
-              } catch (e) { reportError(e, 'Could not delete the thread'); }
+              } catch (e) { reportError(e, tr('chat.menu.threadDeleteFailed')); }
             },
           })}
         >
-          Delete thread
+          {tr('chat.menu.deleteThread')}
         </MenuItem>
       ) : null}
     </>
@@ -184,7 +221,7 @@ export const thread = (env, t, { onOpen, onGone, onChanged } = {}) => {
 };
 
 export const message = (env, msg, { onReply, onEdit }) => {
-  const { store, modal, dialogs } = env;
+  const { store, modal, dialogs, t: tr } = env;
   const api = () => store.apiForChannel(msg.channel_id);
   const perms = store.permissionsIn(msg.channel_id);
   const mine = msg.author === store.me?.user_id;
@@ -198,7 +235,7 @@ export const message = (env, msg, { onReply, onEdit }) => {
       const held = (msg.reactions || []).find((r) => r.emoji === emoji)?.me;
       if (held) await api().unreact(msg.id, emoji);
       else await api().react(msg.id, emoji);
-    } catch (e) { reportError(e, 'Reaction failed'); }
+    } catch (e) { reportError(e, tr('chat.menu.reactionFailed')); }
   };
 
   return (
@@ -216,13 +253,13 @@ export const message = (env, msg, { onReply, onEdit }) => {
               />
             ), { wide: true, desktopSize: 'emoji' })}
           >
-            Add reaction
+            {tr('chat.menu.addReaction')}
           </MenuItem>
           <MenuSeparator />
         </>
       ) : null}
       {maySend ? (
-        <MenuItem icon={ReplyIcon} onAction={() => onReply?.(msg)}>Reply</MenuItem>
+        <MenuItem icon={ReplyIcon} onAction={() => onReply?.(msg)}>{tr('chat.menu.reply')}</MenuItem>
       ) : null}
       {maySend ? (
         <MenuItem
@@ -238,17 +275,17 @@ export const message = (env, msg, { onReply, onEdit }) => {
             />
           ))}
         >
-          Forward
+          {tr('chat.menu.forward')}
         </MenuItem>
       ) : null}
       {maySend ? (
         <MenuItem
           icon={ThreadIcon}
           onAction={() => dialogs.prompt({
-            title: 'Start a thread',
-            label: 'Thread title',
+            title: tr('chat.menu.startThread'),
+            label: tr('chat.menu.threadTitle'),
             value: (msg.content || '').slice(0, 60),
-            confirmLabel: 'Create',
+            confirmLabel: tr('chat.menu.create'),
             onSubmit: async (title) => {
               if (!title.trim()) return;
               try {
@@ -265,33 +302,36 @@ export const message = (env, msg, { onReply, onEdit }) => {
                 });
                 store.emit('channels', msg.guild_id);
                 store.navigate({ channelId: thread.id });
-              } catch (e) { reportError(e, 'Could not start a thread'); }
+              } catch (e) { reportError(e, tr('chat.menu.startThreadFailed')); }
             },
           })}
         >
-          Start a thread
+          {tr('chat.menu.startThread')}
         </MenuItem>
       ) : null}
       {mine ? (
-        <MenuItem icon={EditIcon} onAction={() => onEdit?.(msg.id)}>Edit message</MenuItem>
+        <MenuItem icon={EditIcon} onAction={() => onEdit?.(msg.id)}>{tr('chat.menu.editMessage')}</MenuItem>
       ) : null}
       <MenuSeparator />
-      <MenuItem icon={CopyIcon} onAction={() => copyToClipboard(msg.content || '', 'Message text')}>
-        Copy text
+      <MenuItem
+        icon={CopyIcon}
+        onAction={() => copyToClipboard(msg.content || '', tr('chat.menu.copyTextLabel'))}
+      >
+        {tr('chat.menu.copyText')}
       </MenuItem>
       {mayManage ? (
         <MenuItem
           icon={PinIcon}
           onAction={async () => {
-            try { await api().pin(msg.channel_id, msg.id); toast('Pinned.'); }
+            try { await api().pin(msg.channel_id, msg.id); toast(tr('chat.menu.pinnedToast')); }
             catch (e) {
-              if (e.status !== 409) { reportError(e, 'Could not pin'); return; }
-              try { await api().unpin(msg.channel_id, msg.id); toast('Unpinned.'); }
-              catch (err) { reportError(err, 'Could not unpin'); }
+              if (e.status !== 409) { reportError(e, tr('chat.menu.pinFailed')); return; }
+              try { await api().unpin(msg.channel_id, msg.id); toast(tr('chat.menu.unpinnedToast')); }
+              catch (err) { reportError(err, tr('chat.menu.unpinFailed')); }
             }
           }}
         >
-          Pin message
+          {tr('chat.menu.pinMessage')}
         </MenuItem>
       ) : null}
       <MenuSeparator />
@@ -300,12 +340,16 @@ export const message = (env, msg, { onReply, onEdit }) => {
         tone="danger"
         onAction={() => modal.open((c) => <ReportDialog msg={msg} close={c} />)}
       >
-        Report message
+        {tr('chat.menu.reportMessage')}
       </MenuItem>
       <MenuSeparator />
-      <MenuItem icon={CopyIcon} onAction={() => copyToClipboard(msg.id, 'Message id')}>
-        Copy message id
+      <MenuItem
+        icon={CopyIcon}
+        onAction={() => copyToClipboard(msg.id, tr('chat.menu.copyMessageId'))}
+      >
+        {tr('chat.menu.copyMessageIdItem')}
       </MenuItem>
+      {attachmentDeleteItems(env, msg)}
       {mine || mayManage ? (
         <>
           <MenuSeparator />
@@ -313,17 +357,17 @@ export const message = (env, msg, { onReply, onEdit }) => {
             icon={TrashIcon}
             tone="danger"
             onAction={() => dialogs.confirm({
-              title: 'Delete message',
-              body: 'This cannot be undone.',
-              confirmLabel: 'Delete',
+              title: tr('chat.menu.deleteMessage'),
+              body: tr('chat.menu.deleteMessageBody'),
+              confirmLabel: tr('chat.menu.deleteConfirm'),
               danger: true,
               onConfirm: async () => {
                 try { await api().deleteMessage(msg.channel_id, msg.id); }
-                catch (e) { reportError(e, 'Could not delete'); }
+                catch (e) { reportError(e, tr('chat.menu.deleteFailed')); }
               },
             })}
           >
-            Delete message
+            {tr('chat.menu.deleteMessage')}
           </MenuItem>
         </>
       ) : null}
@@ -332,14 +376,14 @@ export const message = (env, msg, { onReply, onEdit }) => {
 };
 
 export const conversationMessage = (env, convo, msg, { onReply, onEdit }) => {
-  const { store, modal, dialogs } = env;
+  const { store, modal, dialogs, t: tr } = env;
   const mine = msg.author === store.me?.user_id;
   const readable = !msg.unreadable && !msg.deleted;
 
   return (
     <>
       {readable ? (
-        <MenuItem icon={ReplyIcon} onAction={() => onReply?.(msg)}>Reply</MenuItem>
+        <MenuItem icon={ReplyIcon} onAction={() => onReply?.(msg)}>{tr('chat.menu.reply')}</MenuItem>
       ) : null}
       {readable ? (
         <MenuItem
@@ -355,30 +399,37 @@ export const conversationMessage = (env, convo, msg, { onReply, onEdit }) => {
             />
           ))}
         >
-          Forward
+          {tr('chat.menu.forward')}
         </MenuItem>
       ) : null}
       {mine && readable ? (
-        <MenuItem icon={EditIcon} onAction={() => onEdit?.(msg.id)}>Edit message</MenuItem>
+        <MenuItem icon={EditIcon} onAction={() => onEdit?.(msg.id)}>{tr('chat.menu.editMessage')}</MenuItem>
       ) : null}
       {readable ? (
         <MenuItem
           icon={PinIcon}
           onAction={() => store.setPinDm(convo.id, msg.id, !msg.pinned)
-            .catch((e) => reportError(e, 'Could not pin'))}
+            .catch((e) => reportError(e, tr('chat.menu.pinFailed')))}
         >
-          {msg.pinned ? 'Unpin message' : 'Pin message'}
+          {msg.pinned ? tr('chat.menu.unpinMessage') : tr('chat.menu.pinMessage')}
         </MenuItem>
       ) : null}
       <MenuSeparator />
       {readable ? (
-        <MenuItem icon={CopyIcon} onAction={() => copyToClipboard(msg.content || '', 'Message text')}>
-          Copy text
+        <MenuItem
+          icon={CopyIcon}
+          onAction={() => copyToClipboard(msg.content || '', tr('chat.menu.copyTextLabel'))}
+        >
+          {tr('chat.menu.copyText')}
         </MenuItem>
       ) : null}
-      <MenuItem icon={CopyIcon} onAction={() => copyToClipboard(msg.id, 'Message id')}>
-        Copy message id
+      <MenuItem
+        icon={CopyIcon}
+        onAction={() => copyToClipboard(msg.id, tr('chat.menu.copyMessageId'))}
+      >
+        {tr('chat.menu.copyMessageIdItem')}
       </MenuItem>
+      {readable ? attachmentDeleteItems(env, msg) : null}
       {mine ? (
         <>
           <MenuSeparator />
@@ -386,17 +437,17 @@ export const conversationMessage = (env, convo, msg, { onReply, onEdit }) => {
             icon={TrashIcon}
             tone="danger"
             onAction={() => dialogs.confirm({
-              title: 'Delete message',
-              body: 'This removes it for everyone.',
-              confirmLabel: 'Delete',
+              title: tr('chat.menu.deleteMessage'),
+              body: tr('chat.menu.deleteDmBody'),
+              confirmLabel: tr('chat.menu.deleteConfirm'),
               danger: true,
               onConfirm: async () => {
                 try { await store.deleteDm(convo.id, msg.id); }
-                catch (e) { reportError(e, 'Could not delete'); }
+                catch (e) { reportError(e, tr('chat.menu.deleteFailed')); }
               },
             })}
           >
-            Delete message
+            {tr('chat.menu.deleteMessage')}
           </MenuItem>
         </>
       ) : null}

@@ -1,0 +1,652 @@
+{
+  "archived": [
+    {
+      "attachments": "[{\"reference\":\"media://a.example/8785576ea2058be762ff9d562eb51bd794ce110bd2a033a9ee51812d6209d7fd\",\"filename\":\"photo.png\",\"mime\":\"image/png\",\"size\":31}]",
+      "author_id": "@ana:a.example",
+      "author_signature": "ed25519:conformance-signature-0",
+      "cards": "[]",
+      "channel_id": "01JC0NF0RMANCE000000000011",
+      "components": "[]",
+      "content": "welcome <@&01JC0NF0RMANCE000000000002> to <#01JC0NF0RMANCE000000000012> <parrot:01JC0NF0RMANCE000000000020>",
+      "created_at": 2000,
+      "deleted": 0,
+      "edited_at": 2050,
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "id": "01JC0NF0RMANCE000000000100",
+      "reply_to": null,
+      "sticker": null,
+      "thread_id": "01JC0NF0RMANCE000000000014"
+    },
+    {
+      "attachments": "[]",
+      "author_id": "@bo:b.example",
+      "author_signature": "ed25519:conformance-signature-1",
+      "cards": "[{\"title\":\"Welcome\",\"description\":\"Read the rules, then say hello.\",\"colour\":3447003,\"fields\":[{\"name\":\"Rules\",\"value\":\"Be kind.\",\"inline\":true}],\"footer\":\"posted by Bo\"}]",
+      "channel_id": "01JC0NF0RMANCE000000000011",
+      "components": "[{\"type\":\"action_row\",\"components\":[{\"type\":\"button\",\"style\":\"primary\",\"label\":\"Open a ticket\",\"custom_id\":\"support:ticket:open\"},{\"type\":\"button\",\"style\":\"link\",\"label\":\"The rules\",\"url\":\"https://example.test/rules\"},{\"type\":\"select\",\"custom_id\":\"roles:pick\",\"placeholder\":\"Pick a colour\",\"min\":0,\"max\":1,\"options\":[{\"label\":\"Red\",\"value\":\"red\",\"description\":\"a warm one\",\"default\":false}]}]}]",
+      "content": "agreed",
+      "created_at": 2100,
+      "deleted": 0,
+      "edited_at": null,
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "id": "01JC0NF0RMANCE000000000101",
+      "reply_to": "01JC0NF0RMANCE000000000100",
+      "sticker": null,
+      "thread_id": null
+    },
+    {
+      "attachments": "[]",
+      "author_id": "@ana:a.example",
+      "author_signature": null,
+      "cards": "[]",
+      "channel_id": "01JC0NF0RMANCE000000000011",
+      "components": "[]",
+      "content": "",
+      "created_at": 2200,
+      "deleted": 0,
+      "edited_at": null,
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "id": "01JC0NF0RMANCE000000000102",
+      "reply_to": null,
+      "sticker": "{\"id\":\"01JC0NF0RMANCE000000000021\",\"name\":\"shrug\",\"origin\":\"a.example\"}",
+      "thread_id": null
+    },
+    {
+      "attachments": "[]",
+      "author_id": "@bo:b.example",
+      "author_signature": null,
+      "cards": "[]",
+      "channel_id": "01JC0NF0RMANCE000000000011",
+      "components": "[]",
+      "content": "",
+      "created_at": 2300,
+      "deleted": 1,
+      "edited_at": null,
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "id": "01JC0NF0RMANCE000000000103",
+      "reply_to": null,
+      "sticker": null,
+      "thread_id": null
+    }
+  ],
+  "audit_log": [
+    {
+      "action": "role.create",
+      "actor": "@ana:a.example",
+      "created_at": 1000,
+      "data": "{\"name\":\"mods\"}",
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "id": "01JC0NF0RMANCE000000000032",
+      "target": "01JC0NF0RMANCE000000000002"
+    }
+  ],
+  "automod_rules": [
+    {
+      "action": "block",
+      "created_at": 1000,
+      "created_by": "@ana:a.example",
+      "enabled": 1,
+      "escalate": "[{\"hits\":3,\"action\":\"timeout\"},{\"hits\":5,\"action\":\"ban\"}]",
+      "escalate_window_secs": 7200,
+      "exempt_channels": "[\"01JC0NF0RMANCE000000000012\"]",
+      "exempt_roles": "[\"01JC0NF0RMANCE000000000002\"]",
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "id": "01JC0NF0RMANCE000000000030",
+      "kind": "link",
+      "name": "no links",
+      "pattern": ".*",
+      "scope_channels": "[\"01JC0NF0RMANCE000000000011\"]",
+      "threshold": 3,
+      "timeout_secs": 600,
+      "updated_at": 1200,
+      "window_secs": 20
+    }
+  ],
+  "channels": [
+    {
+      "available_tags": "[]",
+      "bitrate": null,
+      "created_at": 1000,
+      "default_layout": "list",
+      "default_sort": "activity",
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "id": "01JC0NF0RMANCE000000000010",
+      "media_expiry_limit_secs": null,
+      "media_max_file_bytes": null,
+      "name": "text channels",
+      "parent_id": null,
+      "position": 0,
+      "slowmode": 0,
+      "strip_embeds": 0,
+      "topic": null,
+      "type": "category",
+      "user_limit": 0,
+      "voice_region": "auto",
+      "voice_status": null,
+      "voice_status_at": null,
+      "voice_status_author": null
+    },
+    {
+      "available_tags": "[]",
+      "bitrate": null,
+      "created_at": 1100,
+      "default_layout": "list",
+      "default_sort": "activity",
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "id": "01JC0NF0RMANCE000000000014",
+      "media_expiry_limit_secs": null,
+      "media_max_file_bytes": null,
+      "name": "a question",
+      "parent_id": "01JC0NF0RMANCE000000000011",
+      "position": 0,
+      "slowmode": 0,
+      "strip_embeds": 0,
+      "topic": null,
+      "type": "thread",
+      "user_limit": 0,
+      "voice_region": "auto",
+      "voice_status": null,
+      "voice_status_at": null,
+      "voice_status_author": null
+    },
+    {
+      "available_tags": "[{\"id\":\"t1\",\"name\":\"bug\"}]",
+      "bitrate": null,
+      "created_at": 1000,
+      "default_layout": "gallery",
+      "default_sort": "creation",
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "id": "01JC0NF0RMANCE000000000011",
+      "media_expiry_limit_secs": 3600,
+      "media_max_file_bytes": 262144,
+      "name": "general",
+      "parent_id": "01JC0NF0RMANCE000000000010",
+      "position": 1,
+      "slowmode": 5,
+      "strip_embeds": 1,
+      "topic": "the general channel",
+      "type": "text",
+      "user_limit": 0,
+      "voice_region": "auto",
+      "voice_status": null,
+      "voice_status_at": null,
+      "voice_status_author": null
+    },
+    {
+      "available_tags": "[]",
+      "bitrate": null,
+      "created_at": 1000,
+      "default_layout": "list",
+      "default_sort": "activity",
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "id": "01JC0NF0RMANCE000000000012",
+      "media_expiry_limit_secs": null,
+      "media_max_file_bytes": null,
+      "name": "announcements",
+      "parent_id": "01JC0NF0RMANCE000000000010",
+      "position": 2,
+      "slowmode": 0,
+      "strip_embeds": 0,
+      "topic": null,
+      "type": "text",
+      "user_limit": 0,
+      "voice_region": "auto",
+      "voice_status": null,
+      "voice_status_at": null,
+      "voice_status_author": null
+    },
+    {
+      "available_tags": "[]",
+      "bitrate": 96000,
+      "created_at": 1000,
+      "default_layout": "list",
+      "default_sort": "activity",
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "id": "01JC0NF0RMANCE000000000013",
+      "media_expiry_limit_secs": null,
+      "media_max_file_bytes": null,
+      "name": "lounge",
+      "parent_id": "01JC0NF0RMANCE000000000010",
+      "position": 3,
+      "slowmode": 0,
+      "strip_embeds": 0,
+      "topic": null,
+      "type": "voice",
+      "user_limit": 10,
+      "voice_region": "eu",
+      "voice_status": "ranked grind in the lounge",
+      "voice_status_at": 1500,
+      "voice_status_author": "@ana:a.example"
+    },
+    {
+      "available_tags": "[]",
+      "bitrate": null,
+      "created_at": 1600,
+      "default_layout": "list",
+      "default_sort": "activity",
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "id": "01JC0NF0RMANCE000000000015",
+      "media_expiry_limit_secs": null,
+      "media_max_file_bytes": null,
+      "name": "ticket-0001",
+      "parent_id": "01JC0NF0RMANCE000000000010",
+      "position": 4,
+      "slowmode": 0,
+      "strip_embeds": 0,
+      "topic": null,
+      "type": "text",
+      "user_limit": 0,
+      "voice_region": "auto",
+      "voice_status": null,
+      "voice_status_at": null,
+      "voice_status_author": null
+    }
+  ],
+  "domain_rules": [
+    {
+      "action": "allow",
+      "domain": "allowed.example",
+      "guild_id": "01JC0NF0RMANCE000000000001"
+    }
+  ],
+  "emojis": [
+    {
+      "animated": 1,
+      "created_at": 1000,
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "id": "01JC0NF0RMANCE000000000020",
+      "media_hash": "9715213796278e1db3479b21830138f75d0eb574e2348a693922f6ecf6ab3095",
+      "name": "parrot",
+      "uploader": "@ana:a.example"
+    }
+  ],
+  "exported_at": 1767225600000,
+  "expressions": [
+    {
+      "data": "Y29uZm9ybWFuY2Ugc3RpY2tlcjogYSBzaHJ1Zw",
+      "media": {
+        "capability": "conformance-sticker-capability",
+        "created_at": 1000,
+        "expires_at": 4102444800000,
+        "filename": "shrug.png",
+        "hash": "511eebe37a088e4037efc414112b616d50d85d068dadb3c8652d9a903be67e61",
+        "height": 160,
+        "local_dest": 0,
+        "mime": "image/png",
+        "moved_to": "elsewhere.example",
+        "owner_user_id": "@ana:a.example",
+        "purpose": "expression",
+        "refcount": 3,
+        "refs": 0,
+        "size": 28,
+        "thumbhash": "THUMBHASH-SHRUG",
+        "width": 160
+      }
+    },
+    {
+      "data": "Y29uZm9ybWFuY2UgZW1vamk6IGEgcGFycm90",
+      "media": {
+        "capability": "conformance-emoji-capability",
+        "created_at": 1000,
+        "expires_at": null,
+        "filename": "parrot.png",
+        "hash": "9715213796278e1db3479b21830138f75d0eb574e2348a693922f6ecf6ab3095",
+        "height": 128,
+        "local_dest": 0,
+        "mime": "image/png",
+        "moved_to": null,
+        "owner_user_id": "@ana:a.example",
+        "purpose": "expression",
+        "refcount": 1,
+        "refs": 0,
+        "size": 27,
+        "thumbhash": "THUMBHASH-PARROT",
+        "width": 128
+      }
+    }
+  ],
+  "follows": [
+    {
+      "created_at": 3300,
+      "created_by": "@ana:a.example",
+      "source_id": "01JC0NF0RMANCE000000000012",
+      "target_id": "01JC0NF0RMANCE000000000011"
+    }
+  ],
+  "guild": {
+    "alias": "conformance",
+    "created_at": 1000,
+    "domain_policy": "blocklist",
+    "emoji_export_policy": "role",
+    "emoji_export_role_id": "01JC0NF0RMANCE000000000002",
+    "external_emoji": 0,
+    "fallback_domain": "standby.example",
+    "hold_first_messages": 1,
+    "icon_ref": "media://a.example/guild-icon",
+    "id": "01JC0NF0RMANCE000000000001",
+    "media_expiry_limit_secs": 86400,
+    "media_max_file_bytes": 1048576,
+    "min_account_age_days": 7,
+    "name": "Conformance",
+    "origin_policy": "allowlist",
+    "owner_user_id": "@ana:a.example",
+    "require_voucher": 1,
+    "screening": "[\"why are you here\"]",
+    "settings": "{\"theme\":\"dark\"}"
+  },
+  "held_messages": [
+    {
+      "author_id": "@cy:c.example",
+      "channel_id": "01JC0NF0RMANCE000000000011",
+      "created_at": 1400,
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "handled_at": 1450,
+      "handled_by": "@ana:a.example",
+      "id": "01JC0NF0RMANCE000000000031",
+      "payload": "{\"content\":\"hi\"}",
+      "reason": "first message",
+      "state": "approved"
+    }
+  ],
+  "invites": [
+    {
+      "channel_id": "01JC0NF0RMANCE000000000011",
+      "code": "conformance",
+      "created_at": 1000,
+      "creator": "@ana:a.example",
+      "expires_at": 4102444800000,
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "max_uses": 100,
+      "uses": 3
+    },
+    {
+      "channel_id": null,
+      "code": "lobby",
+      "created_at": 1001,
+      "creator": "@ana:a.example",
+      "expires_at": null,
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "max_uses": null,
+      "uses": 0
+    }
+  ],
+  "kind": "guild",
+  "member_roles": [
+    {
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "role_id": "01JC0NF0RMANCE000000000002",
+      "user_id": "@ana:a.example"
+    },
+    {
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "role_id": "01JC0NF0RMANCE000000000002",
+      "user_id": "@bo:b.example"
+    }
+  ],
+  "members": [
+    {
+      "avatar_ref": "media://a.example/ana-avatar",
+      "ban_reason": null,
+      "banned": 0,
+      "bot_allowed_intents": 0,
+      "bot_application_id": null,
+      "bot_application_origin": null,
+      "bot_installed_by": null,
+      "bot_role_id": null,
+      "display_name": "Ana",
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "joined_at": 1100,
+      "nickname": "ana!",
+      "profile_version": 3,
+      "timeout_until": 1500,
+      "user_id": "@ana:a.example"
+    },
+    {
+      "avatar_ref": null,
+      "ban_reason": null,
+      "banned": 0,
+      "bot_allowed_intents": 33,
+      "bot_application_id": "01JC0NF0RMANCEBOTAPP00000001",
+      "bot_application_origin": "b.example",
+      "bot_installed_by": "@ana:a.example",
+      "bot_role_id": "01JC0NF0RMANCE000000000002",
+      "display_name": "Bo",
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "joined_at": 1200,
+      "nickname": null,
+      "profile_version": 1,
+      "timeout_until": null,
+      "user_id": "@bo:b.example"
+    },
+    {
+      "avatar_ref": null,
+      "ban_reason": "spam",
+      "banned": 1,
+      "bot_allowed_intents": 0,
+      "bot_application_id": null,
+      "bot_application_origin": null,
+      "bot_installed_by": null,
+      "bot_role_id": null,
+      "display_name": "",
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "joined_at": 1300,
+      "nickname": null,
+      "profile_version": 0,
+      "timeout_until": null,
+      "user_id": "@cy:c.example"
+    }
+  ],
+  "mentions": [
+    {
+      "channel_id": "01JC0NF0RMANCE000000000011",
+      "kind": "role",
+      "message_id": "01JC0NF0RMANCE000000000100",
+      "user_id": "01JC0NF0RMANCE000000000002"
+    },
+    {
+      "channel_id": "01JC0NF0RMANCE000000000011",
+      "kind": "user",
+      "message_id": "01JC0NF0RMANCE000000000104",
+      "user_id": "@bo:b.example"
+    }
+  ],
+  "messages": [
+    {
+      "attachments": "[]",
+      "author_id": "@ana:a.example",
+      "author_signature": "ed25519:conformance-signature-4",
+      "cards": "[]",
+      "channel_id": "01JC0NF0RMANCE000000000011",
+      "components": "[]",
+      "content": "<parrot:01JC0NF0RMANCE000000000020@a.example> is the good one, <@@bo:b.example>",
+      "created_at": 2400,
+      "deleted": 0,
+      "edited_at": 2450,
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "id": "01JC0NF0RMANCE000000000104",
+      "reply_to": "01JC0NF0RMANCE000000000100",
+      "sticker": null,
+      "thread_id": null
+    },
+    {
+      "attachments": "[]",
+      "author_id": "@bo:b.example",
+      "author_signature": null,
+      "cards": "[{\"title\":\"Welcome\",\"description\":\"Read the rules, then say hello.\",\"colour\":3447003,\"fields\":[{\"name\":\"Rules\",\"value\":\"Be kind.\",\"inline\":true}],\"footer\":\"posted by Bo\"}]",
+      "channel_id": "01JC0NF0RMANCE000000000014",
+      "components": "[{\"type\":\"action_row\",\"components\":[{\"type\":\"button\",\"style\":\"primary\",\"label\":\"Open a ticket\",\"custom_id\":\"support:ticket:open\"},{\"type\":\"button\",\"style\":\"link\",\"label\":\"The rules\",\"url\":\"https://example.test/rules\"},{\"type\":\"select\",\"custom_id\":\"roles:pick\",\"placeholder\":\"Pick a colour\",\"min\":0,\"max\":1,\"options\":[{\"label\":\"Red\",\"value\":\"red\",\"description\":\"a warm one\",\"default\":false}]}]}]",
+      "content": "in the thread",
+      "created_at": 2600,
+      "deleted": 0,
+      "edited_at": null,
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "id": "01JC0NF0RMANCE000000000105",
+      "reply_to": null,
+      "sticker": null,
+      "thread_id": null
+    },
+    {
+      "attachments": "[]",
+      "author_id": "@ana:a.example",
+      "author_signature": null,
+      "cards": "[]",
+      "channel_id": "01JC0NF0RMANCE000000000012",
+      "components": "[]",
+      "content": "news for <#01JC0NF0RMANCE000000000011>",
+      "created_at": 2700,
+      "deleted": 0,
+      "edited_at": null,
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "id": "01JC0NF0RMANCE000000000106",
+      "reply_to": null,
+      "sticker": null,
+      "thread_id": null
+    }
+  ],
+  "origin_rules": [
+    {
+      "action": "block",
+      "domain": "blocked.example",
+      "feed_key": null,
+      "feed_url": null,
+      "guild_id": "01JC0NF0RMANCE000000000001"
+    },
+    {
+      "action": "allow",
+      "domain": "feed:https://feeds.example/curated.json",
+      "feed_key": "CURATOR-PUBLIC-KEY",
+      "feed_url": "https://feeds.example/curated.json",
+      "guild_id": "01JC0NF0RMANCE000000000001"
+    }
+  ],
+  "overwrites": [
+    {
+      "allow": 1024,
+      "channel_id": "01JC0NF0RMANCE000000000011",
+      "deny": 0,
+      "target_id": "01JC0NF0RMANCE000000000002",
+      "target_type": "role"
+    },
+    {
+      "allow": 0,
+      "channel_id": "01JC0NF0RMANCE000000000011",
+      "deny": 2048,
+      "target_id": "@bo:b.example",
+      "target_type": "member"
+    },
+    {
+      "allow": 0,
+      "channel_id": "01JC0NF0RMANCE000000000012",
+      "deny": 2048,
+      "target_id": "01JC0NF0RMANCE000000000001",
+      "target_type": "role"
+    }
+  ],
+  "pins": [
+    {
+      "channel_id": "01JC0NF0RMANCE000000000011",
+      "message_id": "01JC0NF0RMANCE000000000100",
+      "pinned_at": 3100,
+      "pinned_by": "@ana:a.example"
+    }
+  ],
+  "reactions": [
+    {
+      "created_at": 3002,
+      "emoji": "👍",
+      "message_id": "01JC0NF0RMANCE000000000104",
+      "user_id": "@bo:b.example"
+    }
+  ],
+  "read_state": [
+    {
+      "channel_id": "01JC0NF0RMANCE000000000011",
+      "last_read_id": "01JC0NF0RMANCE000000000104",
+      "muted": 1,
+      "updated_at": 3200,
+      "user_id": "@ana:a.example"
+    },
+    {
+      "channel_id": "01JC0NF0RMANCE000000000012",
+      "last_read_id": "01JC0NF0RMANCE000000000106",
+      "muted": 0,
+      "updated_at": 3201,
+      "user_id": "@bo:b.example"
+    }
+  ],
+  "roles": [
+    {
+      "color": 0,
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "hoist": 0,
+      "id": "01JC0NF0RMANCE000000000001",
+      "mentionable": 0,
+      "name": "@everyone",
+      "permissions": 1024,
+      "position": 0
+    },
+    {
+      "color": 15844367,
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "hoist": 1,
+      "id": "01JC0NF0RMANCE000000000002",
+      "mentionable": 1,
+      "name": "mods",
+      "permissions": 8200,
+      "position": 1
+    }
+  ],
+  "screening_answers": [
+    {
+      "answers": "[\"for the parrots\"]",
+      "created_at": 1300,
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "state": "pending",
+      "user_id": "@cy:c.example"
+    }
+  ],
+  "source": "a.example",
+  "stickers": [
+    {
+      "created_at": 1000,
+      "format": "png",
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "id": "01JC0NF0RMANCE000000000021",
+      "media_hash": "511eebe37a088e4037efc414112b616d50d85d068dadb3c8652d9a903be67e61",
+      "name": "shrug",
+      "uploader": "@ana:a.example"
+    }
+  ],
+  "subject": "01JC0NF0RMANCE000000000001",
+  "threads": [
+    {
+      "archived": 0,
+      "auto_archive": 86400,
+      "created_at": 1100,
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "id": "01JC0NF0RMANCE000000000014",
+      "last_active": 2600,
+      "locked": 1,
+      "message_count": 1,
+      "owner": "@ana:a.example",
+      "parent_id": "01JC0NF0RMANCE000000000011",
+      "pinned": 1,
+      "starter_id": "01JC0NF0RMANCE000000000100",
+      "tags": "[\"bug\"]",
+      "title": "a question"
+    }
+  ],
+  "version": 2,
+  "voice_regions": [
+    {
+      "created_at": 1000,
+      "created_by": "@ana:a.example",
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "is_default": 1,
+      "name": "eu",
+      "pubkey_hint": "ed25519:sfu-key-hint",
+      "sfu": "wss://sfu.example",
+      "turn": "turn:turn.example"
+    }
+  ]
+}

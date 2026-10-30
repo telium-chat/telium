@@ -1057,8 +1057,11 @@ pub async fn purge_messages(
          .fetch_all(&state.pool).await?
     };
     for (message_id, channel_id) in &rows {
+        let mut tx = state.pool.begin().await?;
+        crate::routes::media::release_message_refs(&mut *tx, "messages.id = ? AND messages.deleted = 0", message_id).await?;
         sqlx::query("UPDATE messages SET deleted = 1, content = '', attachments = '[]', sticker = NULL WHERE id = ?")
-            .bind(message_id).execute(&state.pool).await?;
+            .bind(message_id).execute(&mut *tx).await?;
+        tx.commit().await?;
         crate::routes::social::unindex_message(&state, message_id).await?;
         sqlx::query("DELETE FROM pins WHERE message_id = ?")
             .bind(message_id)

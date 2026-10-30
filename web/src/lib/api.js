@@ -290,6 +290,7 @@ export class Api {
     return this.patch(`/_telium/v1/channels/${channelId}/messages/${id}`, { content });
   }
   deleteMessage(channelId, id) { return this.del(`/_telium/v1/channels/${channelId}/messages/${id}`); }
+  deleteMedia(hash) { return this.del(`/_telium/v1/media/${encodeURIComponent(hash)}`); }
   typing(channelId) { return this.post(`/_telium/v1/channels/${channelId}/typing`, {}); }
 
   react(messageId, emoji) {
@@ -498,6 +499,7 @@ export class Api {
   adminMetricsSeries(query) { return this.get('/_telium/v1/admin/metrics/series', query); }
   adminStorage() { return this.get('/_telium/v1/admin/storage'); }
   adminStorageSweep() { return this.post('/_telium/v1/admin/storage/sweep', {}); }
+  adminMediaConsumers() { return this.get('/_telium/v1/admin/storage/media-consumers'); }
   adminPeers() { return this.get('/_telium/v1/admin/peers'); }
   adminPeerStatus(origin) { return this.get(`/_telium/v1/admin/peers/${encodeURIComponent(origin)}`); }
   adminRevalidate() { return this.post('/_telium/v1/admin/revalidate', {}); }

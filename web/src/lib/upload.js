@@ -11,6 +11,10 @@ export { uploadExternal } from './external-upload.js';
 /// Tier 1: your own homeserver on your home token (default). Tier 2: any other origin, on a short-lived voucher the guild signs. `uploadAttachment` tries them in order unless the account picked a tier.
 
 async function send(base, path, headers, file, opts = {}) {
+  // A dead signal must not start anything, and XHR has no native way to know.
+  if (opts.signal?.aborted) {
+    return Promise.reject(new DOMException('The upload was cancelled.', 'AbortError'));
+  }
   const requestHeaders = {
     'Content-Type': file.type || 'application/octet-stream',
     'X-Telium-Filename': encodeURIComponent(file.name),
@@ -20,9 +24,9 @@ async function send(base, path, headers, file, opts = {}) {
   const url = `${base}${path}`;
   const relayed = effectiveMode(domainOf(url) || '').route === 'protected';
   const resp = opts.onProgress && !relayed
-    ? await xhrSend(url, requestHeaders, file, opts.onProgress)
+    ? await xhrSend(url, requestHeaders, file, opts.onProgress, opts.signal)
     : await teliumFetch(url, {
-      method: 'POST', headers: requestHeaders, body: file,
+      method: 'POST', headers: requestHeaders, body: file, signal: opts.signal,
     }, { purpose: 'upload' });
   if (!resp.ok) {
     const payload = await resp.json().catch(() => ({}));
@@ -162,20 +166,32 @@ export async function uploadAttachment(store, channel, file, opts = {}) {
   }
 }
 
-function xhrSend(url, headers, file, onProgress) {
+function xhrSend(url, headers, file, onProgress, signal) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', url);
     Object.entries(headers).forEach(([name, value]) => xhr.setRequestHeader(name, value));
+    const onAbort = () => xhr.abort();
+    if (signal) {
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    }
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) onProgress(event.loaded, event.total);
     };
     xhr.onerror = () => reject(new Error('Upload failed.'));
-    xhr.onload = () => resolve({
-      ok: xhr.status >= 200 && xhr.status < 300,
-      status: xhr.status,
-      json: async () => JSON.parse(xhr.responseText),
-    });
+    xhr.onabort = () => {
+      signal?.removeEventListener('abort', onAbort);
+      reject(new DOMException('The upload was cancelled.', 'AbortError'));
+    };
+    xhr.onload = () => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve({
+        ok: xhr.status >= 200 && xhr.status < 300,
+        status: xhr.status,
+        json: async () => JSON.parse(xhr.responseText),
+      });
+    };
     xhr.send(file);
   });
 }

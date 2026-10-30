@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { reportError } from '../../hooks/useToast.jsx';
 import { t } from '../../lib/i18n/index.js';
+import { bytes } from '../../lib/util.js';
 
 let seq = 0;
+
+/// Staged uploads in flight at once, per composer.
+const UPLOAD_CONCURRENCY = 3;
 
 function previewable(file) {
   const type = file.type || '';
@@ -11,6 +15,7 @@ function previewable(file) {
 
 export function useStagedFiles(surface) {
   const [items, setItems] = useState([]);
+  const controllers = useRef(new Map());
 
   const urls = useRef(new Set());
   const mint = useCallback((file) => {
@@ -27,16 +32,57 @@ export function useStagedFiles(surface) {
   }, []);
   useEffect(() => {
     const held = urls.current;
+    const live = controllers.current;
     return () => {
       held.forEach((url) => URL.revokeObjectURL(url));
       held.clear();
+      live.forEach((controller) => controller.abort());
+      live.clear();
     };
   }, []);
+
+  // One failed card stays put with its reason and a Retry, instead of
+  // vanishing with a toast and taking the picked file with it. The sentence
+  // the server gave — quota exhausted, over a channel cap — beats anything
+  // this file can invent.
+  const send = useCallback(async (entry) => {
+    const controller = new AbortController();
+    controllers.current.set(entry.key, controller);
+    try {
+      const att = await surface.upload(entry.file, {
+        ...entry.opts,
+        signal: controller.signal,
+        onProgress: (loaded, total) => setItems((was) => was.map((item) => (
+          item.key === entry.key
+            ? { ...item, progress: total ? Math.round((loaded / total) * 100) : 0 }
+            : item
+        ))),
+      });
+      setItems((was) => was.map((item) => (
+        item.key === entry.key ? { ...item, status: 'ready', progress: 100, att, error: null } : item
+      )));
+    } catch (e) {
+      // A cancel is the user's own act — remove() already took the card,
+      // and nothing was stored or charged.
+      if (controller.signal.aborted) return;
+      setItems((was) => was.map((item) => (
+        item.key === entry.key
+          ? { ...item, status: 'error', error: e.message || t('chat.staged.uploadFailed', { name: entry.name }), att: null }
+          : item
+      )));
+    } finally {
+      controllers.current.delete(entry.key);
+    }
+  }, [surface]);
 
   const add = useCallback(async (files, opts = {}) => {
     const picked = [...(files || [])].filter(Boolean);
     if (!picked.length) return;
+    // The origin publishes its caps; refusing before the first byte spares
+    // everyone the transfer and the generic failure the server would give.
+    const limit = surface.uploadLimit ?? null;
     const entries = picked.map((file) => {
+      const over = limit != null && file.size > limit;
       seq += 1;
       return {
         key: `staged-${seq}`,
@@ -45,39 +91,47 @@ export function useStagedFiles(surface) {
         size: file.size,
         mime: file.type || 'application/octet-stream',
         preview: previewable(file) ? mint(file) : null,
-        status: 'uploading',
+        status: over ? 'error' : 'uploading',
+        error: over ? t('chat.staged.tooLarge', { limit: bytes(limit) }) : null,
+        opts: { ttlSecs: opts.ttlSecs, externalHost: opts.externalHost || null },
         progress: 0,
         att: null,
       };
     });
     setItems((was) => [...was, ...entries]);
 
-    for (const entry of entries) {
-      try {
-        const att = await surface.upload(entry.file, {
-          ttlSecs: opts.ttlSecs,
-          externalHost: opts.externalHost || null,
-          onProgress: (loaded, total) => setItems((was) => was.map((item) => (
-            item.key === entry.key
-              ? { ...item, progress: total ? Math.round((loaded / total) * 100) : 0 }
-              : item
-          ))),
-        });
-        setItems((was) => was.map((item) => (
-          item.key === entry.key ? { ...item, status: 'ready', progress: 100, att } : item
-        )));
-      } catch (e) {
-        reportError(e, t('chat.staged.uploadFailed', { name: entry.name }));
-        release([entry]);
-        setItems((was) => was.filter((item) => item.key !== entry.key));
+    // A few at a time: one big file no longer queues everything behind it,
+    // and a farm of parallel uploads does not stampede the origin.
+    const queue = entries.filter((entry) => entry.status !== 'error');
+    await Promise.all(Array.from({ length: Math.min(UPLOAD_CONCURRENCY, queue.length) }, async () => {
+      while (queue.length) {
+        await send(queue.shift());
       }
-    }
-  }, [surface, mint, release]);
+    }));
+  }, [surface, mint, release, send]);
 
-  const remove = useCallback((key) => setItems((was) => {
-    release(was.filter((item) => item.key === key));
-    return was.filter((item) => item.key !== key);
-  }), [release]);
+  const retry = useCallback((key) => {
+    const entry = items.find((item) => item.key === key && item.status === 'error');
+    if (!entry) return;
+    setItems((was) => was.map((item) => (
+      item.key === key ? { ...item, status: 'uploading', error: null, progress: 0 } : item
+    )));
+    void send(entry);
+  }, [items, send]);
+
+  const remove = useCallback((key) => {
+    controllers.current.get(key)?.abort();
+    controllers.current.delete(key);
+    setItems((was) => {
+      release(was.filter((item) => item.key === key));
+      return was.filter((item) => item.key !== key);
+    });
+  }, [release]);
+
+  const abortAll = useCallback(() => {
+    controllers.current.forEach((controller) => controller.abort());
+    controllers.current.clear();
+  }, []);
 
   const rename = useCallback((key, next) => {
     const name = String(next || '').trim();
@@ -93,18 +147,22 @@ export function useStagedFiles(surface) {
     }));
   }, []);
 
-  const clear = useCallback(() => setItems([]), []);
+  const clear = useCallback(() => {
+    abortAll();
+    setItems([]);
+  }, [abortAll]);
   const restore = useCallback((list) => setItems(list || []), []);
   const drop = useCallback((list) => {
+    abortAll();
     release(list);
     setItems([]);
-  }, [release]);
+  }, [abortAll, release]);
 
   const staged = useMemo(() => items.filter((i) => i.att).map((i) => i.att), [items]);
 
   return useMemo(
-    () => ({ items, staged, add, remove, rename, clear, drop, restore, release }),
-    [items, staged, add, remove, rename, clear, drop, restore, release],
+    () => ({ items, staged, add, remove, retry, rename, clear, drop, restore, release }),
+    [items, staged, add, remove, retry, rename, clear, drop, restore, release],
   );
 }
 

@@ -1,5 +1,5 @@
 
-use crate::config::Config;
+use crate::config::{Config, MediaDefault};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -217,6 +217,36 @@ pub fn audit(cfg: &Config, config_path: Option<&Path>) -> Audit {
                 .into(),
             remedy: "`federation.allow_http = false`. It exists for test rigs and split-horizon \
                      development, and nothing else."
+                .into(),
+        });
+    }
+
+    if cfg.media_policy.quota_bytes > 0 && cfg.media_policy.default == MediaDefault::Enabled {
+        f.push(Finding {
+            key: "media_policy.quota_bytes".into(),
+            level: Level::Notice,
+            exposes: "uploads are unlimited: media_policy.default is \"enabled\", so \
+                      media_policy.quota_bytes is not enforced for anyone."
+                .into(),
+            remedy: "`media_policy.default = \"quota\"` enforces the per-account ceiling (and \
+                     the allowlist with it); keep \"enabled\" if unlimited uploads are what \
+                     you want."
+                .into(),
+        });
+    }
+
+    if cfg.media_policy.attachment_max_age_days > 0 {
+        f.push(Finding {
+            key: "media_policy.attachment_max_age_days".into(),
+            level: Level::Warn,
+            exposes: format!(
+                "attachment media older than {} day(s) is swept whether or not a message \
+                 still refers to it, so live messages will lose their files past that age.",
+                cfg.media_policy.attachment_max_age_days
+            ),
+            remedy: "`media_policy.attachment_max_age_days = 0` keeps attachments for as long \
+                     as their messages live; the unreferenced sweep alone reclaims what \
+                     deletions free."
                 .into(),
         });
     }
@@ -767,6 +797,15 @@ mod tests {
 
     fn has(audit: &Audit, key: &str) -> bool {
         audit.findings.iter().any(|f| f.key == key)
+    }
+
+    #[test]
+    fn an_inert_quota_is_named_so_nobody_wonders_where_the_ceiling_went() {
+        let cfg = production();
+        assert!(has(&audit(&cfg, None), "media_policy.quota_bytes"));
+        let mut quota = cfg;
+        quota.media_policy.default = MediaDefault::Quota;
+        assert!(!has(&audit(&quota, None), "media_policy.quota_bytes"));
     }
 
     #[test]

@@ -252,6 +252,9 @@ export const channel = {
   // than an instruction. "Channel" is load-bearing: the guild's cap still
   // applies, and this says only that the channel adds none of its own.
   'channel.edit.expiryPlaceholder': 'No channel limit',
+  'channel.edit.fileSizeLabel': 'File size limit',
+  'channel.edit.fileSizeHint': 'Bytes. Empty means the guild or server cap applies. Attachments only.',
+  'channel.edit.fileSizePlaceholder': 'No channel limit',
 
   // ------------------------------------------------------------------- durations
   //

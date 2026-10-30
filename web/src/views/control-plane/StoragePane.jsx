@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { reportError, toast } from '../../hooks/useToast.jsx';
-import { Button, Hint, Notice, Section } from '../../components/index.js';
+import { Button, DataTable, Hint, Notice, Section } from '../../components/index.js';
 import { Meter, TimeChart } from './Chart.jsx';
 import { Facts, Fact, Freshness, Tile } from './Bits.jsx';
 import { useControlPlane } from './context.js';
@@ -20,6 +20,60 @@ function growth(points, pick) {
   const days = (last.at - first.at) / 86_400_000;
   if (days <= 0) return null;
   return (last.v - first.v) / days;
+}
+
+
+function Consumers() {
+  const { home } = useControlPlane();
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [consumers, setConsumers] = useState(null);
+
+  const load = async () => {
+    setBusy(true);
+    try {
+      const out = await home.adminMediaConsumers();
+      setConsumers(out.consumers || []);
+      setLoaded(true);
+    } catch (e) {
+      reportError(e, 'Could not load media consumers');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Section
+      title="Who is filling the disk"
+      description="The accounts holding the most media here, largest first. Aggregates only —
+        this never lists individual files. Loaded on demand: the query touches the whole media
+        table, so it is not part of the polling loop."
+    >
+      <div className="cp-bar">
+        <Button size="sm" variant="ghost" disabled={busy} onClick={load}>
+          {loaded ? 'Refresh' : 'Load'}
+        </Button>
+      </div>
+      {consumers ? (
+        consumers.length ? (
+          <DataTable
+            rows={consumers}
+            rowKey={(r) => r.user_id}
+            label="Top media consumers"
+            columns={[
+              { key: 'user_id', header: 'Account', render: (r) => r.user_id, mono: true },
+              { key: 'objects', header: 'Objects', align: 'end', render: (r) => count(r.objects) },
+              { key: 'bytes', header: 'Stored', align: 'end', render: (r) => size(r.bytes) },
+            ]}
+          />
+        ) : (
+          <Hint>No media is stored on this server.</Hint>
+        )
+      ) : (
+        <Hint>Load to see the accounts holding the most media.</Hint>
+      )}
+    </Section>
+  );
 }
 
 function Backup({ backup }) {
@@ -225,14 +279,15 @@ export function StoragePane() {
             Sweep now
           </Button>
           <Hint className="cp-bar__hint">
-            Drops expired remote-cache entries and deletes media files whose reference count has
-            reached zero.
+            Drops expired remote-cache entries, deletes media files no row accounts for, and
+            reclaims uploads no live message refers to anymore (past the grace window).
           </Hint>
         </div>
         {sweep ? (
           <Notice tone="success">
-            {`Removed ${count(sweep.cache_entries)} expired cache entries and `
-             + `${count(sweep.orphan_files)} unreferenced files.`}
+            {`Removed ${count(sweep.cache_entries)} expired cache entries, `
+             + `${count(sweep.orphan_files)} unreferenced files and `
+             + `${count(sweep.unreferenced_objects ?? 0)} uploads nothing refers to.`}
           </Notice>
         ) : null}
         {present(s?.media_cache_expired) && s.media_cache_expired > 0 ? (
@@ -275,6 +330,8 @@ export function StoragePane() {
           </Facts>
         ) : null}
       </Section>
+
+      <Consumers />
 
       <Section
         title="Backups"

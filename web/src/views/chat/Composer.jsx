@@ -360,6 +360,7 @@ export function Composer({ surface, replyTo, onCancelReply, onEditLast, send, mo
           sticker={sticker}
           onRemove={staging.remove}
           onRename={staging.rename}
+          onRetry={staging.retry}
           onRemoveSticker={() => setSticker(null)}
           expiries={expiries}
           expiry={chosen}

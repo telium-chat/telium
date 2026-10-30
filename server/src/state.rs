@@ -4,6 +4,7 @@ use crate::crypto::ServerKey;
 use crate::gateway::hub::Hub;
 use serde_json::Value;
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
@@ -34,6 +35,10 @@ pub struct AppState {
     pub send_once: Arc<crate::sendonce::SendOnce>,
     pub hash_lists: Arc<crate::scan::HashLists>,
     pub gofile_guest_token: Arc<Mutex<Option<String>>>,
+    /// One lock per account, held from the quota check to the row insert, so
+    /// an account's parallel uploads cannot all read a stale total and land
+    /// over its quota. The instance lease keeps this single-process.
+    pub upload_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
     pub demoted: Arc<std::sync::atomic::AtomicBool>,
     pub shut_down: Arc<std::sync::atomic::AtomicBool>,
     pub updates: Arc<RwLock<crate::updates::Status>>,

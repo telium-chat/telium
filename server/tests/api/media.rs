@@ -540,8 +540,629 @@ async fn the_same_image_uploaded_twice_is_one_object() {
     assert_eq!(emojis, 3);
 }
 
-fn jpeg_fixture(width: u32, height: u32) -> Vec<u8> {
-    let image = image::RgbImage::from_fn(width, height, |x, y| image::Rgb([x as u8, y as u8, 200]));
+// --- reference accounting and reclamation -----------------------------------
+
+async fn upload_attachment(s: &Server, who: &User, cid: Option<&str>, body: &str) -> Value {
+    let mut req = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&who.home)
+        .header("X-Telium-Filename", "note.txt")
+        .header("Content-Type", "text/plain")
+        .body(body.to_string());
+    if let Some(cid) = cid {
+        req = req.header("X-Telium-Channel-Id", cid);
+    }
+    let resp = req.send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+    resp.json().await.unwrap()
+}
+
+async fn attachment_entry(s: &Server, who: &User, cid: Option<&str>, body: &str) -> (Value, Value) {
+    let media = upload_attachment(s, who, cid, body).await;
+    let entry = json!({
+        "origin": media["origin"],
+        "hash": media["hash"],
+        "filename": media["filename"],
+        "mime": media["mime"],
+        "size": media["size"],
+        "capability": media["capability"],
+    });
+    (media, entry)
+}
+
+async fn media_refs(s: &Server, hash: &str) -> (i64, i64) {
+    sqlx::query_as("SELECT refs, local_dest FROM media WHERE hash = ?")
+        .bind(hash)
+        .fetch_one(&s.state.pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn deleting_a_message_releases_its_upload_for_reclamation() {
+    let (s, alice, _bob, _gid, cid) = social_fixture().await;
+    let (media, entry) = attachment_entry(&s, &alice, Some(&cid), "the bytes").await;
+    let hash = media["hash"].as_str().unwrap().to_string();
+
+    let (status, msg) = s
+        .post(&format!("/_telium/v1/channels/{cid}/messages"), Some(&alice.token), json!({
+            "content": "here you go", "attachments": [entry],
+        }))
+        .await;
+    assert_eq!(status, 200, "{msg}");
+    let (refs, local_dest) = media_refs(&s, &hash).await;
+    assert_eq!(refs, 1, "a sent message claims its upload");
+    assert_eq!(local_dest, 1, "an upload aimed at a local channel is reclaimable here");
+
+    let mid = msg["id"].as_str().unwrap().to_string();
+    let (status, _) = s
+        .delete(&format!("/_telium/v1/channels/{cid}/messages/{mid}"), &alice.token)
+        .await;
+    assert_eq!(status, 200);
+    let (refs, _) = media_refs(&s, &hash).await;
+    assert_eq!(refs, 0, "a deleted message releases its claim");
+
+    let swept = telium_server::routes::media::sweep_unreferenced_before(
+        &s.state,
+        telium_server::util::now_ms() + 1000,
+    )
+    .await
+    .unwrap();
+    assert_eq!(swept, 1);
+    let gone = s
+        .client
+        .get(format!("{}/_telium/v1/media/{hash}?cap={}", s.base, media["capability"].as_str().unwrap()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(gone.status().as_u16(), 404, "reclaimed bytes must stop serving");
+}
+
+#[tokio::test]
+async fn a_message_still_referencing_its_upload_blocks_reclamation() {
+    let (s, alice, _bob, _gid, cid) = social_fixture().await;
+    let (media, entry) = attachment_entry(&s, &alice, Some(&cid), "kept").await;
+    let hash = media["hash"].as_str().unwrap().to_string();
+
+    let (status, _) = s
+        .post(&format!("/_telium/v1/channels/{cid}/messages"), Some(&alice.token), json!({
+            "content": "still here", "attachments": [entry],
+        }))
+        .await;
+    assert_eq!(status, 200);
+
+    let swept = telium_server::routes::media::sweep_unreferenced_before(
+        &s.state,
+        telium_server::util::now_ms() + 1000,
+    )
+    .await
+    .unwrap();
+    assert_eq!(swept, 0, "a live message protects its upload");
+    let alive = s
+        .client
+        .get(format!("{}/_telium/v1/media/{}?cap={}", s.base, hash, media["capability"].as_str().unwrap()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(alive.status().as_u16(), 200);
+}
+
+#[tokio::test]
+async fn an_upload_without_a_local_destination_is_never_reference_reclaimed() {
+    let (s, alice, _bob, _gid, _cid) = social_fixture().await;
+    // No channel or guild header: the shape of an end-to-end-encrypted
+    // conversation upload or a tier-2 origin storing bytes for someone else.
+    let (media, _entry) = attachment_entry(&s, &alice, None, "sealed").await;
+    let hash = media["hash"].as_str().unwrap().to_string();
+    let (refs, local_dest) = media_refs(&s, &hash).await;
+    assert_eq!(refs, 0);
+    assert_eq!(local_dest, 0, "no local destination, no local authority");
+
+    let swept = telium_server::routes::media::sweep_unreferenced_before(
+        &s.state,
+        telium_server::util::now_ms() + 1000,
+    )
+    .await
+    .unwrap();
+    assert_eq!(swept, 0, "this server cannot see who still refers to it");
+    let alive = s
+        .client
+        .get(format!("{}/_telium/v1/media/{}?cap={}", s.base, hash, media["capability"].as_str().unwrap()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(alive.status().as_u16(), 200);
+}
+
+#[tokio::test]
+async fn deleting_a_channel_releases_every_attachment_it_held() {
+    let (s, alice, _bob, gid, cid) = social_fixture().await;
+    let mut hashes = Vec::new();
+    for body in ["first", "second"] {
+        let (media, entry) = attachment_entry(&s, &alice, Some(&cid), body).await;
+        let (status, msg) = s
+            .post(&format!("/_telium/v1/channels/{cid}/messages"), Some(&alice.token), json!({
+                "content": body, "attachments": [entry],
+            }))
+            .await;
+        assert_eq!(status, 200, "{msg}");
+        hashes.push(media["hash"].as_str().unwrap().to_string());
+    }
+
+    let (status, _) = s.delete(&format!("/_telium/v1/channels/{cid}"), &alice.token).await;
+    assert_eq!(status, 200);
+
+    let swept = telium_server::routes::media::sweep_unreferenced_before(
+        &s.state,
+        telium_server::util::now_ms() + 1000,
+    )
+    .await
+    .unwrap();
+    assert_eq!(swept, 2, "both uploads go with the channel");
+    for hash in &hashes {
+        let (rows,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM media WHERE hash = ?")
+            .bind(hash)
+            .fetch_one(&s.state.pool)
+            .await
+            .unwrap();
+        assert_eq!(rows, 0, "{hash}");
+    }
+}
+
+#[tokio::test]
+async fn expression_media_is_not_reference_reclaimed() {
+    let (s, alice, _bob, gid, _cid) = social_fixture().await;
+    let picture = png_fixture(32, 32);
+    let (status, emoji) = s
+        .post(
+            &format!("/_telium/v1/guilds/{gid}/emojis"),
+            Some(&alice.token),
+            json!({ "name": "party", "data": URL_SAFE_NO_PAD.encode(&picture), "mime": "image/png" }),
+        )
+        .await;
+    assert_eq!(status, 200, "{emoji}");
+    let hash = emoji["reference"].as_str().unwrap().rsplit('/').next().unwrap().to_string();
+
+    let swept = telium_server::routes::media::sweep_unreferenced_before(
+        &s.state,
+        telium_server::util::now_ms() + 1000,
+    )
+    .await
+    .unwrap();
+    assert_eq!(swept, 0, "expressions are not attachments; the sweep does not judge them");
+    let alive = s.client.get(format!("{}/_telium/v1/media/{hash}", s.base)).send().await.unwrap();
+    assert_eq!(alive.status().as_u16(), 200);
+}
+
+#[tokio::test]
+async fn an_owner_cannot_delete_deduplicated_content_another_upload_holds() {
+    let s = start().await;
+    let alice = s.user("alice").await;
+    let bob = s.user("bob").await;
+    let bytes = "the same bytes twice";
+
+    let resp = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&bob.home)
+        .header("Content-Type", "text/plain")
+        .body(bytes.to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+    let hash = resp.json::<Value>().await.unwrap()["hash"].as_str().unwrap().to_string();
+
+    let resp = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home)
+        .header("Content-Type", "text/plain")
+        .body(bytes.to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 200, "dedup lands on the same object");
+    let (refcount,): (i64,) = sqlx::query_as("SELECT refcount FROM media WHERE hash = ?")
+        .bind(&hash)
+        .fetch_one(&s.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(refcount, 2, "two uploads claim one object");
+
+    // Bob owns the row but not the content: deleting would break Alice's copy.
+    let (status, refused) = s
+        .delete(&format!("/_telium/v1/media/{hash}"), &bob.home)
+        .await;
+    assert_eq!(status, 409, "{refused}");
+    assert!(refused["message"].as_str().unwrap().contains("shared"), "{refused}");
+    let (rows,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM media WHERE hash = ?")
+        .bind(&hash)
+        .fetch_one(&s.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 1, "a refused delete removes nothing");
+
+    // The operator's takedown does not ask.
+    let (status, gone) = s.delete(&format!("/_telium/v1/media/{hash}"), &alice.home).await;
+    assert_eq!(status, 200, "{gone}");
+    let (rows,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM media WHERE hash = ?")
+        .bind(&hash)
+        .fetch_one(&s.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 0);
+}
+
+#[tokio::test]
+async fn an_owner_may_delete_a_file_their_own_message_still_holds() {
+    let (s, alice, _bob, _gid, cid) = social_fixture().await;
+    let (media, entry) = attachment_entry(&s, &alice, Some(&cid), "mine to remove").await;
+    let hash = media["hash"].as_str().unwrap().to_string();
+
+    let (status, msg) = s
+        .post(&format!("/_telium/v1/channels/{cid}/messages"), Some(&alice.token), json!({
+            "content": "look at this", "attachments": [entry],
+        }))
+        .await;
+    assert_eq!(status, 200, "{msg}");
+
+    // One refcount claim (their upload) even though a message references it:
+    // pulling your own file is the point of the endpoint.
+    let (status, gone) = s.delete(&format!("/_telium/v1/media/{hash}"), &alice.home).await;
+    assert_eq!(status, 200, "{gone}");
+}
+
+#[tokio::test]
+async fn a_default_expiry_applies_only_where_the_client_chose_none() {
+    let s = start_with(|cfg| cfg.media_policy.default_expiry_secs = 3_600).await;
+    let alice = s.user("alice").await;
+    let upload = |ttl: Option<&str>| {
+        let mut req = s
+            .client
+            .post(format!("{}/_telium/v1/media", s.base))
+            .bearer_auth(&alice.home)
+            .header("Content-Type", "text/plain")
+            .body("kept for a while".to_string());
+        if let Some(ttl) = ttl {
+            req = req.header("X-Telium-Ttl-Secs", ttl);
+        }
+        async move { req.send().await.unwrap().json::<Value>().await.unwrap() }
+    };
+
+    let now = telium_server::util::now_ms();
+    let defaulted = upload(None).await;
+    let chosen = upload(Some("60")).await;
+    // A year is the most a client may ask for (366 days is refused at the header).
+    let a_year = upload(Some("31536000")).await;
+
+    let in_hours = defaulted["expires_at"].as_i64().unwrap() - now;
+    assert!(
+        (3_000_000..4_200_000).contains(&in_hours),
+        "the default TTL lands near an hour: {in_hours}ms"
+    );
+    let in_minutes = chosen["expires_at"].as_i64().unwrap() - now;
+    assert!(
+        (30_000..90_000).contains(&in_minutes),
+        "a client's own TTL is never widened: {in_minutes}ms"
+    );
+    assert!(
+        a_year["expires_at"].as_i64().unwrap() > now + 300 * 24 * 60 * 60 * 1000,
+        "a longer request still wins over the default"
+    );
+}
+
+#[tokio::test]
+async fn the_age_sweep_takes_only_attachments_past_the_ceiling() {
+    let s = start_with(|cfg| cfg.media_policy.attachment_max_age_days = 1).await;
+    let alice = s.user("alice").await;
+
+    let old = upload_attachment(&s, &alice, None, "ancient").await;
+    let young = upload_attachment(&s, &alice, None, "recent").await;
+    let avatar = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home)
+        .header("X-Telium-Purpose", "profile")
+        .header("Content-Type", "image/png")
+        .body("pretend png".to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(avatar.status().as_u16(), 200);
+    let profile_hash = avatar.json::<Value>().await.unwrap()["hash"].as_str().unwrap().to_string();
+
+    let two_days_ago = telium_server::util::now_ms() - 2 * 24 * 60 * 60 * 1000;
+    sqlx::query("UPDATE media SET created_at = ? WHERE hash = ?")
+        .bind(two_days_ago)
+        .bind(old["hash"].as_str().unwrap())
+        .execute(&s.state.pool)
+        .await
+        .unwrap();
+
+    let swept = telium_server::routes::media::sweep_aged_attachments(&s.state).await.unwrap();
+    assert_eq!(swept, 1, "only the aged attachment goes");
+
+    let (rows,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM media WHERE hash = ?")
+        .bind(old["hash"].as_str().unwrap())
+        .fetch_one(&s.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 0);
+    for survivor in [young["hash"].as_str().unwrap(), profile_hash.as_str()] {
+        let (rows,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM media WHERE hash = ?")
+            .bind(survivor)
+            .fetch_one(&s.state.pool)
+            .await
+            .unwrap();
+        assert_eq!(rows, 1, "{survivor} is not past the ceiling, or not an attachment");
+    }
+}
+
+#[tokio::test]
+async fn the_destination_size_cap_narrows_what_the_server_accepts() {
+    let s = start().await;
+    let alice = s.user("alice").await;
+    let (_, guild) = s.post("/_telium/v1/guilds", Some(&alice.token), json!({ "name": "G" })).await;
+    let gid = guild["id"].as_str().unwrap().to_string();
+    let (_, channels) = s.get(&format!("/_telium/v1/guilds/{gid}/channels"), Some(&alice.token)).await;
+    let cid = channels["channels"][0]["id"].as_str().unwrap().to_string();
+    assert_eq!(channels["channels"][0]["media_max_file_bytes"], Value::Null);
+
+    // A guild cap alone stops an upload aimed at any of its channels.
+    let (status, patched) = s
+        .patch(&format!("/_telium/v1/guilds/{gid}"), &alice.token, json!({ "media_max_file_bytes": 10 }))
+        .await;
+    assert_eq!(status, 200, "{patched}");
+    assert_eq!(patched["media_max_file_bytes"], 10);
+
+    let refused = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home)
+        .header("X-Telium-Channel-Id", &cid)
+        .header("Content-Type", "text/plain")
+        .body("too big for this guild".to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status().as_u16(), 413, "over the guild cap");
+    assert!(refused.json::<Value>().await.unwrap()["message"].as_str().unwrap().contains("destination"));
+
+    // A channel may tighten it further, and the narrowest wins.
+    let (status, _) = s
+        .patch(&format!("/_telium/v1/channels/{cid}"), &alice.token, json!({ "media_max_file_bytes": 5 }))
+        .await;
+    assert_eq!(status, 200);
+    let refused = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home)
+        .header("X-Telium-Channel-Id", &cid)
+        .header("Content-Type", "text/plain")
+        .body("123456".to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status().as_u16(), 413, "over the channel cap, under the guild's");
+
+    let allowed = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home)
+        .header("X-Telium-Channel-Id", &cid)
+        .header("Content-Type", "text/plain")
+        .body("12345".to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(allowed.status().as_u16(), 200);
+
+    // Removing the channel cap falls back to the guild's.
+    let (status, _) = s
+        .patch(&format!("/_telium/v1/channels/{cid}"), &alice.token, json!({ "media_max_file_bytes": null }))
+        .await;
+    assert_eq!(status, 200);
+    let refused = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home)
+        .header("X-Telium-Channel-Id", &cid)
+        .header("Content-Type", "text/plain")
+        .body("12345678901".to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status().as_u16(), 413, "the guild cap is back in force");
+
+    // Zero is not a cap, it is a mistake.
+    let (status, err) = s
+        .patch(&format!("/_telium/v1/guilds/{gid}"), &alice.token, json!({ "media_max_file_bytes": 0 }))
+        .await;
+    assert_eq!(status, 400, "{err}");
+}
+
+#[tokio::test]
+async fn the_guild_cap_does_not_cage_profile_assets() {
+    let s = start().await;
+    let alice = s.user("alice").await;
+    let (_, guild) = s.post("/_telium/v1/guilds", Some(&alice.token), json!({ "name": "G" })).await;
+    let gid = guild["id"].as_str().unwrap().to_string();
+    let (status, _) = s
+        .patch(&format!("/_telium/v1/guilds/{gid}"), &alice.token, json!({ "media_max_file_bytes": 4 }))
+        .await;
+    assert_eq!(status, 200);
+
+    let avatar = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home)
+        .header("X-Telium-Purpose", "profile")
+        .header("Content-Type", "image/png")
+        .body("pretend png".to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(avatar.status().as_u16(), 200, "the cap is for attachments, not avatars");
+}
+
+#[tokio::test]
+async fn a_refused_upload_leaves_no_staging_file_or_row_behind() {
+    // Over the global cap: the stream is cut mid-flight.
+    let s = start_with(|cfg| cfg.media_policy.max_file_bytes = 8).await;
+    let alice = s.user("alice").await;
+
+    let refused = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home)
+        .header("Content-Type", "text/plain")
+        .body("these bytes are much too long for the cap".to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status().as_u16(), 413);
+    assert!(
+        refused.json::<Value>().await.unwrap()["message"].as_str().unwrap().contains("limit"),
+        "the refusal names the cap"
+    );
+
+    let (rows,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM media").fetch_one(&s.state.pool).await.unwrap();
+    assert_eq!(rows, 0, "an aborted upload stores nothing");
+    let staging = s.dir.join("media").join("tmp");
+    let leftovers = staging.exists()
+        && std::fs::read_dir(&staging).unwrap().count() > 0;
+    assert!(!leftovers, "the staging directory is empty after a refusal");
+}
+
+#[tokio::test]
+async fn an_upload_past_the_quota_is_refused_after_staging_and_leaves_nothing() {
+    let s = start_with(|cfg| {
+        cfg.media_policy.default = MediaDefault::Quota;
+        cfg.media_policy.quota_bytes = 16;
+    })
+    .await;
+    let alice = s.user("alice").await;
+
+    let first = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home)
+        .header("Content-Type", "text/plain")
+        .body("0123456789abcdef".to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status().as_u16(), 200);
+
+    let refused = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home)
+        .header("Content-Type", "text/plain")
+        .body("over the quota entirely".to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status().as_u16(), 413);
+    assert!(
+        refused.json::<Value>().await.unwrap()["message"].as_str().unwrap().contains("quota"),
+        "the refusal names the quota"
+    );
+
+    let (count, total): (i64, i64) =
+        sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM media").fetch_one(&s.state.pool).await.unwrap();
+    assert_eq!((count, total), (1, 16), "only the first upload is on the books");
+    let staging = s.dir.join("media").join("tmp");
+    let leftovers = staging.exists() && std::fs::read_dir(&staging).unwrap().count() > 0;
+    assert!(!leftovers, "staging bytes of a refused upload do not linger");
+}
+
+#[tokio::test]
+async fn parallel_uploads_of_one_account_never_overshoot_its_quota() {
+    let s = start_with(|cfg| {
+        cfg.media_policy.default = MediaDefault::Quota;
+        cfg.media_policy.quota_bytes = 100;
+    })
+    .await;
+    let alice = s.user("alice").await;
+    let upload = |n: usize| {
+        let client = s.client.clone();
+        let url = format!("{}/_telium/v1/media", s.base);
+        let token = alice.home.clone();
+        async move {
+            client
+                .post(url)
+                .bearer_auth(&token)
+                .header("Content-Type", "text/plain")
+                .body(format!("{:060}", n))
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .as_u16()
+        }
+    };
+
+    // Sixty-byte uploads: two fit the quota of one hundred, the rest must not
+    // ride in on a stale total while the first two are still landing.
+    let outcomes: Vec<u16> = futures_util::future::join_all((0..6).map(upload)).await;
+    let accepted = outcomes.iter().filter(|s| **s == 200).count();
+    let (total,): (i64,) =
+        sqlx::query_as("SELECT COALESCE(SUM(size), 0) FROM media").fetch_one(&s.state.pool).await.unwrap();
+    assert!(
+        total <= 100,
+        "the quota was overshoot by parallel uploads: {total} bytes, outcomes {outcomes:?}"
+    );
+    assert_eq!(accepted, total as usize / 60, "outcomes {outcomes:?}");
+}
+
+#[tokio::test]
+async fn the_operator_can_see_who_is_filling_the_disk() {
+    let s = start().await;
+    let alice = s.user("alice").await;
+    let bob = s.user("bob").await;
+    for (who, pile) in [(&alice, "alice's personal pile of bytes"), (&bob, "bob's own pile")] {
+        let resp = s
+            .client
+            .post(format!("{}/_telium/v1/media", s.base))
+            .bearer_auth(&who.home)
+            .header("Content-Type", "text/plain")
+            .body(pile.to_string())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 200);
+    }
+
+    // Alice registered first: she is the server's operator.
+    let (status, listed) = s.get("/_telium/v1/admin/storage/media-consumers", Some(&alice.home)).await;
+    assert_eq!(status, 200, "{listed}");
+    let consumers = listed["consumers"].as_array().unwrap();
+    assert_eq!(consumers.len(), 2, "{listed}");
+    assert_eq!(consumers[0]["objects"], 1);
+    assert_eq!(consumers[0]["bytes"], 30);
+
+    let (status, refused) = s.get("/_telium/v1/admin/storage/media-consumers", Some(&bob.home)).await;
+    assert_eq!(status, 403, "{refused}");
+}
+
+#[tokio::test]
+async fn capabilities_report_what_the_account_stores() {
+    let s = start().await;
+    let alice = s.user("alice").await;
+
+    let (_, caps) = s.get("/_telium/v1/capabilities", Some(&alice.home)).await;
+    assert_eq!(caps["account"]["used_bytes"], 0);
+    assert_eq!(caps["account"]["quota_bytes"], Value::Null, "the default policy is unlimited");
+
+    upload_attachment(&s, &alice, None, "some bytes").await;
+    let (_, caps) = s.get("/_telium/v1/capabilities", Some(&alice.home)).await;
+    assert_eq!(caps["account"]["used_bytes"], 10);
+}
+
+fn jpeg_fixture(width: u32, height: u32) -> Vec<u8> {    let image = image::RgbImage::from_fn(width, height, |x, y| image::Rgb([x as u8, y as u8, 200]));
     let mut out = std::io::Cursor::new(Vec::new());
     image::DynamicImage::ImageRgb8(image).write_to(&mut out, image::ImageFormat::Jpeg).unwrap();
     out.into_inner()

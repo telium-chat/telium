@@ -856,7 +856,8 @@ pub async fn admin_storage(
 
     let unreferenced: Option<(i64, i64)> = if state.cfg.roles.media {
         sqlx::query_as(
-            "SELECT COUNT(*), COALESCE(SUM(size), 0) FROM media WHERE refcount <= 0",
+            "SELECT COUNT(*), COALESCE(SUM(size), 0) FROM media \
+             WHERE purpose = 'attachment' AND local_dest = 1 AND refs <= 0",
         )
         .fetch_one(&state.pool)
         .await
@@ -920,15 +921,39 @@ pub async fn admin_storage_sweep(
     let orphans = crate::routes::media::sweep_orphans(&state)
         .await
         .map_err(ApiError::Internal)?;
+    let unreferenced = crate::routes::media::sweep_unreferenced(&state)
+        .await
+        .map_err(ApiError::Internal)?;
     crate::admin::record(
         &state,
         &auth.user_id,
         "storage.sweep",
         None,
-        json!({ "cache_entries": cache, "orphan_files": orphans }),
+        json!({ "cache_entries": cache, "orphan_files": orphans, "unreferenced_objects": unreferenced }),
     )
     .await;
-    Ok(Json(json!({ "cache_entries": cache, "orphan_files": orphans })))
+    Ok(Json(json!({ "cache_entries": cache, "orphan_files": orphans, "unreferenced_objects": unreferenced })))
+}
+
+/// The accounts filling the disk, largest first. Aggregates only, per the
+/// metrics rule — no per-object detail.
+pub async fn admin_media_consumers(
+    State(state): State<AppState>,
+    auth: HomeAuth,
+) -> ApiResult<Json<Value>> {
+    require_admin(&state, &auth.user_id).await?;
+    let rows: Vec<(String, i64, i64)> = sqlx::query_as(
+        "SELECT owner_user_id, COUNT(*), COALESCE(SUM(size), 0) FROM media \
+         GROUP BY owner_user_id ORDER BY SUM(size) DESC, owner_user_id LIMIT 20",
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(Json(json!({
+        "consumers": rows
+            .into_iter()
+            .map(|(user_id, objects, bytes)| json!({ "user_id": user_id, "objects": objects, "bytes": bytes }))
+            .collect::<Vec<_>>(),
+    })))
 }
 
 #[cfg(test)]

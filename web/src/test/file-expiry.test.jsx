@@ -45,6 +45,27 @@ async function boot({ guildExpiry = null } = {}) {
 }
 
 describe('the staged-file tray', () => {
+  it('refuses a file the origin caps before a byte is sent', async () => {
+    const server = createFakeServer();
+    server.state.serverMediaMaxFileBytes = 4;
+    const { user } = await (async () => {
+      const { store, user } = await signedInApp(server);
+      await act(async () => { await store.addServer('guilds.example'); });
+      await user.click(await screen.findByTitle('Telium on guilds.example'));
+      await user.click(await screen.findByRole('button', { name: 'general' }));
+      return { store, user };
+    })();
+
+    const before = server.state.mediaUploads.length;
+    await user.upload(filePicker(), new File(['way too many bytes'], 'big.txt', { type: 'text/plain' }));
+    await waitFor(() => {
+      const alerts = screen.getAllByRole('alert');
+      expect(alerts.some((el) => /Too large/.test(el.textContent))).toBe(true);
+    });
+    expect(server.state.mediaUploads.length).toBe(before);
+  });
+
+
   const filePicker = () => document.querySelector('input[type="file"]');
 
   const openExpiryMenu = async (user) => {
@@ -127,7 +148,58 @@ describe('the staged-file tray', () => {
     const second = await browse(user, server, new File(['x'], 'later.txt', { type: 'text/plain' }));
     expect(second.ttl).toBe(60 * 60);
     expect(second.filename).toBe('later.txt');
-    expect(second.expires_at).toBeGreaterThan(Date.now());
-    expect(server.state.mediaUploads[0].ttl).toBe(30 * 24 * 60 * 60);
+  });
+
+  it('puts every staged file in flight instead of queueing them', async () => {
+    const { server, user } = await boot();
+    let release;
+    server.state.uploadGate = new Promise((resolve) => { release = resolve; });
+
+    await user.upload(document.querySelector('input[type="file"]'), [
+      new File(['a'], 'a.txt', { type: 'text/plain' }),
+      new File(['bb'], 'b.txt', { type: 'text/plain' }),
+      new File(['ccc'], 'c.txt', { type: 'text/plain' }),
+    ]);
+    await waitFor(() => expect(server.state.uploadSeen).toBe(3));
+    expect(server.state.mediaUploads.length).toBe(0);
+
+    release();
+    await waitFor(() => expect(server.state.mediaUploads.length).toBe(3));
+  });
+
+  it('keeps a failed upload as a card with its reason, and Retry lands it', async () => {
+    const { server, user } = await boot();
+    server.state.failNextUpload = true;
+    await user.upload(document.querySelector('input[type="file"]'), notesFile());
+
+    await waitFor(() => {
+      const alerts = screen.getAllByRole('alert');
+      expect(alerts.some((el) => el.textContent.includes('pretending to be broken'))).toBe(true);
+    });
+    expect(server.state.mediaUploads.length).toBe(0);
+
+    server.state.failNextUpload = false;
+    await user.click(screen.getByTitle('Retry upload'));
+    await waitFor(() => expect(server.state.mediaUploads.length).toBe(1));
+    await waitFor(() => {
+      const alerts = screen.queryAllByRole('alert');
+      expect(alerts.every((el) => !el.textContent.includes('pretending to be broken'))).toBe(true);
+    });
+  });
+
+  it('offers Delete file on your own message and takes the file off the origin', async () => {
+    const { server, user } = await boot();
+    await browse(user, server);
+    await waitFor(() => expect(server.state.storedMedia.size).toBe(1));
+    await user.click(screen.getByTitle('Send'));
+    await waitFor(() => expect(screen.getAllByText('notes.txt').length).toBeGreaterThan(0));
+
+    const inTimeline = screen.getAllByText('notes.txt').at(-1);
+    fireEvent.contextMenu(inTimeline);
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete file: notes.txt' }));
+
+    const dialog = await screen.findByRole('dialog');
+    await user.click(await within(dialog).findByRole('button', { name: 'Delete file' }));
+    await waitFor(() => expect(server.state.storedMedia.size).toBe(0));
   });
 });

@@ -399,6 +399,7 @@ fn federation_routes() -> Router<AppState> {
         .route("/_telium/v1/admin/metrics/series", get(crate::metrics::admin_series))
         .route("/_telium/v1/admin/storage", get(crate::metrics::admin_storage))
         .route("/_telium/v1/admin/storage/sweep", post(crate::metrics::admin_storage_sweep))
+        .route("/_telium/v1/admin/storage/media-consumers", get(crate::metrics::admin_media_consumers))
         .route("/_telium/v1/admin/moderation/summary", get(federation::routes::moderation_summary))
         .route("/_telium/v1/admin/peers", get(federation::routes::peers_overview))
         .route("/_telium/v1/admin/reports", get(federation::routes::list_reports))

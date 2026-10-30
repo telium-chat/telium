@@ -105,6 +105,11 @@ export function useChannelSurface(channelId) {
     store.guilds.get(guildId)?.media_expiry_limit_secs ?? null,
     store.caps.get(origin)?.media?.max_expiry_secs || null,
   );
+  const uploadLimit = narrowestLimit(
+    channel?.media_max_file_bytes ?? null,
+    store.guilds.get(guildId)?.media_max_file_bytes ?? null,
+    store.caps.get(origin)?.media?.max_file_bytes || null,
+  );
   const mediaTier = store.mediaPreference?.tier || 1;
   const externalHosts = store.externalMediaHosts || EMPTY;
   const typing = useTypingSignal(
@@ -148,6 +153,7 @@ export function useChannelSurface(channelId) {
     mayAttach: has(perms, 'ATTACH_FILES'),
     stickers: true,
     expiryCap,
+    uploadLimit,
     mediaTier,
     externalHosts,
     upload: (file, opts) => uploadAttachment(store, channel, file, opts),
@@ -227,6 +233,7 @@ export function useDmSurface(convo) {
     mayAttach: true,
     stickers: false,
     expiryCap: store.caps.get(store.session?.home?.domain)?.media?.max_expiry_secs || null,
+    uploadLimit: store.caps.get(store.session?.home?.domain)?.media?.max_file_bytes || null,
     mediaTier: 1,
     externalHosts: EMPTY,
     upload: (file, opts) => uploadEncrypted(store.home, file, opts),
