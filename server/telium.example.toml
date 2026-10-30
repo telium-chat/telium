@@ -1,5 +1,13 @@
 # Telium reference server. Every value here is the default; delete anything you
 # do not want to override. `telium-server init` writes this file for you.
+#
+# Full documentation: https://docs.telium.chat/self-hosting/configuration
+#
+# Sizes, durations and days may be written the way you would say them out loud:
+# max_file_bytes = "100MiB", interval_secs = "6h", stale_after_secs = "2d 12h".
+# A plain integer also works and keeps its old unit -- the one the key name
+# spells out: bytes (*_bytes), seconds (*_secs), milliseconds (*_ms), days
+# (*_days). Both forms are accepted for every key below.
 
 # The domain that appears in user ids (@you:example.org) and guild aliases.
 # This is an identity, not a hostname — it can be delegated (see public_base_url).
@@ -32,11 +40,11 @@ relay = false
 max_concurrent_per_account = 4
 max_concurrent_total = 256
 # Per tunnel, both directions.
-max_tunnel_bytes = 268435456
+max_tunnel_bytes = "256MiB"
 # Rolling 24 hours per account, persisted. 4 GiB.
-daily_bytes_per_account = 4294967296
+daily_bytes_per_account = "4GiB"
 idle_timeout_secs = 120
-max_lifetime_secs = 21600
+max_lifetime_secs = "6h"
 # Distinct destination servers per account per hour.
 destinations_per_hour = 40
 opens_burst = 20
@@ -57,13 +65,13 @@ log_destinations = false
 # their first upload instead of showing an error.
 [media_policy]
 default = "enabled"          # enabled | quota | disabled
-quota_bytes = 1073741824     # used when default = "quota", and for allowlisted users
+quota_bytes = "1GiB"         # used when default = "quota", and for allowlisted users
 allowlist = []               # user ids that always get tier-1 upload
 blocklist = []               # user ids that never do
 # Avatars and banners are small and always allowed, so a media-disabled server
 # does not leave its own users without a profile picture.
-profile_asset_carveout_bytes = 524288
-max_file_bytes = 104857600
+profile_asset_carveout_bytes = "512KiB"
+max_file_bytes = "100MiB"
 
 # The curated registry feed this server offers its users: conforming tier-2
 # origins they can upload through instead of here. A recommendation, not an
@@ -73,7 +81,7 @@ max_file_bytes = 104857600
 # origin = "files.example.org"
 # name = "Example Files"
 # description = "2 GB per file, kept for a year."
-# max_file_bytes = 2147483648
+# max_file_bytes = "2GiB"
 # abuse_contact = "abuse@example.org"
 
 # Gofile uploads are client-direct. Web browsers cannot attach Gofile's
@@ -89,10 +97,10 @@ gofile_playback_proxy = true
 # retried, and how long one fetch may take. `feed_validity_secs` is how long the
 # signed feed this server publishes from its own `hosts` stays valid; a
 # subscriber stops treating those hosts as vouched for once it lapses.
-# feed_refresh_secs = 3600
-# feed_retry_secs = 600
+# feed_refresh_secs = "1h"
+# feed_retry_secs = "10m"
 # feed_timeout_secs = 10
-# feed_validity_secs = 604800
+# feed_validity_secs = "7d"
 
 # Curators this server points its guilds at, published as a signed directory at
 # /_telium/v1/media/curators (docs/media.md, "Finding a curator"). Listing one
@@ -157,10 +165,10 @@ enabled = true
 # timescale of a pricing page, not a moderation decision. `catalog_validity_secs`
 # is how long the catalogue this server publishes from `providers` below stays
 # valid -- a subscriber lists nothing from it once it lapses.
-# catalog_refresh_secs = 21600
-# catalog_retry_secs = 900
+# catalog_refresh_secs = "6h"
+# catalog_retry_secs = "15m"
 # catalog_timeout_secs = 10
-# catalog_validity_secs = 604800
+# catalog_validity_secs = "7d"
 
 # A signed catalogue this server subscribes to. `key` is the publisher's
 # Ed25519 public key, base64, and it is the only key the document is ever
@@ -200,8 +208,8 @@ enabled = true
 # currency = "EUR"
 # period = "monthly"          # free | monthly | yearly | metered
 # member_cap = 500
-# storage_bytes = 21474836480
-# media_quota_bytes = 10737418240
+# storage_bytes = "20GiB"
+# media_quota_bytes = "10GiB"
 # notes = "Daily backups included."
 
 # Sections 6 and 9: an origin hosting strangers' content for the public owes the
@@ -227,15 +235,15 @@ report_retention_days = 365
 # path      = "/var/lib/telium/example-list.txt"
 
 [sessions]
-home_session_ttl_secs = 2592000
+home_session_ttl_secs = "30d"
 # Identity assertions are deliberately short-lived: they exist only to be
 # exchanged for a local guild session.
 assertion_ttl_secs = 300
 # How long a guild session lives before the client must present a fresh
 # assertion. This is the window in which a home-server revocation takes effect.
-guild_session_ttl_secs = 3600
+guild_session_ttl_secs = "1h"
 revalidate_interval_secs = 600
-signing_key_validity_secs = 7776000
+signing_key_validity_secs = "90d"
 
 # Key that seals TOTP secrets (docs/secrets.md). Keep it out of the backups.
 # Losing it means `telium-server mfa reset-all`.
@@ -248,7 +256,7 @@ key_file = "mfa.key"
 [ownership]
 # Wait before an `admin recover` claim takes effect, unless no usable admin
 # exists. 0 is allowed.
-recovery_delay_secs = 86400
+recovery_delay_secs = "1d"
 
 [registration]
 open = true
@@ -296,13 +304,13 @@ dir = "backups"
 # Every interval, and the first one at startup unless an archive newer than one
 # interval already exists -- so a new server is not left with nothing to restore
 # from for the length of its first interval.
-interval_secs = 21600
+interval_secs = "6h"
 # How many archives to keep on this disk.
 keep = 8
 # Log loudly, and show the admin screen a warning, once the newest archive --
 # or the newest successful upload, if a remote is configured -- is older than
 # this.
-stale_after_secs = 172800
+stale_after_secs = "2d"
 # Whether `media_dir` (attachments, avatars, emoji, stickers) goes into the
 # archive. The `cache/` and `camo/` subdirectories never do; they are copies of
 # other servers' bytes and are re-fetched on demand.
@@ -323,9 +331,9 @@ key_file = "backup.key"
 
 # Rehearse a recovery of the newest archive (`telium-server backup drill`).
 drill = true
-drill_interval_secs = 86400
+drill_interval_secs = "1d"
 # Warn when the last passing drill is older than this.
-drill_stale_after_secs = 259200
+drill_stale_after_secs = "3d"
 # Back up right before applying schema migrations.
 pre_migration_backup = true
 # Refuse to migrate if that backup fails.
@@ -370,7 +378,7 @@ dir = "cold"
 horizon_days = 365
 keep_hot_messages = 10000
 batch = 5000
-sweep_interval_secs = 3600
+sweep_interval_secs = "1h"
 
 # Same shape as [backup.remote], and only read when archive.store = "s3".
 [archive.s3]
@@ -415,17 +423,17 @@ enabled = true
 request_timeout_secs = 15
 # How long a scheduled migration waits before it runs, during which any
 # logged-in device can call it off.
-migration_delay_secs = 86400
+migration_delay_secs = "1d"
 
 [limits]
 # Default body cap; the gap allowed between body chunks, in seconds.
-max_request_bytes = 2097152
+max_request_bytes = "2MiB"
 request_body_timeout_secs = 30
 max_message_len = 4000
 max_guilds_per_user = 200
 max_emoji_per_guild = 250
 max_stickers_per_guild = 60
-max_sync_store_bytes = 1048576
+max_sync_store_bytes = "1MiB"
 max_attachments_per_message = 10
 # Pending stranger DM requests per account; overflow is silently declined.
 max_message_requests = 100
@@ -444,7 +452,7 @@ expression_max_source_pixels = 16777216
 # canvas lowers the effective frame cap to what fits in it.
 expression_max_total_pixels = 268435456
 expression_max_frames = 250
-expression_max_duration_ms = 30000
+expression_max_duration_ms = "30s"
 # Past the frame or duration cap: keep what fits and drop the rest, or refuse
 # the upload.
 expression_drop_excess_frames = true
@@ -498,7 +506,7 @@ mesh_max_participants = 4
 #
 # turn = "turn.example.com:3478"
 # turn_secret = "a long random string, the same one coturn is given"
-# turn_ttl_secs = 3600
+# turn_ttl_secs = "1h"
 
 # FCM and APNs need the app publisher's credentials. Web Push and UnifiedPush
 # need nothing here.
@@ -531,7 +539,7 @@ environment = "production"
 # This is the *built* client, not its source: run `bun run build` in `web/` and
 # point at the `dist` it produces.
 [web]
-dir = "../web/dist"
+# dir = "../web/dist"
 # Where people open this server's web client, if that is not `public_base_url`
 # (a client hosted on its own domain, or behind a different proxy). Published as
 # `client` in /.well-known/telium/server; with `dir` set and this left out, the
@@ -623,7 +631,7 @@ dir = "replicas"
 # Seconds of lag is seconds of data loss in a failure, so the poll is short.
 poll_secs = 5
 batch = 500
-keep_acked_secs = 1800
+keep_acked_secs = "30m"
 # How behind a copy may be before clients reading it are told it is behind,
 # rather than merely told it is a copy.
 stale_after_secs = 300
@@ -633,7 +641,7 @@ media_batch = 200
 # answer that matters most is the one checked once at startup.
 demotion_poll_secs = 30
 # Disk cap for one bootstrap snapshot from the primary. 100 GiB.
-max_snapshot_bytes = 107374182400
+max_snapshot_bytes = "100GiB"
 
 # Staying current (../docs/operator-guide.md, "Staying current"). A Telium
 # homeserver updates itself by default -- that half is deploy/update.sh and a
@@ -664,8 +672,8 @@ manifest_url = "https://raw.githubusercontent.com/telium-chat/telium/main/deploy
 # Six hours. A release is not urgent to *learn about* in the minute it happens
 # -- the box's own timer is already pulling every minute -- so this is a
 # background fact, checked at the rate a background fact deserves.
-check_interval_secs = 21600
-retry_secs = 1800
+check_interval_secs = "6h"
+retry_secs = "30m"
 timeout_secs = 10
 # When being behind stops being ordinary and starts being worth saying loudly.
 #
@@ -708,7 +716,7 @@ count_url = "https://count.telium.chat/ping"
 # A day. Neither number moves on an hour's timescale in any way that matters,
 # and a census that rang every doorbell hourly would be spending operator
 # goodwill on nothing.
-interval_secs = 86400
+interval_secs = "1d"
 # How long one report may take.
 timeout_secs = 10
 
@@ -734,7 +742,7 @@ retention_days = 14
 # Total media bytes, database size and cold-segment size are the only numbers
 # here that cost a table scan, so they are sampled on their own slower clock.
 # Buckets in between record them as absent rather than repeating the last value.
-storage_interval_secs = 900
+storage_interval_secs = "15m"
 # GET /metrics (docs/observability.md). Off by default.
 scrape_enabled = false
 # Bearer token; TELIUM_METRICS_SCRAPE_TOKEN overrides. Use it behind a proxy.
