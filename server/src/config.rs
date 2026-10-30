@@ -579,6 +579,7 @@ pub enum IntegrityMode {
 #[serde(default)]
 pub struct Shutdown {
     /// Seconds to wait for in-flight work before exiting anyway.
+    #[serde(deserialize_with = "de_secs_u64")]
     pub grace_secs: u64,
     /// Milliseconds for close frames to flush before the wait begins.
     #[serde(deserialize_with = "de_millis_u64")]
@@ -2258,7 +2259,8 @@ mod tests {
         let cfg: Config = toml::from_str(
             "[sessions]\nhome_session_ttl_secs = \"30d\"\nsigning_key_validity_secs = \"90d\"\n\
              [backup]\ninterval_secs = \"6h\"\ndrill_stale_after_secs = \"3d\"\n[limits]\n\
-             expression_max_duration_ms = \"30s\"\n[shutdown]\nsettle_ms = \"0.25s\"\n[voice]\n\
+             expression_max_duration_ms = \"30s\"\n[shutdown]\ngrace_secs = \"15s\"\n\
+             settle_ms = \"0.25s\"\n[voice]\n\
              max_bitrate = \"2.5Mbps\"\ntoken_ttl_secs = \"10m\"\n[updates]\n\
              check_interval_secs = \"6h\"\nstale_after_days = \"2w\"\n[retention]\n\
              audit_log_days = \"104w\"\n",
@@ -2269,6 +2271,7 @@ mod tests {
         assert_eq!(cfg.backup.interval_secs, 21_600);
         assert_eq!(cfg.backup.drill_stale_after_secs, 259_200);
         assert_eq!(cfg.limits.expression_max_duration_ms, 30_000);
+        assert_eq!(cfg.shutdown.grace_secs, 15);
         assert_eq!(cfg.shutdown.settle_ms, 250);
         assert_eq!(cfg.voice.max_bitrate, 2_500_000);
         assert_eq!(cfg.voice.token_ttl_secs, 600);
