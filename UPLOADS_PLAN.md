@@ -225,6 +225,23 @@ Docs commits live in the separate telium-chat-docs repository: 399ee12, 1fcf38c,
   naming the inert knob ("uploads are unlimited: … quota_bytes is not enforced") so an operator
   who believed they had a ceiling finds out at boot, not in review.
 
+## i18n: the surfaces this work lives in now speak every locale
+
+The coverage test was already green, but green only meant the ten catalogues agree — the
+message menu, the account media section and the operator console were never on the migrated
+list, so this work's strings rendered English everywhere. Fixed for the two user-facing surfaces:
+
+- `views/menus/messages.jsx` — the guild message menu, DM message menu, post and thread menus
+  migrated whole (65 keys, `chat.menu.*`): Reply, Forward, Start a thread, pin/lock/archive for
+  posts and threads, Copy text/id/link, Report, Delete message, Delete file, and every toast and
+  failure sentence they can produce.
+- `views/user-settings/AccountPane.jsx` — the upload-host and quota section (25 keys,
+  `settings.media.*`): the tier choice cards, host picker, origin field, external-host list,
+  "X of Y used on …" with its warning, and the host-detail lines.
+
+All ten locales carry both sets. The operator console (control-plane panes) remains
+English-only as it was before this work — migrating it is its own project, not a fragment.
+
 ## Notes
 
 - Work happens on a new branch off `kit/standalone-compose` (one commit per item); the dirty

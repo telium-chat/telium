@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAsync, useStore, useStoreEvent } from '../../hooks/useStore.jsx';
+import { useT } from '../../lib/i18n/react.jsx';
+import { t as i18nT } from '../../lib/i18n/index.js';
 import { useModal } from '../../hooks/useModal.jsx';
 import { reportError, toast } from '../../hooks/useToast.jsx';
 import { bytes, dayOf, relative } from '../../lib/util.js';
@@ -11,12 +13,9 @@ import { MigrationDialog } from './MigrationDialog.jsx';
 import { ReceiveMigrationDialog } from './ReceiveMigrationDialog.jsx';
 
 const TIERS = [
-  [1, HomeIcon, 'This server',
-    'The default. Nothing to set up.'],
-  [2, GlobeIcon, 'Another Telium server',
-    'Files go to another Telium server you choose.'],
-  [3, LinkIcon, 'Another host',
-    'Files go to a third-party host such as Gofile. Those files are public URLs.'],
+  [1, HomeIcon, 'settings.media.tier1', 'settings.media.tier1Desc'],
+  [2, GlobeIcon, 'settings.media.tier2', 'settings.media.tier2Desc'],
+  [3, LinkIcon, 'settings.media.tier3', 'settings.media.tier3Desc'],
 ];
 
 function AccountBundle({ store }) {
@@ -335,6 +334,7 @@ function AccountSafetySections({ store, onClose }) {
 }
 
 export function MediaTierSection({ store, pref, hosts, feedHosts = [], externalHosts }) {
+  const tr = useT();
   const home = store.session?.home?.domain;
   const account = home ? store.caps.get(home)?.account : null;
   const usage = account?.quota_bytes
@@ -358,22 +358,22 @@ export function MediaTierSection({ store, pref, hosts, feedHosts = [], externalH
     setBusy(true);
     try {
       await store.setMediaPreference(tier, tier === 2 ? origin : null);
-      toast('Upload host saved.');
-    } catch (e) { reportError(e, 'Could not save upload host'); }
+      toast(tr('settings.media.savedToast'));
+    } catch (e) { reportError(e, tr('settings.media.saveFailed')); }
     finally { setBusy(false); }
   };
 
   return (
-    <Section title="Where your uploads go">
-      <Hint>This choice follows your account to every device.</Hint>
-      <ChoiceList value={tier} onChange={setTier} aria-label="Where uploads are stored">
+    <Section title={tr('settings.media.sectionTitle')}>
+      <Hint>{tr('settings.media.followsAccount')}</Hint>
+      <ChoiceList value={tier} onChange={setTier} aria-label={tr('settings.media.sectionTitle')}>
         {TIERS.map(([value, icon, label, description]) => (
           <ChoiceCard
             key={value}
             value={value}
             icon={icon}
-            label={label}
-            description={description}
+            label={tr(label)}
+            description={tr(description)}
           />
         ))}
       </ChoiceList>
@@ -381,34 +381,38 @@ export function MediaTierSection({ store, pref, hosts, feedHosts = [], externalH
       {usage ? (
         usage.used / usage.quota > 0.9 ? (
           <Notice tone="warn">
-            {`${bytes(usage.used)} of ${bytes(usage.quota)} used on ${usage.home}. Delete files you no longer need from your messages, or move uploads to another host.`}
+            {tr('settings.media.usageWarn', {
+              used: bytes(usage.used), quota: bytes(usage.quota), home: usage.home,
+            })}
           </Notice>
         ) : (
-          <Hint>{`${bytes(usage.used)} of ${bytes(usage.quota)} used on ${usage.home}.`}</Hint>
+          <Hint>{tr('settings.media.usage', {
+            used: bytes(usage.used), quota: bytes(usage.quota), home: usage.home,
+          })}</Hint>
         )
       ) : null}
 
       {tier === 2 ? (
         <>
           <Field
-            label="Media host"
+            label={tr('settings.media.hostLabel')}
             hint={offered.length
-              ? 'Recommended hosts. Any Telium media origin works.'
-              : 'This server recommends no hosts. Name one yourself.'}
+              ? tr('settings.media.hostsRecommended')
+              : tr('settings.media.hostsNone')}
           >
             <Select
               value={choice}
               options={[
                 ...offered.map((h) => [h.origin, hostLabel(h)]),
-                ['custom', 'Another host...'],
+                ['custom', tr('settings.media.anotherHost')],
               ]}
               onChange={(e) => setChoice(e.target.value)}
             />
           </Field>
           {choice === 'custom' ? (
             <Field
-              label="Origin"
-              hint="A domain, not a URL."
+              label={tr('settings.media.originLabel')}
+              hint={tr('settings.media.originHint')}
             >
               <TextInput
                 value={custom}
@@ -426,11 +430,11 @@ export function MediaTierSection({ store, pref, hosts, feedHosts = [], externalH
         <div className="flex flex-col gap-1.5">
           {externalHosts.length ? (
             <>
-              <div className="text-sm font-medium text-foreground">Enabled external hosts</div>
+              <div className="text-sm font-medium text-foreground">{tr('settings.media.externalEnabled')}</div>
               {externalHosts.map((host) => <ExternalHostDetail key={host.id} host={host} />)}
             </>
           ) : (
-            <Notice tone="warn">This server has not enabled any external upload hosts.</Notice>
+            <Notice tone="warn">{tr('settings.media.externalNone')}</Notice>
           )}
         </div>
       ) : null}
@@ -441,7 +445,7 @@ export function MediaTierSection({ store, pref, hosts, feedHosts = [], externalH
         disabled={busy || (tier === 2 && !origin) || (tier === 3 && !externalHosts.length)}
         onClick={save}
       >
-        Save
+        {tr('common.save')}
       </Button>
     </Section>
   );
@@ -450,23 +454,25 @@ export function MediaTierSection({ store, pref, hosts, feedHosts = [], externalH
 function vouchers(host) {
   const names = (host?.vouched_by || []).map((v) => v.curator || v.feed).filter(Boolean);
   if (!names.length) return null;
-  return `Vouched for by ${names.join(', ')}.`;
+  return i18nT('settings.media.vouchedBy', { names: names.join(', ') });
 }
 
 function hostLabel(host) {
   const name = host.name || host.origin;
   const names = (host.vouched_by || []).map((v) => v.curator || v.feed).filter(Boolean);
-  return names.length ? `${name} - via ${names.join(', ')}` : name;
+  const tr = i18nT;
+  return names.length ? tr('settings.media.via', { name, names: names.join(', ') }) : name;
 }
 
 function HostDetail({ host }) {
+  const tr = useT();
   if (!host) return null;
   return (
     <Hint>
       {[
         host.description,
-        host.max_file_bytes ? `Up to ${bytes(host.max_file_bytes)} per file.` : null,
-        host.abuse_contact ? `Abuse contact: ${host.abuse_contact}.` : null,
+        host.max_file_bytes ? tr('settings.media.upTo', { size: bytes(host.max_file_bytes) }) : null,
+        host.abuse_contact ? tr('settings.media.abuseContact', { contact: host.abuse_contact }) : null,
         vouchers(host),
       ].filter(Boolean).join(' ')}
     </Hint>
@@ -474,13 +480,14 @@ function HostDetail({ host }) {
 }
 
 function ExternalHostDetail({ host }) {
+  const tr = useT();
   if (!host) return null;
   return (
     <Hint>
       {[
         `${host.name || host.id} (${host.domain})`,
         host.description,
-        host.max_file_bytes ? `Up to ${bytes(host.max_file_bytes)} per file.` : null,
+        host.max_file_bytes ? tr('settings.media.upTo', { size: bytes(host.max_file_bytes) }) : null,
       ].filter(Boolean).join(' ')}
     </Hint>
   );
