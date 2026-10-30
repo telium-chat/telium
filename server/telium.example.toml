@@ -1,13 +1,30 @@
-# Telium reference server. Every value here is the default; delete anything you
-# do not want to override. `telium-server init` writes this file for you.
+# Telium reference server. Every value that is not a comment is the default;
+# delete anything you do not want to override. `telium-server init` writes this
+# file for you.
+#
+# Full documentation: https://docs.telium.chat/self-hosting/configuration
+# After editing, `telium-server check --strict` audits the file without
+# starting anything.
+#
+# Sizes, durations, day spans and bitrates may be written the way you would say
+# them out loud: max_file_bytes = "100MiB", interval_secs = "6h",
+# stale_after_secs = "2d 12h", max_bitrate = "2.5Mbps". A plain integer also
+# works and keeps its old unit -- the one the key name spells out: bytes
+# (*_bytes), seconds (*_secs), milliseconds (*_ms), days (*_days), bits per
+# second (voice.max_bitrate). MB and MiB are different units on purpose: MB is
+# a million bytes, MiB is 1,048,576. Both forms are accepted for every key
+# below; where a key says zero means off, that is the only meaning zero has.
 
 # The domain that appears in user ids (@you:example.org) and guild aliases.
 # This is an identity, not a hostname — it can be delegated (see public_base_url).
 server_name = "localhost"
 # Where clients actually reach this server; published at /.well-known/telium/server.
 public_base_url = "http://localhost:8448"
+# The local address and port to listen on. Keep it on loopback behind a proxy.
 bind = "127.0.0.1:8448"
+# Where the database lives.
 database_url = "sqlite://telium.db?mode=rwc"
+# Where uploaded media is stored.
 media_dir = "media"
 
 # How loud the startup audit (`telium-server check`) is: auto, production or
@@ -20,8 +37,11 @@ profile = "auto"
 # Three roles, one binary. Turn any of them off to split the deployment; the
 # code paths between them are the same either way.
 [roles]
+# Accounts and sign-in.
 identity = true
+# Guilds, channels, voice authorisation.
 guild = true
+# File hosting.
 media = true
 # Forward "Protect my IP" users' guild traffic (docs/network-privacy.md).
 # Needs identity = true. Costs bandwidth; the relay sees address and volume.
@@ -29,25 +49,32 @@ relay = false
 
 # Relay budgets, ignored unless roles.relay = true.
 [relay]
+# Tunnels one account may hold open at once.
 max_concurrent_per_account = 4
+# Tunnels the whole server may hold open at once.
 max_concurrent_total = 256
-# Per tunnel, both directions.
-max_tunnel_bytes = 268435456
-# Rolling 24 hours per account, persisted. 4 GiB.
-daily_bytes_per_account = 4294967296
-idle_timeout_secs = 120
-max_lifetime_secs = 21600
-# Distinct destination servers per account per hour.
+# Traffic allowed per tunnel, both directions added together.
+max_tunnel_bytes = "256MiB"
+# Traffic allowed per account in a rolling 24 hours.
+daily_bytes_per_account = "4GiB"
+# A tunnel idle this long is closed.
+idle_timeout_secs = "2m"
+# No tunnel lives longer than this, however busy.
+max_lifetime_secs = "6h"
+# Distinct destination servers one account may use per hour.
 destinations_per_hour = 40
+# Tunnel-open attempts per account: burst allowance, then per minute.
 opens_burst = 20
 opens_per_minute = 30
+# Destination ports a tunnel may be opened to.
 ports = [443]
-# Empty means any server with a valid discovery document.
+# Server names the relay will carry traffic for. Empty means any server with a
+# valid discovery document.
 allow = []
-# Checked before allow.
+# Server names refused regardless of `allow`. Checked first.
 deny = []
-# Also bounds how long a failed lookup is cached.
-discovery_cache_secs = 600
+# How long a peer's discovery document (and a failed lookup) is remembered.
+discovery_cache_secs = "10m"
 # Log account and destination of every tunnel. Published in discovery.
 log_destinations = false
 
@@ -56,14 +83,28 @@ log_destinations = false
 # attach through another origin, and the client runs the origin-setup flow on
 # their first upload instead of showing an error.
 [media_policy]
+# enabled (uploads free), quota (a per-user allowance), or disabled.
 default = "enabled"          # enabled | quota | disabled
-quota_bytes = 1073741824     # used when default = "quota", and for allowlisted users
-allowlist = []               # user ids that always get tier-1 upload
-blocklist = []               # user ids that never do
+# The allowance, used when default = "quota", and for allowlisted users.
+quota_bytes = "1GiB"         # used when default = "quota", and for allowlisted users
+# User ids that always get tier-1 upload / that never do.
+allowlist = []
+blocklist = []
 # Avatars and banners are small and always allowed, so a media-disabled server
 # does not leave its own users without a profile picture.
-profile_asset_carveout_bytes = 524288
-max_file_bytes = 104857600
+profile_asset_carveout_bytes = "512KiB"
+# Largest single upload this server accepts.
+max_file_bytes = "100MiB"
+# Largest avatar or banner.
+max_profile_asset_bytes = "256KiB"
+# Longest lifetime a client may ask for an upload; zero caps nothing.
+max_expiry_secs = 0
+# Lifetime applied when the client asks for none; zero keeps such uploads
+# until something reclaims them.
+default_expiry_secs = 0
+# Attachments older than this are swept even when a message still refers to
+# them. Destructive by design; zero never ages anything out.
+attachment_max_age_days = 0
 
 # The curated registry feed this server offers its users: conforming tier-2
 # origins they can upload through instead of here. A recommendation, not an
@@ -73,7 +114,7 @@ max_file_bytes = 104857600
 # origin = "files.example.org"
 # name = "Example Files"
 # description = "2 GB per file, kept for a year."
-# max_file_bytes = 2147483648
+# max_file_bytes = "2GiB"
 # abuse_contact = "abuse@example.org"
 
 # Gofile uploads are client-direct. Web browsers cannot attach Gofile's
@@ -89,10 +130,25 @@ gofile_playback_proxy = true
 # retried, and how long one fetch may take. `feed_validity_secs` is how long the
 # signed feed this server publishes from its own `hosts` stays valid; a
 # subscriber stops treating those hosts as vouched for once it lapses.
-# feed_refresh_secs = 3600
-# feed_retry_secs = 600
-# feed_timeout_secs = 10
-# feed_validity_secs = 604800
+feed_refresh_secs = "1h"
+feed_retry_secs = "10m"
+feed_timeout_secs = "10s"
+feed_validity_secs = "7d"
+
+# Tier 3 upload add-ons. These entries are public provider configuration; do
+# not put provider account tokens here. Current `main` exposes the Gofile
+# adapter; its upload bytes go directly from the client to Gofile. Unsupported
+# provider names are not advertised merely because an operator writes a row
+# here. Remove the entry to stop offering Gofile to accounts on this server.
+# [[media_registry.external_hosts]]
+# id = "gofile"
+# provider = "gofile"
+# name = "Gofile"
+# domain = "gofile.io"
+# upload_url = "https://upload.gofile.io/uploadfile"
+# description = "Guest files are temporary and are normally kept for about ten days."
+# max_file_bytes = "2GiB"
+# browser_direct = true
 
 # Curators this server points its guilds at, published as a signed directory at
 # /_telium/v1/media/curators (docs/media.md, "Finding a curator"). Listing one
@@ -131,20 +187,6 @@ gofile_playback_proxy = true
 # enabled = true
 # providers = ["youtube", "vimeo", "file"]
 
-# Tier 3 upload add-ons. These entries are public provider configuration; do
-# not put provider account tokens here. Current `main` exposes the Gofile
-# adapter; its upload bytes go directly from the client to Gofile. Unsupported
-# provider names are not advertised merely because an operator writes a row
-# here. Remove the entry to stop offering Gofile to accounts on this server.
-# [[media_registry.external_hosts]]
-# id = "gofile"
-# provider = "gofile"
-# name = "Gofile"
-# domain = "gofile.io"
-# upload_url = "https://upload.gofile.io/uploadfile"
-# description = "Guest files are temporary and are normally kept for about ten days."
-# browser_direct = true
-
 # Managed guild hosting (docs/hosting.md). The client's "create a guild" flow
 # offers this server -- self-hosted, today's behaviour -- alongside whatever
 # companies this operator is willing to name. Telium moves no money, stores no
@@ -157,10 +199,10 @@ enabled = true
 # timescale of a pricing page, not a moderation decision. `catalog_validity_secs`
 # is how long the catalogue this server publishes from `providers` below stays
 # valid -- a subscriber lists nothing from it once it lapses.
-# catalog_refresh_secs = 21600
-# catalog_retry_secs = 900
-# catalog_timeout_secs = 10
-# catalog_validity_secs = 604800
+catalog_refresh_secs = "6h"
+catalog_retry_secs = "15m"
+catalog_timeout_secs = "10s"
+catalog_validity_secs = "7d"
 
 # A signed catalogue this server subscribes to. `key` is the publisher's
 # Ed25519 public key, base64, and it is the only key the document is ever
@@ -200,8 +242,8 @@ enabled = true
 # currency = "EUR"
 # period = "monthly"          # free | monthly | yearly | metered
 # member_cap = 500
-# storage_bytes = 21474836480
-# media_quota_bytes = 10737418240
+# storage_bytes = "20GiB"
+# media_quota_bytes = "10GiB"
 # notes = "Daily backups included."
 
 # Sections 6 and 9: an origin hosting strangers' content for the public owes the
@@ -212,10 +254,13 @@ enabled = true
 [moderation]
 # BLAKE3 digests inline, for the handful you add by hand after a takedown.
 upload_hash_blocklist = []
-# Who to contact about content hosted here; published in /_telium/v1/capabilities.
+# Where report refusals and the report queue's contact address are published;
+# set it if you host strangers' content.
 # abuse_contact = "abuse@example.org"
+# URLs of signed blocklist feeds this server fetches and honours.
 blocklist_feeds = []
-report_retention_days = 365
+# How long a report stays in the queue before it is dropped.
+report_retention_days = "365d"
 
 # Real lists arrive as files of hex digests, so point at them rather than pasting
 # them. One digest per line; `#` comments; anything after the digest is ignored.
@@ -227,15 +272,18 @@ report_retention_days = 365
 # path      = "/var/lib/telium/example-list.txt"
 
 [sessions]
-home_session_ttl_secs = 2592000
+# How long a sign-in on the home server lasts.
+home_session_ttl_secs = "30d"
 # Identity assertions are deliberately short-lived: they exist only to be
 # exchanged for a local guild session.
-assertion_ttl_secs = 300
+assertion_ttl_secs = "5m"
 # How long a guild session lives before the client must present a fresh
 # assertion. This is the window in which a home-server revocation takes effect.
-guild_session_ttl_secs = 3600
-revalidate_interval_secs = 600
-signing_key_validity_secs = 7776000
+guild_session_ttl_secs = "1h"
+# How often the client refreshes a guild session ahead of its expiry.
+revalidate_interval_secs = "10m"
+# How long the server's identity-signing key is published as valid.
+signing_key_validity_secs = "90d"
 
 # Key that seals TOTP secrets (docs/secrets.md). Keep it out of the backups.
 # Losing it means `telium-server mfa reset-all`.
@@ -248,11 +296,18 @@ key_file = "mfa.key"
 [ownership]
 # Wait before an `admin recover` claim takes effect, unless no usable admin
 # exists. 0 is allowed.
-recovery_delay_secs = 86400
+recovery_delay_secs = "1d"
 
 [registration]
+# Whether anybody may create an account. With `admins` empty, the first
+# account registered becomes the administrator; close registration once yours
+# exists.
 open = true
+# Shortest password accepted.
 min_password_len = 8
+# Account localparts granted admin when they register. Empty means the first
+# account becomes the administrator.
+admins = []
 
 # Two questions about distributed account-home onboarding that look alike and
 # are not the same. `accepting` and `referral_weight` are about strangers coming
@@ -277,13 +332,10 @@ referral_weight = 1
 # screen, so nobody is locked to this domain; only the default moves.
 suggest_alternatives = false
 
-# Section 10's floor: a scheduled backup that runs without being thought about.
-# Snapshots are consistent (SQLite VACUUM INTO) and restoring one is a file copy.
-# Section 10's floor: a scheduled backup that runs without being thought
-# about, and a restore that is one command. Each run writes one encrypted
-# `telium-<stamp>.tbk` to `dir` (a consistent database snapshot plus the cold
-# and media stores), then copies it to the bucket below if one is configured.
-# Operator guide: docs/backup.md.
+# A scheduled backup that runs without being thought about, and a restore that
+# is one command. Each run writes one encrypted `telium-<stamp>.tbk` to `dir`
+# (a consistent database snapshot plus the cold and media stores), then copies
+# it to the bucket below if one is configured. Operator guide: docs/backup.md.
 [backup]
 enabled = true
 # Put this where the data is not. An archive inside the directory it is an
@@ -296,13 +348,13 @@ dir = "backups"
 # Every interval, and the first one at startup unless an archive newer than one
 # interval already exists -- so a new server is not left with nothing to restore
 # from for the length of its first interval.
-interval_secs = 21600
+interval_secs = "6h"
 # How many archives to keep on this disk.
 keep = 8
 # Log loudly, and show the admin screen a warning, once the newest archive --
 # or the newest successful upload, if a remote is configured -- is older than
 # this.
-stale_after_secs = 172800
+stale_after_secs = "2d"
 # Whether `media_dir` (attachments, avatars, emoji, stickers) goes into the
 # archive. The `cache/` and `camo/` subdirectories never do; they are copies of
 # other servers' bytes and are re-fetched on demand.
@@ -323,9 +375,9 @@ key_file = "backup.key"
 
 # Rehearse a recovery of the newest archive (`telium-server backup drill`).
 drill = true
-drill_interval_secs = 86400
+drill_interval_secs = "1d"
 # Warn when the last passing drill is older than this.
-drill_stale_after_secs = 259200
+drill_stale_after_secs = "3d"
 # Back up right before applying schema migrations.
 pre_migration_backup = true
 # Refuse to migrate if that backup fails.
@@ -357,7 +409,7 @@ path_style = true
 keep = 8
 # Per-request timeout for small requests; uploads and downloads get more in
 # proportion to their size.
-timeout_secs = 60
+timeout_secs = "60s"
 
 # Off by default: moving history is the operator's decision. See
 # docs/operator-guide.md, "Cold history and archiving".
@@ -367,10 +419,14 @@ enabled = false
 # bucket below instead; `dir` still names the key prefix.
 store = "local"
 dir = "cold"
-horizon_days = 365
+# How old a message must be before it may be moved.
+horizon_days = "365d"
+# The newest messages of a channel are never archived, however old.
 keep_hot_messages = 10000
+# Messages moved per sweep.
 batch = 5000
-sweep_interval_secs = 3600
+# How often the sweeper looks for candidates.
+sweep_interval_secs = "1h"
 
 # Same shape as [backup.remote], and only read when archive.store = "s3".
 [archive.s3]
@@ -382,7 +438,7 @@ prefix = ""
 access_key_id = ""
 secret_access_key = ""
 path_style = true
-timeout_secs = 60
+timeout_secs = "60s"
 
 # "local" writes uploaded media under `media_dir`, as before. "s3" writes it to
 # the bucket below instead; `media_dir` still names the key prefix. An
@@ -402,35 +458,65 @@ prefix = ""
 access_key_id = ""
 secret_access_key = ""
 path_style = true
-timeout_secs = 60
+timeout_secs = "60s"
 
-# Every key here has a default; the ones worth knowing about are the timeout and
-# the cooling-off window.
+# Server-to-server behaviour. Every key here has a default; the ones worth
+# knowing about are the timeout and the cooling-off window.
 [federation]
 enabled = true
+# Allow plain HTTP to peers. False everywhere but test rigs and LANs.
+allow_http = false
+# Where a named peer answers, when discovery is not enough (test rigs,
+# split-horizon DNS).
+# peers = { "peer.example" = "https://peer.internal:8448" }
 # How long an ordinary call to another server may take, end to end. Sized for a
 # small request and a quick answer -- a migration push is not one of those and
 # carries its own, much longer, allowance, so this does not need raising to move
 # a guild.
-request_timeout_secs = 15
+request_timeout_secs = "15s"
+# How long a peer's signing key is trusted without asking again.
+key_cache_secs = "1d"
+# How far another server's clock may be off before signatures are doubted.
+max_clock_skew_secs = "5m"
+# How long a fetched peer's media is served from the local cache.
+media_cache_ttl_secs = "1d"
+# Disk the peer-media cache may use.
+media_cache_max_bytes = "2GiB"
+# Whether link previews (unfurls) are fetched at all.
+embed_enabled = true
+# Largest page fetched for a preview.
+embed_max_bytes = "8MiB"
+# Cap on a proxied video unfurl; over it, the card falls back to its still.
+embed_video_max_bytes = "32MiB"
+# How long one unfurl fetch may take.
+embed_timeout_secs = "8s"
+# How long a preview is kept before being fetched again.
+embed_cache_secs = "1d"
 # How long a scheduled migration waits before it runs, during which any
 # logged-in device can call it off.
-migration_delay_secs = 86400
+migration_delay_secs = "1d"
+# How often the server re-checks peers against their discovery documents.
+revalidate_interval_secs = "10m"
+# Delay before retrying a failed direct-message hand-off to a peer.
+dm_retry_secs = "30s"
 
 [limits]
-# Default body cap; the gap allowed between body chunks, in seconds.
-max_request_bytes = 2097152
-request_body_timeout_secs = 30
+# Longest chat message, in characters.
 max_message_len = 4000
+# Guilds one account may belong to.
 max_guilds_per_user = 200
+# Custom emoji one guild may have.
 max_emoji_per_guild = 250
+# Custom stickers one guild may have.
 max_stickers_per_guild = 60
-max_sync_store_bytes = 1048576
+# Per-device sync state a client may store on the server.
+max_sync_store_bytes = "1MiB"
+# Files attached to one message.
 max_attachments_per_message = 10
 # Pending stranger DM requests per account; overflow is silently declined.
 max_message_requests = 100
 # Presence is the primary fanout bomb; coalescing it is not optional at scale.
-presence_coalesce_secs = 30
+presence_coalesce_secs = "30s"
 # Emoji and sticker uploads are decoded and re-encoded here rather than stored
 # as sent (docs/media.md, "Expression normalization"). These are the box each
 # kind is scaled down to fit -- never up -- and the budgets a decode may spend.
@@ -443,11 +529,17 @@ expression_max_source_pixels = 16777216
 # decoded and resampled, so this bounds the work an upload can cost. A large
 # canvas lowers the effective frame cap to what fits in it.
 expression_max_total_pixels = 268435456
+# Most frames one animation may have.
 expression_max_frames = 250
-expression_max_duration_ms = 30000
+# Longest animation accepted.
+expression_max_duration_ms = "30s"
 # Past the frame or duration cap: keep what fits and drop the rest, or refuse
 # the upload.
 expression_drop_excess_frames = true
+# Largest request body on routes without their own ceiling.
+max_request_bytes = "2MiB"
+# Stall allowed between body chunks before abandoning the request (slowloris).
+request_body_timeout_secs = "30s"
 
 # Section 7. With no `[[voice.regions]]` configured, calls use peer-to-peer
 # mesh. To advertise an SFU as the default for guilds, add a region using the
@@ -457,13 +549,31 @@ expression_drop_excess_frames = true
 # address from; use your own STUN or coturn if preferred, or empty the list when
 # every participant is on one network.
 [voice]
+# Whether calls are offered at all.
+enabled = true
+# Which `[[voice.regions]]` entry clients are pointed at first; only
+# meaningful once regions exist.
+default_region = "local"
+# Addresses handed to clients to learn their own public address from.
 stun_servers = ["stun:stun.l.google.com:19302"]
+# How long a call-join token lives before the client quietly renews it.
+token_ttl_secs = "10m"
+# Bitrate ceiling handed to clients; the streamer spends the budget.
+max_bitrate = "2.5Mbps"
+# People who may screenshare in one channel at once.
+max_streamers_per_channel = 4
+# Peer-to-peer calls are used when no SFU is configured; more than this many
+# participants and a channel needs one.
 mesh_max_participants = 4
+# How long a call survives its gateway socket dropping, so a network blip
+# does not evict everyone.
+reconnect_grace_secs = "15s"
 # Example only; uncomment and replace both values to enable your SFU:
 # default_region = "local"
 # [[voice.regions]]
 # name = "local"
 # sfu = "https://sfu.your-domain.example"
+# pubkey_hint = "base64-key"   # carried to the client; nothing reads it yet
 
 # The relay. STUN only tells a client its own public address; it does not carry
 # media, and there are pairs of networks -- symmetric NAT on either side, most
@@ -498,13 +608,14 @@ mesh_max_participants = 4
 #
 # turn = "turn.example.com:3478"
 # turn_secret = "a long random string, the same one coturn is given"
-# turn_ttl_secs = 3600
+# turn_ttl_secs = "1h"
 
 # FCM and APNs need the app publisher's credentials. Web Push and UnifiedPush
 # need nothing here.
 [push]
 
 [push.fcm]
+# Needs this switch and a service account below.
 enabled = false
 # Must match the service-account JSON.
 # project_id = "telium-android"
@@ -515,6 +626,7 @@ enabled = false
 
 [push.apns]
 enabled = false
+# The credentials come from Apple's developer account.
 # team_id = "ABCDE12345"
 # key_id = "FGHIJ67890"
 # bundle_id = "chat.telium.ios"
@@ -531,7 +643,7 @@ environment = "production"
 # This is the *built* client, not its source: run `bun run build` in `web/` and
 # point at the `dist` it produces.
 [web]
-dir = "../web/dist"
+# dir = "../web/dist"
 # Where people open this server's web client, if that is not `public_base_url`
 # (a client hosted on its own domain, or behind a different proxy). Published as
 # `client` in /.well-known/telium/server; with `dir` set and this left out, the
@@ -539,6 +651,10 @@ dir = "../web/dist"
 # person here to receive an account move without copying a code by hand
 # (docs/migration.md, "The guided flow"), so leave it unset if there is no page.
 # client_url = "https://chat.example.com"
+# Where invite and vanity links this server mints are opened. The default sends
+# them to Telium's own page, which is safe for a server that serves no client
+# of its own; "self" restores links on this server's public_base_url.
+invite_portal = "https://telium.chat"
 
 # Public browser-side GIF provider configuration. The API key is an
 # application credential, not a server secret: clients contact KLIPY directly.
@@ -562,7 +678,7 @@ media_hosts = ["klipy.com", "static.klipy.com", "static.klipy.co", "media.klipy.
 [mail]
 mode = "none"
 # webhook_url = "https://mail-relay.internal.example/send"
-# webhook_token = "change-me"
+# webhook_token = "change-me"   # or "${file:/run/secrets/mail-webhook}"
 # from = "noreply@chat.example"   # default: noreply@<server_name>
 
 
@@ -571,6 +687,11 @@ mode = "none"
 # anonymous buckets with a fake X-Forwarded-For header.
 [rate_limit]
 enabled = true
+# Each pair below is a burst allowance and a steady refill per second, for one
+# kind of traffic: ordinary reads, ordinary writes, password-bearing endpoints
+# (the tightest), server-to-server traffic (per socket, generous because a peer
+# relays for all its users), and guild search (cost units, not requests; an
+# ordinary search costs about seven).
 read_burst = 200
 read_per_sec = 20.0
 write_burst = 60
@@ -584,6 +705,8 @@ federation_per_sec = 40.0
 # Guild search, in cost units rather than requests (routes/social.rs::search_cost).
 search_burst = 600
 search_per_sec = 20.0
+# Proxy addresses allowed to claim a client IP via X-Forwarded-For. List only
+# proxies you control.
 trusted_proxies = []
 
 
@@ -595,7 +718,9 @@ outbox_depth = 400
 max_connections_per_account = 6
 # Upgraded sockets not yet identified (close 4013).
 max_pending_sockets = 2048
-max_frame_bytes = 65536
+# Largest client frame buffered and parsed; the only cap that acts before
+# authentication.
+max_frame_bytes = "64KiB"
 # Client frames per account; heartbeats exempt.
 frames_per_sec = 10.0
 frame_burst = 120
@@ -619,21 +744,30 @@ typing_burst = 5
 [failover]
 standbys = []
 replicate = []
+# Where mirrored databases and their media live.
 dir = "replicas"
 # Seconds of lag is seconds of data loss in a failure, so the poll is short.
-poll_secs = 5
+poll_secs = "5s"
+# Log entries fetched per poll.
 batch = 500
-keep_acked_secs = 1800
+# How long acknowledged entries are kept, so a briefly disconnected standby
+# resumes instead of resyncing.
+keep_acked_secs = "30m"
 # How behind a copy may be before clients reading it are told it is behind,
 # rather than merely told it is a copy.
-stale_after_secs = 300
+stale_after_secs = "5m"
+# Content addresses examined per sweep of a replica's media.
 media_batch = 200
+# Standbys allowed to stream a logical origin after promotion; separate from
+# `standbys`.
+# promoted_standbys = { "origin.example" = ["standby.example"] }
 # How often a primary asks its standbys whether one of them has taken over.
 # Slower on purpose: the question is only interesting after an outage, and the
 # answer that matters most is the one checked once at startup.
-demotion_poll_secs = 30
-# Disk cap for one bootstrap snapshot from the primary. 100 GiB.
-max_snapshot_bytes = 107374182400
+demotion_poll_secs = "30s"
+# Disk cap for one bootstrap snapshot from the primary. Too low silently
+# breaks failover.
+max_snapshot_bytes = "100GiB"
 
 # Staying current (../docs/operator-guide.md, "Staying current"). A Telium
 # homeserver updates itself by default -- that half is deploy/update.sh and a
@@ -664,9 +798,11 @@ manifest_url = "https://raw.githubusercontent.com/telium-chat/telium/main/deploy
 # Six hours. A release is not urgent to *learn about* in the minute it happens
 # -- the box's own timer is already pulling every minute -- so this is a
 # background fact, checked at the rate a background fact deserves.
-check_interval_secs = 21600
-retry_secs = 1800
-timeout_secs = 10
+check_interval_secs = "6h"
+# How soon after a failed check it is tried again.
+retry_secs = "30m"
+# How long one check may take.
+timeout_secs = "10s"
 # When being behind stops being ordinary and starts being worth saying loudly.
 #
 # Days since the first release this build missed, not days since the build was
@@ -679,8 +815,14 @@ timeout_secs = 10
 # software that shouts at them then is software they learn to ignore before the
 # day it matters. Past `urgent_after_days`, or the moment a release marked
 # security-relevant has been missed, it is impossible to overlook.
-stale_after_days = 14
-urgent_after_days = 45
+stale_after_days = "2w"
+urgent_after_days = "45d"
+# Ed25519 public key (url-safe base64) that must have signed the manifest;
+# empty means the manifest is trusted only as far as its transport. The key is
+# never compiled in, so verifying releases is always this server's own choice.
+# manifest_public_key = "base64-ed25519-public-key"
+# Where the detached signature lives; empty means manifest_url + ".sig".
+# manifest_signature_url = "https://example.com/releases.json.sig"
 
 # Counting the world's Telium servers, and nothing else (docs/privacy.md).
 #
@@ -708,9 +850,9 @@ count_url = "https://count.telium.chat/ping"
 # A day. Neither number moves on an hour's timescale in any way that matters,
 # and a census that rang every doorbell hourly would be spending operator
 # goodwill on nothing.
-interval_secs = 86400
+interval_secs = "1d"
 # How long one report may take.
-timeout_secs = 10
+timeout_secs = "10s"
 
 # What the operator console measures, and for how long it remembers it.
 #
@@ -726,15 +868,17 @@ timeout_secs = 10
 enabled = true
 # One history row per interval. In between, everything lives in memory as
 # atomics, so the cost of measuring a request is two adds.
-interval_secs = 60
+interval_secs = "1m"
 # Two weeks at a row a minute is about twenty thousand rows. Small enough that
 # the smallest box anyone runs this on can carry it, long enough that last
 # weekend is still answerable on Monday.
-retention_days = 14
+retention_days = "14d"
 # Total media bytes, database size and cold-segment size are the only numbers
 # here that cost a table scan, so they are sampled on their own slower clock.
 # Buckets in between record them as absent rather than repeating the last value.
-storage_interval_secs = 900
+storage_interval_secs = "15m"
+# Most route patterns tracked in the live per-route table (memory-only).
+max_routes = 512
 # GET /metrics (docs/observability.md). Off by default.
 scrape_enabled = false
 # Bearer token; TELIUM_METRICS_SCRAPE_TOKEN overrides. Use it behind a proxy.
@@ -746,19 +890,24 @@ scrape_allow = ["127.0.0.1", "::1"]
 
 # Housekeeping retention (docs/data-lifecycle.md). There is no message retention.
 [retention]
-erasure_journal_days = 90
+# How long the journal backing an erasure request is kept after it completes.
+erasure_journal_days = "90d"
 # 0 keeps tombstones forever.
-tombstone_days = 365
-remote_cache_days = 30
+tombstone_days = "365d"
+# How long records about a remote server's deleted content are kept.
+remote_cache_days = "30d"
+# Account data exports one account may request per day.
 exports_per_day = 3
-delivered_notice_days = 14
+# How long "delivered" receipts are kept.
+delivered_notice_days = "14d"
 # 0 keeps guild audit entries forever.
-audit_log_days = 730
+audit_log_days = "730d"
 
 # Startup database checks (docs/data-lifecycle.md).
 [integrity]
 # off, quick or full. TELIUM_DB_INTEGRITY overrides for one run.
 startup_check = "quick"
+# Look for rows referencing missing records.
 foreign_key_check = true
 # false starts anyway and salvages what it can.
 refuse_start_on_corruption = true
@@ -768,6 +917,6 @@ refuse_start_on_corruption = true
 # then give HTTP requests grace_secs. The supervisor must wait longer.
 [shutdown]
 # 1-300.
-grace_secs = 15
+grace_secs = "15s"
 # 0-5000.
-settle_ms = 250
+settle_ms = "250ms"

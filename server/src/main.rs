@@ -1515,8 +1515,10 @@ fn init_config(path: &std::path::Path) -> anyhow::Result<()> {
     if path.exists() {
         anyhow::bail!("{} already exists", path.display());
     }
-    let cfg = Config::default();
-    std::fs::write(path, toml::to_string_pretty(&cfg)?)?;
+    // The annotated example, not a bare dump of the defaults: every value in it
+    // is the default, and the comments around them are the documentation most
+    // operators will actually read.
+    std::fs::write(path, include_str!("../telium.example.toml"))?;
     println!("wrote {}", path.display());
     Ok(())
 }

@@ -277,8 +277,8 @@ fn the_example_config_still_describes_the_config_this_binary_has() {
     );
     let edits: &[(&str, &str, fn(&Config) -> String)] = &[
         ("drill = true", "drill = false", |c| c.backup.drill.to_string()),
-        ("drill_interval_secs = 86400", "drill_interval_secs = 3600", |c| c.backup.drill_interval_secs.to_string()),
-        ("drill_stale_after_secs = 259200", "drill_stale_after_secs = 9", |c| c.backup.drill_stale_after_secs.to_string()),
+        ("drill_interval_secs = \"1d\"", "drill_interval_secs = 3600", |c| c.backup.drill_interval_secs.to_string()),
+        ("drill_stale_after_secs = \"3d\"", "drill_stale_after_secs = 9", |c| c.backup.drill_stale_after_secs.to_string()),
         ("pre_migration_backup = true", "pre_migration_backup = false", |c| c.backup.pre_migration_backup.to_string()),
         ("before_migration = false", "before_migration = true", |c| c.backup.require_backup_before_migration.to_string()),
     ];
@@ -287,4 +287,15 @@ fn the_example_config_still_describes_the_config_this_binary_has() {
         let edited: Config = toml::from_str(&text.replace(from, to)).unwrap();
         assert_eq!(read(&edited), to.rsplit(" = ").next().unwrap(), "`{from}` is not the key the parser reads");
     }
+}
+
+#[test]
+fn the_example_config_equals_the_compiled_defaults() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("telium.example.toml");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let parsed: Config = toml::from_str(&text).expect("telium.example.toml parses");
+    // Compared through their TOML round trip: `Config` does not derive
+    // `PartialEq`, and serializing normalizes key order on both sides.
+    let written = |c: &Config| toml::to_string_pretty(c).expect("config serializes");
+    assert_eq!(written(&parsed), written(&Config::default()));
 }

@@ -206,6 +206,266 @@ fn collect_file_references(value: &toml::Value, out: &mut Vec<PathBuf>) {
     }
 }
 
+// Human values. Byte, second, millisecond, day and bit-rate keys accept a
+// string written the way an operator says it -- "100MiB", "6h", "2d 12h",
+// "250ms", "2.5Mbps" -- beside the plain integer each key has always taken.
+// The integer's unit is the one the key name spells out, and a string with no
+// unit at all keeps that unit too.
+
+fn split_number_unit(text: &str) -> Result<(f64, String), String> {
+    let trimmed = text.trim();
+    let split = trimmed
+        .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '+'))
+        .unwrap_or(trimmed.len());
+    let (number, unit) = trimmed.split_at(split);
+    let number = number.trim();
+    if number.is_empty() {
+        return Err(format!("`{text}` has no number in it"));
+    }
+    let number: f64 =
+        number.parse().map_err(|_| format!("`{number}` is not a number"))?;
+    if !number.is_finite() || number < 0.0 {
+        return Err(format!("`{number}` must be zero or more"));
+    }
+    Ok((number, unit.trim().to_ascii_lowercase()))
+}
+
+const SIZE_GUIDE: &str =
+    "sizes look like \"15MB\", \"1GiB\", \"512KiB\" or a plain integer of bytes";
+
+fn parse_size(text: &str) -> Result<i128, String> {
+    let (number, unit) = split_number_unit(text)
+        .map_err(|e| format!("`{text}` is not a size: {e}; {SIZE_GUIDE}"))?;
+    let multiplier = match unit.as_str() {
+        "" | "b" => 1.0,
+        "k" | "kb" => 1e3,
+        "m" | "mb" => 1e6,
+        "g" | "gb" => 1e9,
+        "t" | "tb" => 1e12,
+        "ki" | "kib" => 1024.0,
+        "mi" | "mib" => 1024.0 * 1024.0,
+        "gi" | "gib" => 1024.0 * 1024.0 * 1024.0,
+        "ti" | "tib" => 1024.0 * 1024.0 * 1024.0 * 1024.0,
+        other => return Err(format!("`{text}`: unknown size unit `{other}`; {SIZE_GUIDE}")),
+    };
+    Ok((number * multiplier).round() as i128)
+}
+
+const DURATION_GUIDE: &str = "durations look like \"90s\", \"10m\", \"6h\", \"1d\", \"2w\", \"1d 12h\" or a plain integer of seconds";
+
+/// A duration is one or more `<number><unit>` chunks, spaces optional between
+/// them: "6h", "1d 12h", "1h30m".
+fn duration_chunks(text: &str, guide: &str) -> Result<Vec<(f64, String)>, String> {
+    let mut chunks = Vec::new();
+    let mut rest = text.trim();
+    while !rest.is_empty() {
+        let number_end = rest
+            .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '+'))
+            .unwrap_or(rest.len());
+        let (number, tail) = rest.split_at(number_end);
+        let unit_end = tail
+            .find(|c: char| c.is_ascii_digit() || c == '.' || c.is_whitespace())
+            .unwrap_or(tail.len());
+        let (unit, tail) = tail.split_at(unit_end);
+        let number = number.trim();
+        let unit = unit.trim().to_ascii_lowercase();
+        if number.is_empty() || unit.is_empty() {
+            return Err(format!("`{text}` pairs a number and a unit wrongly; {guide}"));
+        }
+        let number: f64 =
+            number.parse().map_err(|_| format!("`{number}` is not a number"))?;
+        if !number.is_finite() || number < 0.0 {
+            return Err(format!("`{number}` must be zero or more"));
+        }
+        chunks.push((number, unit));
+        rest = tail.trim_start();
+    }
+    if chunks.is_empty() {
+        return Err(format!("`{text}` has no number in it; {guide}"));
+    }
+    Ok(chunks)
+}
+
+fn parse_secs(text: &str) -> Result<i128, String> {
+    let mut total = 0.0;
+    for (number, unit) in duration_chunks(text, DURATION_GUIDE)
+        .map_err(|e| format!("`{text}` is not a duration: {e}"))?
+    {
+        let multiplier = match unit.as_str() {
+            "" | "s" | "sec" | "secs" | "second" | "seconds" => 1.0,
+            "m" | "min" | "mins" | "minute" | "minutes" => 60.0,
+            "h" | "hr" | "hrs" | "hour" | "hours" => 3600.0,
+            "d" | "day" | "days" => 24.0 * 3600.0,
+            "w" | "wk" | "week" | "weeks" => 7.0 * 24.0 * 3600.0,
+            other => {
+                return Err(format!(
+                    "`{text}`: unknown duration unit `{other}`; {DURATION_GUIDE}"
+                ))
+            }
+        };
+        total += number * multiplier;
+    }
+    Ok(total.round() as i128)
+}
+
+const MILLIS_GUIDE: &str =
+    "durations look like \"250ms\", \"1.5s\", \"30s\" or a plain integer of milliseconds";
+
+fn parse_millis(text: &str) -> Result<i128, String> {
+    let mut total = 0.0;
+    for (number, unit) in duration_chunks(text, MILLIS_GUIDE)
+        .map_err(|e| format!("`{text}` is not a duration: {e}"))?
+    {
+        let multiplier = match unit.as_str() {
+            "" | "ms" | "millis" | "millisecond" | "milliseconds" => 1.0,
+            "s" | "sec" | "secs" | "second" | "seconds" => 1000.0,
+            "m" | "min" | "mins" | "minute" | "minutes" => 60.0 * 1000.0,
+            "h" | "hr" | "hrs" | "hour" | "hours" => 3600.0 * 1000.0,
+            other => {
+                return Err(format!(
+                    "`{text}`: unknown duration unit `{other}`; {MILLIS_GUIDE}"
+                ))
+            }
+        };
+        total += number * multiplier;
+    }
+    Ok(total.round() as i128)
+}
+
+const DAYS_GUIDE: &str = "spans look like \"30d\", \"2w\" or a plain integer of days";
+
+fn parse_days(text: &str) -> Result<i128, String> {
+    let (number, unit) = split_number_unit(text)
+        .map_err(|e| format!("`{text}` is not a span of days: {e}; {DAYS_GUIDE}"))?;
+    let multiplier = match unit.as_str() {
+        "" | "d" | "day" | "days" => 1.0,
+        "w" | "wk" | "week" | "weeks" => 7.0,
+        other => {
+            return Err(format!(
+                "`{text}`: unknown span unit `{other}`; {DAYS_GUIDE}"
+            ))
+        }
+    };
+    if number.fract() != 0.0 {
+        return Err(format!("`{text}`: {DAYS_GUIDE}, and `{number}` is not whole"));
+    }
+    Ok((number * multiplier) as i128)
+}
+
+const RATE_GUIDE: &str =
+    "rates look like \"2.5Mbps\", \"800kbps\" or a plain integer of bits per second";
+
+fn parse_bps(text: &str) -> Result<i128, String> {
+    let (number, unit) = split_number_unit(text)
+        .map_err(|e| format!("`{text}` is not a rate: {e}; {RATE_GUIDE}"))?;
+    let multiplier = match unit.as_str() {
+        "" | "bps" | "bit" | "bits" => 1.0,
+        "k" | "kb" | "kbps" | "kbit" => 1e3,
+        "m" | "mb" | "mbps" | "mbit" => 1e6,
+        "g" | "gb" | "gbps" | "gbit" => 1e9,
+        other => return Err(format!("`{text}`: unknown rate unit `{other}`; {RATE_GUIDE}")),
+    };
+    Ok((number * multiplier).round() as i128)
+}
+
+fn narrow<T, E>(v: i128) -> Result<T, E>
+where
+    T: std::convert::TryFrom<i128>,
+    E: serde::de::Error,
+{
+    T::try_from(v).map_err(|_| E::custom(format!("value {v} does not fit this setting's range")))
+}
+
+/// One deserializer per (unit grammar, integer type) pair. The config fields
+/// keep their plain integer types, so nothing outside this file changes.
+macro_rules! human_deserializer {
+    ($name:ident, $ty:ty, $parse:ident, $expecting:expr) => {
+        pub(crate) fn $name<'de, D>(d: D) -> Result<$ty, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            struct V;
+            impl<'de> serde::de::Visitor<'de> for V {
+                type Value = $ty;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str($expecting)
+                }
+                fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<$ty, E> {
+                    narrow(v as i128)
+                }
+                fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<$ty, E> {
+                    narrow(v as i128)
+                }
+                fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<$ty, E> {
+                    $parse(v).map_err(E::custom).and_then(narrow)
+                }
+            }
+            d.deserialize_any(V)
+        }
+    };
+}
+
+human_deserializer!(
+    de_bytes, usize, parse_size,
+    "a size like \"15MB\", \"1GiB\" or a plain integer of bytes"
+);
+human_deserializer!(
+    de_bytes_i64, i64, parse_size,
+    "a size like \"15MB\", \"1GiB\" or a plain integer of bytes"
+);
+human_deserializer!(
+    de_bytes_u64, u64, parse_size,
+    "a size like \"15MB\", \"1GiB\" or a plain integer of bytes"
+);
+human_deserializer!(
+    de_secs, i64, parse_secs,
+    "a duration like \"6h\", \"1d 12h\" or a plain integer of seconds"
+);
+human_deserializer!(
+    de_secs_u64, u64, parse_secs,
+    "a duration like \"6h\", \"1d 12h\" or a plain integer of seconds"
+);
+human_deserializer!(
+    de_millis, u32, parse_millis,
+    "a duration like \"250ms\", \"1.5s\" or a plain integer of milliseconds"
+);
+human_deserializer!(
+    de_millis_u64, u64, parse_millis,
+    "a duration like \"250ms\", \"1.5s\" or a plain integer of milliseconds"
+);
+human_deserializer!(
+    de_days, i64, parse_days,
+    "a span like \"30d\", \"2w\" or a plain integer of days"
+);
+human_deserializer!(
+    de_bps, i64, parse_bps,
+    "a rate like \"2.5Mbps\", \"800kbps\" or a plain integer of bits per second"
+);
+
+/// The `Option<i64>` form, for fields where an omitted limit means unstated.
+pub(crate) fn de_bytes_opt<'de, D>(d: D) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct V;
+    impl<'de> serde::de::Visitor<'de> for V {
+        type Value = Option<i64>;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a size like \"15MB\", \"1GiB\" or a plain integer of bytes")
+        }
+        fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Option<i64>, E> {
+            Ok(Some(v))
+        }
+        fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Option<i64>, E> {
+            narrow(v as i128).map(Some)
+        }
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Option<i64>, E> {
+            parse_size(v).map_err(E::custom).and_then(narrow).map(Some)
+        }
+    }
+    d.deserialize_any(V)
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Config {
@@ -254,15 +514,20 @@ pub struct Config {
 #[serde(default)]
 pub struct Retention {
     /// Erasure journal retention after completion.
+    #[serde(deserialize_with = "de_days")]
     pub erasure_journal_days: i64,
     /// Zero keeps local tombstones forever.
+    #[serde(deserialize_with = "de_days")]
     pub tombstone_days: i64,
     /// Retention for `remote_tombstones`.
+    #[serde(deserialize_with = "de_days")]
     pub remote_cache_days: i64,
     /// Account exports allowed per day.
     pub exports_per_day: i64,
+    #[serde(deserialize_with = "de_days")]
     pub delivered_notice_days: i64,
     /// Zero keeps the audit log forever.
+    #[serde(deserialize_with = "de_days")]
     pub audit_log_days: i64,
 }
 
@@ -314,8 +579,10 @@ pub enum IntegrityMode {
 #[serde(default)]
 pub struct Shutdown {
     /// Seconds to wait for in-flight work before exiting anyway.
+    #[serde(deserialize_with = "de_secs_u64")]
     pub grace_secs: u64,
     /// Milliseconds for close frames to flush before the wait begins.
+    #[serde(deserialize_with = "de_millis_u64")]
     pub settle_ms: u64,
 }
 
@@ -333,11 +600,16 @@ pub struct Updates {
     /// Release list URL (JSON written by CI).
     pub manifest_url: String,
     /// Check interval, retry delay and timeout.
+    #[serde(deserialize_with = "de_secs")]
     pub check_interval_secs: i64,
+    #[serde(deserialize_with = "de_secs")]
     pub retry_secs: i64,
+    #[serde(deserialize_with = "de_secs_u64")]
     pub timeout_secs: u64,
     /// Lag before warning, and before urgent. Security releases are urgent immediately.
+    #[serde(deserialize_with = "de_days")]
     pub stale_after_days: i64,
+    #[serde(deserialize_with = "de_days")]
     pub urgent_after_days: i64,
     /// Ed25519 manifest-signing key, url-safe base64; empty means unchecked. Never compiled in.
     pub manifest_public_key: String,
@@ -368,7 +640,9 @@ impl Default for Updates {
 pub struct Usage {
     pub report: bool,
     pub count_url: String,
+    #[serde(deserialize_with = "de_secs")]
     pub interval_secs: i64,
+    #[serde(deserialize_with = "de_secs_u64")]
     pub timeout_secs: u64,
 }
 
@@ -392,10 +666,14 @@ pub struct Hosting {
     pub catalogs: Vec<HostingCatalog>,
     pub providers: Vec<HostingProvider>,
     /// Catalogue refetch interval, failed-fetch retry delay, and per-fetch timeout.
+    #[serde(deserialize_with = "de_secs")]
     pub catalog_refresh_secs: i64,
+    #[serde(deserialize_with = "de_secs")]
     pub catalog_retry_secs: i64,
+    #[serde(deserialize_with = "de_secs_u64")]
     pub catalog_timeout_secs: u64,
     /// Validity of the catalogue published from `providers`.
+    #[serde(deserialize_with = "de_secs")]
     pub catalog_validity_secs: i64,
 }
 
@@ -450,7 +728,9 @@ pub struct HostingPlan {
     /// free | monthly | yearly | metered.
     pub period: String,
     pub member_cap: Option<i64>,
+    #[serde(deserialize_with = "de_bytes_opt")]
     pub storage_bytes: Option<i64>,
+    #[serde(deserialize_with = "de_bytes_opt")]
     pub media_quota_bytes: Option<i64>,
     pub notes: Option<String>,
 }
@@ -587,12 +867,16 @@ pub struct Relay {
     pub max_concurrent_per_account: u32,
     pub max_concurrent_total: u32,
     /// Bytes per tunnel, both directions.
+    #[serde(deserialize_with = "de_bytes_i64")]
     pub max_tunnel_bytes: i64,
     /// Bytes per account in a rolling 24 hours (persisted in `relay_usage`).
+    #[serde(deserialize_with = "de_bytes_i64")]
     pub daily_bytes_per_account: i64,
     /// Idle seconds before closing.
+    #[serde(deserialize_with = "de_secs_u64")]
     pub idle_timeout_secs: u64,
     /// Maximum tunnel lifetime in seconds.
+    #[serde(deserialize_with = "de_secs_u64")]
     pub max_lifetime_secs: u64,
     /// Distinct destinations per account per hour.
     pub destinations_per_hour: u32,
@@ -606,6 +890,7 @@ pub struct Relay {
     /// Server names this relay refuses regardless of `allow`. Checked first.
     pub deny: Vec<String>,
     /// Seconds a discovery document (and negative answer) is cached.
+    #[serde(deserialize_with = "de_secs_u64")]
     pub discovery_cache_secs: u64,
     /// Log account and destination per tunnel; off to avoid mapping who talks to whom.
     pub log_destinations: bool,
@@ -647,22 +932,29 @@ pub struct Roles {
 #[serde(default)]
 pub struct MediaPolicy {
     pub default: MediaDefault,
+    #[serde(deserialize_with = "de_bytes_i64")]
     pub quota_bytes: i64,
     pub allowlist: Vec<String>,
     pub blocklist: Vec<String>,
+    #[serde(deserialize_with = "de_bytes_i64")]
     pub profile_asset_carveout_bytes: i64,
+    #[serde(deserialize_with = "de_bytes")]
     pub max_file_bytes: usize,
     /// Per-object ceiling for `purpose = profile`.
+    #[serde(deserialize_with = "de_bytes")]
     pub max_profile_asset_bytes: usize,
     /// Longest requested upload lifetime in seconds; zero is no cap.
+    #[serde(deserialize_with = "de_secs")]
     pub max_expiry_secs: i64,
     /// Lifetime applied when the client requests none; zero keeps such uploads
     /// until something reclaims them. Never widens a client's own request and
     /// still narrows against the destination's cap.
+    #[serde(deserialize_with = "de_secs")]
     pub default_expiry_secs: i64,
     /// Attachment media older than this many days is swept even when a message
     /// still refers to it; zero never ages anything out. Destructive by design:
     /// live messages will lose their files past the age.
+    #[serde(deserialize_with = "de_days")]
     pub attachment_max_age_days: i64,
 }
 
@@ -684,10 +976,14 @@ pub struct MediaRegistry {
     /// Tier-3 upload add-ons.
     pub external_hosts: Vec<ExternalHost>,
     /// Origin feed refresh interval, retry delay and fetch timeout.
+    #[serde(deserialize_with = "de_secs")]
     pub feed_refresh_secs: i64,
+    #[serde(deserialize_with = "de_secs")]
     pub feed_retry_secs: i64,
+    #[serde(deserialize_with = "de_secs_u64")]
     pub feed_timeout_secs: u64,
     /// How long the feed published from `hosts` stays valid.
+    #[serde(deserialize_with = "de_secs")]
     pub feed_validity_secs: i64,
     /// Curators published as a signed directory; pinning stays a guild moderator's act.
     pub curators: Vec<CuratorEntry>,
@@ -763,6 +1059,7 @@ pub struct RegistryHost {
     pub origin: String,
     pub name: String,
     pub description: Option<String>,
+    #[serde(deserialize_with = "de_bytes_opt")]
     pub max_file_bytes: Option<i64>,
     pub abuse_contact: Option<String>,
 }
@@ -777,6 +1074,7 @@ pub struct ExternalHost {
     pub domain: String,
     pub upload_url: String,
     pub description: Option<String>,
+    #[serde(deserialize_with = "de_bytes_opt")]
     pub max_file_bytes: Option<i64>,
     /// Whether the provider accepts browser CORS uploads; `None` uses the adapter default.
     pub browser_direct: Option<bool>,
@@ -794,11 +1092,16 @@ impl ExternalHost {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Sessions {
+    #[serde(deserialize_with = "de_secs")]
     pub home_session_ttl_secs: i64,
+    #[serde(deserialize_with = "de_secs")]
     pub assertion_ttl_secs: i64,
     /// Bounded so home-server revocation takes effect.
+    #[serde(deserialize_with = "de_secs")]
     pub guild_session_ttl_secs: i64,
+    #[serde(deserialize_with = "de_secs")]
     pub revalidate_interval_secs: i64,
+    #[serde(deserialize_with = "de_secs")]
     pub signing_key_validity_secs: i64,
 }
 
@@ -852,9 +1155,11 @@ impl Default for Mfa {
 pub struct Backup {
     pub enabled: bool,
     pub dir: PathBuf,
+    #[serde(deserialize_with = "de_secs_u64")]
     pub interval_secs: u64,
     pub keep: usize,
     /// Warn once a backup is older than this, including the off-box copy.
+    #[serde(deserialize_with = "de_secs")]
     pub stale_after_secs: i64,
     /// Include `media_dir`; off if media is backed up elsewhere.
     pub include_media: bool,
@@ -865,8 +1170,10 @@ pub struct Backup {
     /// Periodic restore rehearsal: fetch, decrypt and open the newest archive in a scratch directory.
     pub drill: bool,
     /// Daily; each drill is a full download.
+    #[serde(deserialize_with = "de_secs_u64")]
     pub drill_interval_secs: u64,
     /// Staleness threshold for the last drill result.
+    #[serde(deserialize_with = "de_secs")]
     pub drill_stale_after_secs: i64,
     /// Back up at startup before applying migrations.
     pub pre_migration_backup: bool,
@@ -893,6 +1200,7 @@ pub struct Remote {
     /// Archives kept in the bucket.
     pub keep: usize,
     /// Timeout for small requests; transfers get more.
+    #[serde(deserialize_with = "de_secs_u64")]
     pub timeout_secs: u64,
 }
 
@@ -941,20 +1249,32 @@ pub struct Federation {
     /// Allow plain HTTP to peers. False everywhere but test rigs and LANs.
     pub allow_http: bool,
     pub peers: std::collections::BTreeMap<String, String>,
+    #[serde(deserialize_with = "de_secs_u64")]
     pub request_timeout_secs: u64,
+    #[serde(deserialize_with = "de_secs")]
     pub key_cache_secs: i64,
+    #[serde(deserialize_with = "de_secs")]
     pub max_clock_skew_secs: i64,
+    #[serde(deserialize_with = "de_secs")]
     pub media_cache_ttl_secs: i64,
+    #[serde(deserialize_with = "de_bytes_i64")]
     pub media_cache_max_bytes: i64,
     pub embed_enabled: bool,
+    #[serde(deserialize_with = "de_bytes")]
     pub embed_max_bytes: usize,
     /// Cap on a proxied video unfurl; over it, the card falls back to its still.
+    #[serde(deserialize_with = "de_bytes")]
     pub embed_video_max_bytes: usize,
+    #[serde(deserialize_with = "de_secs_u64")]
     pub embed_timeout_secs: u64,
+    #[serde(deserialize_with = "de_secs")]
     pub embed_cache_secs: i64,
     /// Cooling-off before a migration executes; any logged-in device can cancel.
+    #[serde(deserialize_with = "de_secs")]
     pub migration_delay_secs: i64,
+    #[serde(deserialize_with = "de_secs")]
     pub revalidate_interval_secs: i64,
+    #[serde(deserialize_with = "de_secs_u64")]
     pub dm_retry_secs: u64,
 }
 
@@ -968,22 +1288,26 @@ pub struct Voice {
     /// `/session`; the client renews it mid-call (`voice/token`), so a call
     /// never sits on an expired LiveKit grant, which would turn the first
     /// network blip into a full reconnect.
+    #[serde(deserialize_with = "de_secs")]
     pub token_ttl_secs: i64,
     /// Handed to every client; without a reflexive address a peer can only
     /// offer its own network's addresses.
     pub stun_servers: Vec<String>,
     /// Shared TURN secret (coturn `static-auth-secret`); `TELIUM_TURN_SECRET` overrides.
     pub turn_secret: Option<Secret>,
+    #[serde(deserialize_with = "de_secs")]
     pub turn_ttl_secs: i64,
     /// This server's own TURN relay (`host:port`) for relay-only calls; needs `turn_secret`.
     pub turn: Option<String>,
     /// Bitrate ceiling in bits per second; the streamer spends the budget.
+    #[serde(deserialize_with = "de_bps")]
     pub max_bitrate: i64,
     pub max_streamers_per_channel: i64,
     /// Mesh mode (peer-to-peer WebRTC, signalled over the guild gateway) is what
     /// the reference client uses when no SFU is configured.
     pub mesh_max_participants: i64,
     /// How long a voice state outlives its gateway connection, so a socket drop doesn't evict a live call.
+    #[serde(deserialize_with = "de_secs_u64")]
     pub reconnect_grace_secs: u64,
 }
 
@@ -1012,6 +1336,7 @@ pub struct Moderation {
     pub upload_hash_lists: Vec<HashListSource>,
     pub abuse_contact: Option<String>,
     pub blocklist_feeds: Vec<String>,
+    #[serde(deserialize_with = "de_days")]
     pub report_retention_days: i64,
 }
 
@@ -1037,11 +1362,13 @@ pub struct Limits {
     pub max_guilds_per_user: i64,
     pub max_emoji_per_guild: i64,
     pub max_stickers_per_guild: i64,
+    #[serde(deserialize_with = "de_bytes_i64")]
     pub max_sync_store_bytes: i64,
     pub max_attachments_per_message: usize,
     /// Undecided stranger DM requests per account; overflow is silently filed as declined.
     pub max_message_requests: i64,
     /// Presence is coalesced to this granularity (the fanout bomb).
+    #[serde(deserialize_with = "de_secs")]
     pub presence_coalesce_secs: i64,
     /// The side of the square an emoji is scaled down to fit; never scaled up.
     pub emoji_max_dimension: u32,
@@ -1052,13 +1379,16 @@ pub struct Limits {
     /// Max source pixels across all animation frames; bounds decode work.
     pub expression_max_total_pixels: u64,
     pub expression_max_frames: usize,
+    #[serde(deserialize_with = "de_millis")]
     pub expression_max_duration_ms: u32,
     /// Past the frame or duration cap: keep what fits and drop the rest (true),
     /// or refuse the upload (false).
     pub expression_drop_excess_frames: bool,
     /// Largest request body on routes without their own ceiling; pins axum's 2 MB default.
+    #[serde(deserialize_with = "de_bytes")]
     pub max_request_bytes: usize,
     /// Stall allowed between body chunks before abandoning the request (slowloris).
+    #[serde(deserialize_with = "de_secs_u64")]
     pub request_body_timeout_secs: u64,
 }
 
@@ -1115,6 +1445,7 @@ pub struct Gateway {
     /// Sockets upgraded but not yet IDENTIFYed, globally.
     pub max_pending_sockets: u64,
     /// Largest client frame buffered and parsed; the only cap that acts before authentication.
+    #[serde(deserialize_with = "de_bytes")]
     pub max_frame_bytes: usize,
     /// Client frames per second per account, and burst.
     pub frames_per_sec: f64,
@@ -1146,10 +1477,12 @@ pub struct Archive {
     pub enabled: bool,
     pub dir: PathBuf,
     /// How old a message must be before it is a candidate.
+    #[serde(deserialize_with = "de_days")]
     pub horizon_days: i64,
     /// Never archive below this many messages of recent tail per channel.
     pub keep_hot_messages: i64,
     pub batch: i64,
+    #[serde(deserialize_with = "de_secs_u64")]
     pub sweep_interval_secs: u64,
     pub store: StoreBackend,
     pub s3: Remote,
@@ -1191,10 +1524,13 @@ pub struct MediaStore {
 pub struct Metrics {
     pub enabled: bool,
     /// Span of one history bucket; below ~30s row count outweighs resolution.
+    #[serde(deserialize_with = "de_secs_u64")]
     pub interval_secs: u64,
     /// How long rolled-up history is kept (about twenty thousand rows at two weeks).
+    #[serde(deserialize_with = "de_days")]
     pub retention_days: i64,
     /// Sampling interval for expensive gauges; buckets between samples record them as absent.
+    #[serde(deserialize_with = "de_secs_u64")]
     pub storage_interval_secs: u64,
     /// Max route patterns in the live per-route table (memory-only).
     pub max_routes: usize,
@@ -1229,6 +1565,7 @@ impl Default for Metrics {
 #[serde(default)]
 pub struct Ownership {
     /// Delay before a filesystem-opened admin-recovery claim applies while another admin can cancel it.
+    #[serde(deserialize_with = "de_secs")]
     pub recovery_delay_secs: i64,
 }
 
@@ -1490,19 +1827,24 @@ pub struct Failover {
     /// Where mirrored databases and their media live.
     pub dir: PathBuf,
     /// How often the standby asks for new entries; lag is data loss in a failure.
+    #[serde(deserialize_with = "de_secs_u64")]
     pub poll_secs: u64,
     pub batch: i64,
     /// How long to keep acknowledged entries, so a briefly disconnected standby resumes.
+    #[serde(deserialize_with = "de_secs")]
     pub keep_acked_secs: i64,
     /// How stale a replica may be before clients are told the copy is behind.
+    #[serde(deserialize_with = "de_secs")]
     pub stale_after_secs: i64,
     /// Content addresses examined per sweep of a replica's media.
     pub media_batch: i64,
     /// Standbys allowed to stream a logical origin after promotion; separate from `standbys`.
     pub promoted_standbys: BTreeMap<String, Vec<String>>,
     /// How often a primary asks its standbys whether one has taken over.
+    #[serde(deserialize_with = "de_secs_u64")]
     pub demotion_poll_secs: u64,
     /// Largest snapshot a standby will write; too low silently breaks failover.
+    #[serde(deserialize_with = "de_bytes_u64")]
     pub max_snapshot_bytes: u64,
 }
 
@@ -1879,6 +2221,107 @@ impl Config {
 mod tests {
     use super::Config;
 
+    #[test]
+    fn sizes_take_human_strings() {
+        let cfg: Config = toml::from_str(
+            "[media_policy]\nmax_file_bytes = \"100MiB\"\nquota_bytes = \"1GiB\"\n\
+             profile_asset_carveout_bytes = \"512KiB\"\n[federation]\n\
+             media_cache_max_bytes = \"2GiB\"\nembed_video_max_bytes = \"32MB\"\n[relay]\n\
+             max_tunnel_bytes = \"256MiB\"\ndaily_bytes_per_account = \"4 GiB\"\n",
+        )
+        .expect("human sizes parse");
+        assert_eq!(cfg.media_policy.max_file_bytes, 104_857_600);
+        assert_eq!(cfg.media_policy.quota_bytes, 1_073_741_824);
+        assert_eq!(cfg.media_policy.profile_asset_carveout_bytes, 524_288);
+        assert_eq!(cfg.federation.media_cache_max_bytes, 2 * 1024 * 1024 * 1024);
+        // MB and MiB are different units on purpose: this is 32,000,000, not the default.
+        assert_eq!(cfg.federation.embed_video_max_bytes, 32_000_000);
+        assert_eq!(cfg.relay.max_tunnel_bytes, 268_435_456);
+        assert_eq!(cfg.relay.daily_bytes_per_account, 4 * 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn optional_sizes_take_human_strings() {
+        let cfg: Config = toml::from_str(
+            "[[media_registry.hosts]]\norigin = \"files.example.org\"\nname = \"Example\"\n\
+             max_file_bytes = \"2GiB\"\n",
+        )
+        .expect("an optional human size parses");
+        assert_eq!(cfg.media_registry.hosts[0].max_file_bytes, Some(2 * 1024 * 1024 * 1024));
+
+        let unstated: Config =
+            toml::from_str("[[media_registry.hosts]]\norigin = \"a.example\"\n").expect("parses");
+        assert_eq!(unstated.media_registry.hosts[0].max_file_bytes, None);
+    }
+
+    #[test]
+    fn durations_take_human_strings() {
+        let cfg: Config = toml::from_str(
+            "[sessions]\nhome_session_ttl_secs = \"30d\"\nsigning_key_validity_secs = \"90d\"\n\
+             [backup]\ninterval_secs = \"6h\"\ndrill_stale_after_secs = \"3d\"\n[limits]\n\
+             expression_max_duration_ms = \"30s\"\n[shutdown]\ngrace_secs = \"15s\"\n\
+             settle_ms = \"0.25s\"\n[voice]\n\
+             max_bitrate = \"2.5Mbps\"\ntoken_ttl_secs = \"10m\"\n[updates]\n\
+             check_interval_secs = \"6h\"\nstale_after_days = \"2w\"\n[retention]\n\
+             audit_log_days = \"104w\"\n",
+        )
+        .expect("human durations parse");
+        assert_eq!(cfg.sessions.home_session_ttl_secs, 2_592_000);
+        assert_eq!(cfg.sessions.signing_key_validity_secs, 7_776_000);
+        assert_eq!(cfg.backup.interval_secs, 21_600);
+        assert_eq!(cfg.backup.drill_stale_after_secs, 259_200);
+        assert_eq!(cfg.limits.expression_max_duration_ms, 30_000);
+        assert_eq!(cfg.shutdown.grace_secs, 15);
+        assert_eq!(cfg.shutdown.settle_ms, 250);
+        assert_eq!(cfg.voice.max_bitrate, 2_500_000);
+        assert_eq!(cfg.voice.token_ttl_secs, 600);
+        assert_eq!(cfg.updates.check_interval_secs, 21_600);
+        assert_eq!(cfg.updates.stale_after_days, 14);
+        assert_eq!(cfg.retention.audit_log_days, 728);
+    }
+
+    #[test]
+    fn compound_durations_add_up() {
+        let cfg: Config = toml::from_str(
+            "[failover]\nstale_after_secs = \"1d 12h\"\n[archive]\nsweep_interval_secs = \"1h30m\"\n",
+        )
+        .expect("compound durations parse");
+        assert_eq!(cfg.failover.stale_after_secs, 129_600);
+        assert_eq!(cfg.archive.sweep_interval_secs, 5_400);
+    }
+
+    #[test]
+    fn plain_integers_still_mean_what_the_key_name_says() {
+        let cfg: Config = toml::from_str(
+            "[media_policy]\nmax_file_bytes = 104857600\nattachment_max_age_days = 30\n\
+             [voice]\nmax_bitrate = 2500000\n",
+        )
+        .expect("plain integers keep parsing");
+        assert_eq!(cfg.media_policy.max_file_bytes, 104_857_600);
+        assert_eq!(cfg.media_policy.attachment_max_age_days, 30);
+        assert_eq!(cfg.voice.max_bitrate, 2_500_000);
+    }
+
+    #[test]
+    fn human_values_refuse_nonsense_loudly() {
+        for (src, fragment) in [
+            ("[media_policy]\nmax_file_bytes = \"15qb\"\n", "unknown size unit"),
+            ("[media_policy]\nmax_file_bytes = \"a lot\"\n", "is not a size"),
+            ("[media_policy]\nmax_file_bytes = \"MB\"\n", "no number"),
+            ("[sessions]\nhome_session_ttl_secs = \"5x\"\n", "unknown duration unit"),
+            ("[sessions]\nhome_session_ttl_secs = \"-5m\"\n", "wrongly"),
+            ("[media_policy]\nattachment_max_age_days = \"1.5d\"\n", "not whole"),
+            ("[media_policy]\nattachment_max_age_days = \"6h\"\n", "unknown span unit"),
+            ("[voice]\nmax_bitrate = \"2.5MB/s\"\n", "unknown rate unit"),
+        ] {
+            let err = toml::from_str::<Config>(src)
+                .expect_err("a nonsensical human value must be refused");
+            assert!(
+                format!("{err}").contains(fragment),
+                "`{src}` was refused, but not with `{fragment}`: {err}"
+            );
+        }
+    }
     #[test]
     fn printing_the_whole_configuration_does_not_print_a_single_credential() {
         let mut cfg = Config::default();
