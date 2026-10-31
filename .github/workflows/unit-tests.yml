@@ -3,11 +3,15 @@ name: Unit tests
 # The cheap, required unit-test gate. It always reports a `unit-tests` check,
 # but only runs the suites a change can actually affect.
 #
-# This repository currently uses one self-hosted runner. Keeping Rust, web, and
-# the final collector as separate jobs made those jobs look parallel while the
-# runner actually executed them serially, reacquiring the same machine between
-# each job. Keep the whole gate in one job so one checkout/filter can feed the
-# affected suites directly.
+# Rust and web are separate jobs so a change touching both runs them in
+# parallel instead of paying the sum of their runtimes. The diff that decides
+# which suites are affected lives in its own `changes` job -- it is the only
+# step that needs full history, which lets both workers use shallow
+# checkouts. The trailing collector keeps the check name that branch
+# protection requires stable, and reports green when neither suite is
+# affected. (The gate was a single job when it ran on one self-hosted runner,
+# where separate jobs looked parallel but executed serially on the same
+# machine; hosted runners made the split real.)
 on:
   pull_request:
   push:
@@ -15,7 +19,7 @@ on:
       - main
 
 # One run per pull request/ref. A newer commit makes an older queued/running
-# unit-test result obsolete, which matters on a single-runner queue.
+# unit-test result obsolete, so cancel it instead of spending a runner on it.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -24,23 +28,20 @@ permissions:
   contents: read
 
 jobs:
-  # Keep this job name stable: this is the check branch/ruleset protection
-  # should require.
-  unit-tests:
+  changes:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      web: ${{ steps.filter.outputs.web }}
     steps:
-      # Full history is needed for a pull request merge-base diff. On the
-      # persistent runner this normally fetches only what is new.
       # Every `uses:` below names a commit, not a tag. A tag is a mutable
       # pointer that the action's owner -- or anyone who takes their account
       # -- can move onto new code, and this repository's runs would then
       # execute it without a diff, a review, or a notification. The trailing
       # comment is the release that commit was, so the pin is still readable;
       # `docs/supply-chain.md` explains how to move one forward.
-      - name: Free disk space
-        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-
+      #
+      # Full history is needed for a pull request merge-base diff.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
@@ -115,24 +116,52 @@ jobs:
           echo "web=$web"   >> "$GITHUB_OUTPUT"
           echo "decided: rust=$rust web=$web"
 
+  rust:
+    name: Rust suites
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      # The `changes` job decided what to run; building and testing do not
+      # need history.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
       - name: Set up Rust
-        if: steps.filter.outputs.rust == 'true'
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch @ 2026-09-03
         with:
-          # clippy is not part of what this action installs by default, and the
-          # persistent runner cannot be relied on to have it: rustup only ships
-          # it when the profile asks for it, and the toolchain the runner had
-          # lying around from some earlier job is whatever that job asked for.
-          # Without this line the Rust lint step below dies on "'cargo-clippy'
-          # is not installed for the toolchain 'stable-x86_64-unknown-linux-gnu'"
-          # -- which reads like a broken gate rather than a missing component,
-          # because the workflow looks like it set up a toolchain and did.
+          # clippy is not part of what this action installs by default: the
+          # minimal profile ships without it, and without this line the Rust
+          # lint step below dies on "'cargo-clippy' is not installed for the
+          # toolchain 'stable-x86_64-unknown-linux-gnu'" -- which reads like a
+          # broken gate rather than a missing component, because the workflow
+          # looks like it set up a toolchain and did.
           components: clippy
+
+      # nextest runs every test in its own process rather than as threads
+      # inside one binary. The server suite is ~900 mostly-integration tests
+      # that spawn real servers and wait on real timers; under `cargo test`
+      # they share one runtime and queue on each other's sleeps, which is
+      # where the suite's ~16 minutes go.
+      #
+      # nextest does not run doctests. None of the three crates have runnable
+      # ones -- every doc example is a ```text, ```json, or ```ignore block --
+      # so nothing is silently dropped.
+      #
+      # The installer is pinned like every other action here, and the tool
+      # version with it: a moving test runner could change the gate's
+      # behavior without a diff.
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@9114bf4d891761788c546334fd37538eae1bf8b3 # v2.87.16
+        with:
+          tool: cargo-nextest@0.9.150
 
       # Three separate crates rather than one workspace, so the cache names
       # all three.
       - name: Restore Rust cache
-        if: steps.filter.outputs.rust == 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: |
@@ -168,16 +197,14 @@ jobs:
       #
       # The cost is honest: clippy and `cargo test` use different metadata
       # hashes, so this does not reuse the test build and it roughly doubles the
-      # Rust wall time on a cold cache. On the persistent runner with
-      # rust-cache, the dependency tree is already built and only the three
-      # workspace crates recompile.
+      # Rust wall time on a cold cache. With rust-cache, the dependency tree is
+      # already built and only the three workspace crates recompile.
       #
       # `cargo fmt --check` is NOT here. See docs/supply-chain.md: the
       # codebase has never been rustfmt-formatted, the check produces roughly
       # 2,800 diffs, and the fix is one agreed reformatting commit on a quiet
       # day rather than a gate that is red from the moment it is added.
       - name: Rust lint
-        if: steps.filter.outputs.rust == 'true'
         run: |
           set -euo pipefail
           for crate in telium-protocol sfu server; do
@@ -186,26 +213,33 @@ jobs:
           done
 
       - name: Protocol suite
-        if: steps.filter.outputs.rust == 'true'
-        run: cargo test --manifest-path telium-protocol/Cargo.toml
+        run: cargo nextest run --manifest-path telium-protocol/Cargo.toml
 
       - name: SFU suite
-        if: steps.filter.outputs.rust == 'true'
-        run: cargo test --manifest-path sfu/Cargo.toml
+        run: cargo nextest run --manifest-path sfu/Cargo.toml
 
       - name: Server suite
-        if: steps.filter.outputs.rust == 'true'
-        run: cargo test --manifest-path server/Cargo.toml
+        run: cargo nextest run --manifest-path server/Cargo.toml
+
+  web:
+    name: Web suite
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Bun
-        if: steps.filter.outputs.web == 'true'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.0
 
       # setup-bun caches the executable, not Bun's package cache.
       - name: Restore Bun cache
-        if: steps.filter.outputs.web == 'true'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.bun/install/cache
@@ -213,24 +247,41 @@ jobs:
           restore-keys: bun-${{ runner.os }}-
 
       - name: Install web dependencies
-        if: steps.filter.outputs.web == 'true'
         working-directory: web
         run: bun install --frozen-lockfile
 
       # Development mode is enough here: this catches unresolved/untransformable
       # modules without paying for a production minification pass.
       - name: Build
-        if: steps.filter.outputs.web == 'true'
         working-directory: web
         run: bunx vite build --mode development --logLevel error
 
       # jsdom is expensive on this runner. Four workers was already established
       # as the stable ceiling; keep that behavior unchanged.
       - name: Unit suite
-        if: steps.filter.outputs.web == 'true'
         working-directory: web
         run: bunx vitest run --maxWorkers=4
 
-      - name: Nothing affected
-        if: steps.filter.outputs.rust != 'true' && steps.filter.outputs.web != 'true'
-        run: echo "No Rust or web unit-test inputs changed; required check is green."
+  # Keep this job name stable: this is the check branch/ruleset protection
+  # should require.
+  unit-tests:
+    needs: [changes, rust, web]
+    # Skipped workers are a normal green outcome (a change that touches
+    # neither suite), so the collector cannot use the default "all
+    # dependencies succeeded" gate -- it must always report and evaluate the
+    # results itself.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      # A failed or cancelled worker fails the gate. So does a failed
+      # `changes` job: an undecided diff must read as a broken gate, never as
+      # a green one.
+      - name: Fail if any affected suite failed
+        if: >-
+          needs.changes.result != 'success' ||
+          contains(needs.*.result, 'failure') ||
+          contains(needs.*.result, 'cancelled')
+        run: exit 1
+
+      - name: Gate green
+        run: echo "Affected suites passed (or no Rust or web unit-test inputs changed); required check is green."
