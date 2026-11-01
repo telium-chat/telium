@@ -398,20 +398,46 @@ jobs:
       # `github.sha` is the head of the default branch, and a release labelled
       # with whatever `main` happened to be is wrong about the one fact this
       # tag exists to record.
+      #
+      # WHAT THIS JOB WRITES, AND WHEN
+      #
+      # The container channel is a tag. compose.yml names `server-latest` and
+      # update.sh pulls it every minute, so the moment that tag points at a
+      # digest, every unattended box in the world is sixty seconds from
+      # running it. Pushing the release tags first and verifying the result
+      # afterwards would leave the fleet holding an image nobody has ever
+      # started -- the exact failure a release smoke test exists to prevent,
+      # arranged to happen anyway.
+      #
+      # So the build lands on the one tag nothing follows -- `sha-<commit>`,
+      # kept because it is how you say "that one" after the fact -- and the
+      # release tags are written afterwards, by `imagetools create`, pointing
+      # at the same manifest list the build pushed. No second build, so "one
+      # build per release, one digest per artifact" survives intact: what
+      # `server-v*` and `server-latest` name is byte-for-byte what the smoke
+      # step below pulled and booted, SBOM and provenance attestations
+      # included. A failed smoke stops this job, publish never runs, and the
+      # channel tag simply never moved.
       - id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ghcr.io/${{ github.repository }}
+          # The version and channel tags are added by the promote step below,
+          # once the image has passed the smoke. This tag is everything the
+          # build itself may write.
           tags: |
-            type=raw,value=server-v${{ needs.validate.outputs.version }}
             type=raw,value=sha-${{ needs.validate.outputs.commit }}
-            type=raw,value=server-latest,enable=${{ needs.validate.outputs.moves_latest }}
 
       - id: push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           push: ${{ inputs.dry_run != true }}
+          # A dry run pushes nothing, so the smoke below would have nothing
+          # to pull; for that one case the image is loaded into the runner's
+          # docker store instead. Only there: on a real run the smoke pulls
+          # back what was pushed, which is the claim being verified.
+          load: ${{ inputs.dry_run == true }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: |
             ${{ steps.meta.outputs.labels }}
@@ -437,8 +463,135 @@ jobs:
           # records the workflow, the commit, the builder and the materials, so
           # "where did this image come from" is answerable from the image itself
           # months later.
-          sbom: true
-          provenance: mode=max
+          #
+          # Both travel with the registry push, and only there: a dry run
+          # pushes nothing and its docker-store export does not carry them,
+          # so they are switched off for that case rather than asking the
+          # exporter to strip what nothing will read.
+          sbom: ${{ inputs.dry_run != true }}
+          provenance: ${{ inputs.dry_run != true && 'mode=max' || 'false' }}
+
+      # The fleet-facing half of the smoke: take the bytes this job just
+      # pushed and run them. Three assertions, in the order a broken release
+      # would fail them:
+      #
+      #   * it names itself. Version and commit are build arguments that
+      #     travelled through validate and two shells to get here; an image
+      #     that cannot say which release it is is exactly the build the
+      #     update machinery refuses to reason about.
+      #   * it carries the two files update.sh docker-cp's out of every
+      #     image to reconcile a box's compose.yml -- byte-compared against
+      #     this checkout, so a Dockerfile that loses or moves the COPY
+      #     fails here rather than silently disabling config reconciliation
+      #     on every box that takes the release, which continues past a
+      #     missing file by design. `docker compose config` parses the file
+      #     while it is out.
+      #   * it boots. A minimal config, a tmpfs for the data, every outbound
+      #     call the server knows how to make switched off -- a smoke test
+      #     must not phone home -- and the health endpoint, which is a real
+      #     database round-trip and not a liveness ping, polled until it
+      #     answers.
+      - name: Smoke the image
+        env:
+          COMMIT: ${{ needs.validate.outputs.commit }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          DRY_RUN: ${{ inputs.dry_run == true }}
+        run: |
+          set -euo pipefail
+          REPO="ghcr.io/${GITHUB_REPOSITORY}"
+          IMAGE="${REPO}:sha-${COMMIT}"
+          PORT=$(( 20000 + GITHUB_RUN_ID % 10000 ))
+
+          if [ "$DRY_RUN" != "true" ]; then
+            docker pull "$IMAGE"
+          fi
+
+          identity="$(docker run --rm --entrypoint telium-server "$IMAGE" version)"
+          echo "$identity"
+          grep -qx "version=${VERSION}" <<<"$identity"
+          grep -qx "commit=${COMMIT}" <<<"$identity"
+
+          SMOKE="$(mktemp -d)"
+          trap 'rm -rf "$SMOKE"' EXIT
+          cid="$(docker create "$IMAGE")"
+          docker cp "$cid:/usr/share/telium/deploy/compose.yml" "$SMOKE/compose.yml"
+          docker cp "$cid:/usr/share/telium/deploy/telium.example.toml" "$SMOKE/telium.example.toml"
+          docker rm "$cid" > /dev/null
+          cmp "$SMOKE/compose.yml" deploy/compose.yml
+          cmp "$SMOKE/telium.example.toml" server/telium.example.toml
+          # `docker compose config` is what parses the file, and compose
+          # refuses a declared env_file that is missing -- the cloudflared
+          # service's tunnel.env lives on the box and is deliberately not in
+          # this repository. Stub it: what is under test here is that the
+          # release's compose file parses, not where the tunnel token is.
+          # Should a release ever declare an env_file this stub does not
+          # satisfy, failing here is correct -- boxes would hit the same
+          # refusal at `compose up` with no one watching.
+          touch "$SMOKE/tunnel.env"
+          docker compose -f "$SMOKE/compose.yml" config --quiet
+
+          cat > "$SMOKE/telium.toml" <<EOF
+          server_name = "smoke.test"
+          public_base_url = "http://127.0.0.1:${PORT}"
+          bind = "0.0.0.0:8448"
+          database_url = "sqlite:///var/lib/telium/telium.db?mode=rwc"
+          media_dir = "/var/lib/telium/media"
+
+          [updates]
+          check = false
+
+          [usage]
+          report = false
+
+          [backup]
+          enabled = false
+          EOF
+
+          docker run -d --name telium-image-smoke \
+            -p "127.0.0.1:${PORT}:8448" \
+            -v "$SMOKE/telium.toml:/etc/telium/telium.toml:ro" \
+            --tmpfs /var/lib/telium:uid=10001,gid=10001 \
+            "$IMAGE" > /dev/null
+          up=0
+          for _ in $(seq 1 60); do
+            if curl -fsS "http://127.0.0.1:${PORT}/_telium/v1/health" > /dev/null; then
+              up=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$up" != 1 ]; then
+            echo "the image did not come up; its log:" >&2
+            docker logs --tail=100 telium-image-smoke >&2 || true
+            docker rm -f telium-image-smoke > /dev/null 2>&1 || true
+            exit 1
+          fi
+          docker rm -f telium-image-smoke > /dev/null
+          echo "smoke passed: ${IMAGE} names ${VERSION}, carries its deploy files, and serves"
+
+      # The step everything else was held back for. `imagetools create`
+      # re-tags the manifest list the build pushed -- image, SBOM and
+      # provenance attestations travel with it -- so this is a pointer move
+      # and not a rebuild, and the digest recorded on the release is the
+      # digest that was just verified. Until this line runs, a broken image
+      # costs a red job and nothing else; after it, the fleet starts its
+      # sixty-second walk towards the new digest, exactly as before.
+      - name: Promote the image to the release tags
+        if: inputs.dry_run != true
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          MOVES_LATEST: ${{ needs.validate.outputs.moves_latest }}
+        run: |
+          set -euo pipefail
+          REPO="ghcr.io/${GITHUB_REPOSITORY}"
+          args=(-t "${REPO}:server-v${VERSION}")
+          if [ "$MOVES_LATEST" = "true" ]; then
+            args+=(-t "${REPO}:server-latest")
+          fi
+          docker buildx imagetools create "${args[@]}" "${REPO}@${DIGEST}"
+          echo "promoted ${REPO}@${DIGEST} to:"
+          printf '  %s\n' "${args[@]}"
 
   # ----------------------------------------------------------------- image sfu
   # The SFU's image, cut from the same release. Tag names mirror the server's
@@ -602,7 +755,22 @@ jobs:
               # wrapper, which is what makes the binary static; `ar` is
               # binutils, arch-generic for same-architecture archives.
               u="${triple//-/_}"
-              export RUSTFLAGS="-C target-feature=+crt-static"
+              # crt-static asks rustc for a self-contained binary, and the
+              # x86_64 musl target relays that to cc as -static-pie -- which
+              # the musl-gcc wrapper Debian ships does not implement. Its
+              # specs silently degrade the link, two ways in two runs: ask
+              # for nothing else and the artifact comes out a pie executable
+              # carrying the musl interpreter (exec fails on any glibc box);
+              # add -static beside it and the link is a mix of static-pie and
+              # static that execs and then segfaults at startup. The aarch64
+              # target asks plain -static, which the wrapper does implement,
+              # which is why that leg always worked. relocation-model=static
+              # is what keeps rustc from asking for static-pie at all: both
+              # targets then get the plain -static link the wrapper handles.
+              # No apostrophes in this script, and none anywhere in it: it
+              # reaches the container inside single quotes, and one of those
+              # ends the script early in a way that still parses.
+              export RUSTFLAGS="-C target-feature=+crt-static -C relocation-model=static"
               export "CC_$u=musl-gcc"
               export "AR_$u=ar"
               export "CARGO_TARGET_${u^^}_LINKER=musl-gcc"
@@ -636,6 +804,121 @@ jobs:
           tar -C ".native/stage/$ARCH" -czf ".native/$ASSET" telium-server telium.example.toml
           ( cd .native && sha256sum "$ASSET" > "$ASSET.sha256" )
           rm -rf .native/stage
+
+      # The tarball is the only thing an unattended native box ever executes,
+      # and it executes it with nobody watching -- so the release proves the
+      # binary runs before anything is published, on a runner of the very
+      # architecture that will run it. Four assertions, cheapest first:
+      #
+      #   * the tarball carries the two members the updater unpacks by name.
+      #     `tar -xzf ... telium-server telium.example.toml` is not a fuzzy
+      #     match; a renamed or nested member is an update that fails on
+      #     every box at the same minute.
+      #   * it is statically self-contained. What the musl build buys is an
+      #     artifact that asks the host for nothing: zero DT_NEEDED entries,
+      #     so there is no shared library to be missing on an Ubuntu 22.04
+      #     host. readelf states that fact directly; `ldd` does not -- its
+      #     answer for a static-pie binary has changed wording across glibc
+      #     vintages ("not a dynamic executable" on some, "statically
+      #     linked" on 24.04) -- which the first dry run of this smoke
+      #     learned the hard way against a known-good artifact.
+      #   * it names itself. version and commit are build arguments that
+      #     travelled through validate and two shells to get here; an
+      #     artifact that cannot say which release it is is exactly the
+      #     build the updater refuses to reason about.
+      #   * it boots. The same audit the updater runs before it will restart
+      #     a box (`check`), then a real startup against a minimal config
+      #     with every outbound call the server knows how to make switched
+      #     off -- a smoke test must not phone home -- and the health
+      #     endpoint, which is a real database round-trip, polled until it
+      #     answers.
+      #
+      # A failure here stops this leg, the artifact is never uploaded, and
+      # publish -- which needs both legs -- never runs. A broken native
+      # release costs a red build and nothing else.
+      - name: Smoke the artifact
+        env:
+          ARCH: ${{ matrix.arch }}
+          COMMIT: ${{ needs.validate.outputs.commit }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          ASSET="telium-server-linux-${ARCH}.tar.gz"
+          PORT=$(( 20000 + GITHUB_RUN_ID % 10000 ))
+          SMOKE="$(mktemp -d)"
+          trap 'rm -rf "$SMOKE"' EXIT
+
+          tar -xzf ".native/$ASSET" -C "$SMOKE" telium-server telium.example.toml
+          test -x "$SMOKE/telium-server"
+          test -f "$SMOKE/telium.example.toml"
+
+          # A missing readelf fails loudly rather than counting zero against
+          # an error message. The why of readelf over ldd is in the step
+          # comment above.
+          command -v readelf > /dev/null || { echo "readelf is not installed on this runner; the linkage assertion needs it" >&2; exit 1; }
+          file -b "$SMOKE/telium-server"
+          needed="$(readelf -d "$SMOKE/telium-server" | grep -c NEEDED || true)"
+          echo "DT_NEEDED entries: $needed"
+          if [ "$needed" != "0" ]; then
+            echo "the artifact links $needed shared libraries; the musl static build regressed" >&2
+            exit 1
+          fi
+
+          # What the binary would not say about itself, the step says for it:
+          # when an artifact refuses to exec, these lines are the difference
+          # between a diagnosis and a guess.
+          if identity="$("$SMOKE/telium-server" version 2>&1)"; then
+            echo "$identity"
+          else
+            status=$?
+            echo "the artifact would not execute (exit ${status}); what it asks for:" >&2
+            file -b "$SMOKE/telium-server" >&2 || true
+            readelf -h "$SMOKE/telium-server" 2>&1 | grep -E 'Type:|Machine:' >&2 || true
+            readelf -l "$SMOKE/telium-server" 2>&1 | grep -A1 INTERP >&2 || true
+            ls /proc/sys/fs/binfmt_misc/ 2>&1 | tail -n +2 >&2 || true
+            exit 1
+          fi
+          grep -qx "version=${VERSION}" <<<"$identity"
+          grep -qx "commit=${COMMIT}" <<<"$identity"
+
+          cat > "$SMOKE/telium.toml" <<EOF
+          server_name = "smoke.test"
+          public_base_url = "http://127.0.0.1:${PORT}"
+          bind = "127.0.0.1:${PORT}"
+          database_url = "sqlite://${SMOKE}/telium.db?mode=rwc"
+          media_dir = "${SMOKE}/media"
+
+          [updates]
+          check = false
+
+          [usage]
+          report = false
+
+          [backup]
+          enabled = false
+          EOF
+
+          "$SMOKE/telium-server" --config "$SMOKE/telium.toml" check
+
+          "$SMOKE/telium-server" --config "$SMOKE/telium.toml" serve \
+            > "$SMOKE/serve.log" 2>&1 &
+          pid=$!
+          up=0
+          for _ in $(seq 1 60); do
+            if curl -fsS "http://127.0.0.1:${PORT}/_telium/v1/health" > /dev/null; then
+              up=1
+              break
+            fi
+            sleep 1
+          done
+          kill "$pid" 2> /dev/null || true
+          if [ "$up" != 1 ]; then
+            echo "the artifact did not come up; its log:" >&2
+            cat "$SMOKE/serve.log" >&2 || true
+            exit 1
+          fi
+          wait "$pid" 2> /dev/null || true
+          echo "smoke passed: ${ASSET} names ${VERSION}, is static, checks, and serves"
 
       # `download-artifact@v4` is the one unpinned action by documented
       # exception; `upload` gets the same pin treatment as everything else.
