@@ -755,21 +755,22 @@ jobs:
               # wrapper, which is what makes the binary static; `ar` is
               # binutils, arch-generic for same-architecture archives.
               u="${triple//-/_}"
-              # crt-static asks rustc for a self-contained binary, and on
-              # x86_64 musl rustc relays that to cc as -static-pie -- which
-              # the musl-gcc wrapper Debian ships does not implement. What
-              # came out was a pie executable carrying the musl interpreter
-              # and no static guarantee: it could not exec on a glibc host,
-              # and no check short of executing it could tell. The aarch64
+              # crt-static asks rustc for a self-contained binary, and the
+              # x86_64 musl target relays that to cc as -static-pie -- which
+              # the musl-gcc wrapper Debian ships does not implement. Its
+              # specs silently degrade the link, two ways in two runs: ask
+              # for nothing else and the artifact comes out a pie executable
+              # carrying the musl interpreter (exec fails on any glibc box);
+              # add -static beside it and the link is a mix of static-pie and
+              # static that execs and then segfaults at startup. The aarch64
               # target asks plain -static, which the wrapper does implement,
-              # which is why only that leg was broken the other way. Ask for
-              # -static outright, on both: the artifact the updater swaps in
-              # must run on whatever the box has.
-              #
-              # No apostrophes above, and none anywhere in this script: it
+              # which is why that leg always worked. relocation-model=static
+              # is what keeps rustc from asking for static-pie at all: both
+              # targets then get the plain -static link the wrapper handles.
+              # No apostrophes in this script, and none anywhere in it: it
               # reaches the container inside single quotes, and one of those
               # ends the script early in a way that still parses.
-              export RUSTFLAGS="-C target-feature=+crt-static -C link-arg=-static"
+              export RUSTFLAGS="-C target-feature=+crt-static -C relocation-model=static"
               export "CC_$u=musl-gcc"
               export "AR_$u=ar"
               export "CARGO_TARGET_${u^^}_LINKER=musl-gcc"
