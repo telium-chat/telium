@@ -519,6 +519,15 @@ jobs:
           docker rm "$cid" > /dev/null
           cmp "$SMOKE/compose.yml" deploy/compose.yml
           cmp "$SMOKE/telium.example.toml" server/telium.example.toml
+          # `docker compose config` is what parses the file, and compose
+          # refuses a declared env_file that is missing -- the cloudflared
+          # service's tunnel.env lives on the box and is deliberately not in
+          # this repository. Stub it: what is under test here is that the
+          # release's compose file parses, not where the tunnel token is.
+          # Should a release ever declare an env_file this stub does not
+          # satisfy, failing here is correct -- boxes would hit the same
+          # refusal at `compose up` with no one watching.
+          touch "$SMOKE/tunnel.env"
           docker compose -f "$SMOKE/compose.yml" config --quiet
 
           cat > "$SMOKE/telium.toml" <<EOF
@@ -790,12 +799,14 @@ jobs:
       #     `tar -xzf ... telium-server telium.example.toml` is not a fuzzy
       #     match; a renamed or nested member is an update that fails on
       #     every box at the same minute.
-      #   * the binary is statically linked. `ldd` answers "not a dynamic
-      #     executable" for a static binary and exits non-zero, so the
-      #     phrase is grepped for rather than the exit code read. This is
-      #     the musl build doing its one job -- a dynamically linked
-      #     artifact here excludes exactly the Ubuntu 22.04 hosts the
-      #     static build exists for.
+      #   * it is statically self-contained. What the musl build buys is an
+      #     artifact that asks the host for nothing: zero DT_NEEDED entries,
+      #     so there is no shared library to be missing on an Ubuntu 22.04
+      #     host. readelf states that fact directly; `ldd` does not -- its
+      #     answer for a static-pie binary has changed wording across glibc
+      #     vintages ("not a dynamic executable" on some, "statically
+      #     linked" on 24.04) -- which the first dry run of this smoke
+      #     learned the hard way against a known-good artifact.
       #   * it names itself. version and commit are build arguments that
       #     travelled through validate and two shells to get here; an
       #     artifact that cannot say which release it is is exactly the
@@ -826,8 +837,9 @@ jobs:
           test -x "$SMOKE/telium-server"
           test -f "$SMOKE/telium.example.toml"
 
-          if ! ldd "$SMOKE/telium-server" 2>&1 | grep -q 'not a dynamic executable'; then
-            echo "the artifact is dynamically linked; the musl static build regressed" >&2
+          needed="$(readelf -d "$SMOKE/telium-server" | grep -c NEEDED || true)"
+          if [ "$needed" != "0" ]; then
+            echo "the artifact links $needed shared libraries; the musl static build regressed" >&2
             exit 1
           fi
 
