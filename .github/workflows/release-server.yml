@@ -757,14 +757,18 @@ jobs:
               u="${triple//-/_}"
               # crt-static asks rustc for a self-contained binary, and on
               # x86_64 musl rustc relays that to cc as -static-pie -- which
-              # Debian's musl-gcc wrapper does not implement. What came out
-              # was a pie executable carrying musl's interpreter and no
-              # static guarantee: it could not exec on a glibc host, and no
-              # check short of executing it could tell. aarch64's target
-              # asks plain -static, which the wrapper does implement, which
-              # is why only this leg was broken. Ask for -static outright,
-              # on both: the artifact the updater swaps in must run on
-              # whatever the box has.
+              # the musl-gcc wrapper Debian ships does not implement. What
+              # came out was a pie executable carrying the musl interpreter
+              # and no static guarantee: it could not exec on a glibc host,
+              # and no check short of executing it could tell. The aarch64
+              # target asks plain -static, which the wrapper does implement,
+              # which is why only that leg was broken the other way. Ask for
+              # -static outright, on both: the artifact the updater swaps in
+              # must run on whatever the box has.
+              #
+              # No apostrophes above, and none anywhere in this script: it
+              # reaches the container inside single quotes, and one of those
+              # ends the script early in a way that still parses.
               export RUSTFLAGS="-C target-feature=+crt-static -C link-arg=-static"
               export "CC_$u=musl-gcc"
               export "AR_$u=ar"
