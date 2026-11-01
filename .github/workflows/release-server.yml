@@ -837,14 +837,32 @@ jobs:
           test -x "$SMOKE/telium-server"
           test -f "$SMOKE/telium.example.toml"
 
+          # A missing readelf fails loudly rather than counting zero against
+          # an error message. The why of readelf over ldd is in the step
+          # comment above.
+          command -v readelf > /dev/null || { echo "readelf is not installed on this runner; the linkage assertion needs it" >&2; exit 1; }
+          file -b "$SMOKE/telium-server"
           needed="$(readelf -d "$SMOKE/telium-server" | grep -c NEEDED || true)"
+          echo "DT_NEEDED entries: $needed"
           if [ "$needed" != "0" ]; then
             echo "the artifact links $needed shared libraries; the musl static build regressed" >&2
             exit 1
           fi
 
-          identity="$("$SMOKE/telium-server" version)"
-          echo "$identity"
+          # What the binary would not say about itself, the step says for it:
+          # when an artifact refuses to exec, these lines are the difference
+          # between a diagnosis and a guess.
+          if identity="$("$SMOKE/telium-server" version 2>&1)"; then
+            echo "$identity"
+          else
+            status=$?
+            echo "the artifact would not execute (exit ${status}); what it asks for:" >&2
+            file -b "$SMOKE/telium-server" >&2 || true
+            readelf -h "$SMOKE/telium-server" 2>&1 | grep -E 'Type:|Machine:' >&2 || true
+            readelf -l "$SMOKE/telium-server" 2>&1 | grep -A1 INTERP >&2 || true
+            ls /proc/sys/fs/binfmt_misc/ 2>&1 | tail -n +2 >&2 || true
+            exit 1
+          fi
           grep -qx "version=${VERSION}" <<<"$identity"
           grep -qx "commit=${COMMIT}" <<<"$identity"
 
