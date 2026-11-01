@@ -62,18 +62,18 @@ jobs:
           restore-keys: bun-${{ runner.os }}-
       - run: bun install --frozen-lockfile
         working-directory: web
-      - name: Run web tests
-        run: bun run test
-        working-directory: web
       - run: bun add --no-save @playwright/test@1.55.0 @axe-core/playwright@4.10.2
         working-directory: web
       - run: bunx playwright install --with-deps chromium
         working-directory: web
+      # No unit suites here. Anything that can trigger this job -- server, sfu,
+      # telium-protocol, or web changes -- also flips the matching suite on in
+      # the unit-tests workflow, on the same commit. Running them here too
+      # filled ~26 of the job's ~30 minutes with a re-run of the gate, ahead of
+      # a smoke test that itself takes seconds. What is left is exactly what
+      # the smoke test needs: the server binary, a browser, and two dev
+      # servers.
       - run: cargo build --manifest-path server/Cargo.toml
-      - name: Run server tests
-        run: cargo test --manifest-path server/Cargo.toml --tests
-      - name: Run SFU tests
-        run: cargo test --manifest-path sfu/Cargo.toml --tests
       - name: Start Telium server
         run: |
           ./server/target/debug/telium-server --config /tmp/telium-e2e.toml serve >/tmp/telium-server.log 2>&1 &
