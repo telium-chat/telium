@@ -179,8 +179,8 @@ pub(super) async fn sequence_inner(
     };
     let inserted = sqlx::query(
         "INSERT INTO dm_messages (id, conversation_id, seq, epoch, kind, sender, sender_device, \
-         ciphertext, notification_id, created_at, frame_id, generation) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         ciphertext, notification_id, created_at, frame_id, generation, notify) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&message_id)
     .bind(conversation_id)
@@ -194,6 +194,7 @@ pub(super) async fn sequence_inner(
     .bind(now)
     .bind(extras.frame_id)
     .bind(generation)
+    .bind(notify)
     .execute(&mut *tx)
     .await;
     match inserted {
@@ -301,10 +302,11 @@ pub(super) async fn sequence_inner(
             .fetch_one(&mut *tx)
             .await?;
             let welcome_id = ulid();
+            // A welcome never announces: `notify` 0, as its dispatch JSON already says.
             sqlx::query(
                 "INSERT INTO dm_messages (id, conversation_id, seq, epoch, kind, sender, \
-                 sender_device, ciphertext, created_at, generation) \
-                 VALUES (?, ?, ?, ?, 'welcome', ?, ?, ?, ?, ?)",
+                 sender_device, ciphertext, created_at, generation, notify) \
+                 VALUES (?, ?, ?, ?, 'welcome', ?, ?, ?, ?, ?, 0)",
             )
             .bind(&welcome_id)
             .bind(conversation_id)

@@ -309,8 +309,8 @@ pub(super) async fn store_frame(state: &AppState, conversation_id: &str, msg: &V
     }
     sqlx::query(
         "INSERT INTO dm_messages (id, conversation_id, seq, epoch, kind, sender, \
-         sender_device, ciphertext, notification_id, created_at, generation) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+         sender_device, ciphertext, notification_id, created_at, generation, notify) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
     )
     .bind(msg.get("id").and_then(Value::as_str).unwrap_or_default())
     .bind(conversation_id)
@@ -323,6 +323,8 @@ pub(super) async fn store_frame(state: &AppState, conversation_id: &str, msg: &V
     .bind(msg.get("notification_id").and_then(Value::as_str))
     .bind(msg.get("created_at").and_then(Value::as_i64).unwrap_or_else(now_ms))
     .bind(msg.get("generation").and_then(Value::as_i64).unwrap_or(0))
+    // The sequencer's stored frame carries the sender's word; presumed speaking if absent.
+    .bind(msg.get("notify").and_then(Value::as_bool).unwrap_or(true))
     .execute(&state.pool)
     .await?;
     Ok(())

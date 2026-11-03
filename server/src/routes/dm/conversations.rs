@@ -508,8 +508,11 @@ pub async fn list_conversations(
 }
 
 /// The server's word on how much this member has not seen: application frames past the
-/// delivery cursor, this account's own frames excluded. A pending message request keeps its
-/// silence here — it is announced by the request inbox, never by a badge.
+/// delivery cursor, this account's own frames excluded, and only frames the sender marked
+/// worth interrupting for — receipts, typing and the rest ride the same encrypted kind,
+/// so their senders mark them silent (`notify`, migration 0093) and they never badge. A
+/// pending message request keeps its silence here — it is announced by the request inbox,
+/// never by a badge.
 async fn dm_unread(
     state: &AppState,
     conversation_id: &str,
@@ -522,7 +525,8 @@ async fn dm_unread(
     }
     let unread: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM dm_messages \
-         WHERE conversation_id = ? AND seq > ? AND kind = 'application' AND sender != ?",
+         WHERE conversation_id = ? AND seq > ? AND kind = 'application' AND notify = 1 \
+           AND sender != ?",
     )
     .bind(conversation_id)
     .bind(delivered_seq)

@@ -752,3 +752,53 @@ async fn a_member_added_mid_history_starts_delivered_up_to_the_add() {
     let (_, listed) = s.get("/_telium/v1/conversations", Some(&carol.home)).await;
     assert_eq!(listed["conversations"][0]["unread"].as_i64(), Some(1), "{listed}");
 }
+
+#[tokio::test]
+async fn bookkeeping_frames_never_count_as_unread() {
+    let s = start().await;
+    let alice = s.user("badge-quiet-alice").await;
+    let bob = s.user("badge-quiet-bob").await;
+    let conv = open_dm(&s, &alice, &bob).await;
+    let path = format!("/_telium/v1/conversations/{conv}/messages");
+    let (status, body) = s
+        .post(&format!("/_telium/v1/conversations/{conv}/request/accept"), Some(&bob.home), json!({}))
+        .await;
+    assert_eq!(status, 200, "{body}");
+
+    // Receipts, typing, reactions and the rest ride the same encrypted kind — the
+    // sequencer cannot tell them apart — so the sender marks them silent. They
+    // sequence like anything else, but a silent frame never badges.
+    for ct in ["typing-1", "receipt-1", "reaction-1"] {
+        let (status, body) = s
+            .post(&path, Some(&alice.home), json!({ "kind": "application", "ciphertext": ct, "notify": false }))
+            .await;
+        assert_eq!(status, 200, "{body}");
+    }
+    let (_, listed) = s.get("/_telium/v1/conversations", Some(&bob.home)).await;
+    assert_eq!(
+        listed["conversations"][0]["unread"].as_i64(),
+        Some(0),
+        "silent frames are not unseen: {listed}",
+    );
+
+    // A message speaks, and it counts even with silent frames all around it.
+    let (status, sent) = s
+        .post(&path, Some(&alice.home), json!({ "kind": "application", "ciphertext": "hello", "notify": true }))
+        .await;
+    assert_eq!(status, 200, "{sent}");
+    let seq = sent["seq"].as_i64().unwrap();
+    let (status, body) = s
+        .post(&path, Some(&alice.home), json!({ "kind": "application", "ciphertext": "typing-2", "notify": false }))
+        .await;
+    assert_eq!(status, 200, "{body}");
+    let (_, listed) = s.get("/_telium/v1/conversations", Some(&bob.home)).await;
+    assert_eq!(listed["conversations"][0]["unread"].as_i64(), Some(1), "{listed}");
+
+    // Reading past the silent frames settles the badge, here and on every other device.
+    let (status, body) = s
+        .post(&format!("/_telium/v1/conversations/{conv}/delivered"), Some(&bob.home), json!({ "seq": seq }))
+        .await;
+    assert_eq!(status, 200, "{body}");
+    let (_, listed) = s.get("/_telium/v1/conversations", Some(&bob.home)).await;
+    assert_eq!(listed["conversations"][0]["unread"].as_i64(), Some(0), "{listed}");
+}
