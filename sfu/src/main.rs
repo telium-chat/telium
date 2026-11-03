@@ -1,4 +1,5 @@
 
+mod admission;
 mod admin;
 mod config;
 mod control;
@@ -9,6 +10,7 @@ mod server;
 mod session;
 mod sessions;
 mod trust;
+mod usage;
 
 #[cfg(test)]
 mod integration;
@@ -28,6 +30,7 @@ use crate::livekit::LivekitManager;
 use crate::server::{router, AppState};
 use crate::sessions::SessionRegistry;
 use crate::trust::TrustedKeys;
+use crate::usage::Usage;
 
 #[derive(Parser)]
 #[command(name = "telium-sfu", version, about = "Telium SFU front (LiveKit-backed media plane)")]
@@ -80,11 +83,13 @@ async fn main() -> anyhow::Result<()> {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let livekit = LivekitManager::start(&cfg, shutdown_rx).await?;
 
+    let usage = Arc::new(Usage::load(std::path::Path::new(&cfg.livekit.config_dir)));
     let state = Arc::new(AppState {
         cfg: cfg.clone(),
         trust: trust.clone(),
         livekit: livekit.clone(),
         sessions: Arc::new(SessionRegistry::new()),
+        usage,
     });
     let bind = state.cfg.bind.clone();
 
@@ -105,6 +110,8 @@ async fn main() -> anyhow::Result<()> {
             cli.config.clone(),
             livekit.clone(),
             trust.clone(),
+            state.usage.clone(),
+            state.sessions.clone(),
         )?);
         let admin_bind = cfg.admin.bind.clone();
         if admin_state.needs_bootstrap() {

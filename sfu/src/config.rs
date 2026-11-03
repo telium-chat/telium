@@ -18,6 +18,23 @@ pub struct LimitsConfig {
     pub max_bitrate: i64,
     pub enforce: bool,
     pub poll_interval_secs: u64,
+    /// Admission ceiling: at most this many concurrent rooms (0 = unlimited).
+    /// A relay nearing this refuses new joins; existing calls are untouched.
+    /// Pick it to match the uplink: a room of n voice participants costs
+    /// roughly (n-1) x 40 kbps of egress, video far more.
+    pub max_rooms: u32,
+    /// At most this many participants across all rooms (0 = unlimited).
+    pub max_participants: u32,
+    /// Estimated transfer budget in bytes over `transfer_period_days`; 0 = no
+    /// budget. The estimate is deliberately conservative (it assumes every
+    /// declared video layer flows) — a relay under a hard traffic cap stops
+    /// taking NEW calls as it nears the budget rather than exceeding it.
+    pub transfer_budget_bytes: i64,
+    pub transfer_period_days: u32,
+    /// Guild servers this relay refuses, by `server_name` (the origin a join
+    /// token is signed by). Blocked at admission; rooms already in progress
+    /// finish naturally.
+    pub blocked_origins: Vec<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -136,7 +153,16 @@ impl Default for SfuConfig {
 
 impl Default for LimitsConfig {
     fn default() -> Self {
-        Self { max_bitrate: 8_000_000, enforce: true, poll_interval_secs: 15 }
+        Self {
+            max_bitrate: 8_000_000,
+            enforce: true,
+            poll_interval_secs: 15,
+            max_rooms: 0,
+            max_participants: 0,
+            transfer_budget_bytes: 0,
+            transfer_period_days: 30,
+            blocked_origins: Vec::new(),
+        }
     }
 }
 

@@ -479,6 +479,10 @@ export class Api {
   addGuildVoiceRegion(guildId, body) { return this.post(`/_telium/v1/guilds/${encodeURIComponent(guildId)}/voice/regions`, body); }
   setGuildVoiceRegionDefault(guildId, name) { return this.patch(`/_telium/v1/guilds/${encodeURIComponent(guildId)}/voice/regions/default`, { name }); }
   deleteGuildVoiceRegion(guildId, name) { return this.del(`/_telium/v1/guilds/${encodeURIComponent(guildId)}/voice/regions/${encodeURIComponent(name)}`); }
+  /// The held public SFU directory, with one fresh probe round per listing.
+  voiceDirectory() { return this.get('/_telium/v1/voice/directory'); }
+  /// Merges the guild's voice relay mode server-side; no wholesale settings write.
+  setGuildVoiceMode(guildId, voiceMode) { return this.patch(`/_telium/v1/guilds/${encodeURIComponent(guildId)}/voice/mode`, { voice_mode: voiceMode }); }
 
   adminStatus() { return this.get('/_telium/v1/admin/status'); }
   // Admin-only: an exact release lists the advisories that apply.

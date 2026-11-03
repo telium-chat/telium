@@ -1871,6 +1871,7 @@ pub async fn capabilities(State(state): State<AppState>, headers: HeaderMap) -> 
         "calls": {
             "relay": crate::routes::dmvoice::relay_turn(&state).is_some(),
             "sfu": state.cfg.voice.enabled && state.cfg.voice.addressed_regions().next().is_some(),
+            "sfu_directory": state.cfg.voice.enabled && state.cfg.voice.directory.is_subscribed(),
             "mesh_max_participants": state.cfg.voice.mesh_max_participants,
             "e2ee": "mls-exporter",
         },

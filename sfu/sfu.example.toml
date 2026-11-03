@@ -99,6 +99,32 @@ discovery_url = "https://your.server.name"  # SFU GETs {discovery_url}/_telium/v
 # client (as the /session `max_bitrate` and the participant attribute
 # `telium.max_bitrate`), which sizes its encoders and simulcast ladder to fit.
 max_bitrate = 8000000
+
+# Admission ceilings. When either is hit, the relay refuses NEW joins with a
+# clear "relay is full" answer and guild servers route newcomers elsewhere;
+# calls already in progress are never dropped. Set these to match your
+# uplink -- a room of n voice participants costs roughly (n-1) x 40 kbps of
+# egress, and video multiplies that:
+#   100 Mbps line  -> max_participants ~ 40 (voice-heavy) to 8 (video-heavy)
+#   1 Gbps line    -> max_participants ~ 400 (voice-heavy) to 80 (video-heavy)
+#   10 Gbps line   -> size accordingly; the transfer budget below will usually
+#                     bind first on metered connections
+max_rooms = 0
+max_participants = 0
+
+# Estimated transfer budget over a rolling period, in bytes (0 = no budget).
+# The relay tallies what it forwards (an estimate that assumes every declared
+# video layer flows -- it errs high on purpose) and stops taking NEW calls as
+# it nears the budget, so traffic routes around it BEFORE anything breaks.
+# /health reports the estimate, the budget, and an 80% "near budget" flag;
+# the dashboard shows the same numbers per guild server.
+transfer_budget_bytes = 0
+transfer_period_days = 30
+
+# Guild servers this relay refuses, by server_name. Blocked at admission;
+# rooms already in progress finish naturally. Editable here or from the
+# dashboard's status page (takes effect after a restart).
+blocked_origins = []
 # Media-plane backstop. LiveKit has no per-participant bitrate cap of its own,
 # so every `poll_interval_secs` the SFU lists each active room and mutes, at
 # the SFU, any video track whose declared simulcast layers add up to more than

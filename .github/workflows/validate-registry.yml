@@ -5,6 +5,8 @@ on:
     paths:
       - 'site/registry/**'
       - 'site/scripts/validate-registry.mjs'
+      - 'site/scripts/validate-sfus.mjs'
+      - 'site/scripts/validate-sfus.mjs'
       - '.github/workflows/validate-registry.yml'
   push:
     branches: [main]
@@ -45,10 +47,13 @@ jobs:
         with:
           node-version: 22
 
-      # The validator has no dependencies — it is deliberately plain Node so a
-      # first-time contributor can run it without installing anything.
+      # The validators have no dependencies — they are deliberately plain Node
+      # so a first-time contributor can run them without installing anything.
       - name: Validate registry/servers.json
         run: node scripts/validate-registry.mjs
+
+      - name: Validate registry/sfus.json
+        run: node scripts/validate-sfus.mjs
 
   # Advisory, not required: a listing is judged on whether the server answers,
   # and the fastest way to tell a contributor their DNS or TLS is wrong is to
@@ -67,3 +72,6 @@ jobs:
 
       - name: Probe every domain in the registry
         run: node scripts/probe.mjs
+
+      - name: Probe every relay in the SFU registry
+        run: node scripts/probe-sfus.mjs

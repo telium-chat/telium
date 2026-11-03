@@ -12,6 +12,7 @@ pub mod hosting_catalog;
 pub mod interactivity;
 pub mod media_feed;
 pub mod release;
+pub mod sfu_directory;
 
 /// Watch-quality vocabulary shared by server, SFU and web client.
 pub const WATCH_QUALITIES: [&str; 4] = ["auto", "low", "medium", "high"];

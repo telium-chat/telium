@@ -647,6 +647,13 @@ export const voice = {
   // Which of a deployment's voice servers carries the call. The region names
   // themselves are identifiers the deployment published and are drawn exactly
   // as they arrive.
+  // Mesh fallback and the relay a call is actually carried by. The relay is
+  // a region name for configured regions, or the relay's address when the
+  // call rides the public directory.
+  'voice.mesh.banner': 'This call is direct, person-to-person — capped at about {count} participants. A relay lifts the cap.',
+  'voice.mesh.bannerUnknown': 'This call is direct, person-to-person, so it will not scale past a handful of participants. A relay lifts the cap.',
+  'voice.sfu.carriedBy': 'Carried by {relay}. Media is end-to-end encrypted; the relay cannot listen.',
+
   'voice.region.title': 'Voice region',
   'voice.region.subtitle': 'Where this call is carried. Closer is usually quieter.',
   'voice.region.loading': 'Loading regions',

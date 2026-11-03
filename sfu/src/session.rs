@@ -10,6 +10,7 @@ use crate::livekit::JoinFlags;
 use crate::livekit::room_name;
 use crate::server::AppState;
 use crate::trust::maybe_discover;
+use crate::usage::Usage;
 
 #[derive(Debug, serde::Deserialize)]
 pub struct SessionRequest {
@@ -88,6 +89,13 @@ pub async fn session_handler(
     };
     let max_bitrate = effective_bitrate(requested, state.cfg.limits.max_bitrate);
 
+    // Admission: a full relay, a blocked guild or an exhausted transfer budget
+    // refuses the join before anything is minted. Existing calls are untouched;
+    // the caller routes around a 503 exactly as it would around a dead relay.
+    if let Some((code, body)) = crate::admission::refuse(&state, origin) {
+        return Err((code, Json(body)));
+    }
+
     let room = room_name(origin, guild, channel);
     let lk_token = match state.livekit.mint_token(&room, user_id, &flags, exp_secs, max_bitrate) {
         Ok(t) => t,
@@ -96,7 +104,7 @@ pub async fn session_handler(
             return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "mint failed" }))));
         }
     };
-    state.sessions.record_join(&room, user_id, max_bitrate);
+    state.sessions.record_join(&room, origin, user_id, max_bitrate);
 
     Ok(Json(SessionResponse {
         url: state.livekit.connect_url(),
@@ -188,7 +196,18 @@ mod tests {
             trust: Arc::new(RwLock::new(trust)),
             livekit,
             sessions: Arc::new(SessionRegistry::new()),
+            usage: Arc::new(Usage::load(&unique_usage_dir())),
         })
+    }
+
+fn unique_usage_dir() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "telium-sfu-test-usage-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).ok();
+        dir
     }
 
     fn forge_token(

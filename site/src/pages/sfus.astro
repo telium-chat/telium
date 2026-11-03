@@ -1,0 +1,192 @@
+---
+import Base from '../layouts/Base.astro'
+import Icon from '../components/Icon.astro'
+import SfuTable from '../components/SfuTable.astro'
+import {
+  generatedAt,
+  eligibilityReason,
+  feedSfus,
+  sfus,
+} from '../lib/sfus'
+import { URLS } from '../config'
+
+const checked = generatedAt
+  ? new Date(generatedAt).toLocaleString('en-GB', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: 'UTC',
+    })
+  : null
+---
+
+<Base
+  title="Relays"
+  description="Public SFU relays that carry large voice and video calls. Browse community-run relays with region, declared capacity, measured uptime, and browser-measured latency."
+>
+  <section class="page pt-14 pb-10 sm:pt-20">
+    <div class="grid gap-6 lg:grid-cols-[minmax(0,.8fr)_minmax(0,1.2fr)] lg:items-end">
+      <div>
+        <p class="eyebrow">Relay directory</p>
+        <h1 class="h2 mt-3 max-w-[20ch]">The switchboard behind big calls.</h1>
+      </div>
+      <p class="max-w-[60ch] text-[15.5px] leading-relaxed text-muted lg:justify-self-end">
+        A relay is what a voice call routes through once it outgrows direct, person-to-person
+        connection. Running one is real bandwidth with real limits, so this page shows who runs
+        each relay and what the hourly checks actually measured — never what the operator hopes.
+      </p>
+    </div>
+  </section>
+
+  <section class="page pb-16">
+    {
+      sfus.length === 0 ? (
+        <div class="panel-inset px-6 py-12 text-center sm:px-10">
+          <p class="text-[15px] font-medium">No relays are listed yet.</p>
+          <p class="mx-auto mt-2 max-w-[56ch] text-[13.5px] leading-relaxed text-muted">
+            The directory fills in as operators add theirs. There is no application form and no
+            approval queue — you open a pull request against the public registry, and the page
+            rebuilds with your relay in it when it merges. Calls work without any of this; a relay
+            is what lifts the participant cap.
+          </p>
+          <a
+            href={URLS.sfuRegistry}
+            class="mt-4 inline-flex items-center gap-1.5 rounded text-[13.5px] text-link hover:underline"
+          >
+            Run a relay? List it here
+            <Icon name="arrow-up-right" size={14} />
+          </a>
+        </div>
+      ) : (
+        <>
+          <SfuTable />
+
+          <details class="disclosure mt-6 py-4 text-[13px] leading-relaxed text-muted">
+            <summary class="disclosure-summary">
+              <Icon name="chevron-down" size={15} />
+              Automatic use by guilds
+            </summary>
+            <div class="prose-measure mt-3 space-y-3">
+              <p>
+                Being listed and being suggested automatically are separate. A guild owner can always
+                add a listed relay by hand. For a relay to be <em>suggested</em> — picked for a guild in
+                automatic mode — its operator must opt in here with <code>feed: {'{ opt_in: true }'}</code>,
+                and the relay must pass the published health and maturation rules. Eligibility is not an
+                endorsement by Telium.
+              </p>
+
+              {feedSfus.length === 0 ? (
+                <p>
+                  No listed operator is currently opted into automatic mode. The directory remains fully
+                  usable for manual relay choice.
+                </p>
+              ) : (
+                <ul class="space-y-3 pt-1">
+                  {feedSfus.map((relay) => {
+                    const decision = relay.probe.eligibility
+                    const reasons = decision?.reasons ?? []
+                    return (
+                      <li class="panel-inset p-3">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                          <span>
+                            <strong class="font-medium text-foreground">{relay.name}</strong>{' '}
+                            <span class="font-mono text-[12px]">{relay.url}</span>
+                          </span>
+                          {decision?.eligible ? (
+                            <span class="eligibility-badge eligibility-yes">
+                              Eligible · weight {decision.weight}
+                            </span>
+                          ) : (
+                            <span class="eligibility-badge eligibility-no">
+                              Not eligible
+                            </span>
+                          )}
+                        </div>
+                        {!decision ? (
+                          <p class="mt-1.5 text-[12.5px] text-muted">
+                            Waiting for the next hourly probe to evaluate eligibility.
+                          </p>
+                        ) : reasons.length > 0 ? (
+                          <ul class="mt-1.5 list-disc space-y-0.5 pl-5 text-[12.5px] text-muted">
+                            {reasons.map((reason) => <li>{eligibilityReason(reason)}</li>)}
+                          </ul>
+                        ) : (
+                          <p class="mt-1.5 text-[12.5px] text-muted">
+                            Opt-in, HTTPS, observed age, sample count, uptime and probe freshness all pass.
+                          </p>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </div>
+          </details>
+
+          <details class="disclosure mt-6 py-4 text-[13px] leading-relaxed text-muted">
+            <summary class="disclosure-summary">
+              <Icon name="chevron-down" size={15} />
+              How these numbers work
+            </summary>
+            <div class="prose-measure mt-3 space-y-2">
+              <p>
+                Latency is measured from your browser against the relay's health endpoint, so each relay
+                sees your IP address. Turn it off below and the column stays empty.
+              </p>
+              <p>
+                Uptime is our record of hourly checks over 30 days. Capacity is a band declared by the
+                operator — the relay's own admission ceilings and transfer budget are set on the relay
+                itself, in its <span class="font-mono">sfu.toml</span>, and a full relay turns new calls
+                away regardless of anything on this page. Whether a relay is accepting right now is read
+                live by the servers themselves, not shown here. {checked && <>Last checked {checked} UTC.</>}
+              </p>
+            </div>
+          </details>
+
+          <div class="probe-controls mt-8 flex flex-wrap items-center justify-between gap-x-8 gap-y-4 pt-6">
+            <label class="flex cursor-pointer items-center gap-2.5 text-[13.5px] select-none">
+              <input type="checkbox" data-probe-toggle checked class="size-3.5 accent-[var(--color-accent)]" />
+              Measure latency from my browser
+            </label>
+
+            <a href={URLS.sfuRegistry} class="inline-flex items-center gap-1.5 rounded text-[13.5px] text-link hover:underline">
+              Run a relay? List it here
+              <Icon name="arrow-up-right" size={14} />
+            </a>
+          </div>
+        </>
+      )
+    }
+  </section>
+</Base>
+
+<style>
+  /* Same disclosure treatment as /servers, which owns the pattern; these rules
+     exist only because scoped styles do not cross components. */
+  .disclosure-summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    cursor: pointer;
+    color: var(--color-foreground);
+  }
+
+  .eligibility-badge {
+    display: inline-block;
+    border-radius: 4px;
+    padding: 0.0625rem 0.3125rem;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .eligibility-yes {
+    background: var(--color-accent-soft);
+    color: var(--color-accent-soft-foreground);
+  }
+  .eligibility-no {
+    background: color-mix(in oklab, var(--color-foreground) 9%, transparent);
+    color: var(--color-muted);
+  }
+
+  .probe-controls {
+    border-top: 1px solid var(--color-separator);
+  }
+</style>

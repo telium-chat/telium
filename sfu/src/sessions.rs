@@ -5,6 +5,9 @@ use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
 pub struct JoinRecord {
+    /// The guild server this join's token was signed by; the usage ledger and
+    /// the dashboard's per-guild view roll up by it.
+    pub origin: String,
     pub max_bitrate: i64,
     pub minted_at: Instant,
 }
@@ -30,11 +33,21 @@ impl SessionRegistry {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    pub fn record_join(&self, room: &str, identity: &str, max_bitrate: i64) {
+    pub fn record_join(&self, room: &str, origin: &str, identity: &str, max_bitrate: i64) {
         self.lock().joins.insert(
             (room.to_string(), identity.to_string()),
-            JoinRecord { max_bitrate, minted_at: Instant::now() },
+            JoinRecord { origin: origin.to_string(), max_bitrate, minted_at: Instant::now() },
         );
+    }
+
+    /// The origin any current join in `room` came from, for usage attribution.
+    pub fn room_origin(&self, room: &str) -> Option<String> {
+        self.lock().joins.iter().find(|((r, _), _)| r == room).map(|(_, rec)| rec.origin.clone())
+    }
+
+    /// Distinct participants across all rooms, as admission counts them.
+    pub fn join_count_all(&self) -> usize {
+        self.lock().joins.len()
     }
 
     pub fn cap_for(&self, room: &str, identity: &str) -> Option<i64> {
@@ -103,8 +116,8 @@ mod tests {
     #[test]
     fn join_records_are_scoped_by_room_and_identity() {
         let reg = SessionRegistry::new();
-        reg.record_join("r1", "alice", 1_000);
-        reg.record_join("r2", "alice", 2_000);
+        reg.record_join("r1", "guild.one", "alice", 1_000);
+        reg.record_join("r2", "guild.one", "alice", 2_000);
         assert_eq!(reg.cap_for("r1", "alice"), Some(1_000));
         assert_eq!(reg.cap_for("r2", "alice"), Some(2_000));
         assert_eq!(reg.cap_for("r1", "bob"), None);
@@ -114,9 +127,9 @@ mod tests {
     #[test]
     fn retain_drops_absent_identities_after_grace_and_their_watches() {
         let reg = SessionRegistry::new();
-        reg.record_join("r", "viewer", 1);
-        reg.record_join("r", "streamer", 1);
-        reg.record_join("r", "gone", 1);
+        reg.record_join("r", "guild.one", "viewer", 1);
+        reg.record_join("r", "guild.one", "streamer", 1);
+        reg.record_join("r", "guild.one", "gone", 1);
         reg.set_watch("r", "viewer", "streamer", "low");
         reg.set_watch("r", "viewer", "gone", "high");
 
@@ -132,8 +145,8 @@ mod tests {
     #[test]
     fn removing_a_participant_clears_both_sides_of_its_watches() {
         let reg = SessionRegistry::new();
-        reg.record_join("r", "a", 1);
-        reg.record_join("r", "b", 1);
+        reg.record_join("r", "guild.one", "a", 1);
+        reg.record_join("r", "guild.one", "b", 1);
         reg.set_watch("r", "a", "b", "medium");
         reg.set_watch("r", "b", "a", "medium");
         reg.remove_participant("r", "a");

@@ -70,6 +70,8 @@ pub struct AdminState {
     bootstrap_token: String,
     livekit: Arc<LivekitManager>,
     trust: Arc<RwLock<TrustedKeys>>,
+    usage: Arc<crate::usage::Usage>,
+    voice_sessions: Arc<crate::sessions::SessionRegistry>,
 }
 
 impl AdminState {
@@ -78,6 +80,8 @@ impl AdminState {
         config_path: PathBuf,
         livekit: Arc<LivekitManager>,
         trust: Arc<RwLock<TrustedKeys>>,
+        usage: Arc<crate::usage::Usage>,
+        voice_sessions: Arc<crate::sessions::SessionRegistry>,
     ) -> anyhow::Result<Self> {
         let state_dir = PathBuf::from(&cfg.admin.state_dir);
         std::fs::create_dir_all(&state_dir)?;
@@ -91,6 +95,8 @@ impl AdminState {
             bootstrap_token: random_token(),
             livekit,
             trust,
+            usage,
+            voice_sessions,
         })
     }
 
@@ -150,6 +156,8 @@ pub fn router(state: Arc<AdminState>) -> Router {
         .route("/admin/status", get(status_page))
         .route("/admin/trust", get(trust_page).post(add_trust))
         .route("/admin/trust/remove", post(remove_trust))
+        .route("/admin/limits/block", post(block_origin))
+        .route("/admin/limits/unblock", post(unblock_origin))
         .route("/admin/restart", post(restart))
         .with_state(state)
 }
@@ -273,6 +281,47 @@ async fn status_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) -
     } else {
         format!("<code>{}</code>", esc(&current.livekit.public_url))
     };
+    let rooms = state.voice_sessions.rooms().len();
+    let participants = state.voice_sessions.join_count_all();
+    let period = current.limits.transfer_period_days;
+    let estimate = state.usage.total_estimate(now_ms(), period);
+    let accepting = (current.limits.max_rooms == 0 || (rooms as u32) < current.limits.max_rooms)
+        && (current.limits.max_participants == 0 || (participants as u32) < current.limits.max_participants)
+        && (current.limits.transfer_budget_bytes == 0 || estimate < current.limits.transfer_budget_bytes);
+    let (transfer_line, budget_line) = if current.limits.transfer_budget_bytes > 0 {
+        (
+            format!("{} of {}", human_bytes(estimate), human_bytes(current.limits.transfer_budget_bytes)),
+            format!("{} over {} days", human_bytes(current.limits.transfer_budget_bytes), period),
+        )
+    } else {
+        ("not budgeted".to_string(), "none".to_string())
+    };
+    let per_origin = {
+        let rows = state.usage.snapshot(now_ms(), period);
+        if rows.is_empty() {
+            "<p class=\"muted\">No usage recorded yet.</p>".to_string()
+        } else {
+            let mut table = String::from("<table><tr><th>Guild server</th><th>Estimated, trailing period</th></tr>");
+            for (origin, bytes) in rows {
+                table.push_str(&format!("<tr><td><code>{}</code></td><td>{}</td></tr>", esc(&origin), human_bytes(bytes)));
+            }
+            table.push_str("</table>");
+            table
+        }
+    };
+    let blocked_html = if current.limits.blocked_origins.is_empty() {
+        "<p class=\"muted\">None.</p>".to_string()
+    } else {
+        let mut list = String::new();
+        for origin in &current.limits.blocked_origins {
+            list.push_str(&format!(
+                "<form class=\"inline\" method=\"post\" action=\"/admin/limits/unblock\"><code>{}</code> <button class=\"secondary\" type=\"submit\">Unblock</button><input type=\"hidden\" name=\"server_name\" value=\"{}\"></form> ",
+                esc(origin),
+                esc(origin)
+            ));
+        }
+        list
+    };
     let html = format!(
         r#"
         <nav><strong>Telium SFU</strong><span><a href="/admin/status">Status</a> · <a href="/admin/trust">Trusted servers</a> · <a href="/admin/setup">Configure</a></span></nav>
@@ -282,6 +331,20 @@ async fn status_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) -
           <section><h2>Access</h2><p>SFU API: <code>{bind}</code></p><p>Mode: <strong>{mode}</strong></p></section>
           <section><h2>Trust</h2><p>{trust}</p><p>{origins} configured origin(s)</p></section>
         </div>
+        <h2>Load &amp; limits</h2>
+        <div class="grid">
+          <section><h3>Right now</h3><p>{rooms} room(s), {participants} participant(s)</p><p>Admission: <strong>{admission}</strong></p></section>
+          <section><h3>Transfer (estimated)</h3><p>{transfer}</p><p class="muted">The estimate assumes every declared video layer flows; it errs high on purpose. Budget: {budget}</p></section>
+        </div>
+        <h3>Per-guild usage</h3>
+        {per_origin}
+        <h3>Blocked guild servers</h3>
+        <p class="muted">Refuse new calls from a guild server by its server_name. Takes effect after a restart.</p>
+        {blocked}
+        <form class="inline" method="post" action="/admin/limits/block">
+          <input name="server_name" placeholder="guild.example" required>
+          <button type="submit">Block</button>
+        </form>
         <p><a class="button" href="/admin/setup">Configure deployment</a></p>
         <form method="post" action="/admin/restart"><button class="secondary" type="submit">Restart SFU</button></form>
         <form method="post" action="/admin/logout"><button class="secondary" type="submit">Sign out</button></form>
@@ -297,6 +360,13 @@ async fn status_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) -
             "Only explicitly trusted Telium servers can use this SFU."
         },
         origins = current.trust.origins.len(),
+        rooms = rooms,
+        participants = participants,
+        admission = if accepting { "accepting" } else { "not accepting" },
+        transfer = transfer_line,
+        budget = budget_line,
+        per_origin = per_origin,
+        blocked = blocked_html,
     );
     page("Telium SFU status", &html)
 }
@@ -694,6 +764,85 @@ fn write_secret(path: &Path, value: &str) -> std::io::Result<()> {
     {
         std::fs::write(path, value)
     }
+}
+
+#[derive(serde::Deserialize)]
+pub struct OriginForm {
+    server_name: String,
+}
+
+/// Blocks a guild server by name in `[limits].blocked_origins`. The change is
+/// written to sfu.toml and takes effect on restart; the dashboard says so.
+async fn block_origin(
+    State(state): State<Arc<AdminState>>,
+    headers: HeaderMap,
+    Form(form): Form<OriginForm>,
+) -> Response {
+    if !authenticated(&state, &headers).await {
+        return Redirect::to("/admin/login").into_response();
+    }
+    let server_name = form.server_name.trim().to_ascii_lowercase();
+    if server_name.is_empty() {
+        return error_page(StatusCode::BAD_REQUEST, "A server name is required.");
+    }
+    let mut cfg = match SfuConfig::load(&state.config_path) {
+        Ok(cfg) => cfg,
+        Err(e) => return error_page(StatusCode::INTERNAL_SERVER_ERROR, &format!("Could not read sfu.toml: {e}")),
+    };
+    if cfg.limits.blocked_origins.iter().any(|o| *o == server_name) {
+        return error_page(StatusCode::CONFLICT, "That server is already blocked.");
+    }
+    cfg.limits.blocked_origins.push(server_name);
+    if let Err(e) = write_config(&state.config_path, &cfg) {
+        return error_page(StatusCode::INTERNAL_SERVER_ERROR, &format!("Could not save the block: {e}"));
+    }
+    Redirect::to("/admin/status").into_response()
+}
+
+async fn unblock_origin(
+    State(state): State<Arc<AdminState>>,
+    headers: HeaderMap,
+    Form(form): Form<OriginForm>,
+) -> Response {
+    if !authenticated(&state, &headers).await {
+        return Redirect::to("/admin/login").into_response();
+    }
+    let server_name = form.server_name.trim().to_ascii_lowercase();
+    let mut cfg = match SfuConfig::load(&state.config_path) {
+        Ok(cfg) => cfg,
+        Err(e) => return error_page(StatusCode::INTERNAL_SERVER_ERROR, &format!("Could not read sfu.toml: {e}")),
+    };
+    let before = cfg.limits.blocked_origins.len();
+    cfg.limits.blocked_origins.retain(|o| *o != server_name);
+    if cfg.limits.blocked_origins.len() == before {
+        return error_page(StatusCode::NOT_FOUND, "That server is not blocked.");
+    }
+    if let Err(e) = write_config(&state.config_path, &cfg) {
+        return error_page(StatusCode::INTERNAL_SERVER_ERROR, &format!("Could not save the change: {e}"));
+    }
+    Redirect::to("/admin/status").into_response()
+}
+
+/// Bytes as an operator reads them: a transfer budget is a round number, so
+/// the display is one decimal at most.
+fn human_bytes(bytes: i64) -> String {
+    let units = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < units.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} {}", units[unit])
+    } else {
+        format!("{value:.1} {}", units[unit])
+    }
+}
+
+pub fn now_ms() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
 
 fn write_config(path: &Path, cfg: &SfuConfig) -> anyhow::Result<()> {

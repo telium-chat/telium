@@ -372,6 +372,7 @@ mod live_updates;
 mod media;
 mod profile;
 mod roles;
+mod sfu_directory;
 mod social;
 mod voice;
 

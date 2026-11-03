@@ -47,6 +47,9 @@ jobs:
       - name: Probe every homeserver in the registry
         run: node scripts/probe.mjs
 
+      - name: Probe the SFU relay registry
+        run: node scripts/probe-sfus.mjs
+
       - name: Commit the results
         id: commit
         run: |
