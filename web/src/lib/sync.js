@@ -25,7 +25,8 @@ export const KEYS = {
   drafts: 'drafts.v2',
   // Merged, and only ever sealed.
   identityPins: 'identity.pins.v1',
-  // Sends waiting for the wire; resending is idempotent by frame id.
+  // Sends waiting for the wire; resending is idempotent by frame id. Sealed-only: an
+  // entry carries the message's text, so the server refuses plaintext for it too.
   outbox: 'outbox.v1',
 };
 
@@ -34,7 +35,7 @@ const LEGACY_DRAFTS = 'drafts.v1';
 
 const SYNCED = new Set(Object.values(KEYS));
 /// Keys that have never held plaintext; the server refuses plaintext for them too.
-const SEALED_ONLY = new Set([KEYS.savedStickers, KEYS.drafts, KEYS.identityPins]);
+const SEALED_ONLY = new Set([KEYS.savedStickers, KEYS.drafts, KEYS.identityPins, KEYS.outbox]);
 
 // Sized for imports from Discord and similar clients.
 export const MAX_GIF_FAVORITES = 500;

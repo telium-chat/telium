@@ -697,6 +697,14 @@ async fn unread_counts_sit_between_the_delivery_cursor_and_the_reports() {
     s.post(&path, Some(&bob.home), json!({ "seq": 4 })).await;
     let (_, listed) = s.get("/_telium/v1/conversations", Some(&bob.home)).await;
     assert_eq!(listed["conversations"][0]["unread"].as_i64(), Some(0), "{listed}");
+
+    // A report past the conversation's own horizon clamps to it: what arrives after
+    // still counts, instead of vanishing behind a lying clock.
+    let (status, body) = s.post(&path, Some(&bob.home), json!({ "seq": 999_999 })).await;
+    assert_eq!(status, 200, "{body}");
+    dm_send(&s, &conv, &alice, "m5").await;
+    let (_, listed) = s.get("/_telium/v1/conversations", Some(&bob.home)).await;
+    assert_eq!(listed["conversations"][0]["unread"].as_i64(), Some(1), "{listed}");
 }
 
 #[tokio::test]
@@ -801,4 +809,31 @@ async fn bookkeeping_frames_never_count_as_unread() {
     assert_eq!(status, 200, "{body}");
     let (_, listed) = s.get("/_telium/v1/conversations", Some(&bob.home)).await;
     assert_eq!(listed["conversations"][0]["unread"].as_i64(), Some(0), "{listed}");
+}
+
+#[tokio::test]
+async fn re_inviting_somebody_already_here_does_not_read_or_unread_them() {
+    let s = start().await;
+    let alice = s.user("readd-alice").await;
+    let bob = s.user("readd-bob").await;
+    let (status, made) = s
+        .post("/_telium/v1/conversations", Some(&alice.home), json!({ "kind": "gc", "members": [&bob.user_id] }))
+        .await;
+    assert_eq!(status, 200, "{made}");
+    let conv = made["id"].as_str().unwrap().to_string();
+    dm_send(&s, &conv, &alice, "one").await;
+    let (_, listed) = s.get("/_telium/v1/conversations", Some(&bob.home)).await;
+    assert_eq!(listed["conversations"][0]["unread"].as_i64(), Some(1), "{listed}");
+
+    // The add is a no-op for a member who never left: their badge survives it.
+    let (status, body) = s
+        .post(&format!("/_telium/v1/conversations/{conv}/members"), Some(&alice.home), json!({ "user_id": bob.user_id }))
+        .await;
+    assert_eq!(status, 200, "{body}");
+    let (_, listed) = s.get("/_telium/v1/conversations", Some(&bob.home)).await;
+    assert_eq!(listed["conversations"][0]["unread"].as_i64(), Some(1), "{listed}");
+
+    dm_send(&s, &conv, &alice, "two").await;
+    let (_, listed) = s.get("/_telium/v1/conversations", Some(&bob.home)).await;
+    assert_eq!(listed["conversations"][0]["unread"].as_i64(), Some(2), "{listed}");
 }

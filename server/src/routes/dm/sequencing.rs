@@ -259,11 +259,15 @@ pub(super) async fn sequence_inner(
                 .await?;
         }
         for (user_id, home) in &added {
+            // A member the group lost starts delivered up to the re-add; one who was never
+            // away keeps their cursor — replaying their own add must not quietly read them.
             sqlx::query(
                 "INSERT INTO conversation_members (conversation_id, user_id, home_domain, added_at, delivered_seq) \
                  VALUES (?, ?, ?, ?, (SELECT c.last_seq FROM conversations c WHERE c.id = ?)) \
                  ON CONFLICT(conversation_id, user_id) DO UPDATE SET state = 'active', resync = 0, \
-                     delivered_seq = (SELECT c.last_seq FROM conversations c WHERE c.id = conversation_members.conversation_id)",
+                     delivered_seq = CASE WHEN conversation_members.state != 'active' \
+                         THEN (SELECT c.last_seq FROM conversations c WHERE c.id = conversation_members.conversation_id) \
+                         ELSE conversation_members.delivered_seq END",
             )
             .bind(conversation_id)
             .bind(user_id)

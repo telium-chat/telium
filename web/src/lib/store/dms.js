@@ -14,7 +14,7 @@ const HISTORY_TAIL = 100;
 const HISTORY_PAGE = 200;
 
 /// Auto-retry waits between outbox pumps, then gives up and asks the person to resend.
-const OUTBOX_BACKOFF = [5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
+export const OUTBOX_BACKOFF = [5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
 
 async function readWindow(home, id) {
   return (await home.dmHistory(id, { tail: HISTORY_TAIL })).messages || [];
@@ -717,10 +717,12 @@ export const dmMethods = {
         } catch (e) {
           entry.attempts += 1;
           entry.error = e;
-          if (!worthRetrying(e) || entry.attempts >= OUTBOX_BACKOFF.length) {
+          // Every wait in the table is spent before the give-up: the last entry is a
+          // wait, not a spare.
+          if (!worthRetrying(e) || entry.attempts > OUTBOX_BACKOFF.length) {
             entry.failed = true;
           } else {
-            entry.nextAt = Date.now() + OUTBOX_BACKOFF[Math.min(entry.attempts, OUTBOX_BACKOFF.length) - 1];
+            entry.nextAt = Date.now() + OUTBOX_BACKOFF[entry.attempts - 1];
           }
         }
         changed = true;

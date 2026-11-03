@@ -485,8 +485,25 @@ pub async fn list_conversations(
     .bind(&auth.user_id)
     .fetch_all(&state.pool)
     .await?;
+    // Every badge in one pass rather than a COUNT each: the cursor lives on the member
+    // row, so the whole rail's unread is a single join. Pending requests gate to zero
+    // below — the request inbox announces those, never a badge.
+    let unread: std::collections::HashMap<String, i64> = sqlx::query_as(
+        "SELECT m.conversation_id, COUNT(*) FROM conversation_members m \
+         JOIN dm_messages d ON d.conversation_id = m.conversation_id \
+           AND d.seq > m.delivered_seq AND d.kind = 'application' AND d.notify = 1 \
+           AND d.sender != ? \
+         WHERE m.user_id = ? AND m.state = 'active' \
+         GROUP BY m.conversation_id",
+    )
+    .bind(&auth.user_id)
+    .bind(&auth.user_id)
+    .fetch_all(&state.pool)
+    .await?
+    .into_iter()
+    .collect();
     let mut out = Vec::new();
-    for (id, muted, delivered_seq, active_at) in rows {
+    for (id, muted, _delivered_seq, active_at) in rows {
         let policy = local_dm_policy(&state, &id, &auth.user_id).await?;
         if !policy.visible {
             continue;
@@ -495,9 +512,12 @@ pub async fn list_conversations(
         if let Some(object) = conversation.as_object_mut() {
             object.insert("muted".into(), json!(muted == 1));
             object.insert("last_activity_at".into(), json!(active_at));
-            object.insert("unread".into(), json!(dm_unread(
-                &state, &id, &auth.user_id, delivered_seq, policy.request_state.as_deref(),
-            ).await?));
+            let unread_count = if policy.request_state.as_deref() == Some("pending") {
+                0
+            } else {
+                unread.get(&id).copied().unwrap_or(0)
+            };
+            object.insert("unread".into(), json!(unread_count));
             if let Some(request_state) = policy.request_state {
                 object.insert("request_state".into(), Value::String(request_state));
             }
@@ -538,7 +558,8 @@ async fn dm_unread(
 
 /// The member's delivery cursor: the highest frame this account has in hand. A MAX upsert,
 /// so a repeat — or a device that lagged behind another — can only hold still, never
-/// unread what was already seen.
+/// unread what was already seen. A report past the conversation's own horizon clamps to
+/// it: a lying clock must not silence the frames that arrive after it.
 #[derive(Deserialize)]
 pub struct DeliveredBody {
     pub seq: i64,
@@ -552,7 +573,8 @@ pub async fn set_delivered(
 ) -> ApiResult<Json<Value>> {
     require_member(&state, &id, &auth.user_id).await?;
     sqlx::query(
-        "UPDATE conversation_members SET delivered_seq = MAX(delivered_seq, ?) \
+        "UPDATE conversation_members SET delivered_seq = MAX(delivered_seq, MIN(?, \
+             (SELECT c.last_seq FROM conversations c WHERE c.id = conversation_members.conversation_id))) \
          WHERE conversation_id = ? AND user_id = ?",
     )
     .bind(body.seq.max(0))

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { dmMethods } from '../lib/store/dms.js';
+import { dmMethods, OUTBOX_BACKOFF } from '../lib/store/dms.js';
 import { timelineMethods } from '../lib/store/timeline.js';
 import { friendMethods } from '../lib/store/friends.js';
 import { signalMethods } from '../lib/store/signals.js';
@@ -221,6 +221,43 @@ describe('the DM outbox', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('an entry walks every backoff, the long one included, before it asks the person', async () => {
+    const store = fakeStore();
+    store.dmFrames.set('c1', []);
+    store.mls = {
+      joined: () => true,
+      notedSent: vi.fn(async () => {}),
+      payloadTypeOf: () => 'message',
+      run: (_id, fn) => fn(),
+      send: vi.fn(async (_id, _text, _attachments, _reply, { queued } = {}) => {
+        queued(QUEUED_BODY, 'plain-one');
+        throw Object.assign(new Error('the wire is down'), { status: 503 });
+      }),
+    };
+    store.home = { sendFrame: vi.fn(async () => {
+      throw Object.assign(new Error('still down'), { status: 503 });
+    }) };
+    await store.sendDm('c1', 'hello');
+
+    // Each refusal waits exactly the next entry of the table; the long wait is no spare.
+    for (const wait of OUTBOX_BACKOFF) {
+      const before = Date.now();
+      await store.pumpDmOutbox('c1');
+      const entry = store.dmOutboxIn('c1')[0];
+      expect(entry.failed).toBe(false);
+      const waited = entry.nextAt - before;
+      expect(waited).toBeGreaterThanOrEqual(wait);
+      expect(waited).toBeLessThan(wait + 50);
+      entry.nextAt = 0;
+    }
+
+    // One refusal past the last wait gives up and asks the person to resend.
+    await store.pumpDmOutbox('c1');
+    const entry = store.dmOutboxIn('c1')[0];
+    expect(entry.failed).toBe(true);
+    expect(entry.attempts).toBe(OUTBOX_BACKOFF.length + 1);
   });
 });
 
