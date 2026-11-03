@@ -179,8 +179,8 @@ pub(super) async fn sequence_inner(
     };
     let inserted = sqlx::query(
         "INSERT INTO dm_messages (id, conversation_id, seq, epoch, kind, sender, sender_device, \
-         ciphertext, notification_id, created_at, frame_id, generation) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         ciphertext, notification_id, created_at, frame_id, generation, notify) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&message_id)
     .bind(conversation_id)
@@ -194,6 +194,7 @@ pub(super) async fn sequence_inner(
     .bind(now)
     .bind(extras.frame_id)
     .bind(generation)
+    .bind(notify)
     .execute(&mut *tx)
     .await;
     match inserted {
@@ -258,15 +259,21 @@ pub(super) async fn sequence_inner(
                 .await?;
         }
         for (user_id, home) in &added {
+            // A member the group lost starts delivered up to the re-add; one who was never
+            // away keeps their cursor — replaying their own add must not quietly read them.
             sqlx::query(
-                "INSERT INTO conversation_members (conversation_id, user_id, home_domain, added_at) \
-                 VALUES (?, ?, ?, ?) \
-                 ON CONFLICT(conversation_id, user_id) DO UPDATE SET state = 'active', resync = 0",
+                "INSERT INTO conversation_members (conversation_id, user_id, home_domain, added_at, delivered_seq) \
+                 VALUES (?, ?, ?, ?, (SELECT c.last_seq FROM conversations c WHERE c.id = ?)) \
+                 ON CONFLICT(conversation_id, user_id) DO UPDATE SET state = 'active', resync = 0, \
+                     delivered_seq = CASE WHEN conversation_members.state != 'active' \
+                         THEN (SELECT c.last_seq FROM conversations c WHERE c.id = conversation_members.conversation_id) \
+                         ELSE conversation_members.delivered_seq END",
             )
             .bind(conversation_id)
             .bind(user_id)
             .bind(home)
             .bind(now)
+            .bind(conversation_id)
             .execute(&mut *tx)
             .await?;
         }
@@ -299,10 +306,11 @@ pub(super) async fn sequence_inner(
             .fetch_one(&mut *tx)
             .await?;
             let welcome_id = ulid();
+            // A welcome never announces: `notify` 0, as its dispatch JSON already says.
             sqlx::query(
                 "INSERT INTO dm_messages (id, conversation_id, seq, epoch, kind, sender, \
-                 sender_device, ciphertext, created_at, generation) \
-                 VALUES (?, ?, ?, ?, 'welcome', ?, ?, ?, ?, ?)",
+                 sender_device, ciphertext, created_at, generation, notify) \
+                 VALUES (?, ?, ?, ?, 'welcome', ?, ?, ?, ?, ?, 0)",
             )
             .bind(&welcome_id)
             .bind(conversation_id)

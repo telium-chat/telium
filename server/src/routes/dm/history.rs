@@ -12,6 +12,8 @@ pub struct HistoryQuery {
     #[serde(default)]
     pub after: Option<i64>,
     #[serde(default)]
+    pub before: Option<i64>,
+    #[serde(default)]
     pub limit: Option<i64>,
     #[serde(default)]
     pub tail: Option<i64>,
@@ -31,7 +33,8 @@ pub async fn history(
     let limit = q.limit.unwrap_or(100).clamp(1, 500);
     // No holes in the catch-up window: fill from the sequencer or stop below the gap.
     let missing = if q.tail.is_none() {
-        repair(&state, &id, after, Some(after.saturating_add(limit))).await?
+        let upto = q.before.unwrap_or_else(|| after.saturating_add(limit));
+        repair(&state, &id, after, Some(upto)).await?
     } else {
         None
     };
@@ -47,6 +50,19 @@ pub async fn history(
             .bind(tail.clamp(1, 500))
             .fetch_all(&state.pool)
             .await?,
+            // `before`: the page immediately below it, newest first, handed back ascending —
+            // so scrolling up reads history downward without ever stepping over the floor.
+            None if q.before.is_some() => sqlx::query_as(
+                "SELECT id, seq, epoch, kind, sender, sender_device, ciphertext, created_at, \
+                 generation FROM dm_messages WHERE conversation_id = ? AND seq > ? AND seq < ? \
+                 ORDER BY seq DESC LIMIT ?",
+            )
+            .bind(&id)
+            .bind(after)
+            .bind(q.before.unwrap())
+            .bind(limit)
+            .fetch_all(&state.pool)
+            .await?,
             None => sqlx::query_as(
                 "SELECT id, seq, epoch, kind, sender, sender_device, ciphertext, created_at, \
                  generation FROM dm_messages WHERE conversation_id = ? AND seq > ? ORDER BY seq LIMIT ?",
@@ -57,7 +73,7 @@ pub async fn history(
             .fetch_all(&state.pool)
             .await?,
         };
-    if q.tail.is_some() {
+    if q.tail.is_some() || q.before.is_some() {
         rows.reverse();
     }
     if let Some(hole) = missing {

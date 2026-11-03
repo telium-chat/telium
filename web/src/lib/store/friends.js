@@ -7,7 +7,17 @@ export const friendMethods = {
     if (!this.home) return;
     const resp = await this.home.conversations();
     this.conversations = resp.conversations || [];
+    // A row that carries the server's own unread count takes over the badge: the snapshot
+    // includes everything the live overlay was counting, so that overlay hands over too.
+    // A server without the field is left exactly as it was.
+    for (const convo of this.conversations) {
+      if (typeof convo.unread !== 'number') continue;
+      this.dmServerUnread?.set(convo.id, convo.unread);
+      this.dmUnread?.delete(convo.id);
+      this.dmReadCleared?.delete(convo.id);
+    }
     this.emit('conversations');
+    this.emit('unread', null);
   },
 
   async refreshFriends() {

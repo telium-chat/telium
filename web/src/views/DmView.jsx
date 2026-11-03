@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useStore, useStoreEvent, useStoreEventFor } from '../hooks/useStore.jsx';
+import { reportError } from '../hooks/useToast.jsx';
 import { useConversationPeer } from '../hooks/useConversationPeer.js';
 import { useModal } from '../hooks/useModal.jsx';
 import { cn } from '../lib/cn.js';
@@ -30,7 +31,7 @@ export function DmView({ conversationId, mobile = false, onBack, onMore, onOpenN
     (e) => !e?.conversation_id || e.conversation_id === conversationId,
     'dm',
   );
-  useStoreEvent('conversations', 'vault', 'voice', 'prefs', 'ring', 'call-log');
+  useStoreEvent('conversations', 'vault', 'voice', 'prefs', 'ring', 'call-log', 'outbox');
   const modal = useModal();
   const voice = useVoice();
   const t = useT();
@@ -43,6 +44,14 @@ export function DmView({ conversationId, mobile = false, onBack, onMore, onOpenN
     || null;
   const loading = Boolean(conversationId) && !store.dmOpened.has(conversationId) && !error;
   const [reload, setReload] = useState(0);
+  const [fetchingOlder, setFetchingOlder] = useState(false);
+
+  const loadOlder = useCallback(async () => {
+    if (!conversationId) return;
+    setFetchingOlder(true);
+    try { await store.loadOlderDm(conversationId); }
+    finally { setFetchingOlder(false); }
+  }, [store, conversationId]);
 
   const trustRows = useDeviceTrust(conversationId);
   const unverified = trustRows.filter((d) => d.status !== 'verified').length;
@@ -74,6 +83,26 @@ export function DmView({ conversationId, mobile = false, onBack, onMore, onOpenN
   const surface = useDmSurface(convo);
   const frames = store.dmFrames.get(conversationId) || [];
   const callLogs = store.callLogs.get(conversationId) || [];
+
+  // Sends the wire refused, held for idempotent retry. The row hands off from the composer's
+  // optimistic one by nonce; a failed entry offers a fresh resend instead.
+  const outboxRows = store.dmOutboxIn(conversationId).map((e) => ({
+    nonce: e.nonce || `outbox-${e.key}`,
+    key: e.key,
+    author: store.me?.user_id,
+    created_at: e.createdAt || Date.now(),
+    content: e.text || '',
+    reply_to: e.reply?.id || null,
+    failed: Boolean(e.failed),
+  }));
+  const resendQueued = useCallback((msg) => {
+    store.resendQueuedDm(conversationId, msg.outboxKey).catch(
+      (e) => reportError(e, t('chat.sendFailed.notDelivered')),
+    );
+  }, [store, conversationId, t]);
+  const dropQueued = useCallback((msg) => {
+    store.dropQueuedDm(conversationId, msg.outboxKey);
+  }, [store, conversationId]);
   const items = useDmItems(frames, convo, store.mls, store.me?.user_id, callLogs);
 
   const settled = store.dmOpened.has(conversationId);
@@ -83,6 +112,11 @@ export function DmView({ conversationId, mobile = false, onBack, onMore, onOpenN
     frames, conversationId, store.mls,
   );
   const syncError = (settled && store.mls?.errorFor?.(conversationId)) || null;
+  const stuck = settled && Boolean(store.mls?.gapIn?.(conversationId));
+
+  const repairHistory = useCallback(() => {
+    store.catchUpConversation(conversationId).catch(() => {});
+  }, [store, conversationId]);
 
   const unseenPins = store.unseenPinCount(null, conversationId);
 
@@ -220,6 +254,13 @@ export function DmView({ conversationId, mobile = false, onBack, onMore, onOpenN
         typing={typing}
         loading={loading}
         error={error}
+        hasMore={store.dmFrames.has(conversationId) && !store.dmHistoryEnd.has(conversationId)
+          && (frames[0]?.seq || 0) > 1}
+        fetchingOlder={fetchingOlder}
+        onLoadOlder={loadOlder}
+        extraPending={outboxRows}
+        onResend={resendQueued}
+        onDropQueued={dropQueued}
         notices={(
           <div className="pt-2">
             <ConversationNotices
@@ -234,6 +275,18 @@ export function DmView({ conversationId, mobile = false, onBack, onMore, onOpenN
               <p className="flex items-start gap-1.5 px-2 py-1 text-xs leading-[1.5] text-muted">
                 <LockIcon className="mt-[3px] size-3 shrink-0" />
                 {NOT_YET_READABLE}
+              </p>
+            ) : null}
+            {stuck && !awaiting && !syncError ? (
+              <p className="flex items-center gap-2 px-2 py-1 text-xs leading-[1.5] text-muted">
+                <span className="flex-1">{t('chat.gap.stuck')}</span>
+                <button
+                  type="button"
+                  className="shrink-0 cursor-pointer appearance-none border-0 bg-transparent p-0 font-medium text-muted underline decoration-dotted focus-outside"
+                  onClick={repairHistory}
+                >
+                  {t('chat.gap.retry')}
+                </button>
               </p>
             ) : null}
           </div>

@@ -453,7 +453,7 @@ async fn sealed_sync_values_are_kept_opaque_and_seal_the_store() {
 
     let (status, _) = s.put("/_telium/v1/sync/prefs.v1", &alice.home, json!({ "theme": "light" })).await;
     assert_eq!(status, 200);
-    for key in ["drafts.v2", "stickers.saved.v1", "identity.pins.v1"] {
+    for key in ["drafts.v2", "stickers.saved.v1", "identity.pins.v1", "outbox.v1"] {
         let (status, body) = s.put(&format!("/_telium/v1/sync/{key}"), &alice.home, json!({ "c1": "UNSENT" })).await;
         assert_eq!(status, 400, "{key}: {body}");
     }
@@ -463,6 +463,11 @@ async fn sealed_sync_values_are_kept_opaque_and_seal_the_store() {
     assert_eq!(status, 200);
     let (status, _) = s
         .put("/_telium/v1/sync/drafts.v2", &alice.home, sealed_envelope("c2VhbGVkLWRyYWZ0cw"))
+        .await;
+    assert_eq!(status, 200);
+    // The outbox holds message text, so it takes the same bargain: sealed or refused.
+    let (status, _) = s
+        .put("/_telium/v1/sync/outbox.v1", &alice.home, sealed_envelope("c2VhbGVkLW91dGJveA"))
         .await;
     assert_eq!(status, 200);
 

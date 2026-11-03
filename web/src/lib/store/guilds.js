@@ -48,6 +48,13 @@ export const guildMethods = {
     this.emit('voice-reclaim', { domain, rooms: new Set(d.voice_reclaimed || []) });
     // READY cannot settle a DM: frames are not replayed, and a hole is a hole in the MLS key schedule.
     this.resumeConversation(domain);
+    // The rail has been blind since the socket dropped: take the server's word for what moved,
+    // so the order and the badges say who wrote while this device was away.
+    if (this.home && domain === this.home.domain) {
+      this.refreshConversations()
+        .then(() => this.catchUpDmUnread())
+        .catch(() => {});
+    }
   },
 
   ensureGuildMembers(guildId) {

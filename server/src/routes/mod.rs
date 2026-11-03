@@ -450,6 +450,10 @@ fn federation_routes() -> Router<AppState> {
         )
         .route("/_telium/v1/conversations/{id}", get(dm::get_conversation))
         .route(
+            "/_telium/v1/conversations/{id}/delivered",
+            post(dm::set_delivered),
+        )
+        .route(
             "/_telium/v1/conversations/{id}/request/accept",
             post(dm::accept_message_request),
         )

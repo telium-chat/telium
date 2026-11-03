@@ -13,7 +13,7 @@ import { ratchetTreeFromExtension } from 'ts-mls/groupInfo.js';
 import { rejoinBody, rejoinKey } from './rejoin.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { open, seal } from './vault.js';
-import { frameIdOf } from './frame-id.js';
+import { frameIdOf, withFrameId } from './frame-id.js';
 import {
   dmNotificationId,
   sealDmNotificationHints,
@@ -108,6 +108,13 @@ function furthest(a, b) {
   return b > a ? b : a;
 }
 
+/// Worth holding a send for another try: the wire never answered, or the server said "not now"
+/// rather than "no". A 4xx answer is a real refusal; resending it would only fail again.
+export function worthRetrying(e) {
+  const status = e?.status;
+  return typeof status !== 'number' || status >= 500 || [408, 425, 429].includes(status);
+}
+
 export class Mls {
   constructor(home, { userId, deviceId, recoveryKey = null, backup = null }) {
     this.home = home;
@@ -148,6 +155,9 @@ export class Mls {
     // MLS deletes keys as it ratchets, so a frame opens exactly once; this local copy is the only history, and sign-out removes it.
     this.plaintext = new Map();
     this.failed = new Map();
+    // Conversations whose history has a hole neither the walk nor the server could fill;
+    // frames above it stay unread until it heals, so surfaces can say so.
+    this.gaps = new Map();
     this.chains = new Map();
     // Short-lived, to avoid key-discovery storms.
     this.notificationKeys = new Map();
@@ -1246,15 +1256,21 @@ export class Mls {
   }
 
   /// A reply rides in the body envelope so the server never sees it.
-  async send(conversationId, text, attachments, reply = null) {
+  async send(conversationId, text, attachments, reply = null, { queued = null } = {}) {
     const body = encodeBody(text, attachments, reply);
     return this.post(conversationId, pack(MESSAGE, body), async (frame) => {
-      if (!frame?.id) return;
-      if (frame.seq) this.seqOf.set(frame.id, frame.seq);
-      await this.keep(conversationId, frame.id, body);
-      // Record authorship now; the walk steps over our own frames.
-      this.noteAuthor(conversationId, frame.id, this.userId);
-    });
+      await this.notedSent(conversationId, frame, body);
+    }, queued && ((final) => queued(final, body)));
+  }
+
+  /// What a completed send records, shared by the direct path and the store's retry pump:
+  /// the plaintext cache that renders the message, the seq receipt mapping, and authorship.
+  async notedSent(conversationId, frame, plain) {
+    if (!frame?.id) return;
+    if (frame.seq) this.seqOf.set(frame.id, frame.seq);
+    await this.keep(conversationId, frame.id, plain);
+    // Record authorship now; the walk steps over our own frames.
+    this.noteAuthor(conversationId, frame.id, this.userId);
   }
 
   async notificationTargets(conversationId) {
@@ -1298,8 +1314,8 @@ export class Mls {
     }
   }
 
-  /// Messages, receipts and reactions all take this path so the sequencer can't tell them apart. `notify` is derived from the leading byte, so a new frame type stays silent until made loud. `after` runs under the send lock so another tab receiving the echo reads it from disk.
-  async post(conversationId, payload, after = null) {
+  /// Messages, receipts and reactions all take this path so the sequencer can't tell them apart. `notify` is derived from the leading byte, so a new frame type stays silent until made loud. `after` runs under the send lock so another tab receiving the echo reads it from disk. `queued` receives the exact wire body (frame id included) when a send fails in a way worth retrying, so the caller can resend it unchanged — the sequencer answers a repeat of a frame id with the frame it already ordered.
+  async post(conversationId, payload, after = null, queued = null) {
     return this.run(conversationId, async () => {
       let entry = await this.loadGroup(conversationId);
       // Settle any pending commit first; the group may already be past this epoch.
@@ -1326,13 +1342,22 @@ export class Mls {
         hintError = error;
       });
 
-      const frame = await this.home.sendFrame(conversationId, this.stamped(conversationId, {
+      const body = this.stamped(conversationId, {
         kind: 'application',
         ciphertext: encode64(wire.privateMessage(app.privateMessage)),
         epoch,
         notify,
         notification_id: notificationId,
-      }));
+      });
+      let frame;
+      try {
+        frame = await this.home.sendFrame(conversationId, body);
+      } catch (e) {
+        // No answer is not "not ordered", and the ratchet has already advanced, so the only
+        // safe retry is this exact body. Tell the caller; it decides what to do with it.
+        if (queued && worthRetrying(e)) queued(withFrameId(body));
+        throw e;
+      }
       if (after) await after(frame);
       await hint;
 
@@ -2078,10 +2103,21 @@ export class Mls {
   async sync(conversationId, frames, { backfill = false, served = false } = {}) {
     if (backfill) await this.catchUpTo(conversationId, frames);
     const first = await this.walk(conversationId, frames, served);
-    if (!first.gap) return first.opened;
+    if (!first.gap) {
+      this.gaps.delete(conversationId);
+      return first.opened;
+    }
     await this.catchUpTo(conversationId, frames);
     const again = await this.walk(conversationId, frames, served);
+    // Still a hole after a second pull from the server: frames above it stay unread, so say so.
+    if (again.gap) this.gaps.set(conversationId, true);
+    else this.gaps.delete(conversationId);
     return [...first.opened, ...again.opened];
+  }
+
+  /// Whether this conversation's history has an unfilled hole (see `sync`).
+  gapIn(conversationId) {
+    return this.gaps.has(conversationId);
   }
 
   /// Reports whether it stopped at a hole.
