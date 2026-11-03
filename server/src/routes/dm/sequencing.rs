@@ -259,14 +259,16 @@ pub(super) async fn sequence_inner(
         }
         for (user_id, home) in &added {
             sqlx::query(
-                "INSERT INTO conversation_members (conversation_id, user_id, home_domain, added_at) \
-                 VALUES (?, ?, ?, ?) \
-                 ON CONFLICT(conversation_id, user_id) DO UPDATE SET state = 'active', resync = 0",
+                "INSERT INTO conversation_members (conversation_id, user_id, home_domain, added_at, delivered_seq) \
+                 VALUES (?, ?, ?, ?, (SELECT c.last_seq FROM conversations c WHERE c.id = ?)) \
+                 ON CONFLICT(conversation_id, user_id) DO UPDATE SET state = 'active', resync = 0, \
+                     delivered_seq = (SELECT c.last_seq FROM conversations c WHERE c.id = conversation_members.conversation_id)",
             )
             .bind(conversation_id)
             .bind(user_id)
             .bind(home)
             .bind(now)
+            .bind(conversation_id)
             .execute(&mut *tx)
             .await?;
         }

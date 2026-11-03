@@ -463,8 +463,8 @@ pub(super) async fn upsert_conversation_from_sequencer(state: &AppState, conv: &
         for m in members {
             let Some(user_id) = m.get("user_id").and_then(Value::as_str) else { continue };
             sqlx::query(
-                "INSERT INTO conversation_members (conversation_id, user_id, home_domain, state, added_at, resync) \
-                 VALUES (?, ?, ?, ?, ?, ?) \
+                "INSERT INTO conversation_members (conversation_id, user_id, home_domain, state, added_at, resync, delivered_seq) \
+                 VALUES (?, ?, ?, ?, ?, ?, (SELECT c.last_seq FROM conversations c WHERE c.id = ?)) \
                  ON CONFLICT(conversation_id, user_id) DO UPDATE SET state = excluded.state, \
                      resync = excluded.resync",
             )
@@ -474,6 +474,7 @@ pub(super) async fn upsert_conversation_from_sequencer(state: &AppState, conv: &
             .bind(m.get("state").and_then(Value::as_str).unwrap_or("active"))
             .bind(now)
             .bind(i64::from(m.get("resync").and_then(Value::as_bool).unwrap_or(false)))
+            .bind(id)
             .execute(&state.pool)
             .await?;
         }

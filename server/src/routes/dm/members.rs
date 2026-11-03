@@ -81,14 +81,16 @@ pub async fn add_member(
         }
         None => {
             sqlx::query(
-                "INSERT INTO conversation_members (conversation_id, user_id, home_domain, added_at) \
-                 VALUES (?, ?, ?, ?) \
-                 ON CONFLICT(conversation_id, user_id) DO UPDATE SET state = 'active'",
+                "INSERT INTO conversation_members (conversation_id, user_id, home_domain, added_at, delivered_seq) \
+                 VALUES (?, ?, ?, ?, (SELECT c.last_seq FROM conversations c WHERE c.id = ?)) \
+                 ON CONFLICT(conversation_id, user_id) DO UPDATE SET state = 'active', \
+                     delivered_seq = (SELECT c.last_seq FROM conversations c WHERE c.id = conversation_members.conversation_id)",
             )
             .bind(&id)
             .bind(&req.user_id)
             .bind(&home)
             .bind(now_ms())
+            .bind(&id)
             .execute(&state.pool)
             .await?;
             None

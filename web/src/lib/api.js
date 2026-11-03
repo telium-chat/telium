@@ -349,12 +349,15 @@ export class Api {
   declineMessageRequest(id) {
     return this.post(`/_telium/v1/conversations/${id}/request/decline`, {});
   }
-  // `tail` is the newest n frames; `after`/`limit` page forward from a floor.
-  dmHistory(id, { after, limit, tail } = {}) {
-    return this.get(`/_telium/v1/conversations/${id}/messages`, { after, limit, tail });
+  // `tail` is the newest n frames; `after`/`limit` page forward from a floor;
+  // `before`/`limit` page backward from a ceiling, answered ascending.
+  dmHistory(id, { after, before, limit, tail } = {}) {
+    return this.get(`/_telium/v1/conversations/${id}/messages`, { after, before, limit, tail });
   }
   // Sent under an id derived from the ciphertext, so a repeat is safe (`frame-id.js`, `retry.js`).
   sendFrame(id, body) { return this.post(`/_telium/v1/conversations/${id}/messages`, withFrameId(body)); }
+  // The member's delivery cursor: a MAX upsert, so a repeat can only hold still.
+  sendDmDelivered(id, seq) { return this.post(`/_telium/v1/conversations/${id}/delivered`, { seq }); }
   dmNotificationKeys(id) {
     return this.get(`/_telium/v1/conversations/${id}/notification-keys`);
   }

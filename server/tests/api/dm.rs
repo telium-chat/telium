@@ -603,3 +603,152 @@ async fn conversations_list_newest_activity_first() {
     assert_eq!(listed["conversations"][0]["id"], older.as_str(), "{listed}");
     assert!(listed["conversations"][0]["last_activity_at"].as_i64().unwrap() > 0, "{listed}");
 }
+
+#[tokio::test]
+async fn history_before_pages_backward_without_repeating() {
+    let s = start().await;
+    let alice = s.user("page-alice").await;
+    let bob = s.user("page-bob").await;
+    let conv = open_dm(&s, &alice, &bob).await;
+    let path = format!("/_telium/v1/conversations/{conv}/messages");
+    let (status, body) = s
+        .post(&path, Some(&alice.home), json!({ "kind": "welcome", "ciphertext": "w1", "epoch": 1 }))
+        .await;
+    assert_eq!(status, 200, "{body}");
+    let mut seqs = Vec::new();
+    for n in 1..=7 {
+        let (status, frame) = s
+            .post(&path, Some(&bob.home), json!({ "kind": "application", "ciphertext": format!("m{n}") }))
+            .await;
+        assert_eq!(status, 200, "{frame}");
+        seqs.push(frame["seq"].as_i64().unwrap());
+    }
+
+    // The page immediately below a floor: newest first inside, ascending outside.
+    let (_, page) = s.get(&format!("{path}?before={}&limit=2", seqs[4]), Some(&alice.home)).await;
+    let got: Vec<&str> = page["messages"].as_array().unwrap()
+        .iter().map(|f| f["ciphertext"].as_str().unwrap()).collect();
+    assert_eq!(got, vec!["m3", "m4"], "{page}");
+
+    // An `after` floor bounds the window from below.
+    let (_, page) = s
+        .get(&format!("{path}?before={}&after={}&limit=2", seqs[4], seqs[1]), Some(&alice.home))
+        .await;
+    let got: Vec<&str> = page["messages"].as_array().unwrap()
+        .iter().map(|f| f["ciphertext"].as_str().unwrap()).collect();
+    assert_eq!(got, vec!["m3", "m4"], "{page}");
+
+    // Fewer rows than the limit means the beginning has been reached.
+    let (_, page) = s.get(&format!("{path}?before={}&limit=5", seqs[1]), Some(&alice.home)).await;
+    let got: Vec<&str> = page["messages"].as_array().unwrap()
+        .iter().map(|f| f["ciphertext"].as_str().unwrap()).collect();
+    assert_eq!(got, vec!["w1", "m1"], "{page}");
+
+    // Forward paging and tails are unchanged.
+    let (_, page) = s.get(&format!("{path}?after=0&limit=3"), Some(&alice.home)).await;
+    let got: Vec<&str> = page["messages"].as_array().unwrap()
+        .iter().map(|f| f["ciphertext"].as_str().unwrap()).collect();
+    assert_eq!(got, vec!["w1", "m1", "m2"], "{page}");
+    let (_, page) = s.get(&format!("{path}?tail=3"), Some(&alice.home)).await;
+    let got: Vec<&str> = page["messages"].as_array().unwrap()
+        .iter().map(|f| f["ciphertext"].as_str().unwrap()).collect();
+    assert_eq!(got, vec!["m5", "m6", "m7"], "{page}");
+}
+
+#[tokio::test]
+async fn unread_counts_sit_between_the_delivery_cursor_and_the_reports() {
+    let s = start().await;
+    let alice = s.user("badge-alice").await;
+    let bob = s.user("badge-bob").await;
+    let conv = open_dm(&s, &alice, &bob).await;
+    for n in 1..=3 {
+        dm_send(&s, &conv, &alice, &format!("m{n}")).await;
+    }
+    // A DM between strangers starts as a message request; the badge era begins on acceptance.
+    let (status, body) = s
+        .post(&format!("/_telium/v1/conversations/{conv}/request/accept"), Some(&bob.home), json!({}))
+        .await;
+    assert_eq!(status, 200, "{body}");
+
+    let (_, listed) = s.get("/_telium/v1/conversations", Some(&bob.home)).await;
+    assert_eq!(listed["conversations"][0]["unread"].as_i64(), Some(3), "{listed}");
+    let (_, listed) = s.get("/_telium/v1/conversations", Some(&alice.home)).await;
+    assert_eq!(listed["conversations"][0]["unread"].as_i64(), Some(0), "{listed}");
+
+    // The cursor only ever moves forward, however the reports arrive.
+    let path = format!("/_telium/v1/conversations/{conv}/delivered");
+    let (status, body) = s.post(&path, Some(&bob.home), json!({ "seq": 2 })).await;
+    assert_eq!(status, 200, "{body}");
+    let (_, listed) = s.get("/_telium/v1/conversations", Some(&bob.home)).await;
+    assert_eq!(listed["conversations"][0]["unread"].as_i64(), Some(1), "{listed}");
+    s.post(&path, Some(&bob.home), json!({ "seq": 2 })).await;
+    let (_, listed) = s.get("/_telium/v1/conversations", Some(&bob.home)).await;
+    assert_eq!(listed["conversations"][0]["unread"].as_i64(), Some(1), "a repeat ordered nothing twice: {listed}");
+    s.post(&path, Some(&bob.home), json!({ "seq": 1 })).await;
+    let (_, listed) = s.get("/_telium/v1/conversations", Some(&bob.home)).await;
+    assert_eq!(listed["conversations"][0]["unread"].as_i64(), Some(1), "a stale device cannot unread: {listed}");
+
+    // The single conversation view carries the same word, and a new frame counts again.
+    let (_, one) = s.get(&format!("/_telium/v1/conversations/{conv}"), Some(&bob.home)).await;
+    assert_eq!(one["unread"].as_i64(), Some(1), "{one}");
+    dm_send(&s, &conv, &alice, "m4").await;
+    let (_, one) = s.get(&format!("/_telium/v1/conversations/{conv}"), Some(&bob.home)).await;
+    assert_eq!(one["unread"].as_i64(), Some(2), "{one}");
+    s.post(&path, Some(&bob.home), json!({ "seq": 4 })).await;
+    let (_, listed) = s.get("/_telium/v1/conversations", Some(&bob.home)).await;
+    assert_eq!(listed["conversations"][0]["unread"].as_i64(), Some(0), "{listed}");
+}
+
+#[tokio::test]
+async fn a_pending_message_request_never_counts_as_unread() {
+    let s = start().await;
+    let alice = s.user("req-badge-alice").await;
+    let bob = s.user("req-badge-bob").await;
+    let conv = open_dm(&s, &alice, &bob).await;
+    dm_send(&s, &conv, &alice, "knock").await;
+    // A first message to a stranger lands as a pending request, not a badge.
+    let (_, listed) = s.get("/_telium/v1/conversations", Some(&bob.home)).await;
+    assert_eq!(listed["conversations"][0]["unread"].as_i64(), Some(0), "{listed}");
+    assert_eq!(listed["conversations"][0]["request_state"], "pending", "{listed}");
+
+    // Accepting turns the knock into an ordinary message.
+    let (status, body) = s
+        .post(&format!("/_telium/v1/conversations/{conv}/request/accept"), Some(&bob.home), json!({}))
+        .await;
+    assert_eq!(status, 200, "{body}");
+    let (_, listed) = s.get("/_telium/v1/conversations", Some(&bob.home)).await;
+    assert_eq!(listed["conversations"][0]["unread"].as_i64(), Some(1), "{listed}");
+}
+
+#[tokio::test]
+async fn a_member_added_mid_history_starts_delivered_up_to_the_add() {
+    let s = start().await;
+    let alice = s.user("add-alice").await;
+    let bob = s.user("add-bob").await;
+    let carol = s.user("add-carol").await;
+    let (status, made) = s
+        .post(
+            "/_telium/v1/conversations",
+            Some(&alice.home),
+            json!({ "kind": "gc", "members": [&bob.user_id] }),
+        )
+        .await;
+    assert_eq!(status, 200, "{made}");
+    let conv = made["id"].as_str().unwrap().to_string();
+    dm_send(&s, &conv, &alice, "before").await;
+    dm_send(&s, &conv, &bob, "also before").await;
+
+    let (status, body) = s
+        .post(&format!("/_telium/v1/conversations/{conv}/members"), Some(&alice.home), json!({ "user_id": carol.user_id }))
+        .await;
+    assert_eq!(status, 200, "{body}");
+    let (_, listed) = s.get("/_telium/v1/conversations", Some(&carol.home)).await;
+    assert_eq!(
+        listed["conversations"][0]["unread"].as_i64(),
+        Some(0),
+        "history from before the add is not the newcomer's to read: {listed}",
+    );
+    dm_send(&s, &conv, &alice, "after").await;
+    let (_, listed) = s.get("/_telium/v1/conversations", Some(&carol.home)).await;
+    assert_eq!(listed["conversations"][0]["unread"].as_i64(), Some(1), "{listed}");
+}

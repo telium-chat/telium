@@ -138,11 +138,29 @@ export class Store extends Emitter {
     this.dmLoading = new Map();
     this.dmPending = new Map();
     this.dmPendingFull = new Set();
+    // Scrollback: the lowest seq loaded per conversation, and which conversations have shown every frame.
+    this.dmOldest = new Map();
+    this.dmHistoryEnd = new Set();
+    this.dmLoadingOlder = new Map();
     // Sends in flight; the gateway can echo a frame before the send returns (see `onDmFrame`).
     this.sending = new Set();
     this.dmSyncRetrying = new Set();
     // Not on conversation rows: the home keeps no DM read cursor and `refreshConversations` replaces them.
     this.dmUnread = new Map();
+    // The server's own unread count per conversation (`delivered_seq` on the home), seeded at
+    // each refresh; `dmUnread` above is the live overlay for frames that arrived after it.
+    this.dmServerUnread = new Map();
+    // Conversations read since the last refresh: their badge is zero until the server says otherwise.
+    this.dmReadCleared = new Set();
+    // Debounced delivery-cursor reports, per conversation.
+    this.dmDeliveredTimers = new Map();
+    this.dmDeliveredPending = new Map();
+    // Undelivered sends, held for idempotent retry; `dms.js` pumps them.
+    this.dmOutbox = new Map();
+    this.dmOutboxTimers = new Map();
+    this.dmOutboxPumping = new Set();
+    // The offline catch-up pass, while it runs.
+    this.dmCatchUp = null;
     this.mls = null;
     this.signalFlushes = new Map();
     this.typedAt = new Map();

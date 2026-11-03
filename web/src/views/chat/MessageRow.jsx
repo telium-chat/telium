@@ -38,7 +38,7 @@ export const MessageRow = memo(function MessageRow({
   msg, surface, grouped, member, colour, parent, thread, mentionsMe, pinned = false,
   editing, flash, fresh, pending = false,
   dateOrder,
-  onEdit, onReply, onOpenNavigation, mobile = false,
+  onEdit, onReply, onOpenNavigation, onResend, onDropQueued, mobile = false,
 }) {
   const t = useT();
   const { dir } = useLocale();
@@ -311,6 +311,30 @@ export const MessageRow = memo(function MessageRow({
             {msg.edited_at ? <span className="text-2xs text-muted"> {t('chat.message.edited')}</span> : null}
           </div>
         )}
+
+        {msg.failed ? (
+          <div className="flex items-center gap-2 pt-0.5 text-xs text-danger">
+            <span>{t('chat.sendFailed.notDelivered')}</span>
+            {onResend ? (
+              <button
+                type="button"
+                className="cursor-pointer appearance-none border-0 bg-transparent p-0 font-medium text-danger underline decoration-dotted focus-outside"
+                onClick={() => onResend(msg)}
+              >
+                {t('chat.sendFailed.retry')}
+              </button>
+            ) : null}
+            {onDropQueued ? (
+              <button
+                type="button"
+                className="cursor-pointer appearance-none border-0 bg-transparent p-0 text-muted underline decoration-dotted focus-outside"
+                onClick={() => onDropQueued(msg)}
+              >
+                {t('chat.sendFailed.discard')}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
 
         {msg.deleted ? null : (
           <>

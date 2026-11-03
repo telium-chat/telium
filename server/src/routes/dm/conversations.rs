@@ -191,13 +191,14 @@ pub async fn create_conversation(
         .await?;
         for m in &members {
             sqlx::query(
-                "INSERT INTO conversation_members (conversation_id, user_id, home_domain, added_at) \
-                 VALUES (?, ?, ?, ?)",
+                "INSERT INTO conversation_members (conversation_id, user_id, home_domain, added_at, delivered_seq) \
+                 VALUES (?, ?, ?, ?, (SELECT c.last_seq FROM conversations c WHERE c.id = ?))",
             )
             .bind(&id)
             .bind(m)
             .bind(home_of(m)?)
             .bind(now)
+            .bind(&id)
             .execute(&mut *tx)
             .await?;
         }
@@ -472,8 +473,8 @@ pub async fn list_conversations(
     State(state): State<AppState>,
     auth: HomeAuth,
 ) -> ApiResult<Json<Value>> {
-    let rows: Vec<(String, i64, i64)> = sqlx::query_as(
-        "SELECT m.conversation_id, m.muted, \
+    let rows: Vec<(String, i64, i64, i64)> = sqlx::query_as(
+        "SELECT m.conversation_id, m.muted, m.delivered_seq, \
                 COALESCE((SELECT MAX(d.created_at) FROM dm_messages d \
                           WHERE d.conversation_id = m.conversation_id \
                             AND d.kind = 'application'), c.created_at) AS active_at \
@@ -485,7 +486,7 @@ pub async fn list_conversations(
     .fetch_all(&state.pool)
     .await?;
     let mut out = Vec::new();
-    for (id, muted, active_at) in rows {
+    for (id, muted, delivered_seq, active_at) in rows {
         let policy = local_dm_policy(&state, &id, &auth.user_id).await?;
         if !policy.visible {
             continue;
@@ -494,6 +495,9 @@ pub async fn list_conversations(
         if let Some(object) = conversation.as_object_mut() {
             object.insert("muted".into(), json!(muted == 1));
             object.insert("last_activity_at".into(), json!(active_at));
+            object.insert("unread".into(), json!(dm_unread(
+                &state, &id, &auth.user_id, delivered_seq, policy.request_state.as_deref(),
+            ).await?));
             if let Some(request_state) = policy.request_state {
                 object.insert("request_state".into(), Value::String(request_state));
             }
@@ -501,6 +505,58 @@ pub async fn list_conversations(
         out.push(conversation);
     }
     Ok(Json(json!({ "conversations": out })))
+}
+
+/// The server's word on how much this member has not seen: application frames past the
+/// delivery cursor, this account's own frames excluded. A pending message request keeps its
+/// silence here — it is announced by the request inbox, never by a badge.
+async fn dm_unread(
+    state: &AppState,
+    conversation_id: &str,
+    user_id: &str,
+    delivered_seq: i64,
+    request_state: Option<&str>,
+) -> ApiResult<i64> {
+    if request_state == Some("pending") {
+        return Ok(0);
+    }
+    let unread: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM dm_messages \
+         WHERE conversation_id = ? AND seq > ? AND kind = 'application' AND sender != ?",
+    )
+    .bind(conversation_id)
+    .bind(delivered_seq)
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await?;
+    Ok(unread)
+}
+
+/// The member's delivery cursor: the highest frame this account has in hand. A MAX upsert,
+/// so a repeat — or a device that lagged behind another — can only hold still, never
+/// unread what was already seen.
+#[derive(Deserialize)]
+pub struct DeliveredBody {
+    pub seq: i64,
+}
+
+pub async fn set_delivered(
+    State(state): State<AppState>,
+    auth: HomeAuth,
+    Path(id): Path<String>,
+    body: Json<DeliveredBody>,
+) -> ApiResult<Json<Value>> {
+    require_member(&state, &id, &auth.user_id).await?;
+    sqlx::query(
+        "UPDATE conversation_members SET delivered_seq = MAX(delivered_seq, ?) \
+         WHERE conversation_id = ? AND user_id = ?",
+    )
+    .bind(body.seq.max(0))
+    .bind(&id)
+    .bind(&auth.user_id)
+    .execute(&state.pool)
+    .await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 pub async fn get_conversation(
@@ -513,7 +569,20 @@ pub async fn get_conversation(
     if !policy.visible {
         return Err(ApiError::NotFound("no such conversation".into()));
     }
+    let delivered_seq: i64 = sqlx::query_scalar(
+        "SELECT delivered_seq FROM conversation_members \
+         WHERE conversation_id = ? AND user_id = ?",
+    )
+    .bind(&id)
+    .bind(&auth.user_id)
+    .fetch_one(&state.pool)
+    .await?;
     let mut conversation = conversation_json(&state, &id).await?;
+    if let Some(object) = conversation.as_object_mut() {
+        object.insert("unread".into(), json!(dm_unread(
+            &state, &id, &auth.user_id, delivered_seq, policy.request_state.as_deref(),
+        ).await?));
+    }
     if let Some(request_state) = policy.request_state {
         conversation["request_state"] = Value::String(request_state);
     }

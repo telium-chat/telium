@@ -79,6 +79,22 @@ export const chat = {
   // dropped for length. Keep it.
   'chat.timeline.messageGone': 'That message is not available any more.',
 
+  // A send the wire refused for long enough that the client stopped retrying.
+  // The message sits in the timeline where it was typed, marked as
+  // undelivered, with the two things a person can do about it. "deliver" and
+  // not "send": the send already happened, visibly -- what failed is the part
+  // after it, and the wording has to agree with what the row shows.
+  'chat.sendFailed.notDelivered': "This message hasn't been delivered.",
+  'chat.sendFailed.retry': 'Send again',
+  'chat.sendFailed.discard': 'Discard',
+
+  // A hole in the conversation's history that neither the client nor the server
+  // could fill, so the frames above it stay unread. Said as what is true rather
+  // than what broke -- the reader has no way to tell a lost frame from a slow
+  // one -- with the one action that can still help.
+  'chat.gap.stuck': 'Some messages here could not be retrieved yet.',
+  'chat.gap.retry': 'Try again',
+
   // ------------------------------------------------------------ the message
   //
   // One row. Everything here is drawn hundreds of times on a screen, which is

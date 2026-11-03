@@ -25,6 +25,8 @@ export const KEYS = {
   drafts: 'drafts.v2',
   // Merged, and only ever sealed.
   identityPins: 'identity.pins.v1',
+  // Sends waiting for the wire; resending is idempotent by frame id.
+  outbox: 'outbox.v1',
 };
 
 /// Plaintext drafts key from a brief client: deleted from the server, never read.
@@ -54,6 +56,7 @@ const DEFAULTS = {
   [KEYS.savedStickers]: [],
   [KEYS.drafts]: {},
   [KEYS.identityPins]: {},
+  [KEYS.outbox]: {},
 };
 
 /// Fields that describe the machine rather than the account (voice region, Rich Presence, noise cancellation, GIF picker size, date format, seen pins) never leave this device.
@@ -141,6 +144,43 @@ function sanitizeStickers(value) {
   return out;
 }
 
+/// One queued send. The wire body and its plaintext encoding are strings; the rest exists so a
+/// user-directed resend can build a fresh frame if the stored one has aged out.
+function outboxEntry(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  if (typeof raw.body !== 'string' || !raw.body) return null;
+  return {
+    key: String(raw.key || '').slice(0, 64),
+    body: raw.body,
+    plain: typeof raw.plain === 'string' ? raw.plain : '',
+    text: String(raw.text ?? ''),
+    attachments: Array.isArray(raw.attachments) ? raw.attachments.slice(0, 10) : [],
+    reply: raw.reply && typeof raw.reply === 'object' ? raw.reply : null,
+    nonce: typeof raw.nonce === 'string' ? raw.nonce.slice(0, 64) : null,
+    attempts: Number.isFinite(raw.attempts) ? Math.max(0, Math.floor(raw.attempts)) : 0,
+    createdAt: Number.isFinite(raw.createdAt) ? Math.floor(raw.createdAt) : 0,
+  };
+}
+
+function sanitizeOutbox(value) {
+  const out = {};
+  const conversations = value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.entries(value)
+    : [];
+  for (const [id, queue] of conversations) {
+    if (!Array.isArray(queue)) continue;
+    const rows = [];
+    for (const raw of queue) {
+      const entry = outboxEntry(raw);
+      if (entry?.key) rows.push(entry);
+      if (rows.length >= 20) break;
+    }
+    if (rows.length) out[String(id).slice(0, 64)] = rows;
+    if (Object.keys(out).length >= 32) break;
+  }
+  return out;
+}
+
 /// Replaces a stored value whose type differs from its default's (a null prefs row once crashed boot). Shallow on purpose, so new fields aren't dropped by older builds.
 function coerce(key, value) {
   const fallback = DEFAULTS[key];
@@ -167,6 +207,7 @@ function sanitize(key, value) {
   if (key === KEYS.savedStickers) return sanitizeStickers(value);
   if (key === KEYS.drafts) return sanitizeDrafts(value);
   if (key === KEYS.identityPins) return sanitizePins(value);
+  if (key === KEYS.outbox) return sanitizeOutbox(value);
 
   // Shape is checked here, where every entry point funnels; only the container kind, so a newer build's unknown fields survive.
   const fallback = DEFAULTS[key];

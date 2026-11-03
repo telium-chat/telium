@@ -46,6 +46,11 @@ const REPEATABLE = [
     pattern: /^\/_telium\/v1\/conversations\/[^/]+\/notifications$/,
     why: 'muting sets a flag to a value the caller supplied rather than toggling it',
   },
+  {
+    method: 'POST',
+    pattern: /^\/_telium\/v1\/conversations\/[^/]+\/delivered$/,
+    why: 'the delivery cursor is a MAX upsert, so a repeat cannot move it backwards or order a second',
+  },
 ];
 
 /// `key(body)` returns the key or null; null means not repeatable.

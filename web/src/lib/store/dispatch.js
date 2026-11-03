@@ -395,7 +395,14 @@ export const dispatchMethods = {
     }
     this.conversations.splice(at, 1);
     this.dmUnread.delete(d.conversation_id);
+    this.dmServerUnread?.delete(d.conversation_id);
+    this.dmReadCleared?.delete(d.conversation_id);
+    clearTimeout(this.dmDeliveredTimers?.get(d.conversation_id));
+    this.dmDeliveredTimers?.delete(d.conversation_id);
+    this.dmDeliveredPending?.delete(d.conversation_id);
     this.dmFrames.delete(d.conversation_id);
+    this.dmOldest.delete(d.conversation_id);
+    this.dmHistoryEnd.delete(d.conversation_id);
     this.dmOpened.delete(d.conversation_id);
     this.dmPending.delete(d.conversation_id);
     this.mls?.forget(d.conversation_id).catch(() => {});
