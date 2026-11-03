@@ -522,16 +522,20 @@ mod tests {
 
     #[test]
     fn a_subscription_needs_enabled_url_and_pin() {
+        // The production pin ships embedded, so the default configuration subscribes.
         let cfg = VoiceDirectory::default();
-        assert!(subscription(&cfg).is_none(), "the compile-time pin is empty until the publisher's key is embedded");
-        let mut cfg = VoiceDirectory { key: "k".into(), ..VoiceDirectory::default() };
         assert!(subscription(&cfg).is_some());
-        cfg.enabled = false;
-        assert!(subscription(&cfg).is_none());
+        let mut cfg = VoiceDirectory { enabled: false, ..VoiceDirectory::default() };
+        assert!(subscription(&cfg).is_none(), "enabled = false is the kill switch");
         cfg.enabled = true;
         cfg.url = "   ".into();
         assert!(subscription(&cfg).is_none(), "a blank URL is no URL");
-        let cfg = VoiceDirectory { key: "   ".into(), ..VoiceDirectory::default() };
-        assert!(subscription(&cfg).is_none(), "a blank config pin falls back to the compile-time pin, which is empty in tests");
+        // A blank config pin falls back to the compile-time pin, which ships
+        // filled; an operator who wants silence uses the kill switch, and one
+        // who wants their own directory pins their own key.
+        let blanked = VoiceDirectory { key: " ".repeat(3), ..VoiceDirectory::default() };
+        assert!(subscription(&blanked).is_some());
+        let private = VoiceDirectory { url: "https://directory.internal/feed.json".into(), key: "k".into(), ..VoiceDirectory::default() };
+        assert!(subscription(&private).is_some());
     }
 }

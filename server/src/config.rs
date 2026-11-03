@@ -1331,11 +1331,11 @@ pub struct VoiceRegion {
 }
 
 /// The publisher's Ed25519 public key for the public SFU directory, base64.
-/// Filled when the production signing key is generated (see site README,
-/// "SFU directory feed"). Empty, the directory stays silent rather than
-/// trusting an unverified list; an operator can always pin a key of their own
-/// choosing with `[voice.directory] key`.
-pub const DEFAULT_SFU_DIRECTORY_PUBLIC_KEY: &str = "";
+/// The signing seed lives in telium-chat/telium-keys (sfu-directory.env) and
+/// as that repo's Actions secret. Empty here would leave the directory
+/// silent rather than trusting an unverified list; an operator can always
+/// pin a key of their own choosing with `[voice.directory] key`.
+pub const DEFAULT_SFU_DIRECTORY_PUBLIC_KEY: &str = "baQHGGy8rgH0NbRMhn7zYbqtYAGwJu9k12l9SIHNBcM";
 
 /// The public SFU directory: one signed document naming volunteer-operated
 /// relays, fetched and held so guild owners have something to pick from even

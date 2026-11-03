@@ -144,3 +144,70 @@ export async function chooseVoiceRegion(api, preferred = 'auto', options = {}) {
   cache.set(key, { at: now, name, rtt: choice?.rtt ?? null });
   return name;
 }
+
+/// Chooses the relay a guild call pins to — the Discord-style flow:
+///
+///   1. An explicit user preference always wins (they asked for a region).
+///   2. Otherwise, if the call is already running somewhere, everyone joins
+///      where it is — a call cannot span relays, and "nearest to me" only
+///      makes sense for the people who start it.
+///   3. Otherwise the joiner's own device measures the candidates — the
+///      server's configured regions plus the public directory's healthy,
+///      accepting relays — and the closest one that clearly wins becomes the
+///      call's relay. When nothing measurably wins, `auto` defers to the
+///      server, which rotates its choice so the load still spreads.
+///
+/// Directory entries carry the relay's URL as their region name, which is how
+/// the pin round-trips through every later join.
+export async function chooseGuildVoiceRegion(api, channelId, preferred = 'auto', options = {}) {
+  const wanted = preferred || 'auto';
+  if (wanted !== 'auto') return wanted;
+  if (!api?.regions) return 'auto';
+
+  // A call in progress decides for everyone joining it.
+  try {
+    const listing = await api.voiceStates(channelId);
+    const pinned = (Array.isArray(listing) ? listing : listing?.voice_states ?? [])
+      .map((state) => state?.region)
+      .find((region) => region && region !== 'auto');
+    if (pinned) return pinned;
+  } catch {
+    // Cannot see the call (or it is empty) — measure as the first joiner.
+  }
+
+  let published = null;
+  try {
+    published = await api.regions();
+  } catch {
+    // A server too old to publish a region list, or one that would rather not.
+  }
+  const regions = Array.isArray(published?.regions) ? published.regions.filter((r) => r?.sfu) : [];
+
+  let directory = [];
+  try {
+    const listing = await api.voiceDirectory();
+    directory = (Array.isArray(listing?.entries) ? listing.entries : [])
+      .filter((entry) => entry?.reachable && entry?.accepting !== false)
+      .map((entry) => ({ name: entry.url, sfu: entry.url }));
+  } catch {
+    // No directory held on this server (disabled, unexpired-pin) — the
+    // configured regions and the server's rotation still apply.
+  }
+
+  const candidates = [...regions, ...directory];
+  if (!candidates.length) return 'auto';
+  const key = candidates.map((r) => r?.sfu).join('|');
+  const hit = cache.get(key);
+  const now = Date.now();
+  if (hit && now - hit.at < PROBE_TTL_MS) return hit.name;
+
+  let choice = null;
+  try {
+    choice = await pickRegion(candidates, { fallback: published?.default || null, ...options });
+  } catch {
+    choice = null;
+  }
+  const name = choice?.name || 'auto';
+  cache.set(key, { at: now, name, rtt: choice?.rtt ?? null });
+  return name;
+}
