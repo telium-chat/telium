@@ -655,6 +655,7 @@ export const dmMethods = {
       reply,
       nonce,
       attempts: 0,
+      createdAt: Date.now(),
       nextAt: Date.now(),
       failed: false,
       error: null,
@@ -669,6 +670,19 @@ export const dmMethods = {
 
   dmOutboxIn(conversationId) {
     return this.dmOutbox.get(conversationId) || [];
+  },
+
+  /// The wait until the next entry worth pumping is due, or null when nothing is waiting.
+  /// The pump aims its next wake at this, so no entry can outlast its own backoff timer.
+  dmOutboxWait(conversationId) {
+    const now = Date.now();
+    let wait = null;
+    for (const entry of this.dmOutboxIn(conversationId)) {
+      if (entry.failed) continue;
+      const until = Math.max(0, (entry.nextAt || 0) - now);
+      if (wait === null || until < wait) wait = until;
+    }
+    return wait;
   },
 
   scheduleDmPump(conversationId, delay) {
@@ -696,7 +710,9 @@ export const dmMethods = {
             (this.dmOutbox.get(conversationId) || []).filter((e) => e !== entry),
           );
           this.persistDmOutbox();
-          await this.mls?.notedSent(conversationId, frame, entry.plain);
+          // Under the send lock, where the direct path lands its completion too, so another
+          // tab receiving the echo cannot read the plaintext store mid-write.
+          await this.mls?.run(conversationId, () => this.mls.notedSent(conversationId, frame, entry.plain));
           this.finishSentDm(conversationId, frame, entry.nonce);
         } catch (e) {
           entry.attempts += 1;
@@ -704,9 +720,7 @@ export const dmMethods = {
           if (!worthRetrying(e) || entry.attempts >= OUTBOX_BACKOFF.length) {
             entry.failed = true;
           } else {
-            const wait = OUTBOX_BACKOFF[Math.min(entry.attempts, OUTBOX_BACKOFF.length) - 1];
-            entry.nextAt = Date.now() + wait;
-            this.scheduleDmPump(conversationId, wait);
+            entry.nextAt = Date.now() + OUTBOX_BACKOFF[Math.min(entry.attempts, OUTBOX_BACKOFF.length) - 1];
           }
         }
         changed = true;
@@ -714,6 +728,10 @@ export const dmMethods = {
       if (changed) this.emit('outbox', conversationId);
     } finally {
       this.dmOutboxPumping.delete(conversationId);
+      // Whatever is still waiting sets the next wake itself: a wake that arrived mid-pump,
+      // or a timer an earlier schedule replaced, cannot strand an entry past its backoff.
+      const wait = this.dmOutboxWait(conversationId);
+      if (wait !== null) this.scheduleDmPump(conversationId, wait);
     }
   },
 

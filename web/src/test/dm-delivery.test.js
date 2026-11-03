@@ -56,6 +56,7 @@ describe('the DM outbox', () => {
       joined: () => true,
       notedSent: noted,
       payloadTypeOf: () => 'message',
+      run: (_id, fn) => fn(),
       send: vi.fn(async (id, text, attachments, reply, { queued } = {}) => {
         queued(QUEUED_BODY, 'plain-one');
         throw Object.assign(new Error('the wire is down'), { status: 503 });
@@ -70,6 +71,9 @@ describe('the DM outbox', () => {
 
     await expect(store.sendDm('c1', 'hello')).resolves.toBeNull();
     expect(store.dmOutboxIn('c1')).toHaveLength(1);
+    // The row's timestamp is the moment it was typed, not whatever the next render says.
+    expect(store.dmOutboxIn('c1')[0].createdAt).toBeGreaterThanOrEqual(Date.now() - 1_000);
+    expect(store.dmOutboxIn('c1')[0].createdAt).toBeLessThanOrEqual(Date.now());
 
     // First pump: the server is still down; the entry waits, it is not dropped or failed.
     await store.pumpDmOutbox('c1');
@@ -97,6 +101,7 @@ describe('the DM outbox', () => {
       joined: () => true,
       notedSent: vi.fn(async () => {}),
       payloadTypeOf: () => 'message',
+      run: (_id, fn) => fn(),
       send: vi.fn(async (id, text, attachments, reply, { queued } = {}) => {
         if (store.mls.send.mock.calls.length === 1) {
           queued(QUEUED_BODY, 'plain-one');
@@ -128,6 +133,7 @@ describe('the DM outbox', () => {
       joined: () => true,
       notedSent: vi.fn(async () => {}),
       payloadTypeOf: () => 'message',
+      run: (_id, fn) => fn(),
       send: vi.fn(async (id, text, attachments, reply, { queued } = {}) => {
         queued(QUEUED_BODY, 'plain-one');
         throw Object.assign(new Error('the wire is down'), { status: 503 });
@@ -138,6 +144,7 @@ describe('the DM outbox', () => {
     }) };
     await store.sendDm('c1', 'hello');
     expect(store.sync.store[KEYS.outbox].c1).toHaveLength(1);
+    const sentAt = store.dmOutboxIn('c1')[0].createdAt;
 
     // A fresh start reads the queue back, re-arms it, and pumps once the wire answers.
     const restarted = fakeStore();
@@ -152,6 +159,8 @@ describe('the DM outbox', () => {
     restarted.adoptDmOutbox();
     const entry = restarted.dmOutboxIn('c1')[0];
     expect(entry.body).toEqual(QUEUED_BODY);
+    // The typed-at time survives the round trip, so the row does not drift to the restart.
+    expect(entry.createdAt).toBe(sentAt);
     await restarted.pumpDmOutbox('c1');
     expect(restarted.dmOutboxIn('c1')).toHaveLength(1);
     entry.nextAt = 0;
@@ -159,6 +168,59 @@ describe('the DM outbox', () => {
     expect(restarted.dmOutboxIn('c1')).toHaveLength(0);
     // What landed here is gone from the written queue, so a slower device cannot repeat it.
     expect(restarted.sync.store[KEYS.outbox].c1).toBeUndefined();
+  });
+
+  it('an entry whose wake was taken by a later send still pumps at its backoff', async () => {
+    vi.useFakeTimers();
+    try {
+      const store = fakeStore();
+      store.dmFrames.set('c1', []);
+      const noted = vi.fn(async () => {});
+      const bodies = [];
+      store.mls = {
+        joined: () => true,
+        notedSent: noted,
+        payloadTypeOf: () => 'message',
+        run: vi.fn((_id, fn) => fn()),
+        send: vi.fn(async (_id, _text, _attachments, _reply, { queued } = {}) => {
+          const body = { ...QUEUED_BODY, ciphertext: `ct-${store.mls.send.mock.calls.length}` };
+          bodies.push(body);
+          queued(body, `plain-${bodies.length}`);
+          throw Object.assign(new Error('the wire is down'), { status: 503 });
+        }),
+      };
+      const attempts = [];
+      store.home = { sendFrame: vi.fn(async (_id, body) => {
+        attempts.push(body);
+        // Only the first try of the first entry is refused; everything after lands.
+        if (attempts.length === 1) throw Object.assign(new Error('still down'), { status: 503 });
+        return { id: `f${attempts.length}`, seq: attempts.length + 4 };
+      }) };
+
+      // A fails its send and waits out a backoff.
+      await store.sendDm('c1', 'one');
+      await store.pumpDmOutbox('c1');
+      expect(store.dmOutboxIn('c1')).toHaveLength(1);
+      expect(store.dmOutboxIn('c1')[0].nextAt).toBeGreaterThan(Date.now());
+
+      // B is queued; the wake it schedules replaces A's, and B lands on it. A's wake has to
+      // survive the pump that lands B — re-armed from whatever is still waiting.
+      await store.sendDm('c1', 'two');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(attempts).toHaveLength(2);
+      expect(store.dmOutboxIn('c1')).toHaveLength(1);
+      expect(store.mls.run).toHaveBeenCalled();
+
+      // A's backoff elapses: the re-armed timer pumps it with no other event to lean on.
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(store.dmOutboxIn('c1')).toHaveLength(0);
+      expect(attempts).toHaveLength(3);
+      // The retry went out as the identical body, and both sends completed.
+      expect(attempts[2].ciphertext).toBe(bodies[0].ciphertext);
+      expect(noted).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
