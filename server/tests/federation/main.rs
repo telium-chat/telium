@@ -710,8 +710,19 @@ async fn live_claims(server: &Server) -> i64 {
 async fn drained(a: &Server, conv_id: &str) {
     // A healthy outbox drains in milliseconds; the deadline exists to fail a
     // broken pipeline, not to time a runner out for being busy with the other
-    // suites this job runs beside.
-    for _ in 0..3_000 {
+    // suites this job runs beside. The pump is driven from here rather than
+    // awaited from afar: a pass that failed once under load parks its rows at
+    // a long backoff, and no scheduled tick owes this test a wake-up inside
+    // that backoff.
+    for _ in 0..1_000 {
+        sqlx::query("UPDATE dm_outbox SET next_attempt_at = 0 WHERE conversation_id = ?")
+            .bind(conv_id)
+            .execute(&a.state.pool)
+            .await
+            .unwrap();
+        if let Err(e) = telium_server::routes::dm::flush_outbox(&a.state).await {
+            tracing::warn!(error = %e, "outbox flush stumbled; retrying");
+        }
         let queued: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM dm_outbox WHERE conversation_id = ?")
             .bind(conv_id)
             .fetch_one(&a.state.pool)

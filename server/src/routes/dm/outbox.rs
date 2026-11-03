@@ -8,6 +8,9 @@ use super::*;
 const OUTBOX_MAX_SHIFT: i64 = 10;
 
 pub async fn flush_outbox(state: &AppState) -> ApiResult<u64> {
+    // One pump at a time (send path, maintenance sweep, tests): two concurrent
+    // passes would both pick up the same due row and deliver it twice.
+    let _pump = state.outbox_pump.lock().await;
     let due: Vec<(String, String, String, String, String, i64)> = sqlx::query_as(
         "SELECT id, conversation_id, destination, path, payload, attempts FROM dm_outbox \
          WHERE next_attempt_at <= ? ORDER BY created_at LIMIT 50",
@@ -57,10 +60,14 @@ pub async fn flush_outbox(state: &AppState) -> ApiResult<u64> {
                 }
                 let shift = if refused { OUTBOX_MAX_SHIFT } else { attempts.min(OUTBOX_MAX_SHIFT) };
                 let backoff = state.cfg.federation.dm_retry_secs as i64 * 1000 * (1i64 << shift);
+                // The increment happens in SQL because this pump runs from two
+                // places at once (the send path flushes as it enqueues, the
+                // maintenance sweep flushes on its tick); a read here and a
+                // write there lose counts, and an essential frame can sit under
+                // its dead-letter threshold forever because of it.
                 sqlx::query(
-                    "UPDATE dm_outbox SET attempts = ?, next_attempt_at = ?, last_error = ? WHERE id = ?",
+                    "UPDATE dm_outbox SET attempts = attempts + 1, next_attempt_at = ?, last_error = ? WHERE id = ?",
                 )
-                .bind(attempts)
                 .bind(now_ms() + backoff)
                 .bind(e.to_string())
                 .bind(&id)

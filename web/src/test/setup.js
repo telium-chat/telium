@@ -108,5 +108,13 @@ afterEach(async () => {
   } finally {
     pendingActs.clear();
     cleanup();
+    // A toast can be raised by an asynchronous task that outlives the test
+    // which caused it, and jsdom never plays its dismissal (getAnimations is
+    // stubbed above), so it lingers into the next test's DOM. The next test
+    // reading `role=dialog` then finds the stray alongside its own. Toasts
+    // carry the manager's --toast-index; real dialogs do not.
+    for (const node of document.querySelectorAll('[role="dialog"][style*="--toast-index"]')) {
+      node.remove();
+    }
   }
 });

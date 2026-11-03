@@ -359,6 +359,16 @@ describe('every screen mounts', () => {
     expect(server.state.moderated[0]).toMatchObject({
       user_id: '@bob:home.example', mute: true,
     });
+
+    // Bob hangs up. Without this the mesh keeps a recovery timer running for
+    // his tile into the following tests, and its eventual "no media path"
+    // toast -- jsdom never plays the dismissal -- collides with whichever
+    // test next reads `role=dialog`.
+    await act(async () => {
+      server.dispatch(GUILD, 'VOICE_STATE_UPDATE', {
+        guild_id: 'g1', channel_id: null, user_id: '@bob:home.example', streaming: false,
+      });
+    });
   });
 });
 
@@ -701,10 +711,12 @@ describe('links and stickers', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Account menu' }));
     await user.click(await screen.findByRole('menuitem', { name: 'Set a custom status' }));
-    const dialog = await screen.findByRole('dialog');
+    // Scoped by name: a toast leaked from an earlier test would also be a
+    // dialog, and this one must not be found twice.
+    const dialog = await screen.findByRole('dialog', { name: 'Custom status' });
     await user.type(within(dialog).getByLabelText('Status'), 'writing tests');
     await user.click(within(dialog).getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Custom status' })).toBeNull());
 
     const published = () => server.framesFor(GUILD)
       .filter((f) => f.op === 'PRESENCE_UPDATE').at(-1)?.d;

@@ -299,8 +299,26 @@ async fn an_ordered_commit_outlasts_any_outage_and_lands_in_order() {
             .execute(&a.state.pool)
             .await
             .unwrap();
-        telium_server::routes::dm::flush_outbox(&a.state).await.unwrap();
-        assert_eq!(outbox_row(&a, &row).await.map(|r| r.0), Some(attempts + 1), "the commit was dropped");
+        // This pump races its own background callers (the send path flushes as
+        // it enqueues, the maintenance sweep flushes on its tick), so a pass
+        // can find the row parked at a long backoff or counted beside us.
+        // Attempts only ever climb, so what must hold is: still here, and
+        // past the dead-letter threshold, never reset or re-queued.
+        let mut seen = None;
+        for _ in 0..50 {
+            sqlx::query("UPDATE dm_outbox SET next_attempt_at = 0 WHERE id = ?")
+                .bind(&row)
+                .execute(&a.state.pool)
+                .await
+                .unwrap();
+            telium_server::routes::dm::flush_outbox(&a.state).await.unwrap();
+            seen = outbox_row(&a, &row).await.map(|r| r.0);
+            if seen.is_some_and(|n| n > attempts) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(seen.is_some_and(|n| n > attempts), "the commit was dropped: {seen:?}");
     }
 
     let b = bring_back(gone).await;

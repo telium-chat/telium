@@ -39,6 +39,10 @@ pub struct AppState {
     /// an account's parallel uploads cannot all read a stale total and land
     /// over its quota. The instance lease keeps this single-process.
     pub upload_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    /// One lock around the dm/friend outbox pump, held for a whole flush pass,
+    /// so the send path's spawned flush and the maintenance sweep's tick cannot
+    /// deliver the same due row twice at once.
+    pub outbox_pump: Arc<Mutex<()>>,
     pub demoted: Arc<std::sync::atomic::AtomicBool>,
     pub shut_down: Arc<std::sync::atomic::AtomicBool>,
     pub updates: Arc<RwLock<crate::updates::Status>>,

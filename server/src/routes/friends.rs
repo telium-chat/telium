@@ -671,6 +671,9 @@ async fn relay(
 }
 
 pub async fn flush_outbox(state: &AppState) -> ApiResult<u64> {
+    // Same single-pump rule as the dm outbox: concurrent passes would both
+    // pick up the same due row and deliver it twice.
+    let _pump = state.outbox_pump.lock().await;
     let due: Vec<(String, String, String, i64)> = sqlx::query_as(
         "SELECT id, destination, payload, attempts FROM friend_outbox \
          WHERE next_attempt_at <= ? ORDER BY created_at LIMIT 50",
