@@ -708,11 +708,13 @@ pub async fn flush_outbox(state: &AppState) -> ApiResult<u64> {
                         .await?;
                     continue;
                 }
+                // The increment happens in SQL, as in the dm outbox: a read
+                // here and a write there can lose counts and leave a relay
+                // under its dead-letter threshold forever.
                 sqlx::query(
-                    "UPDATE friend_outbox SET attempts = ?, next_attempt_at = ?, last_error = ? \
+                    "UPDATE friend_outbox SET attempts = attempts + 1, next_attempt_at = ?, last_error = ? \
                      WHERE id = ?",
                 )
-                .bind(attempts)
                 .bind(now_ms() + backoff)
                 .bind(e.to_string())
                 .bind(&id)
