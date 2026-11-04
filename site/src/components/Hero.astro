@@ -10,7 +10,7 @@ import { URLS } from '../config'
   <div class="relative z-10 max-w-[900px]">
     <h1 class="display rise-in max-w-[18ch]">
       <span class="block">Choose your server.</span>
-      <span class="block text-accent">Keep your people.</span>
+      <span class="block gradient-text">Keep your people.</span>
     </h1>
     <p class="lead rise-in mt-7 max-w-[52ch]" style="animation-delay: 70ms">
       Community chat, voice, video and encrypted private messages on a server you choose.
@@ -30,6 +30,32 @@ import { URLS } from '../config'
 </section>
 
 <style>
+  /* A single, restrained patch of brand light behind the orbit replaces the
+     two fixed background bubbles that used to follow every section. */
+  .hero::before {
+    content: '';
+    position: absolute;
+    z-index: 0;
+    width: min(56vw, 40rem);
+    aspect-ratio: 1;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    background: radial-gradient(
+      circle,
+      color-mix(in oklab, var(--telium-violet) 10%, transparent),
+      transparent 67%
+    );
+    pointer-events: none;
+  }
+  :root[data-theme='light'] .hero::before {
+    background: radial-gradient(
+      circle,
+      color-mix(in oklab, var(--telium-violet) 4%, transparent),
+      transparent 67%
+    );
+  }
+
   /* Let the mark itself be the hero illustration, without invented UI chrome. */
   .hero-mark-wrap {
     position: absolute;
@@ -53,6 +79,7 @@ import { URLS } from '../config'
     :root[data-theme='light'] .hero-mark-wrap { opacity: 0.07; }
   }
   @media (max-width: 640px) {
+    .hero::before { width: min(90vw, 30rem); opacity: 0.55; }
     /* Small screens use a quieter watermark behind the content, never a
        cropped ring protruding off the right edge. */
     .hero-mark-wrap { width: min(75vw, 21rem); right: 1rem; top: 61%; opacity: 0.065; }
