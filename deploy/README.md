@@ -112,6 +112,66 @@ The native path keeps one generation of the binary beside the install
 downgrade, rolls back to it once if the new release will not start — the one
 place an SFU update is allowed what a server update is not.
 
+### Compose SFU setup
+
+The Compose SFU runs as an unprivileged container; **it cannot operate host nginx
+or Certbot**. Unlike the native installer, its dashboard does not provide a
+host setup wizard. Configure the proxy on the host before making a relay public:
+
+1. Create DNS records pointing `sfu.example.com` and
+   `livekit.example.com` to the relay host. Leave them **DNS-only** if using
+   Cloudflare; realtime UDP cannot pass through a standard HTTP tunnel.
+2. Run `sudo ./deploy/install-sfu.sh`, then edit
+   `/opt/telium-sfu/sfu.toml` on the host. Set
+   `livekit.public_url = "https://livekit.example.com"`, and choose
+   `trust.public = true` only if the relay should accept any valid Telium
+   server. Keep `bind = "0.0.0.0:7890"` and
+   `admin.bind = "0.0.0.0:7891"` **inside** the container; Compose
+   publishes those ports on host loopback only.
+3. Configure host nginx to proxy `sfu.example.com` to
+   `http://127.0.0.1:7890`, and `livekit.example.com` to
+   `http://127.0.0.1:7880` with WebSocket `Upgrade` and
+   `Connection` headers. For example, after installing nginx:
+
+   ```nginx
+   server {
+       listen 80;
+       server_name sfu.example.com;
+       location / {
+           proxy_pass http://127.0.0.1:7890;
+           proxy_set_header Host $host;
+           proxy_set_header X-Forwarded-Proto $scheme;
+       }
+   }
+   server {
+       listen 80;
+       server_name livekit.example.com;
+       location / {
+           proxy_pass http://127.0.0.1:7880;
+           proxy_http_version 1.1;
+           proxy_set_header Upgrade $http_upgrade;
+           proxy_set_header Connection "upgrade";
+           proxy_set_header Host $host;
+           proxy_set_header X-Forwarded-Proto $scheme;
+       }
+   }
+   ```
+
+   Validate with `sudo nginx -t`, then use Certbot's nginx plugin to issue
+   HTTPS certificates for both names. Do not publish HTTP ports 7890, 7880,
+   or the admin port 7891 beyond host loopback.
+4. From `/opt/telium-sfu`, run `docker compose up -d`, then
+   `docker compose logs sfu` to inspect startup. Open the admin bootstrap
+   URL through an SSH tunnel to `127.0.0.1:7891`.
+   Firewall rules must permit public HTTPS, LiveKit TCP fallback (7881),
+   TURN UDP (3478), and the configured RTC UDP range (50000–60000).
+5. Confirm `https://sfu.example.com/health` returns
+   `"ok":true` and check that LiveKit signaling is reachable over
+   `wss://livekit.example.com` before listing the relay publicly.
+
+The Compose updater deliberately never rewrites `sfu.toml`; after making
+operator configuration changes, use `docker compose up -d` to apply them.
+
 ## Files
 
 | on the box | from here | what it is |
