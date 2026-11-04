@@ -10,6 +10,7 @@ pub struct SfuConfig {
     pub trust: TrustConfig,
     pub admin: AdminConfig,
     pub limits: LimitsConfig,
+    pub updates: Updates,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -139,6 +140,108 @@ pub struct AdminConfig {
     pub helper_path: String,
 }
 
+/// Self-update check: GET one public manifest (and its detached signature)
+/// over HTTPS with a bare User-Agent; `check = false` fetches nothing. The
+/// check only *reports* — the actual apply is `deploy/update-sfu-native.sh`
+/// or `deploy/update-sfu.sh` on their systemd timers, which ask this binary
+/// what to do via `telium-sfu updates check`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Updates {
+    pub check: bool,
+    /// Release list URL (JSON written by CI into `deploy/sfu-releases.json`).
+    pub manifest_url: String,
+    /// Check interval, retry delay and per-fetch timeout.
+    pub check_interval_secs: i64,
+    pub retry_secs: i64,
+    pub timeout_secs: u64,
+    /// Lag before warning, and before urgent. Security releases are urgent immediately.
+    pub stale_after_days: i64,
+    pub urgent_after_days: i64,
+    /// Ed25519 manifest-signing key, url-safe base64; empty means unchecked. Never compiled in.
+    pub manifest_public_key: String,
+    /// Where the detached signature lives. Empty means `manifest_url` + `.sig`.
+    pub manifest_signature_url: String,
+    /// How long a drain (SIGUSR1: refuse new joins, let calls finish) lasts
+    /// before the relay resumes accepting on its own. The update script waits
+    /// within this ceiling; auto-expiry is what stops a crashed updater from
+    /// leaving the relay refusing joins forever.
+    pub drain_max_secs: u64,
+}
+
+impl Default for Updates {
+    fn default() -> Self {
+        Self {
+            check: true,
+            manifest_url:
+                "https://raw.githubusercontent.com/telium-chat/telium/main/deploy/sfu-releases.json"
+                    .into(),
+            check_interval_secs: 6 * 60 * 60,
+            retry_secs: 30 * 60,
+            timeout_secs: 10,
+            stale_after_days: 14,
+            urgent_after_days: 45,
+            manifest_public_key: String::new(),
+            manifest_signature_url: String::new(),
+            drain_max_secs: 900,
+        }
+    }
+}
+
+impl Updates {
+    /// Scoped validation for this section. Called on `serve` startup and by
+    /// `telium-sfu --config X check`, which is how the updater audits the
+    /// operator's config with the *staged* binary before anything restarts.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if self.drain_max_secs < 30 || self.drain_max_secs > 86_400 {
+            anyhow::bail!(
+                "updates.drain_max_secs must be between 30 and 86400 (it is how long a drain \
+                 for an update can hold new joins out before the relay resumes on its own; \
+                 shorter never gets anywhere, longer outlives the updater that asked)"
+            );
+        }
+        if self.check {
+            if self.stale_after_days < 1 || self.urgent_after_days < self.stale_after_days {
+                anyhow::bail!(
+                    "updates.stale_after_days must be at least 1 and updates.urgent_after_days \
+                     must not be smaller than it (they are the two steps of one escalation, and \
+                     a louder threshold that arrives first is not a step)"
+                );
+            }
+            if !(self.manifest_url.starts_with("https://") || self.manifest_url.starts_with("http://")) {
+                anyhow::bail!(
+                    "updates.manifest_url must be an https URL, or set updates.check = false to \
+                     turn the check off deliberately"
+                );
+            }
+            // Malformed key would make every signature check look like a forgery.
+            if !self.manifest_public_key.is_empty() {
+                // Decoded with the verifier's own function so we can't accept a key it rejects.
+                let decoded = telium_protocol::unb64(self.manifest_public_key.trim())
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "updates.manifest_public_key is set but is not url-safe unpadded \
+                             base64, which is the form the project publishes its release key in. \
+                             If what you pasted ends in `=` or contains `+` or `/`, it is the other \
+                             base64 alphabet and this relay will never decode it. Leave the key \
+                             empty to check release metadata against nothing but its transport."
+                        )
+                    })?;
+                if decoded.len() != 32 {
+                    anyhow::bail!(
+                        "updates.manifest_public_key decodes to {} bytes and an Ed25519 public key \
+                         is 32. A private key, a signature or a fingerprint pasted here would fail \
+                         every signature check for the life of the deployment while looking \
+                         configured.",
+                        decoded.len()
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Default for SfuConfig {
     fn default() -> Self {
         Self {
@@ -147,6 +250,7 @@ impl Default for SfuConfig {
             trust: TrustConfig::default(),
             admin: AdminConfig::default(),
             limits: LimitsConfig::default(),
+            updates: Updates::default(),
         }
     }
 }

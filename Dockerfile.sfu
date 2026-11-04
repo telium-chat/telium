@@ -14,6 +14,18 @@ FROM rust:1-slim-bookworm AS build
 
 WORKDIR /src
 
+# An image with no opinion about what it is would make `updates check` treat it
+# as an unidentified build and refuse to conclude it is current -- see
+# `sfu/build.rs`. CI passes the released commit's facts in as build args; a
+# hand build falls through to `git`, which works in a checkout and (correctly)
+# not in a context without `.git`.
+ARG TELIUM_BUILD_COMMIT=""
+ARG TELIUM_BUILD_COMMIT_TIME=""
+ARG TELIUM_BUILD_TIME=""
+ENV TELIUM_BUILD_COMMIT=$TELIUM_BUILD_COMMIT \
+    TELIUM_BUILD_COMMIT_TIME=$TELIUM_BUILD_COMMIT_TIME \
+    TELIUM_BUILD_TIME=$TELIUM_BUILD_TIME
+
 COPY telium-protocol/ telium-protocol/
 COPY sfu/ sfu/
 
@@ -40,6 +52,13 @@ RUN apt-get update \
 
 COPY --from=build   /out/telium-sfu       /usr/local/bin/telium-sfu
 COPY --from=livekit /livekit-server       /usr/local/bin/livekit-server
+
+# What a release ships with, for update-sfu.sh's three-way config reconcile --
+# the same mechanism the server image uses. compose.sfu.yml is the deployment
+# the updater is allowed to reconcile; sfu.example.toml is the reference the
+# operator diffs against, never written over their sfu.toml.
+COPY deploy/compose.sfu.yml     /usr/share/telium/deploy/compose.sfu.yml
+COPY sfu/sfu.example.toml       /usr/share/telium/deploy/sfu.example.toml
 
 # LiveKit's binary in the official image expects its data nowhere in
 # particular; it is driven entirely by the livekit.yaml the SFU writes into

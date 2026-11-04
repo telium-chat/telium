@@ -1,0 +1,712 @@
+name: SFU release
+
+# One tag, one build, one release -- the same shape as the server's release,
+# on the SFU's own train.
+#
+# The SFU used to be published only as a side effect of server tags: an image
+# tagged by whatever `server-v*` was being cut, no native tarball, and no entry
+# in any manifest a relay could read. A relay could not be told it was behind,
+# because "behind" had no answer to compare against. Now an
+# `sfu-v<major>.<minor>.<patch>` tag is the only thing that builds, publishes,
+# or updates the SFU, and `deploy/sfu-releases.json` is the signed list the
+# relay's checker reads -- exactly the arrangement the server has with
+# `deploy/releases.json`, and the desktop with `client-releases.json`: one
+# manifest per component, one statement prefix per manifest, one key.
+#
+# Decoupling the trains means a relay is only asked to update when the relay
+# changed. What lockstep tags used to guarantee by construction -- that a relay
+# and the servers it serves agree on the protocol -- the manifest now carries
+# explicitly: each entry records `protocol` and `min_protocol` from the
+# released commit, and a release that raises the floor past a relay's build is
+# reported as an urgent, required update rather than discovered as a refusal.
+#
+# This only publishes. It does not deploy: the relay polls the feed and
+# updates itself (draining live calls first), and the arrow points from the
+# relay to GitHub, never back.
+#
+# WHAT A TAG HAS TO SATISFY
+#
+#   1. `sfu-vX.Y.Z`, no suffix, no leading `v`.
+#   2. Its commit is on `main`.
+#   3. `sfu/Cargo.toml` at that commit says the same version. The version is
+#      compiled in -- `telium-sfu version` and the startup log read it -- so a
+#      tag that disagrees with the source is a release that cannot name itself.
+#   4. The commit has a successful `unit-tests` run.
+#
+# `workflow_dispatch` takes a tag so a failed run can be retried without
+# re-tagging, and `dry_run` runs every step up to the build and stops before
+# anything is published.
+#
+# JOB SHAPE
+#
+#   validate -- one cheap job that answers every question the expensive jobs
+#     would otherwise each re-derive. Nothing builds until it is done.
+#   image / native -- the container build and the two musl tarball builds,
+#     one per architecture, each on a hosted runner of that architecture.
+#   publish -- gathers what the builders made and does every write: the
+#     release, `sfu-latest`, and the `deploy/sfu-releases.json` commit-back.
+
+on:
+  push:
+    tags:
+      - 'sfu-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release (sfu-vX.Y.Z)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Build and validate, but publish nothing'
+        required: false
+        type: boolean
+        default: false
+      skip_checks:
+        description: 'Release even if unit-tests is not green on the commit'
+        required: false
+        type: boolean
+        default: false
+
+# `contents: write` for the versioned release and for one file:
+# `deploy/sfu-releases.json`, the list every relay reads to learn whether it is
+# behind. `packages: write` is scoped to this repository's own package by the
+# token GitHub mints for the run. `checks: read` for the one call that requires
+# a green `unit-tests` run; naming any scope sets every unnamed one to `none`.
+permissions:
+  contents: write
+  packages: write
+  checks: read
+
+# One run per tag. A re-dispatch of the same tag must not race the original
+# into the same release. `github.event.inputs` rather than `inputs` because
+# this is a workflow-level field.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  # ------------------------------------------------------------------ validate
+  validate:
+    name: Validate the tag and the gate
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.tag.outputs.commit }}
+      version: ${{ steps.tag.outputs.version }}
+      moves_latest: ${{ steps.tag.outputs.moves_latest }}
+      previous: ${{ steps.tag.outputs.previous }}
+      commit_time: ${{ steps.commit-time.outputs.commit_time }}
+      breaking: ${{ steps.release-notes.outputs.breaking }}
+      notes: ${{ steps.release-notes.outputs.notes }}
+      security: ${{ steps.release-notes.outputs.security }}
+      trailers: ${{ steps.release-notes.outputs.trailers }}
+    steps:
+      # Full history, for proving the tag's commit is on `main` and reading the
+      # tag's annotation for the trailers. Every `uses:` names a commit, not a
+      # tag: a tag is a mutable pointer its owner can move onto new code.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      # The publisher is ordinary code in this repository, so its decisions are
+      # tested, and the test runs here because this workflow is what runs it.
+      - name: Test the release decisions
+        run: node --test scripts/release-sfu.test.mjs scripts/sign-sfu-release-manifest.test.mjs
+
+      # Resolve the tag through the API rather than `github.sha`, because an
+      # annotated tag's SHA is the tag object, not the commit.
+      - id: tag
+        name: Validate the tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          COMMIT="$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)"
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+
+          # The previous release tag, for the changelog link in the notes.
+          # Tags were fetched with the checkout; `sort -V` orders by version.
+          PREVIOUS="$(git tag -l 'sfu-v*' | grep -vx "$TAG" | sort -V | tail -1 || true)"
+          echo "previous=$PREVIOUS" >> "$GITHUB_OUTPUT"
+
+          # Shape and ordering rules live in the tested script.
+          TAGS="$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/sfu-v" \
+            --jq '.[].ref' | sed 's#^refs/tags/##')"
+          INSPECT="$(node scripts/release-sfu.mjs inspect --tag "$TAG" --tags "$TAGS")"
+          VERSION="$(printf '%s\n' "$INSPECT" | sed -n 's/^version=//p')"
+          printf '%s\n' "$INSPECT" >> "$GITHUB_OUTPUT"
+
+          # The release must be on the branch it claims to release from.
+          git fetch --quiet origin main
+          if ! git merge-base --is-ancestor "$COMMIT" origin/main; then
+            echo "::error::$TAG points at ${COMMIT:0:12}, which is not on main."
+            echo "Merge the version bump first, then tag the merge commit."
+            exit 1
+          fi
+
+          # The tag and the compiled-in version have to agree.
+          SOURCE_VERSION="$(git show "$COMMIT:sfu/Cargo.toml" 2>/dev/null | sed -n 's/^version = "\(.*\)"$/\1/p' | head -1 || true)"
+          if [ -z "$SOURCE_VERSION" ]; then
+            echo "::error::could not read sfu/Cargo.toml at ${COMMIT:0:12}; refusing to release a commit whose version cannot be checked."
+            exit 1
+          fi
+          if [ "$SOURCE_VERSION" != "$VERSION" ]; then
+            echo "::error::$TAG names version $VERSION but sfu/Cargo.toml says ${SOURCE_VERSION:-<unreadable>}."
+            echo "Run scripts/bump-sfu-version.sh $VERSION and merge it before tagging."
+            exit 1
+          fi
+          echo "tag $TAG -> $COMMIT, version $SOURCE_VERSION, on main"
+
+      # A release is the one place the required gate must not be skipped. The
+      # gate runs on the push to main, so it may still be finishing when the
+      # tag arrives: wait rather than fail on a race, but not forever.
+      - id: checks
+        name: Require a green unit-tests run
+        if: inputs.skip_checks != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          COMMIT="${{ steps.tag.outputs.commit }}"
+          for attempt in $(seq 1 80); do
+            conclusion="$(gh api \
+              "repos/$GITHUB_REPOSITORY/commits/$COMMIT/check-runs?per_page=100" \
+              --jq '[.check_runs[] | select(.name == "unit-tests")] | sort_by(.started_at) | last | .conclusion // "missing"')"
+            case "$conclusion" in
+              success)
+                echo "unit-tests is green on ${COMMIT:0:12}"
+                exit 0
+                ;;
+              failure|cancelled|timed_out|action_required)
+                echo "::error::unit-tests concluded '$conclusion' on ${COMMIT:0:12}; refusing to release."
+                exit 1
+                ;;
+            esac
+            state="$(gh api \
+              "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$COMMIT" \
+              --jq '[.workflow_runs[] | select(.name == "Unit tests")] | sort_by(.created_at) | last | .status // "none"')"
+            echo "attempt $attempt/80: unit-tests is '$conclusion' (workflow run: $state) on ${COMMIT:0:12}; waiting"
+            sleep 15
+          done
+          echo "::error::no successful unit-tests run on ${COMMIT:0:12} after twenty minutes."
+          echo "If the gate cannot run, dispatch with skip_checks and say why in the release notes."
+          exit 1
+
+      # The commit *time*, not the build time, is what a release is dated by --
+      # the manifest records it and the downgrade check in update-sfu-native.sh
+      # compares it. This is the one clock shared by everything in the release.
+      - id: commit-time
+        name: When the released commit was made
+        env:
+          COMMIT: ${{ steps.tag.outputs.commit }}
+        run: |
+          set -euo pipefail
+          echo "commit_time=$(git log -1 --format=%ct "$COMMIT")" >> "$GITHUB_OUTPUT"
+
+      # What the release says about itself, put on the image as labels and read
+      # back into the manifest by `publish`. The trailers are read from the
+      # annotated tag message first and the commit body second.
+      - id: release-notes
+        name: Read the release trailers
+        env:
+          COMMIT: ${{ steps.tag.outputs.commit }}
+        run: |
+          set -euo pipefail
+          TAG_MESSAGE="$(git for-each-ref "refs/tags/$TAG" --format='%(contents)' || true)"
+          BODY="$(git log -1 --format=%B "$COMMIT")"
+          NOTES_TEXT="${TAG_MESSAGE:-$BODY}"
+          [ -n "$(printf '%s' "$NOTES_TEXT" | tr -d '[:space:]')" ] || NOTES_TEXT="$BODY"
+
+          breaking=false
+          if printf '%s' "$NOTES_TEXT" | grep -qiE '^Breaking-change:[ \t]*(yes|true)[ \t]*$'; then
+            breaking=true
+          fi
+          # `|| true` on the pipeline: a grep that matched nothing exits 1 under
+          # pipefail, and a release with no upgrade notes is the ordinary case.
+          notes="$(printf '%s' "$NOTES_TEXT" | grep -iE '^Upgrade-notes:' | head -1 | sed -E 's/^[Uu]pgrade-[Nn]otes:[ \t]*//' | cut -c1-400 || true)"
+          security=false
+          if printf '%s' "$NOTES_TEXT" | grep -qiE '^Security-relevant:[ \t]*(yes|true)[ \t]*$'; then
+            security=true
+          fi
+          # Multiline output form: a bare `echo` would stop at the first newline
+          # and the manifest would record half a message.
+          {
+            echo "breaking=$breaking"
+            echo "notes=$notes"
+            echo "security=$security"
+            echo "trailers<<TRAILERS_EOF"
+            printf '%s\n' "$NOTES_TEXT"
+            echo "TRAILERS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  # --------------------------------------------------------------------- image
+  image:
+    name: Build the SFU container image
+    needs: validate
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      # Shallow: this job reads the working tree into a build context and needs
+      # no history; identity facts come from `validate`.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: build-id
+        name: What build is this
+        run: |
+          set -euo pipefail
+          echo "build_time=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+
+      # Three tags on one digest, mirroring the server's naming under an
+      # `sfu-` prefix: the version is the release, `sfu-sha-<commit>` is how
+      # you say "that one" afterwards, and only the highest version may move
+      # the rolling `sfu-latest`.
+      - id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=sfu-v${{ needs.validate.outputs.version }}
+            type=raw,value=sfu-sha-${{ needs.validate.outputs.commit }}
+            type=raw,value=sfu-latest,enable=${{ needs.validate.outputs.moves_latest }}
+
+      - id: push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: Dockerfile.sfu
+          push: ${{ inputs.dry_run != true }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            chat.telium.release.breaking=${{ needs.validate.outputs.breaking }}
+            chat.telium.release.notes=${{ needs.validate.outputs.notes }}
+          # Without these the image's telium-sfu reports an unidentified build
+          # and the relay's own checker refuses to conclude it is current.
+          build-args: |
+            TELIUM_BUILD_COMMIT=${{ needs.validate.outputs.commit }}
+            TELIUM_BUILD_COMMIT_TIME=${{ needs.validate.outputs.commit_time }}
+            TELIUM_BUILD_TIME=${{ steps.build-id.outputs.build_time }}
+          cache-from: type=gha,scope=sfu
+          cache-to: type=gha,mode=max,ignore-error=true,scope=sfu
+          sbom: true
+          provenance: mode=max
+
+  # -------------------------------------------------------------------- native
+  # The same release, built for relays that have no Docker -- the install.sh
+  # path, which is the majority of one-box deployments.
+  #
+  # Statically linked against musl rather than reusing the image's glibc
+  # binary, for the same reason the server's native artifact is: the image's
+  # binary needs bookworm's glibc or newer, and that silently excludes older
+  # hosts. Two architectures: x86_64 for the VPS majority, aarch64 for the
+  # Raspberry Pi class. LiveKit's own binary is deliberately NOT in the
+  # tarball: it is the official upstream release, installed and upgraded
+  # separately (sfu/install.sh), and vendoring its build here would be a
+  # second release pipeline to keep honest for no gain.
+  native:
+    name: Build native artifacts (${{ matrix.arch }})
+    needs: validate
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runs-on: ubuntu-latest
+          - arch: aarch64
+            runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+
+      # Pre-created by the runner user so that the container's root can write
+      # into them and the cache step can still traverse and tar what lands there.
+      - name: Make the cache directories
+        run: mkdir -p .sfu-cargo-registry .sfu-cargo-target
+
+      - name: Restore the Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: sfu
+          cache-directories: |
+            .sfu-cargo-registry
+            .sfu-cargo-target
+          # The two matrix legs are different machines building different
+          # objects; without the arch in the key they would thrash one shared
+          # entry, each save overwriting the other's restore.
+          prefix-key: sfu-native-${{ matrix.arch }}
+          cache-on-failure: true
+
+      - name: Build the native artifact
+        env:
+          COMMIT: ${{ needs.validate.outputs.commit }}
+          COMMIT_TIME: ${{ needs.validate.outputs.commit_time }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          BUILD_TIME="$(date -u +%s)"
+          # Bind mounts rather than named volumes: on an ephemeral runner a
+          # named volume dies with the machine, while a workspace directory is
+          # something the cache step above can take with it.
+          docker run --rm \
+            -v "$PWD:/src" -w /src \
+            -v "$PWD/.sfu-cargo-registry:/usr/local/cargo/registry" \
+            -v "$PWD/.sfu-cargo-target:/target" \
+            -e TELIUM_BUILD_COMMIT="$COMMIT" \
+            -e TELIUM_BUILD_COMMIT_TIME="$COMMIT_TIME" \
+            -e TELIUM_BUILD_TIME="$BUILD_TIME" \
+            -e NATIVE_ARCH="$ARCH" \
+            -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+            -e CARGO_TARGET_DIR=/target \
+            rust:1-slim-bookworm bash -euc '
+              triple="${NATIVE_ARCH}-unknown-linux-musl"
+              apt-get update -qq
+              apt-get install -y -qq --no-install-recommends musl-tools >/dev/null
+              rustup target add "$triple"
+              u="${triple//-/_}"
+              export RUSTFLAGS="-C target-feature=+crt-static"
+              export "CC_$u=musl-gcc"
+              export "AR_$u=ar"
+              export "CARGO_TARGET_${u^^}_LINKER=musl-gcc"
+              cargo build --release --locked --manifest-path sfu/Cargo.toml \
+                --target "$triple"
+              install -Dm755 "/target/$triple/release/telium-sfu" \
+                "/src/.sfu-native/stage/$NATIVE_ARCH/telium-sfu"
+              chown -R "$HOST_UID:$HOST_GID" /src/.sfu-native /usr/local/cargo/registry /target
+            '
+          # Two members at the root, no wrapper directory: the updater unpacks
+          # into a staging directory it created for the purpose. The checksum
+          # file is in `sha256sum -c` format.
+          ASSET="telium-sfu-linux-${ARCH}.tar.gz"
+          cp sfu/sfu.example.toml ".sfu-native/stage/$ARCH/"
+          tar -C ".sfu-native/stage/$ARCH" -czf ".sfu-native/$ASSET" telium-sfu sfu.example.toml
+          ( cd .sfu-native && sha256sum "$ASSET" > "$ASSET.sha256" )
+          rm -rf .sfu-native/stage
+
+      # `include-hidden-files`: since v4.4.0 the upload skips hidden files and
+      # directories, and the staging directory here is `.sfu-native`.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sfu-native-${{ matrix.arch }}
+          path: |
+            .sfu-native/telium-sfu-linux-*.tar.gz
+            .sfu-native/telium-sfu-linux-*.tar.gz.sha256
+          if-no-files-found: error
+          include-hidden-files: true
+
+  # ------------------------------------------------------------------- publish
+  publish:
+    name: Publish the release
+    needs: [validate, image, native]
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: the record step commits `deploy/sfu-releases.json` to
+      # `main` and reads the protocol constants out of the released commit.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      # `download-artifact@v4` is the one unpinned action by documented
+      # exception.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sfu-native-*
+          merge-multiple: true
+          path: .sfu-native
+
+      # One file an operator can check both architectures against.
+      - name: Assemble SHA256SUMS-sfu
+        run: ( cd .sfu-native && sha256sum telium-sfu-linux-*.tar.gz > SHA256SUMS-sfu )
+
+      - name: Stop before publishing
+        if: inputs.dry_run == true
+        run: |
+          echo "### Dry run" >> "$GITHUB_STEP_SUMMARY"
+          echo "Validated $TAG and built the SFU image and both artifacts. Nothing was published." >> "$GITHUB_STEP_SUMMARY"
+          echo "dry run: stopping before publish"
+
+      - id: publish
+        name: Publish the release
+        if: inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ needs.validate.outputs.commit }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          PREVIOUS: ${{ needs.validate.outputs.previous }}
+          SECURITY: ${{ needs.validate.outputs.security }}
+          BREAKING: ${{ needs.validate.outputs.breaking }}
+          UPGRADE_NOTES: ${{ needs.validate.outputs.notes }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          NOTES="$(mktemp)"
+          {
+            echo "Telium SFU $VERSION."
+            echo
+            echo "Built once, from \`${COMMIT:0:12}\` on \`main\`. There is one artifact per"
+            echo "release: this tag's image and these tarballs are what every relay moves to."
+            echo
+            if [ "$SECURITY" = "true" ]; then
+              echo "> **This release is flagged security-relevant.** A relay that misses it"
+              echo "> reports it as urgent immediately, not after the usual delay."
+              echo
+            fi
+            if [ "$BREAKING" = "true" ]; then
+              echo "> **This release needs a person.** An unattended relay stages it and"
+              echo "> waits; \`update-sfu-native.sh --now\` takes it when you have read the notes."
+              echo
+            fi
+            if [ -n "$UPGRADE_NOTES" ]; then
+              echo "**Upgrade notes:** $UPGRADE_NOTES"
+              echo
+            fi
+            echo "### Artifacts"
+            echo
+            echo "- Container image: \`ghcr.io/$GITHUB_REPOSITORY:sfu-v$VERSION\` (\`$DIGEST\`)"
+            echo "- Native x86_64 and aarch64 tarballs, with \`SHA256SUMS-sfu\`"
+            echo
+            echo "### Rollback"
+            echo
+            echo "The relay keeps no database, so the previous binary remains a working undo:"
+            echo "the updater leaves it beside the install as \`telium-sfu.previous\`."
+            echo
+            echo "### Updating"
+            echo
+            echo "Relays update themselves from the release channel. \`deploy/update-sfu.sh\`"
+            echo "(compose) and \`deploy/update-sfu-native.sh\` (native) both read"
+            echo "[deploy/sfu-releases.json](https://github.com/$GITHUB_REPOSITORY/blob/main/deploy/sfu-releases.json),"
+            echo "drain live calls, and move to the highest release."
+            if [ -n "$PREVIOUS" ]; then
+              echo
+              echo "**Full changelog:** [\`$PREVIOUS...$TAG\`](https://github.com/$GITHUB_REPOSITORY/compare/$PREVIOUS...$TAG)"
+            fi
+          } > "$NOTES"
+
+          # Re-running a release replaces its assets rather than being refused,
+          # which is what makes a repair possible. `--latest=false`: the
+          # `releases/latest` slot belongs to the desktop train, whose older
+          # clients still read it.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" .sfu-native/telium-sfu-linux-*.tar.gz .sfu-native/*.sha256 .sfu-native/SHA256SUMS-sfu \
+              --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "Telium SFU $VERSION" --notes-file "$NOTES" --latest=false
+          else
+            gh release create "$TAG" \
+              .sfu-native/telium-sfu-linux-*.tar.gz .sfu-native/*.sha256 .sfu-native/SHA256SUMS-sfu \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Telium SFU $VERSION" \
+              --notes-file "$NOTES" \
+              --verify-tag \
+              --latest=false
+          fi
+          echo "published $TAG"
+          {
+            echo "### Published"
+            echo
+            echo "**Telium SFU $VERSION** at \`$TAG\`"
+            echo
+            echo '```'
+            echo "ghcr.io/$GITHUB_REPOSITORY:sfu-v$VERSION"
+            echo "$DIGEST"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # One URL that never moves, so installers and docs can name a path
+      # without knowing the version. Only the highest version may move it.
+      - name: Point sfu-latest at this release
+        if: inputs.dry_run != true && needs.validate.outputs.moves_latest == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          COMMIT: ${{ needs.validate.outputs.commit }}
+        run: |
+          set -euo pipefail
+          NOTES="$(mktemp)"
+          cat > "$NOTES" <<'EOF'
+          This release is a stable download address, not a version.
+
+          It carries the newest relay build — the native x86_64 and aarch64
+          tarballs, their checksums, and `SHA256SUMS-sfu`. The tag never moves;
+          each `sfu-v*` release copies its files here.
+
+          **It is not where you choose a version from.** Release notes, the
+          image digest and older versions live on the versioned `sfu-v*`
+          releases, and `deploy/sfu-releases.json` names those tag-scoped URLs,
+          so a relay that updates from here still downloads immutable bytes.
+          EOF
+          if gh release view sfu-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload sfu-latest .sfu-native/telium-sfu-linux-*.tar.gz .sfu-native/*.sha256 .sfu-native/SHA256SUMS-sfu \
+              --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit sfu-latest --repo "$GITHUB_REPOSITORY" \
+              --title "Telium SFU — latest" --notes-file "$NOTES" --latest=false
+          else
+            # The tag is made through the refs API rather than the release's
+            # `--target`, which would demand `workflows: write` (cli/cli#9514).
+            if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/sfu-latest" >/dev/null 2>&1; then
+              gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" \
+                -f ref=refs/tags/sfu-latest -f sha="$COMMIT" >/dev/null
+            fi
+            gh release create sfu-latest \
+              .sfu-native/telium-sfu-linux-*.tar.gz .sfu-native/*.sha256 .sfu-native/SHA256SUMS-sfu \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Telium SFU — latest" \
+              --notes-file "$NOTES" \
+              --latest=false
+          fi
+          echo "sfu-latest now points at $VERSION"
+
+      # The honest answer to "what is the current relay release?", written by
+      # the job that just published it and committed back to `main`, where
+      # every relay reads it over plain HTTPS without a token.
+      - id: record
+        name: Record the release
+        if: inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ needs.validate.outputs.commit }}
+          COMMIT_TIME: ${{ needs.validate.outputs.commit_time }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          SECURITY: ${{ needs.validate.outputs.security }}
+          BREAKING: ${{ needs.validate.outputs.breaking }}
+          UPGRADE_NOTES: ${{ needs.validate.outputs.notes }}
+          TRAILERS: ${{ needs.validate.outputs.trailers }}
+        run: |
+          set -euo pipefail
+          # The run is on a tag ref (detached). The manifest lives on `main`, so
+          # the commit-back happens on a branch checkout of it.
+          git fetch --quiet origin main
+          git checkout --quiet -B main origin/main
+          git config user.name  'telium-release'
+          git config user.email 'telium-release@users.noreply.github.com'
+
+          # The protocol window, read from the released commit rather than the
+          # working tree: `main` may have moved past the tag, and the window a
+          # release announces is the one its own code enforces. This is what
+          # replaces the lockstep tag train: a release that raises the floor
+          # past an older relay makes that relay's check read "required".
+          # `[[:space:]]`, not `\s`: this is a POSIX BRE.
+          constant() {
+            git show "$COMMIT:telium-protocol/src/compat.rs" 2>/dev/null \
+              | sed -n "s/^pub const $1:[[:space:]]*u32[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p" \
+              | head -1 || true
+          }
+          PROTOCOL="$(constant PROTOCOL_VERSION)"
+          MIN_PROTOCOL="$(constant MIN_SUPPORTED_PROTOCOL_VERSION)"
+
+          # Artifact URLs are version-scoped on purpose: a release's download
+          # must never be replaced or pruned out from under a relay that pinned it.
+          BASE="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
+          SHA_X86="$(sed -n 's/^\([0-9a-f]*\)  telium-sfu-linux-x86_64\.tar\.gz$/\1/p' .sfu-native/SHA256SUMS-sfu)"
+          SHA_ARM="$(sed -n 's/^\([0-9a-f]*\)  telium-sfu-linux-aarch64\.tar\.gz$/\1/p' .sfu-native/SHA256SUMS-sfu)"
+          SIZE_X86="$(stat -c %s .sfu-native/telium-sfu-linux-x86_64.tar.gz)"
+          SIZE_ARM="$(stat -c %s .sfu-native/telium-sfu-linux-aarch64.tar.gz)"
+
+          node scripts/release-sfu.mjs record \
+            --tag "$TAG" \
+            --commit "$COMMIT" \
+            --released-at "$COMMIT_TIME" \
+            --summary "$(git log -1 --format=%s "$COMMIT")" \
+            --image "$DIGEST" \
+            --protocol "${PROTOCOL:-}" \
+            --min-protocol "${MIN_PROTOCOL:-}" \
+            --trailers "$TRAILERS" \
+            --artifact-x86_64-url "$BASE/telium-sfu-linux-x86_64.tar.gz" \
+            --artifact-x86_64-sha256 "$SHA_X86" \
+            --artifact-x86_64-size "$SIZE_X86" \
+            --artifact-aarch64-url "$BASE/telium-sfu-linux-aarch64.tar.gz" \
+            --artifact-aarch64-sha256 "$SHA_ARM" \
+            --artifact-aarch64-size "$SIZE_ARM" \
+            --manifest deploy/sfu-releases.json
+
+          if git diff --quiet -- deploy/sfu-releases.json; then
+            echo "already recorded"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      # Signs after the manifest is written and before it is committed, so the
+      # signature covers the bytes that actually land on `main`. The seed
+      # never reaches a command line -- argv is readable by every other
+      # process on the machine.
+      - name: Sign the release manifest
+        if: steps.record.outputs.changed == 'true' && vars.RELEASE_SIGNING_ENABLED == 'true'
+        env:
+          TELIUM_RELEASE_SIGNING_KEY: ${{ secrets.TELIUM_RELEASE_SIGNING_KEY }}
+          TELIUM_RELEASE_PUBLIC_KEY: ${{ vars.TELIUM_RELEASE_PUBLIC_KEY }}
+          TELIUM_RELEASE_KEY_ID: ${{ vars.TELIUM_RELEASE_KEY_ID }}
+        run: node scripts/sign-sfu-release-manifest.mjs sign deploy/sfu-releases.json
+
+      # A signature covers the exact bytes of the manifest. If signing is off
+      # and the manifest changed, the `.sig` committed with the previous
+      # release now covers different bytes, and every relay that pinned the
+      # public key would refuse the new manifest. Committing no signature is
+      # honest; committing a stale one is a lie the verifier will catch.
+      - name: Drop a signature this change would invalidate
+        if: steps.record.outputs.changed == 'true' && vars.RELEASE_SIGNING_ENABLED != 'true'
+        run: |
+          set -euo pipefail
+          if [ -f deploy/sfu-releases.json.sig ]; then
+            rm -f deploy/sfu-releases.json.sig
+            echo "removed the stale deploy/sfu-releases.json.sig; this manifest is published unsigned"
+          fi
+
+      - name: Commit the release record
+        if: steps.record.outputs.changed == 'true'
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          COMMIT: ${{ needs.validate.outputs.commit }}
+        run: |
+          set -euo pipefail
+          paths=()
+          for p in deploy/sfu-releases.json deploy/sfu-releases.json.sig; do
+            if [ -e "$p" ] || git ls-files --error-unmatch -- "$p" >/dev/null 2>&1; then
+              paths+=("$p")
+            fi
+          done
+          # Guarded: `git add -A --` with no path sweeps the untracked
+          # `.sfu-native/` tarballs into the commit.
+          if [ ${#paths[@]} -eq 0 ]; then
+            echo "::error::neither deploy/sfu-releases.json nor its signature exists; refusing to commit"
+            exit 1
+          fi
+          git add -A -- "${paths[@]}"
+          git commit -m "Record sfu $VERSION at ${COMMIT:0:12}"
+          # A rebase retry: the gate that runs on the push to main may itself
+          # have committed, and a machine-written list must not lose an entry
+          # to a race with another machine.
+          for attempt in 1 2 3; do
+            if git push; then exit 0; fi
+            echo "push rejected (attempt $attempt); rebasing onto origin/main and retrying"
+            git pull --rebase --autostash origin main
+          done
+          echo "::error::could not commit the release record after three attempts"
+          exit 1

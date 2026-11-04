@@ -1,0 +1,59 @@
+# The SFU compose stack. Lives at /opt/telium-sfu/compose.yml on the box
+# (installed there by deploy/install-sfu.sh as compose.sfu.yml's contents);
+# kept here so that what is running is reviewable in the same place as what
+# is built, and so update-sfu.sh can reconcile a release's copy against the
+# operator's the way update.sh does for the server.
+#
+# One service. Unlike the server stack there is no tunnel and no second
+# container: the image already carries the livekit-server the SFU spawns and
+# supervises, and everything public goes through the host's nginx, which
+# install-sfu.sh (or the dashboard's setup wizard on a native install)
+# configures for TLS.
+
+name: telium-sfu
+
+services:
+  sfu:
+    # The rolling release tag, moved only by the highest `sfu-v*` release.
+    # `update-sfu.sh` pulls this on its timer and recreates the container when
+    # the digest changes; a pin in update-sfu.conf overrides it with a
+    # specific `sfu-v<version>` tag or digest.
+    image: ghcr.io/telium-chat/telium:sfu-latest
+    restart: unless-stopped
+
+    # The relay drains on request -- SIGUSR1 from update-sfu.sh refuses new
+    # joins and /health says so -- but the stop itself still has to wait out
+    # whatever is in flight when the container is recreated. Ten seconds
+    # (Docker's default) is shorter than a session POST behind a slow mobile
+    # link; thirty is not a number anyone has to tune.
+    stop_grace_period: 30s
+
+    ports:
+      # The SFU's control/auth surface (/health, /session, /control). nginx
+      # proxies this at https://<sfu-domain>/; the published port is for
+      # probes on the box and for deployments without nginx.
+      - "7890:7890"
+      # The admin dashboard. Keep this off the public internet: publish it
+      # only on loopback, or drop this line and reach it over an SSH tunnel.
+      # install-sfu.sh binds it to 127.0.0.1 for that reason.
+      - "127.0.0.1:7891:7891"
+      # LiveKit signaling (ws) and its TCP fallback. Browsers reach the
+      # signal endpoint through the public_url's own TLS (livekit.<domain>);
+      # publishing here covers direct/LAN use and the healthcheck.
+      - "7880:7880"
+      - "7881:7881"
+      # Embedded TURN, and the UDP media range LiveKit advertises.
+      - "3478:3478/udp"
+      - "50000-60000:50000-60000/udp"
+
+    volumes:
+      # The operator's config, read-only to the container: sfu.toml is never
+      # written by the updater, by the release, or by the relay itself.
+      - ./sfu.toml:/etc/telium/sfu.toml:ro
+      # Where the SFU writes livekit.yaml, the generated API keys, and the
+      # usage ledger. A named volume, not a bind: its contents are runtime
+      # state, not operator files, and must survive `compose down`.
+      - sfu-data:/var/lib/telium-sfu
+
+volumes:
+  sfu-data:

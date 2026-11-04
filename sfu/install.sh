@@ -119,7 +119,16 @@ fi
 # these empty, causing telium-sfu to generate a new pair every boot. If an old
 # livekit-server survived a restart, its old key no longer matched newly minted
 # client tokens and LiveKit reported "invalid API key".
-if grep -q '^api_key = "" <<'EOF'
+if grep -q '^api_key = ""' "$CONFIG"; then
+  lk_key="telium$(openssl rand -hex 8)"
+  lk_secret="$(openssl rand -hex 32)"
+  sed -i "s|^api_key = .*|api_key = \"$lk_key\"|" "$CONFIG"
+  sed -i "s|^api_secret = .*|api_secret = \"$lk_secret\"|" "$CONFIG"
+  chown telium-sfu:telium-sfu "$CONFIG"
+  echo "generated LiveKit API credentials into $CONFIG"
+fi
+
+cat > /etc/systemd/system/telium-sfu.service <<'EOF'
 [Unit]
 Description=Telium SFU
 After=network-online.target nginx.service
@@ -140,8 +149,7 @@ PrivateTmp=true
 WantedBy=multi-user.target
 EOF
 
-if [[ ! -f /var/lib/telium-sfu/state/admin-password && ! -e /etc/nginx/sites-enabled/telium-sfu.conf ]]; then
-  cat > /etc/nginx/sites-available/telium-sfu-bootstrap.conf <<'EOF'
+if [[ ! -f /var/lib/telium-sfu/state/admin-password && ! -e /etc/nginx/sites-enabled/telium-sfu.conf ]]; then  cat > /etc/nginx/sites-available/telium-sfu-bootstrap.conf <<'EOF'
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
@@ -172,6 +180,23 @@ systemctl enable --now nginx
 systemctl reload nginx
 systemctl enable telium-sfu
 systemctl restart telium-sfu
+
+# The self-updater: check the signed release feed on a timer, drain live
+# calls, swap the binary. Without it this install updates only by being run
+# again, and a relay whose operators rebuild by hand is a relay that stays on
+# the release it started with. The conf is installed only when absent, so a
+# re-run never clobbers an operator's pin or window.
+DEPLOY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/deploy"
+if [[ -f "$DEPLOY_DIR/update-sfu-native.sh" ]]; then
+  install -d -m 0755 /etc/telium /usr/local/sbin
+  install -m 0755 "$DEPLOY_DIR/update-sfu-native.sh" /usr/local/sbin/telium-update-sfu-native
+  [[ -f /etc/telium/update-sfu.conf ]] || install -m 0644 "$DEPLOY_DIR/update-sfu.conf" /etc/telium/update-sfu.conf
+  install -m 0644 "$DEPLOY_DIR/telium-sfu-update-native.service" /etc/systemd/system/telium-sfu-update-native.service
+  install -m 0644 "$DEPLOY_DIR/telium-sfu-update-native.timer" /etc/systemd/system/telium-sfu-update-native.timer
+  systemctl daemon-reload
+  systemctl enable --now telium-sfu-update-native.timer
+  echo "Self-updates enabled (telium-sfu-update-native.timer); mode and pin live in /etc/telium/update-sfu.conf"
+fi
 
 echo "[6/7] Opening required ports when UFW is active..."
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then

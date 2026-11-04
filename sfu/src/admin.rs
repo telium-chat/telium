@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -17,6 +18,7 @@ use tokio::sync::{Mutex, RwLock};
 use crate::config::{SfuConfig, TrustedOrigin};
 use crate::livekit::LivekitManager;
 use crate::trust::TrustedKeys;
+use crate::updates;
 
 const SESSION_TTL: Duration = Duration::from_secs(43_200);
 
@@ -72,6 +74,8 @@ pub struct AdminState {
     trust: Arc<RwLock<TrustedKeys>>,
     usage: Arc<crate::usage::Usage>,
     voice_sessions: Arc<crate::sessions::SessionRegistry>,
+    updates: Arc<RwLock<updates::Status>>,
+    drain_until_ms: Arc<AtomicI64>,
 }
 
 impl AdminState {
@@ -82,6 +86,8 @@ impl AdminState {
         trust: Arc<RwLock<TrustedKeys>>,
         usage: Arc<crate::usage::Usage>,
         voice_sessions: Arc<crate::sessions::SessionRegistry>,
+        updates: Arc<RwLock<updates::Status>>,
+        drain_until_ms: Arc<AtomicI64>,
     ) -> anyhow::Result<Self> {
         let state_dir = PathBuf::from(&cfg.admin.state_dir);
         std::fs::create_dir_all(&state_dir)?;
@@ -97,6 +103,8 @@ impl AdminState {
             trust,
             usage,
             voice_sessions,
+            updates,
+            drain_until_ms,
         })
     }
 
@@ -154,6 +162,7 @@ pub fn router(state: Arc<AdminState>) -> Router {
         .route("/admin/logout", post(logout))
         .route("/admin/setup", get(setup_page).post(apply_setup))
         .route("/admin/status", get(status_page))
+        .route("/admin/version", get(version))
         .route("/admin/trust", get(trust_page).post(add_trust))
         .route("/admin/trust/remove", post(remove_trust))
         .route("/admin/limits/block", post(block_origin))
@@ -270,6 +279,18 @@ async fn logout(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Res
     response
 }
 
+/// `GET /admin/version`: machine-readable release/update state, for scripts
+/// and for the operator who wants the notes without the HTML. Same document
+/// shape the server serves at `/_telium/v1/admin/version`.
+async fn version(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {
+    if !authenticated(&state, &headers).await {
+        return (StatusCode::UNAUTHORIZED, "sign in at /admin/login").into_response();
+    }
+    let status = state.updates.read().await.clone();
+    let cfg = state.cfg.updates.clone();
+    axum::Json(updates::version_document(&status, &cfg, now_ms())).into_response()
+}
+
 async fn status_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Response {
     if !authenticated(&state, &headers).await {
         return Redirect::to("/admin/login").into_response();
@@ -309,6 +330,40 @@ async fn status_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) -
             table
         }
     };
+    let draining = {
+        let until = state.drain_until_ms.load(Ordering::Relaxed);
+        until > 0 && until > now_ms()
+    };
+    let update_status = state.updates.read().await.clone();
+    let build = updates::build();
+    let now = now_ms();
+    let update_severity = updates::severity(&update_status, now, &state.cfg.updates);
+    let (update_state, update_class) = match &update_status.assessment {
+        updates::Assessment::Disabled => ("disabled", "muted"),
+        updates::Assessment::Current => ("up to date", "good"),
+        updates::Assessment::Unknown(_) => ("unknown", "muted"),
+        updates::Assessment::Behind { .. } => match update_severity {
+            updates::Severity::Urgent => ("behind", "bad"),
+            _ => ("behind", "muted"),
+        },
+    };
+    let update_detail = if matches!(update_status.assessment, updates::Assessment::Disabled) {
+        "updates.check = false; this relay is not told when it falls behind.".to_string()
+    } else {
+        updates::describe(&update_status, now).unwrap_or_default()
+    };
+    let last_checked = match update_status.last_checked_ms {
+        Some(ms) => {
+            let mins = (now - ms).max(0) / 60_000;
+            if mins < 1 { "just now".to_string() } else if mins < 60 { format!("{mins} min ago") } else { format!("{} h ago", mins / 60) }
+        }
+        None => "never".to_string(),
+    };
+    let check_line = if state.cfg.updates.check {
+        format!("last checked: {last_checked}; every {} s", state.cfg.updates.check_interval_secs)
+    } else {
+        "off".to_string()
+    };
     let blocked_html = if current.limits.blocked_origins.is_empty() {
         "<p class=\"muted\">None.</p>".to_string()
     } else {
@@ -336,6 +391,11 @@ async fn status_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) -
           <section><h3>Right now</h3><p>{rooms} room(s), {participants} participant(s)</p><p>Admission: <strong>{admission}</strong></p></section>
           <section><h3>Transfer (estimated)</h3><p>{transfer}</p><p class="muted">The estimate assumes every declared video layer flows; it errs high on purpose. Budget: {budget}</p></section>
         </div>
+        <h2>Updates</h2>
+        <div class="grid">
+          <section><h3>Release</h3><p><code>{version}</code> · build <code>{commit}</code></p><p>State: <strong class="{update_class}">{update_state}</strong></p></section>
+          <section><h3>Check</h3><p>{check_line}</p><p class="muted">{update_detail}</p></section>
+        </div>
         <h3>Per-guild usage</h3>
         {per_origin}
         <h3>Blocked guild servers</h3>
@@ -362,9 +422,15 @@ async fn status_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) -
         origins = current.trust.origins.len(),
         rooms = rooms,
         participants = participants,
-        admission = if accepting { "accepting" } else { "not accepting" },
+        admission = if draining { "draining for update" } else if accepting { "accepting" } else { "not accepting" },
         transfer = transfer_line,
         budget = budget_line,
+        version = esc(build.version),
+        commit = esc(updates::short_commit(build.commit)),
+        update_state = update_state,
+        update_class = update_class,
+        check_line = check_line,
+        update_detail = esc(&update_detail),
         per_origin = per_origin,
         blocked = blocked_html,
     );

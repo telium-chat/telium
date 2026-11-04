@@ -178,7 +178,16 @@ async fn vet_destination(url: &Url, policy: AddressPolicy) -> Result<SocketAddr>
     Ok(addrs[0])
 }
 
-pub async fn get_json(url: &str, policy: AddressPolicy, max_bytes: usize) -> Result<Value> {
+/// Hardened GET: scheme and address vetting first, no redirects, DNS pinned
+/// to the vetted address, streamed under `max_bytes`. Returns the raw bytes —
+/// callers that need a document verify or parse them themselves (the release
+/// manifest must be signature-checked over exact bytes before JSON parsing).
+pub async fn get_bytes(
+    url: &str,
+    policy: AddressPolicy,
+    max_bytes: usize,
+    total_timeout: Duration,
+) -> Result<Vec<u8>> {
     let parsed = Url::parse(url)?;
     match parsed.scheme() {
         "https" => {}
@@ -191,10 +200,12 @@ pub async fn get_json(url: &str, policy: AddressPolicy, max_bytes: usize) -> Res
     let host = parsed.host_str().unwrap_or_default().to_string();
 
     let mut builder = reqwest::Client::builder()
-        .timeout(TOTAL_TIMEOUT)
+        .timeout(total_timeout)
         .connect_timeout(CONNECT_TIMEOUT)
         // A discovery document does not redirect; the peer is the party we are constraining.
-        .redirect(reqwest::redirect::Policy::none());
+        .redirect(reqwest::redirect::Policy::none())
+        // Bare product name: no version, no host. What we fetch says nothing about who is fetching.
+        .user_agent("telium-sfu");
 
     // Pin the vetted address, or reqwest re-resolves and DNS rebinding wins.
     if !host.is_empty() && host.parse::<IpAddr>().is_err() {
@@ -203,15 +214,20 @@ pub async fn get_json(url: &str, policy: AddressPolicy, max_bytes: usize) -> Res
 
     let resp = builder.build()?.get(parsed.clone()).send().await?.error_for_status()?;
 
-    // Stream with a cap rather than `.json()`, which buffers whatever the peer sends.
+    // Stream with a cap rather than `.bytes()`, which buffers whatever the peer sends.
     let mut body: Vec<u8> = Vec::new();
     let mut resp = resp;
     while let Some(chunk) = resp.chunk().await? {
         if body.len() + chunk.len() > max_bytes {
-            bail!("discovery document exceeded {max_bytes} bytes");
+            bail!("document exceeded {max_bytes} bytes");
         }
         body.extend_from_slice(&chunk);
     }
+    Ok(body)
+}
+
+pub async fn get_json(url: &str, policy: AddressPolicy, max_bytes: usize) -> Result<Value> {
+    let body = get_bytes(url, policy, max_bytes, TOTAL_TIMEOUT).await?;
     Ok(serde_json::from_slice(&body)?)
 }
 

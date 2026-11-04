@@ -76,6 +76,42 @@ which trusts any origin that publishes one. Without one of those it answers
 every `/session` with a 403 and calls fail where they used to fall back to a
 mesh — the first thing to check if voice breaks the day this region is added.
 
+### The SFU's own updates
+
+The relay updates itself, on its own release train, the same way the server
+does: a `sfu-v<major>.<minor>.<patch>` tag builds the image and the native
+tarballs once, records the release into `deploy/sfu-releases.json` (committed
+back to `main`, ed25519-signed with the statement prefix
+`telium-sfu-release-manifest-v1`), and the relay's checker reads that list and
+nags when it is behind. Decoupled from `server-v*` on purpose: a relay is only
+asked to update when the relay changed, and the protocol window each release
+records is what keeps a relay and the servers it serves compatible.
+
+Two apply paths, mirroring the server's:
+
+| | native (no Docker) | compose |
+| --- | --- | --- |
+| script | `update-sfu-native.sh` | `update-sfu.sh` |
+| conf | `/etc/telium/update-sfu.conf` | `/opt/telium-sfu/update-sfu.conf` |
+| timer | `telium-sfu-update-native.timer` (5 min) | `telium-sfu-update.timer` (60 s) |
+| installed by | `sfu/install.sh` | `deploy/install-sfu.sh` |
+
+Both read the same fields (`TELIUM_SFU_UPDATES`, `TELIUM_SFU_PIN` with its
+required reason, `TELIUM_SFU_UPDATE_WINDOW`), both stage and sha256-check the
+release the manifest names, and neither ever writes `sfu.toml`. The one step
+the server's updaters have no equivalent of is the **drain**: before a swap,
+the running relay is signalled (SIGUSR1) to refuse new joins — `/health`
+reports `accepting: false`, so the directory stops routing to it — and the
+script waits within `TELIUM_SFU_DRAIN_TIMEOUT` for rooms to empty before
+restarting. The relay auto-resumes on its own after `updates.drain_max_secs`
+if the updater dies mid-wait; live calls still open when the ceiling hits
+drop, and clients rejoin.
+
+The native path keeps one generation of the binary beside the install
+(`telium-sfu.previous`) and, because a relay has no database to trap a
+downgrade, rolls back to it once if the new release will not start — the one
+place an SFU update is allowed what a server update is not.
+
 ## Files
 
 | on the box | from here | what it is |
