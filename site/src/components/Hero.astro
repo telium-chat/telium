@@ -8,7 +8,7 @@ import { URLS } from '../config'
     <img src="/brand/telium-mark-gradient.svg" alt="" width="700" height="700" class="hero-mark" decoding="async" />
   </div>
   <div class="relative z-10 max-w-[900px]">
-    <h1 class="display rise-in max-w-[18ch]">
+    <h1 class="hero-headline display rise-in max-w-[18ch]">
       <span class="block">Choose your server.</span>
       <span class="block gradient-text">Keep your people.</span>
     </h1>
@@ -30,6 +30,16 @@ import { URLS } from '../config'
 </section>
 
 <style>
+  /* The display utility's tight 0.98 line height cropped the descender of
+     "your" in the background-clipped second line. Reserve painted space
+     inside that gradient span instead of changing every display heading. */
+  .hero-headline {
+    line-height: 1.08;
+  }
+  .hero-headline .gradient-text {
+    padding-bottom: 0.11em;
+  }
+
   /* A single, restrained patch of brand light behind the orbit replaces the
      two fixed background bubbles that used to follow every section. */
   .hero::before {
