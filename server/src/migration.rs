@@ -220,8 +220,7 @@ pub async fn create_claim(
     source_id: &str,
     target_id: &str,
 ) -> ApiResult<(String, i64)> {
-    // Take the write lock before the count; a deferred read-then-write hits SQLITE_BUSY_SNAPSHOT.
-    let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = state.pool.begin().await?;
     let live: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM import_claims \
          WHERE target_id = ? AND used_at IS NULL AND expires_at > ?",
@@ -1677,8 +1676,7 @@ pub async fn mark_media_moved(
 
 pub async fn apply_user_move(state: &AppState, old_id: &str, new_id: &str) -> ApiResult<u64> {
     let mut moved = 0u64;
-    // Take the write lock before reading the memberships; a deferred read-then-write hits SQLITE_BUSY_SNAPSHOT.
-    let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = state.pool.begin().await?;
     let guilds: Vec<String> =
         sqlx::query_scalar("SELECT guild_id FROM members WHERE user_id = ?")
             .bind(old_id)
