@@ -604,6 +604,35 @@ reconnect_grace_secs = "15s"
 # retry_secs = 900
 # timeout_secs = 10
 
+# The public SFU directory. On by default: this server fetches one signed
+# document naming volunteer-operated relays, so a guild owner whose community
+# has no relay of its own can pick one from a vetted list instead of finding
+# an address on their own. Entries are suggestions only -- a relay nobody
+# chose carries nobody's calls -- and guild owners also get three modes in
+# their voice settings: automatic (default), a fixed list, or direct only.
+#
+#   enabled  false switches the fetch off entirely; the directory goes quiet
+#            and guild owners see no suggestions.
+#   url      the signed document. Repoint it at a directory of your own.
+#   key      the publisher's Ed25519 public key, base64. Empty falls back to
+#            the key pinned at compile time (DEFAULT_SFU_DIRECTORY_PUBLIC_KEY
+#            in config.rs). A directory is only ever trusted with the key its
+#            subscriber pinned: with no pin at all it stays silent rather
+#            than trusting an unverified list, and the server says so at
+#            startup.
+#
+# There is no background polling here: the document is fetched a few times a
+# day (refresh_secs, sooner after a failure), and a relay's live health comes
+# from the relay itself at call time, never from this list.
+#
+# [voice.directory]
+# enabled = true
+# url = "https://telium.chat/.well-known/telium/sfu-directory.json"
+# key = ""
+# refresh_secs = 21600
+# retry_secs = 900
+# timeout_secs = 10
+
 # The relay. STUN only tells a client its own public address; it does not carry
 # media, and there are pairs of networks -- symmetric NAT on either side, most
 # corporate and some mobile networks -- where knowing both addresses still buys
