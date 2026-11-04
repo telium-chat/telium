@@ -91,6 +91,7 @@ pub fn health_body(state: &AppState, livekit_ok: bool) -> Value {
     let status = status(state);
     let limits = &state.cfg.limits;
     json!({
+        "service": "telium-sfu",
         "ok": livekit_ok,
         "accepting": status.accepting && livekit_ok,
         "reason": if status.accepting { Value::Null } else { Value::String(status.reason.into()) },

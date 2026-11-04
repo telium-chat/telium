@@ -118,7 +118,9 @@ pub(crate) async fn resolve_region(state: &AppState, guild_id: &str, requested: 
     if let Some(c) = cands.iter().find(|c| healthy(c)) {
         return Some(c.region.clone());
     }
-    cands.into_iter().next().map(|c| c.region)
+    // Never return a known-unavailable relay merely because it is the last
+    // configured one. Existing calls pin it separately; new calls can use mesh.
+    None
 }
 
 /// A guild's voice relay mode, from its settings blob: `automatic` (the

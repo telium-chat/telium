@@ -172,7 +172,7 @@ async fn a_guild_with_no_regions_picks_a_listed_relay() {
     assert_eq!(status, 200, "{follow:?}");
     assert_eq!(follow["voice_server"]["endpoint"], pinned.as_str(), "the pin is honoured");
 
-    // An explicit request for the other listed relay is honoured too.
+    // Even a conflicting explicit request must not split an active call.
     let other = if pinned == RELAY1 { RELAY2 } else { RELAY1 };
     let (status, moved) = s
         .post(
@@ -182,7 +182,7 @@ async fn a_guild_with_no_regions_picks_a_listed_relay() {
         )
         .await;
     assert_eq!(status, 200, "{moved:?}");
-    assert_eq!(moved["voice_server"]["endpoint"], other);
+    assert_eq!(moved["voice_server"]["endpoint"], pinned.as_str(), "active call stays pinned");
 
     // The listing endpoint surfaces the held entries; the named relays do not
     // resolve in a test, so the probe round reports them unreachable.
@@ -203,6 +203,52 @@ async fn a_guild_with_no_regions_picks_a_listed_relay() {
     let declining = telium_server::sfu_directory::probe_relay(&s.state, &host.declining).await;
     assert!(declining.ok, "an HTTP 200 from a relay that is full is still a reachable relay");
     assert_eq!(declining.accepting, Some(false));
+}
+
+
+#[tokio::test]
+async fn a_full_directory_relay_moves_every_participant_as_one_call() {
+    let host = SfuHost::start().await;
+    let (key, public) = keypair();
+    host.serve(document(&key, 1, vec![relay(RELAY1, "One", 1), relay(RELAY2, "Two", 1)]));
+    let (s, alice, bob, _guild, cid) = directory_fixture(&host, &public).await;
+    telium_server::sfu_directory::refresh(&s.state, &host.directory_url, &public).await.unwrap();
+
+    let (_, first) = s.post(
+        &format!("/_telium/v1/channels/{cid}/voice/join"),
+        Some(&alice.token), json!({ "key_package": "pkg" }),
+    ).await;
+    let pinned = first["voice_server"]["region"].as_str().unwrap().to_owned();
+    let other = if pinned == RELAY1 { RELAY2 } else { RELAY1 };
+
+    let (_, second) = s.post(
+        &format!("/_telium/v1/channels/{cid}/voice/join"),
+        Some(&bob.token), json!({ "key_package": "pkg", "region": other }),
+    ).await;
+    assert_eq!(second["voice_server"]["region"], pinned, "a new join cannot split the active room");
+
+    // Both relay.test names are unreachable from this harness, which exercises
+    // the same verified server-side outage path as a 503/full relay.
+    let (status, report) = s.post(
+        &format!("/_telium/v1/channels/{cid}/voice/relay-full"),
+        Some(&bob.token), json!({ "region": pinned }),
+    ).await;
+    assert_eq!(status, 200, "{report}");
+    assert_eq!(report["changed"], true, "{report}");
+
+    let (_, states) = s.get(&format!("/_telium/v1/channels/{cid}/voice"), Some(&alice.token)).await;
+    let users = states["voice_states"].as_array().unwrap();
+    assert_eq!(users.len(), 2);
+    for user in users {
+        assert_eq!(user["region"], other, "both users migrated to the same alternative: {states}");
+    }
+
+    // Once moved, a stale report for the former relay cannot move the call again.
+    let (_, stale) = s.post(
+        &format!("/_telium/v1/channels/{cid}/voice/relay-full"),
+        Some(&bob.token), json!({ "region": pinned }),
+    ).await;
+    assert_eq!(stale["changed"], false, "{stale}");
 }
 
 #[tokio::test]
