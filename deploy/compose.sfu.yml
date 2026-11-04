@@ -29,18 +29,16 @@ services:
     stop_grace_period: 30s
 
     ports:
-      # The SFU's control/auth surface (/health, /session, /control). nginx
-      # proxies this at https://<sfu-domain>/; the published port is for
-      # probes on the box and for deployments without nginx.
-      - "7890:7890"
+      # The SFU control API is HTTP, so only nginx on the host should reach
+      # it. Do not expose this port directly to the public internet.
+      - "127.0.0.1:7890:7890"
       # The admin dashboard. Keep this off the public internet: publish it
       # only on loopback, or drop this line and reach it over an SSH tunnel.
       # install-sfu.sh binds it to 127.0.0.1 for that reason.
       - "127.0.0.1:7891:7891"
-      # LiveKit signaling (ws) and its TCP fallback. Browsers reach the
-      # signal endpoint through the public_url's own TLS (livekit.<domain>);
-      # publishing here covers direct/LAN use and the healthcheck.
-      - "7880:7880"
+      # LiveKit signaling is plain WebSocket inside the container. nginx on
+      # the host terminates TLS (wss://<livekit-domain>/) and proxies here.
+      - "127.0.0.1:7880:7880"
       - "7881:7881"
       # Embedded TURN, and the UDP media range LiveKit advertises.
       - "3478:3478/udp"
