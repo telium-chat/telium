@@ -10,12 +10,14 @@ mod server;
 mod session;
 mod sessions;
 mod trust;
+mod updates;
 mod usage;
 
 #[cfg(test)]
 mod integration;
 
 use std::path::PathBuf;
+use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -48,6 +50,62 @@ enum Command {
     Serve,
     /// Write a starter config to the config path.
     Init,
+    /// Validate the config file and exit non-zero on a problem.
+    ///
+    /// This is the config audit the on-box updater runs with the *staged*
+    /// binary before anything restarts, so a config a new build cannot load
+    /// holds the update instead of breaking the relay.
+    Check,
+    /// Print what this build is, as key=value lines.
+    ///
+    /// For the shell, and specifically for the on-box updater, which has to
+    /// answer "what is running here" without a config file and without
+    /// trusting anything but the binary it asks. Opens nothing, prints four lines.
+    Version,
+    /// Read the release manifest and say what this relay should do about it.
+    ///
+    /// This is the parser half of `deploy/update-sfu-native.sh`, and it lives
+    /// here rather than in the script because the manifest is untrusted input
+    /// with rules about what may influence a decision, and those rules -- the
+    /// size bounds, the shape checks, the sanitising of somebody else's text
+    /// -- already exist in `src/updates.rs`, tested. A bash reimplementation
+    /// would be a second opinion about hostile input, and the day the two
+    /// disagree is the day one of them is wrong about a file that ends in a
+    /// restart.
+    ///
+    /// Nothing here installs, restarts or writes anything: it is a question,
+    /// and the script remains the only thing on the box allowed to act on it.
+    #[command(subcommand)]
+    Updates(UpdatesCommand),
+}
+
+#[derive(Subcommand)]
+enum UpdatesCommand {
+    /// Fetch, verify and compare the release manifest, and print the answer.
+    ///
+    /// Stdout is key=value lines, safe for a shell to read: every value has
+    /// already been through the manifest sanitiser, so no line can forge
+    /// another one. Exit status answers only "did I get a true answer" --
+    /// zero for `action=current` as much as for `action=update`, non-zero
+    /// when the manifest could not be read, verified or parsed, because the
+    /// updater must be able to tell "stay put on purpose" from "I could not
+    /// find out".
+    Check {
+        /// The installable artifact to look for. Defaults to this build's own
+        /// architecture, so the updater script never has to know what CPU it
+        /// is running on. A release that publishes no such artifact still
+        /// answers -- `action=update` with no artifact lines -- and the
+        /// updater words it for the operator.
+        #[arg(long, default_value_t = default_artifact())]
+        artifact: String,
+        /// Aim at this release instead of the channel's newest: a 40-hex
+        /// commit or a version, standing in for the pin in update-sfu.conf.
+        #[arg(long)]
+        pin: Option<String>,
+        /// Read the manifest from here instead of `updates.manifest_url`.
+        #[arg(long)]
+        manifest_url: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -65,12 +123,33 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    if matches!(cli.command, Some(Command::Version)) {
+        return print_version();
+    }
+
+    // The config audit wants *the file*, and wants it to exist: an updater
+    // auditing a config that was never installed should fail loudly, not
+    // approve defaults the running relay may not be using.
+    if matches!(cli.command, Some(Command::Check)) {
+        let cfg = SfuConfig::load(&cli.config)?;
+        cfg.updates.validate()?;
+        println!("ok");
+        return Ok(());
+    }
+
     let cfg = if cli.config.exists() {
         SfuConfig::load(&cli.config)?
     } else {
         tracing::warn!(path = %cli.config.display(), "no sfu.toml; using defaults");
         SfuConfig::default()
     };
+
+    if let Some(Command::Updates(UpdatesCommand::Check { artifact, pin, manifest_url })) = &cli.command {
+        cfg.updates.validate()?;
+        return updates_check(&cfg.updates, artifact.clone(), pin.as_deref(), manifest_url.as_deref()).await;
+    }
+
+    cfg.updates.validate()?;
 
     let trust = TrustedKeys::from_config(&cfg.trust);
     // Never fatal: static keys remain authoritative.
@@ -90,8 +169,16 @@ async fn main() -> anyhow::Result<()> {
         livekit: livekit.clone(),
         sessions: Arc::new(SessionRegistry::new()),
         usage,
+        updates: Arc::new(RwLock::new(if cfg.updates.check {
+            updates::Status::pending()
+        } else {
+            updates::Status::disabled()
+        })),
+        drain_until_ms: Arc::new(AtomicI64::new(0)),
     });
     let bind = state.cfg.bind.clone();
+
+    updates::log_build();
 
     if cfg.limits.enforce {
         tracing::info!(
@@ -104,6 +191,31 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("bitrate sweep disabled ([limits].enforce = false); ceilings are client-side only");
     }
 
+    // The check loop only reports; the apply is the updater script's job.
+    updates::spawn(state.clone());
+
+    // SIGUSR1 asks the relay to drain for an update: refuse new joins, let
+    // live calls finish, resume on its own after updates.drain_max_secs so a
+    // crashed updater cannot wedge admission shut. The update script polls
+    // /health to see the drain take effect and the rooms empty.
+    #[cfg(unix)]
+    {
+        let drain_state = state.clone();
+        tokio::spawn(async move {
+            if let Ok(mut s) =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1())
+            {
+                while s.recv().await.is_some() {
+                    admission::begin_drain(&drain_state);
+                    tracing::warn!(
+                        drain_max_secs = drain_state.cfg.updates.drain_max_secs,
+                        "drain requested (SIGUSR1): refusing new joins until rooms empty or the deadline passes"
+                    );
+                }
+            }
+        });
+    }
+
     if cfg.admin.enabled {
         let admin_state = Arc::new(AdminState::new(
             cfg.clone(),
@@ -112,6 +224,8 @@ async fn main() -> anyhow::Result<()> {
             trust.clone(),
             state.usage.clone(),
             state.sessions.clone(),
+            state.updates.clone(),
+            state.drain_until_ms.clone(),
         )?);
         let admin_bind = cfg.admin.bind.clone();
         if admin_state.needs_bootstrap() {
@@ -175,4 +289,84 @@ async fn shutdown_signal(shutdown_tx: watch::Sender<bool>) {
     }
     tracing::info!("shutting down");
     let _ = shutdown_tx.send(true);
+}
+
+fn print_version() -> anyhow::Result<()> {
+    let b = crate::updates::build();
+    println!("version={}", b.version);
+    println!("commit={}", b.commit);
+    println!(
+        "commit_time={}",
+        if b.commit_time_ms == 0 { String::new() } else { b.commit_time_ms.to_string() }
+    );
+    println!(
+        "built_at={}",
+        if b.built_at_ms == 0 { String::new() } else { b.built_at_ms.to_string() }
+    );
+    Ok(())
+}
+
+fn default_artifact() -> String {
+    format!("sfu-linux-{}", std::env::consts::ARCH)
+}
+
+async fn updates_check(
+    updates: &crate::config::Updates,
+    artifact: String,
+    pin: Option<&str>,
+    manifest_url: Option<&str>,
+) -> anyhow::Result<()> {
+    let mut updates = updates.clone();
+    if let Some(url) = manifest_url {
+        updates.manifest_url = url.to_string();
+    }
+    let manifest = crate::updates::read_manifest(&updates)
+        .await
+        .map_err(|(kind, e)| anyhow::anyhow!("{}: {e}", kind.as_str()))?;
+    let plan = crate::updates::plan(crate::updates::build().commit, &manifest, pin, &artifact);
+
+    println!("ours={}", plan.ours);
+    println!(
+        "action={}",
+        match plan.action {
+            crate::updates::PlanAction::Current => "current",
+            crate::updates::PlanAction::Update => "update",
+            crate::updates::PlanAction::UnidentifiedBuild => "unidentified_build",
+            crate::updates::PlanAction::NotPublished => "not_published",
+        }
+    );
+    if let Some(target) = &plan.target {
+        println!("target_commit={}", target.commit);
+        if let Some(version) = &target.version {
+            println!("target_version={version}");
+        }
+        println!("target_released_at={}", target.released_at);
+        println!("target_security={}", target.security);
+        if !target.summary.is_empty() {
+            println!("summary={}", target.summary);
+        }
+        if let Some((name, a)) = &target.artifact {
+            println!("artifact_name={name}");
+            println!("artifact_url={}", a.url);
+            println!("artifact_sha256={}", a.sha256);
+            if let Some(size) = a.size {
+                println!("artifact_size={size}");
+            }
+        }
+    }
+    if plan.action == crate::updates::PlanAction::Update {
+        println!("missed={}", plan.missed);
+        println!("security={}", plan.missed_security);
+        println!("breaking={}", plan.breaking);
+        if !plan.notes.is_empty() {
+            let joined = plan
+                .notes
+                .iter()
+                .map(|n| n.text.as_str())
+                .collect::<Vec<_>>()
+                .join("; ");
+            println!("notes={}", joined.chars().take(1200).collect::<String>());
+        }
+    }
+    Ok(())
 }

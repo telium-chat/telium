@@ -1,4 +1,5 @@
 
+use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 
 use axum::extract::State;
@@ -15,6 +16,7 @@ use crate::livekit::LivekitManager;
 use crate::session::session_handler;
 use crate::sessions::SessionRegistry;
 use crate::trust::TrustedKeys;
+use crate::updates;
 use crate::usage::Usage;
 
 #[allow(dead_code)]
@@ -25,6 +27,12 @@ pub struct AppState {
     pub sessions: Arc<SessionRegistry>,
     /// The estimated-transfer ledger, shared with admission and the dashboard.
     pub usage: Arc<Usage>,
+    /// Result of the latest release-manifest check, shared with the dashboard.
+    pub updates: Arc<RwLock<updates::Status>>,
+    /// Epoch-ms deadline while draining for an update (refuse new joins, let
+    /// calls finish); 0 = not draining. An Atomic so the admission hot path
+    /// never awaits.
+    pub drain_until_ms: Arc<AtomicI64>,
 }
 
 async fn root(State(_state): State<Arc<AppState>>) -> Json<Value> {

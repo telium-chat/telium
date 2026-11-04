@@ -76,6 +76,102 @@ which trusts any origin that publishes one. Without one of those it answers
 every `/session` with a 403 and calls fail where they used to fall back to a
 mesh — the first thing to check if voice breaks the day this region is added.
 
+### The SFU's own updates
+
+The relay updates itself, on its own release train, the same way the server
+does: a `sfu-v<major>.<minor>.<patch>` tag builds the image and the native
+tarballs once, records the release into `deploy/sfu-releases.json` (committed
+back to `main`, ed25519-signed with the statement prefix
+`telium-sfu-release-manifest-v1`), and the relay's checker reads that list and
+nags when it is behind. Decoupled from `server-v*` on purpose: a relay is only
+asked to update when the relay changed, and the protocol window each release
+records is what keeps a relay and the servers it serves compatible.
+
+Two apply paths, mirroring the server's:
+
+| | native (no Docker) | compose |
+| --- | --- | --- |
+| script | `update-sfu-native.sh` | `update-sfu.sh` |
+| conf | `/etc/telium/update-sfu.conf` | `/opt/telium-sfu/update-sfu.conf` |
+| timer | `telium-sfu-update-native.timer` (5 min) | `telium-sfu-update.timer` (60 s) |
+| installed by | `sfu/install.sh` | `deploy/install-sfu.sh` |
+
+Both read the same fields (`TELIUM_SFU_UPDATES`, `TELIUM_SFU_PIN` with its
+required reason, `TELIUM_SFU_UPDATE_WINDOW`), both stage and sha256-check the
+release the manifest names, and neither ever writes `sfu.toml`. The one step
+the server's updaters have no equivalent of is the **drain**: before a swap,
+the running relay is signalled (SIGUSR1) to refuse new joins — `/health`
+reports `accepting: false`, so the directory stops routing to it — and the
+script waits within `TELIUM_SFU_DRAIN_TIMEOUT` for rooms to empty before
+restarting. The relay auto-resumes on its own after `updates.drain_max_secs`
+if the updater dies mid-wait; live calls still open when the ceiling hits
+drop, and clients rejoin.
+
+The native path keeps one generation of the binary beside the install
+(`telium-sfu.previous`) and, because a relay has no database to trap a
+downgrade, rolls back to it once if the new release will not start — the one
+place an SFU update is allowed what a server update is not.
+
+### Compose SFU setup
+
+The Compose SFU runs as an unprivileged container; **it cannot operate host nginx
+or Certbot**. Unlike the native installer, its dashboard does not provide a
+host setup wizard. Configure the proxy on the host before making a relay public:
+
+1. Create DNS records pointing `sfu.example.com` and
+   `livekit.example.com` to the relay host. Leave them **DNS-only** if using
+   Cloudflare; realtime UDP cannot pass through a standard HTTP tunnel.
+2. Run `sudo ./deploy/install-sfu.sh`, then edit
+   `/opt/telium-sfu/sfu.toml` on the host. Set
+   `livekit.public_url = "https://livekit.example.com"`, and choose
+   `trust.public = true` only if the relay should accept any valid Telium
+   server. Keep `bind = "0.0.0.0:7890"` and
+   `admin.bind = "0.0.0.0:7891"` **inside** the container; Compose
+   publishes those ports on host loopback only.
+3. Configure host nginx to proxy `sfu.example.com` to
+   `http://127.0.0.1:7890`, and `livekit.example.com` to
+   `http://127.0.0.1:7880` with WebSocket `Upgrade` and
+   `Connection` headers. For example, after installing nginx:
+
+   ```nginx
+   server {
+       listen 80;
+       server_name sfu.example.com;
+       location / {
+           proxy_pass http://127.0.0.1:7890;
+           proxy_set_header Host $host;
+           proxy_set_header X-Forwarded-Proto $scheme;
+       }
+   }
+   server {
+       listen 80;
+       server_name livekit.example.com;
+       location / {
+           proxy_pass http://127.0.0.1:7880;
+           proxy_http_version 1.1;
+           proxy_set_header Upgrade $http_upgrade;
+           proxy_set_header Connection "upgrade";
+           proxy_set_header Host $host;
+           proxy_set_header X-Forwarded-Proto $scheme;
+       }
+   }
+   ```
+
+   Validate with `sudo nginx -t`, then use Certbot's nginx plugin to issue
+   HTTPS certificates for both names. Do not publish HTTP ports 7890, 7880,
+   or the admin port 7891 beyond host loopback.
+4. From `/opt/telium-sfu`, run `docker compose up -d`, then
+   `docker compose logs sfu` to inspect startup. Open the admin bootstrap
+   URL through an SSH tunnel to `127.0.0.1:7891`.
+   Firewall rules must permit public HTTPS, LiveKit TCP fallback (7881),
+   TURN UDP (3478), and the configured RTC UDP range (50000–60000).
+5. Confirm `https://sfu.example.com/health` returns
+   `"ok":true` and check that LiveKit signaling is reachable over
+   `wss://livekit.example.com` before listing the relay publicly.
+
+The Compose updater deliberately never rewrites `sfu.toml`; after making
+operator configuration changes, use `docker compose up -d` to apply them.
+
 ## Files
 
 | on the box | from here | what it is |

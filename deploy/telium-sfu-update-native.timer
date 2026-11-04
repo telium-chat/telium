@@ -1,0 +1,18 @@
+[Unit]
+Description=Check for a new native Telium SFU release every five minutes
+Documentation=https://github.com/telium-chat/telium/blob/main/deploy/README.md
+
+[Timer]
+# A couple of minutes after boot, then every five minutes.
+#
+# This check is one HTTPS GET of a file on a CDN plus a local invocation of
+# the relay binary, and five minutes is still "by the time you have noticed"
+# while staying polite to the hosts it asks -- the same cadence the server's
+# native updater keeps, because the two are the same script's shape.
+OnBootSec=120s
+OnUnitActiveSec=300s
+AccuracySec=30s
+Unit=telium-sfu-update-native.service
+
+[Install]
+WantedBy=timers.target

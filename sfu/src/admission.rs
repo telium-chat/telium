@@ -5,7 +5,7 @@
 
 use crate::server::AppState;
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Status {
@@ -16,6 +16,23 @@ pub struct Status {
     pub participants: usize,
     /// True when the trailing-period transfer estimate has crossed 80% of the budget.
     pub near_budget: bool,
+}
+
+/// True while a drain for an update is in force and its deadline has not
+/// passed. Drain is lazy-expiring on purpose: the update script signals, then
+/// polls `/health` until rooms drain or the script gives up, and a crashed
+/// updater must not leave the relay refusing joins forever — past the
+/// deadline the relay resumes accepting without anyone having to intervene.
+pub fn is_draining(state: &AppState) -> bool {
+    let until = state.drain_until_ms.load(Ordering::Relaxed);
+    until > 0 && until > now_ms()
+}
+
+/// Arm (or re-arm) the drain deadline. Called on SIGUSR1.
+pub fn begin_drain(state: &AppState) {
+    let secs = state.cfg.updates.drain_max_secs;
+    let deadline = now_ms() + (secs as i64).saturating_mul(1000);
+    state.drain_until_ms.store(deadline, Ordering::Relaxed);
 }
 
 pub fn status(state: &AppState) -> Status {
@@ -30,7 +47,9 @@ pub fn status(state: &AppState) -> Status {
         0
     };
     let near_budget = budgeted && used * 5 >= limits.transfer_budget_bytes * 4;
-    let (accepting, reason) = if limits.max_rooms > 0 && rooms as u32 >= limits.max_rooms {
+    let (accepting, reason) = if is_draining(state) {
+        (false, "draining for update")
+    } else if limits.max_rooms > 0 && rooms as u32 >= limits.max_rooms {
         (false, "room limit reached")
     } else if limits.max_participants > 0 && participants as u32 >= limits.max_participants {
         (false, "participant limit reached")
@@ -57,16 +76,22 @@ pub fn refuse(state: &AppState, origin: &str, room: &str, identity: &str) -> Opt
     // A participant cap limits new identities; an existing identity must still
     // be able to renew its token or reconnect when the relay is full.
     // A transfer budget stops new calls, but doesn't strand an active call.
+    // A drain for an update stops everything new for the same reason — and,
+    // like the caps, still lets an existing seat renew, so the drain waits
+    // for calls to end rather than stranding a reconnect mid-call.
     let limits = &state.cfg.limits;
     let existing_room = state.sessions.rooms().iter().any(|r| r == room);
     let existing_seat = state.sessions.cap_for(room, identity).is_some();
+    let draining = is_draining(state) && !existing_seat;
     let rooms_full = !existing_room && limits.max_rooms > 0
         && state.sessions.rooms().len() as u32 >= limits.max_rooms;
     let seats_full = !existing_seat && limits.max_participants > 0
         && state.sessions.join_count_all() as u32 >= limits.max_participants;
     let budget_full = !existing_room && limits.transfer_budget_bytes > 0
         && state.usage.total_estimate(now_ms(), limits.transfer_period_days) >= limits.transfer_budget_bytes;
-    let reason = if rooms_full {
+    let reason = if draining {
+        Some("draining for update")
+    } else if rooms_full {
         Some("room limit reached")
     } else if seats_full {
         Some("participant limit reached")

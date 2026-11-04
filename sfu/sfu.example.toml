@@ -141,3 +141,45 @@ enabled = false
 bind = "127.0.0.1:7891"
 state_dir = "./state"
 helper_path = "/usr/local/libexec/telium-sfu-admin-helper"
+
+[updates]
+# Self-update CHECK. This only watches and nags: the relay fetches one signed
+# release manifest (`deploy/sfu-releases.json` in the project repo), compares it
+# against the commit it was built from, and reports in the logs and the
+# dashboard. The actual apply is deploy/update-sfu-native.sh (native installs)
+# or deploy/update-sfu.sh (compose installs) on their systemd timers -- those
+# scripts ask this binary what to do via `telium-sfu updates check`, drain live
+# calls, swap the binary and restart. `check = false` fetches nothing and the
+# relay is never told it has fallen behind.
+check = true
+
+# Where the signed release list lives. Point it at a fork's feed to follow a
+# fork; the signature must still verify against manifest_public_key below.
+manifest_url = "https://raw.githubusercontent.com/telium-chat/telium/main/deploy/sfu-releases.json"
+
+# Poll cadence, retry after a failed check, and per-fetch timeout.
+check_interval_secs = 21600   # 6 h
+retry_secs = 1800             # 30 min
+timeout_secs = 10
+
+# How many days behind before the dashboard says WARN, then URGENT. A missed
+# release flagged security-relevant is URGENT immediately, as is a release that
+# raised the protocol floor past what this build speaks.
+stale_after_days = 14
+urgent_after_days = 45
+
+# Official release-built binaries carry Telium's Ed25519 public release key.
+# The publisher signature is verified automatically (also when this field is
+# empty in a legacy config). For a separately signed fork or custom feed, set
+# its own url-safe base64 public key here. Hand-built binaries without an
+# embedded key should set a trusted key before enabling native auto-updates.
+# manifest_public_key = "<your publisher's public key>"
+
+# Where the detached signature lives. Empty means manifest_url + ".sig".
+manifest_signature_url = ""
+
+# How long a drain for an update holds new joins out (SIGUSR1 from the update
+# script) before the relay resumes accepting on its own. The update script
+# waits inside this ceiling for rooms to empty; the auto-expiry is what stops
+# a crashed updater from leaving the relay refusing joins forever.
+drain_max_secs = 900

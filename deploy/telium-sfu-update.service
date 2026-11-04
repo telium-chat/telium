@@ -1,0 +1,23 @@
+[Unit]
+Description=Update the Telium SFU compose deployment if the channel has moved
+Documentation=https://github.com/telium-chat/telium/blob/main/deploy/README.md
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# Root, because this unit drives `docker compose` for the relay stack and
+# replaces /opt/telium-sfu/compose.yml when a release ships a new one the
+# operator has not edited. What keeps this honest is the chain the script
+# enforces, not the uid: the image is pulled by digest, a pin overrides the
+# channel, and the config reconcile never writes a file the operator edited.
+ExecStart=/usr/local/sbin/telium-update-sfu
+
+# A pull with nothing to fetch is one registry request, but the tick that
+# finds a new image also extracts, reconciles, drains and recreates. The
+# script is silent when nothing moved, so an empty recent history is healthy.
+TimeoutStartSec=900
+
+StandardOutput=journal
+StandardError=journal

@@ -198,6 +198,8 @@ mod tests {
             livekit,
             sessions: Arc::new(SessionRegistry::new()),
             usage: Arc::new(Usage::load(&unique_usage_dir())),
+            updates: Arc::new(RwLock::new(crate::updates::Status::pending())),
+            drain_until_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
         })
     }
 

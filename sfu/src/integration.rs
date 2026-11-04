@@ -8,7 +8,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::get;
 use axum::Router;
-use ed25519_dalek::SigningKey;
+use ed25519_dalek::{Signer, SigningKey};
 use serde_json::{json, Map, Value};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
@@ -133,6 +133,8 @@ fn unique_usage_dir() -> std::path::PathBuf {
             livekit,
             sessions: Arc::new(SessionRegistry::new()),
             usage: Arc::new(Usage::load(&unique_usage_dir())),
+            updates: Arc::new(RwLock::new(crate::updates::Status::pending())),
+            drain_until_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
         });
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -472,6 +474,8 @@ fn unique_usage_dir() -> std::path::PathBuf {
             livekit,
             sessions: Arc::new(SessionRegistry::new()),
             usage: Arc::new(Usage::load(&unique_usage_dir())),
+            updates: Arc::new(RwLock::new(crate::updates::Status::pending())),
+            drain_until_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
         });
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -601,5 +605,156 @@ fn unique_usage_dir() -> std::path::PathBuf {
         let resp = reqwest::Client::new().get(format!("{}/health", h.base)).send().await.unwrap();
         let status = resp.status();
         (status, resp.json::<Value>().await.unwrap_or(Value::Null))
+    }
+
+    // ---- self-update check + drain ------------------------------------------
+
+    /// Serves a manifest and its detached ed25519 signature the way the
+    /// project's release feed does: `{url}` and `{url}.sig`, the signature
+    /// document stating `telium-sfu-release-manifest-v1 sha256=<hex>`.
+    async fn mock_feed(manifest: Value, signing: &SigningKey) -> String {
+        let bytes = serde_json::to_vec(&manifest).unwrap();
+        let digest = <sha2::Sha256 as sha2::Digest>::digest(&bytes);
+        let statement = format!("{} sha256={:x}", crate::updates::STATEMENT_VERSION, digest);
+        let sig = signing.sign(statement.as_bytes());
+        let doc = json!({
+            "alg": "ed25519",
+            "key_id": "ed25519:feed",
+            "statement": statement,
+            "signature": proto::b64(&sig.to_bytes()),
+        });
+        let (manifest_bytes, sig_bytes) = (bytes, serde_json::to_vec(&doc).unwrap());
+        let app = Router::new()
+            .route(
+                "/releases.json",
+                get(move || async move { (StatusCode::OK, manifest_bytes.clone()) }),
+            )
+            .route(
+                "/releases.json.sig",
+                get(move || async move { (StatusCode::OK, sig_bytes.clone()) }),
+            );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        format!("http://{addr}/releases.json")
+    }
+
+    fn two_release_manifest(ours: &str) -> Value {
+        let now = std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        json!({
+            "channel": "releases",
+            "generated_at": now,
+            "releases": [
+                {
+                    "commit": "b".repeat(40),
+                    "released_at": now,
+                    "version": "9.9.9",
+                    "summary": "newest",
+                    "artifacts": {
+                        "sfu-linux-x86_64": {
+                            "url": "https://artifacts.example/telium-sfu.tar.gz",
+                            "sha256": "a".repeat(64),
+                            "size": 4096,
+                        }
+                    },
+                },
+                { "commit": ours, "released_at": now - 60_000, "version": "9.9.8" },
+            ],
+        })
+    }
+
+    #[tokio::test]
+    async fn the_update_check_reads_the_feed_and_reports_behind() {
+        let ours = crate::updates::build().commit;
+        let signing = SigningKey::from_bytes(&[9u8; 32]);
+        let public_b64 = proto::b64(signing.verifying_key().as_bytes());
+        let url = mock_feed(two_release_manifest(&ours), &signing).await;
+
+        let h = harness_with(|cfg| {
+            cfg.updates.manifest_url = url.clone();
+            cfg.updates.manifest_public_key = public_b64.clone();
+            cfg.updates.timeout_secs = 5;
+        })
+        .await;
+
+        if ours.is_empty() {
+            // A build that cannot place itself is unknown, never current.
+            assert_eq!(
+                crate::updates::check_once(&h.state).await.unwrap(),
+                crate::updates::Assessment::Unknown(crate::updates::Unknown::UnidentifiedBuild)
+            );
+            return;
+        }
+        match crate::updates::check_once(&h.state).await.unwrap() {
+            crate::updates::Assessment::Behind { missed, latest_version, incompatible, .. } => {
+                assert_eq!(missed, 1);
+                assert_eq!(latest_version.as_deref(), Some("9.9.9"));
+                assert_eq!(incompatible, None);
+            }
+            other => panic!("expected behind, got {other:?}"),
+        }
+
+        // The loop's refresh lands the assessment in shared state for the dashboard.
+        crate::updates::refresh(&h.state).await;
+        let status = h.state.updates.read().await.clone();
+        assert!(status.last_checked_ms.is_some());
+        assert!(matches!(status.assessment, crate::updates::Assessment::Behind { .. }));
+
+        // The CLI half the updater script consumes answers over the same feed.
+        crate::updates_check(&h.state.cfg.updates, "sfu-linux-x86_64".into(), None, None)
+            .await
+            .expect("updates check prints a plan");
+
+        // An unreadable feed must be an error, not a plan: the updater has to
+        // be able to tell "stay put on purpose" from "I could not find out".
+        let mut dead = h.state.cfg.updates.clone();
+        dead.manifest_url = "http://127.0.0.1:1/releases.json".into();
+        assert!(crate::updates::read_manifest(&dead).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_feed_that_fails_verification_is_refused_not_parsed() {
+        let ours = crate::updates::build().commit;
+        let signing = SigningKey::from_bytes(&[9u8; 32]);
+        let url = mock_feed(two_release_manifest(&ours), &signing).await;
+        // A key that is not the signer's: every release looks forged.
+        let other = SigningKey::from_bytes(&[8u8; 32]);
+        let cfg = crate::config::Updates {
+            manifest_url: url,
+            manifest_public_key: proto::b64(other.verifying_key().as_bytes()),
+            timeout_secs: 5,
+            ..crate::config::Updates::default()
+        };
+        let (kind, message) = crate::updates::read_manifest(&cfg).await.unwrap_err();
+        assert_eq!(kind, crate::updates::Unknown::Unverified);
+        assert!(message.contains("does not verify"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn a_drain_refuses_new_joins_until_it_expires() {
+        let h = harness().await;
+        let (_, health) = get_health(&h).await;
+        assert_eq!(health["accepting"], true, "{health}");
+
+        crate::admission::begin_drain(&h.state);
+        let (status, body) = join(&h, "alice", 1_000_000).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+        assert_eq!(body["code"], "relay_full", "{body}");
+        let (_, health) = get_health(&h).await;
+        assert_eq!(health["accepting"], false, "{health}");
+        assert_eq!(health["reason"], "draining for update", "{health}");
+
+        // The deadline passes and the relay resumes on its own: a crashed
+        // updater must not be able to wedge admission shut forever.
+        h.state
+            .drain_until_ms
+            .store(crate::updates::now_ms() - 1_000, std::sync::atomic::Ordering::Relaxed);
+        let (_, health) = get_health(&h).await;
+        assert_eq!(health["accepting"], true, "{health}");
+        let (status, _) = join(&h, "bob", 1_000_000).await;
+        assert_eq!(status, StatusCode::OK);
     }
 }

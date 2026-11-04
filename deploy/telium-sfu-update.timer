@@ -1,0 +1,15 @@
+[Unit]
+Description=Check for a new Telium SFU release every minute
+Documentation=https://github.com/telium-chat/telium/blob/main/deploy/README.md
+
+[Timer]
+# The same cadence as the server's container updater, for the same reason: a
+# pull with nothing to fetch is a single registry request, and a release that
+# lands is live on the box within a minute of the operator's window opening.
+OnBootSec=120s
+OnUnitActiveSec=60s
+AccuracySec=30s
+Unit=telium-sfu-update.service
+
+[Install]
+WantedBy=timers.target
