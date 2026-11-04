@@ -158,3 +158,14 @@ test('the repository manifest this script writes is the shape the relay reads', 
   const sorted = [...manifest.releases].sort((a, b) => b.released_at - a.released_at)
   assert.deepEqual(manifest.releases, sorted, 'newest first')
 })
+
+test('SFU updater and installer scripts parse as Bash', () => {
+  execFileSync('bash', [
+    '-n',
+    'deploy/update-sfu.sh',
+    'deploy/update-sfu-native.sh',
+    'deploy/install-sfu.sh',
+    'sfu/install.sh',
+    'scripts/bump-sfu-version.sh',
+  ])
+})
