@@ -121,6 +121,21 @@ jobs:
       - name: Test the release decisions
         run: node --test scripts/release-sfu.test.mjs scripts/sign-sfu-release-manifest.test.mjs
 
+      # Do not ship an image with no embedded publisher verification key.
+      # Checking the release-signing configuration before the build also avoids
+      # publishing a half-release that could never produce a signed manifest.
+      - name: Require signing configuration
+        env:
+          RELEASE_PUBLIC_KEY: ${{ vars.TELIUM_RELEASE_PUBLIC_KEY }}
+          RELEASE_KEY_ID: ${{ vars.TELIUM_RELEASE_KEY_ID }}
+          RELEASE_SIGNING_KEY: ${{ secrets.TELIUM_RELEASE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RELEASE_PUBLIC_KEY" ] || [ -z "$RELEASE_KEY_ID" ] || [ -z "$RELEASE_SIGNING_KEY" ]; then
+            echo "::error::SFU releases require TELIUM_RELEASE_PUBLIC_KEY, TELIUM_RELEASE_KEY_ID, and TELIUM_RELEASE_SIGNING_KEY"
+            exit 1
+          fi
+
       # Resolve the tag through the API rather than `github.sha`, because an
       # annotated tag's SHA is the tag object, not the commit.
       - id: tag
@@ -305,6 +320,7 @@ jobs:
             TELIUM_BUILD_COMMIT=${{ needs.validate.outputs.commit }}
             TELIUM_BUILD_COMMIT_TIME=${{ needs.validate.outputs.commit_time }}
             TELIUM_BUILD_TIME=${{ steps.build-id.outputs.build_time }}
+            TELIUM_RELEASE_PUBLIC_KEY=${{ vars.TELIUM_RELEASE_PUBLIC_KEY }}
           cache-from: type=gha,scope=sfu
           cache-to: type=gha,mode=max,ignore-error=true,scope=sfu
           sbom: true
@@ -361,6 +377,7 @@ jobs:
         env:
           COMMIT: ${{ needs.validate.outputs.commit }}
           COMMIT_TIME: ${{ needs.validate.outputs.commit_time }}
+          RELEASE_PUBLIC_KEY: ${{ vars.TELIUM_RELEASE_PUBLIC_KEY }}
           ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
@@ -375,6 +392,7 @@ jobs:
             -e TELIUM_BUILD_COMMIT="$COMMIT" \
             -e TELIUM_BUILD_COMMIT_TIME="$COMMIT_TIME" \
             -e TELIUM_BUILD_TIME="$BUILD_TIME" \
+            -e TELIUM_RELEASE_PUBLIC_KEY="$RELEASE_PUBLIC_KEY" \
             -e NATIVE_ARCH="$ARCH" \
             -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
             -e CARGO_TARGET_DIR=/target \
@@ -658,26 +676,12 @@ jobs:
       # never reaches a command line -- argv is readable by every other
       # process on the machine.
       - name: Sign the release manifest
-        if: steps.record.outputs.changed == 'true' && vars.RELEASE_SIGNING_ENABLED == 'true'
+        if: steps.record.outputs.changed == 'true'
         env:
           TELIUM_RELEASE_SIGNING_KEY: ${{ secrets.TELIUM_RELEASE_SIGNING_KEY }}
           TELIUM_RELEASE_PUBLIC_KEY: ${{ vars.TELIUM_RELEASE_PUBLIC_KEY }}
           TELIUM_RELEASE_KEY_ID: ${{ vars.TELIUM_RELEASE_KEY_ID }}
         run: node scripts/sign-sfu-release-manifest.mjs sign deploy/sfu-releases.json
-
-      # A signature covers the exact bytes of the manifest. If signing is off
-      # and the manifest changed, the `.sig` committed with the previous
-      # release now covers different bytes, and every relay that pinned the
-      # public key would refuse the new manifest. Committing no signature is
-      # honest; committing a stale one is a lie the verifier will catch.
-      - name: Drop a signature this change would invalidate
-        if: steps.record.outputs.changed == 'true' && vars.RELEASE_SIGNING_ENABLED != 'true'
-        run: |
-          set -euo pipefail
-          if [ -f deploy/sfu-releases.json.sig ]; then
-            rm -f deploy/sfu-releases.json.sig
-            echo "removed the stale deploy/sfu-releases.json.sig; this manifest is published unsigned"
-          fi
 
       - name: Commit the release record
         if: steps.record.outputs.changed == 'true'
