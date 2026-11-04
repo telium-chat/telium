@@ -436,6 +436,7 @@ export class Api {
   regions() { return this.get('/_telium/v1/voice/regions'); }
   voiceStates(channelId) { return this.get(`/_telium/v1/channels/${channelId}/voice`); }
   voiceJoin(channelId, body) { return this.post(`/_telium/v1/channels/${channelId}/voice/join`, body || {}).then(joined); }
+  voiceRelayFull(channelId, region) { return this.post(`/_telium/v1/channels/${channelId}/voice/relay-full`, { region }); }
   voiceLeave(channelId) { return this.post(`/_telium/v1/channels/${channelId}/voice/leave`, {}); }
   /// A fresh join token for the session this device already holds, so a call
   /// never runs on an expired LiveKit grant (the resume that follows a network

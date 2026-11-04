@@ -14,8 +14,10 @@ use serde_json::{json, Value};
 use sha1::Sha1;
 
 mod e2ee;
+mod failover;
 
 pub use e2ee::*;
+pub use failover::report_relay_full;
 
 #[derive(Clone)]
 pub(crate) struct Region {
@@ -396,7 +398,23 @@ pub async fn join(
         }
     }
 
-    let sfu = resolve_region(&state, &ctx.guild_id, &ctx.region).await.is_some();
+    // A running channel always uses one pinned region, even when the relay
+    // is no longer accepting *new calls*. Persist the actual resolved region
+    // rather than "auto", or late joiners can split across different SFUs.
+    let held: Option<String> = sqlx::query_scalar(
+        "SELECT region FROM voice_states WHERE channel_id = ? AND region != 'auto' LIMIT 1",
+    )
+    .bind(&channel_id)
+    .fetch_optional(&state.pool)
+    .await?;
+    let chosen = if let Some(held) = held {
+        failover::pinned_region(&state, &ctx.guild_id, &held).await.map(|(r, _)| r)
+            .or(resolve_region(&state, &ctx.guild_id, &ctx.region).await)
+    } else {
+        resolve_region(&state, &ctx.guild_id, &ctx.region).await
+    };
+    let sfu = chosen.is_some();
+    ctx.region = chosen.map(|r| r.name).unwrap_or_else(|| "auto".into());
     let key_package = if sfu {
         match req.key_package.as_deref() {
             Some(p) if !p.is_empty() && p.len() <= MAX_KEY_PACKAGE => Some(p.to_string()),
@@ -481,7 +499,8 @@ async fn server_update(
     session_id: &str,
     muted: bool,
 ) -> ApiResult<Value> {
-    let Some(region) = resolve_region(state, &ctx.guild_id, &ctx.region).await else {
+    let pinned = failover::pinned_region(state, &ctx.guild_id, &ctx.region).await.map(|(r, _)| r);
+    let Some(region) = pinned.or(resolve_region(state, &ctx.guild_id, &ctx.region).await) else {
         let turn = crate::routes::dmvoice::relay_turn(state);
         return Ok(json!({
             "mode": "mesh",
@@ -529,9 +548,9 @@ pub async fn refresh_token(
     auth: GuildAuth,
     Path(channel_id): Path<String>,
 ) -> ApiResult<Json<Value>> {
-    let ctx = voice_channel(&state, &channel_id, &auth.user_id).await?;
-    let session_id: String = sqlx::query_scalar(
-        "SELECT session_id FROM voice_states WHERE guild_id = ? AND user_id = ? AND channel_id = ?",
+    let mut ctx = voice_channel(&state, &channel_id, &auth.user_id).await?;
+    let (session_id, pinned): (String, String) = sqlx::query_as(
+        "SELECT session_id, region FROM voice_states WHERE guild_id = ? AND user_id = ? AND channel_id = ?",
     )
     .bind(&ctx.guild_id)
     .bind(&auth.user_id)
@@ -539,6 +558,7 @@ pub async fn refresh_token(
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::Conflict("you are not connected to that channel".into()))?;
+    ctx.region = pinned;
     let (muted, _) = server_flags(&state, &ctx.guild_id, &auth.user_id).await?;
     Ok(Json(server_update(&state, &ctx, &auth, &session_id, muted).await?))
 }
@@ -1551,10 +1571,8 @@ pub async fn signal(
 
 pub async fn health_check(state: &AppState) -> ApiResult<()> {
     for region in &state.cfg.voice.regions {
-        if region.sfu.is_empty() {
-            continue;
-        }
-        probe_region(state, &region.name, &region.sfu).await?;
+        if region.sfu.is_empty() { continue; }
+        probe_region(state, &region.name, &region.sfu, &region.name, None).await?;
     }
 
     let guild_regions: Vec<(String, String, String)> = sqlx::query_as(
@@ -1564,26 +1582,48 @@ pub async fn health_check(state: &AppState) -> ApiResult<()> {
     .await
     .unwrap_or_default();
     for (guild_id, name, sfu) in guild_regions {
-        if sfu.is_empty() {
-            continue;
-        }
+        if sfu.is_empty() { continue; }
         let key = format!("g{guild_id}/{name}");
-        probe_region(state, &key, &sfu).await?;
+        probe_region(state, &key, &sfu, &name, Some(&guild_id)).await?;
+    }
+
+    // Only poll directory SFUs actually carrying calls; an idle listing is
+    // sampled by the directory publisher, not every participating guild.
+    for relay in crate::sfu_directory::relays(state).await? {
+        let active: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM voice_states WHERE region = ?")
+            .bind(&relay.url)
+            .fetch_one(&state.pool)
+            .await?;
+        if active > 0 {
+            let key = crate::sfu_directory::health_key(&relay.url);
+            probe_region(state, &key, &relay.url, &relay.url, None).await?;
+        }
     }
     Ok(())
 }
 
-async fn probe_region(state: &AppState, key: &str, sfu: &str) -> ApiResult<()> {
+async fn probe_region(
+    state: &AppState, key: &str, sfu: &str, region_name: &str, guild_filter: Option<&str>,
+) -> ApiResult<()> {
     let url = format!("{}/health", sfu.trim_end_matches('/'));
     let started = now_ms();
-    let ok = state
-        .http
+    let (operational, accepting) = match state.http
         .get(&url)
         .timeout(std::time::Duration::from_secs(5))
         .send()
         .await
-        .map(|r| r.status().is_success())
-        .unwrap_or(false);
+    {
+        Ok(response) if response.status().is_success() => {
+            let body = response.json::<Value>().await.ok();
+            let operational = body.as_ref()
+                .and_then(|v| v.get("ok").and_then(Value::as_bool)) != Some(false);
+            let accepting = body.as_ref()
+                .and_then(|v| v.get("accepting").and_then(Value::as_bool)) != Some(false);
+            (operational, accepting)
+        }
+        _ => (false, false),
+    };
+    let available = operational && accepting;
     let latency = now_ms() - started;
 
     let was_healthy: Option<i64> =
@@ -1601,62 +1641,17 @@ async fn probe_region(state: &AppState, key: &str, sfu: &str) -> ApiResult<()> {
     )
     .bind(key)
     .bind(sfu)
-    .bind(ok as i64)
-    .bind(if ok { 0 } else { 1 })
+    .bind(available as i64)
+    .bind(if available { 0 } else { 1 })
     .bind(latency)
     .bind(now_ms())
     .execute(&state.pool)
     .await?;
 
-    if !ok && was_healthy != Some(0) {
-        reassign(state, key).await?;
-    }
-    Ok(())
-}
-
-async fn reassign(state: &AppState, failed: &str) -> ApiResult<()> {
-    let affected: Vec<(String, String, String)> = sqlx::query_as(
-        "SELECT guild_id, user_id, channel_id FROM voice_states WHERE region = ?",
-    )
-    .bind(failed)
-    .fetch_all(&state.pool)
-    .await?;
-    if affected.is_empty() {
-        return Ok(());
-    }
-    tracing::warn!(target: crate::logcat::VOICE, region = %failed, members = affected.len(), "voice region failed; reassigning");
-
-    for (guild_id, user_id, channel_id) in affected {
-        let Some(region) = resolve_region(state, &guild_id, "auto").await else { continue };
-        if region.name == failed {
-            continue;
-        }
-        sqlx::query(
-            "UPDATE voice_states SET region = ?, updated_at = ? WHERE guild_id = ? AND user_id = ?",
-        )
-        .bind(&region.name)
-        .bind(now_ms())
-        .bind(&guild_id)
-        .bind(&user_id)
-        .execute(&state.pool)
-        .await?;
-        state
-            .hub
-            .publish(
-                Event {
-                    t: "VOICE_SERVER_UPDATE",
-                    guild_id: guild_id.clone(),
-                    channel_id: Some(channel_id.clone()),
-                    intent: INTENT_GUILD_VOICE_STATES,
-                    only_user: Some(user_id.clone()),
-                    data: json!({
-                        "mode": "sfu", "region": region.name, "endpoint": region.sfu(),
-                        "channel_id": channel_id, "reconnect": true,
-                    }),
-                }
-                .into(),
-            )
-            .await;
+    // At capacity means no *new* calls; never interrupt existing ones.
+    // A genuinely down SFU, however, must move its active rooms as a unit.
+    if !operational && was_healthy != Some(0) {
+        failover::reassign_for_failure(state, region_name, guild_filter).await?;
     }
     Ok(())
 }

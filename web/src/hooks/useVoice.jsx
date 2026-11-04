@@ -636,6 +636,7 @@ export function VoiceProvider({ children }) {
     if (callRef.current) await coreLeave();
     const me = store.me?.user_id;
     let joinedOnServer = false;
+    let attemptedRelay = null;
     try {
       setPhase('connecting');
       const body = {
@@ -664,6 +665,7 @@ export function VoiceProvider({ children }) {
       if (keys) body.key_package = keys.offered;
       const resp = await store.voiceApi(targetChannelId).voiceJoin(targetChannelId, body);
       joinedOnServer = true;
+      attemptedRelay = resp.voice_server?.mode === 'sfu' ? resp.voice_server.region : null;
       if (keys && resp.e2ee) keys.begin(resp.e2ee);
       const refused = privacyRef.current
         ? refusalCode(privacyRef.current.own, resp.voice_server)
@@ -703,6 +705,19 @@ export function VoiceProvider({ children }) {
       lastJoinErrorRef.current = null;
       playCallTone('join');
     } catch (e) {
+      // A full relay is not an instruction to move a room. Ask the guild
+      // authority to confirm capacity and relocate *all* channel members.
+      // Then retry this join using the same bounded recovery ladder as an
+      // offline relay, instead of leaving one rejected participant behind.
+      let migrated = false;
+      if (e?.status === 503 && attemptedRelay && !conversationCall(targetChannelId)) {
+        try {
+          const result = await store.voiceApi(targetChannelId).voiceRelayFull(targetChannelId, attemptedRelay);
+          migrated = result?.changed === true;
+        } catch (reportError) {
+          console.warn('Could not verify full relay or migrate the call:', reportError);
+        }
+      }
       // A retake reads this to tell 'nobody answered' from 'the answer was no'.
       lastJoinErrorRef.current = e;
       if (joinedOnServer) {
@@ -731,6 +746,12 @@ export function VoiceProvider({ children }) {
       dropGuildKeys();
       if (!quiet) reportError(e, t('voice.error.join'));
       setPhase('idle');
+      if (migrated) {
+        // The first dial never established callRef, so schedule the same
+        // bounded retry used for an established call which lost its SFU.
+        channelRef.current = targetChannelId;
+        retakeRef.current?.(targetChannelId, e);
+      }
     }
   }, [store, dial, coreLeave, hangUp, reposture, greet, armGuildKeys, dropGuildKeys]);
 
