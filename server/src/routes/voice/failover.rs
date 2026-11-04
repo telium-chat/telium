@@ -135,8 +135,14 @@ pub async fn report_relay_full(
     let (region, health_key) = pinned_region(&state, &ctx.guild_id, &body.region).await
         .ok_or_else(|| ApiError::Conflict("the call's relay is no longer configured or listed".into()))?;
     let probe = crate::sfu_directory::probe_relay(&state, region.sfu()).await;
-    if probe.ok && probe.accepting != Some(false) {
-        return Err(ApiError::Conflict("the relay still reports accepting new sessions".into()));
+    // A client-controlled report must not force migration merely because a
+    // relay cannot be probed from this server's network. Only a positive,
+    // authenticated server-side observation of "not accepting" is actionable.
+    // Ordinary outages are handled separately by periodic health checks.
+    if !probe.ok || probe.accepting != Some(false) {
+        return Err(ApiError::Conflict(
+            "relay capacity could not be confirmed by the guild server".into(),
+        ));
     }
 
     // Mark this relay unavailable for *new* call selection. The health checker

@@ -207,46 +207,100 @@ async fn a_guild_with_no_regions_picks_a_listed_relay() {
 
 
 #[tokio::test]
-async fn a_full_directory_relay_moves_every_participant_as_one_call() {
-    let host = SfuHost::start().await;
-    let (key, public) = keypair();
-    host.serve(document(&key, 1, vec![relay(RELAY1, "One", 1), relay(RELAY2, "Two", 1)]));
-    let (s, alice, bob, _guild, cid) = directory_fixture(&host, &public).await;
-    telium_server::sfu_directory::refresh(&s.state, &host.directory_url, &public).await.unwrap();
+async fn verified_capacity_refusal_moves_every_participant_together() {
+    use std::sync::atomic::{AtomicBool, Ordering};
 
-    let (_, first) = s.post(
+    // A real local relay whose admission switches from open to full. This is
+    // different from an offline endpoint: a client must not be able to trigger
+    // forced migration with an unverified assertion.
+    let accepting = std::sync::Arc::new(AtomicBool::new(true));
+    let switch = accepting.clone();
+    let app = axum::Router::new().route("/health", axum::routing::get(move || {
+        let current = switch.clone();
+        async move {
+            axum::Json(json!({
+                "service": "telium-sfu", "ok": true,
+                "accepting": current.load(Ordering::SeqCst),
+            }))
+        }
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let primary = format!("http://{addr}");
+    let host = SfuHost::start().await;
+    let backup = host.reachable.clone();
+    let s = start_with(move |cfg| {
+        cfg.voice.directory.enabled = false;
+        cfg.voice.default_region = "primary".into();
+        cfg.voice.regions = vec![
+            VoiceRegion {
+                name: "primary".into(), sfu: primary,
+                turn: None, pubkey_hint: None,
+            },
+            VoiceRegion {
+                name: "backup".into(), sfu: backup,
+                turn: None, pubkey_hint: None,
+            },
+        ];
+    }).await;
+    let alice = s.user("alice").await;
+    let bob = s.user("bob").await;
+    let (_, guild) = s.post("/_telium/v1/guilds", Some(&alice.token), json!({ "name": "Guild" })).await;
+    let gid = guild["id"].as_str().unwrap().to_owned();
+    let (_, invite) = s.post(&format!("/_telium/v1/guilds/{gid}/invites"), Some(&alice.token), json!({})).await;
+    let code = invite["code"].as_str().unwrap();
+    s.post(&format!("/_telium/v1/invites/{code}/join"), Some(&bob.token), json!({})).await;
+    let (_, channel) = s.post(
+        &format!("/_telium/v1/guilds/{gid}/channels"),
+        Some(&alice.token), json!({ "name": "Voice", "type": "voice" }),
+    ).await;
+    let cid = channel["id"].as_str().unwrap();
+
+    let (status, first) = s.post(
         &format!("/_telium/v1/channels/{cid}/voice/join"),
         Some(&alice.token), json!({ "key_package": "pkg" }),
     ).await;
-    let pinned = first["voice_server"]["region"].as_str().unwrap().to_owned();
-    let other = if pinned == RELAY1 { RELAY2 } else { RELAY1 };
+    assert_eq!(status, 200, "{first}");
+    assert_eq!(first["voice_server"]["region"], "primary");
 
-    let (_, second) = s.post(
+    let (status, second) = s.post(
         &format!("/_telium/v1/channels/{cid}/voice/join"),
-        Some(&bob.token), json!({ "key_package": "pkg", "region": other }),
+        Some(&bob.token), json!({ "key_package": "pkg", "region": "backup" }),
     ).await;
-    assert_eq!(second["voice_server"]["region"], pinned, "a new join cannot split the active room");
+    assert_eq!(status, 200, "{second}");
+    assert_eq!(second["voice_server"]["region"], "primary", "active calls remain pinned");
 
-    // Both relay.test names are unreachable from this harness, which exercises
-    // the same verified server-side outage path as a 503/full relay.
-    let (status, report) = s.post(
+    // Reporting a healthy relay as full must not relocate anybody.
+    let (status, denied) = s.post(
         &format!("/_telium/v1/channels/{cid}/voice/relay-full"),
-        Some(&bob.token), json!({ "region": pinned }),
+        Some(&bob.token), json!({ "region": "primary" }),
     ).await;
-    assert_eq!(status, 200, "{report}");
-    assert_eq!(report["changed"], true, "{report}");
+    assert_eq!(status, 409, "{denied}");
 
-    let (_, states) = s.get(&format!("/_telium/v1/channels/{cid}/voice"), Some(&alice.token)).await;
-    let users = states["voice_states"].as_array().unwrap();
-    assert_eq!(users.len(), 2);
-    for user in users {
-        assert_eq!(user["region"], other, "both users migrated to the same alternative: {states}");
+    accepting.store(false, Ordering::SeqCst);
+    let (status, migrated) = s.post(
+        &format!("/_telium/v1/channels/{cid}/voice/relay-full"),
+        Some(&bob.token), json!({ "region": "primary" }),
+    ).await;
+    assert_eq!(status, 200, "{migrated}");
+    assert_eq!(migrated["changed"], true, "{migrated}");
+
+    let (status, result) = s.get(
+        &format!("/_telium/v1/channels/{cid}/voice"), Some(&alice.token),
+    ).await;
+    assert_eq!(status, 200, "{result}");
+    let states = result["voice_states"].as_array().unwrap();
+    assert_eq!(states.len(), 2);
+    for user in states {
+        assert_eq!(user["region"], "backup", "every participant must migrate: {result}");
     }
 
-    // Once moved, a stale report for the former relay cannot move the call again.
+    // A stale second report cannot bounce the call again.
     let (_, stale) = s.post(
         &format!("/_telium/v1/channels/{cid}/voice/relay-full"),
-        Some(&bob.token), json!({ "region": pinned }),
+        Some(&bob.token), json!({ "region": "primary" }),
     ).await;
     assert_eq!(stale["changed"], false, "{stale}");
 }
