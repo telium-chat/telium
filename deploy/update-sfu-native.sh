@@ -444,11 +444,17 @@ if ! cmp -s "$STATE/staged/sfu.example.toml" "$example"; then
 fi
 
 echo "installed ${before} -> ${after_name}; restarting ${TELIUM_SFU_UNIT}"
-systemctl restart "$TELIUM_SFU_UNIT"
+# Restart itself can fail before systemd reports an active unit. Do not let
+# set -e bypass rollback, which exists precisely for a non-starting release.
+if ! systemctl restart "$TELIUM_SFU_UNIT"; then
+  echo "WARNING: restart failed; checking readiness before rollback" >&2
+fi
 
+# An active unit can still have a broken LiveKit engine. Require the relay's
+# own health probe before declaring the new release successful.
 up=0
 for _ in $(seq 1 30); do
-  if systemctl is-active --quiet "$TELIUM_SFU_UNIT"; then
+  if systemctl is-active --quiet "$TELIUM_SFU_UNIT"      && [ "$(health_field ok)" = "true" ]; then
     up=1
     break
   fi
@@ -466,10 +472,12 @@ if [ "$up" -eq 0 ]; then
   if [ -x "${TELIUM_SFU_BIN}.previous" ]; then
     install -m755 "${TELIUM_SFU_BIN}.previous" "$(dirname "$TELIUM_SFU_BIN")/.telium-sfu.incoming"
     mv -f "$(dirname "$TELIUM_SFU_BIN")/.telium-sfu.incoming" "$TELIUM_SFU_BIN"
-    systemctl restart "$TELIUM_SFU_UNIT"
+    if ! systemctl restart "$TELIUM_SFU_UNIT"; then
+      echo "WARNING: rollback restart failed; checking readiness" >&2
+    fi
     up=0
     for _ in $(seq 1 30); do
-      if systemctl is-active --quiet "$TELIUM_SFU_UNIT"; then
+      if systemctl is-active --quiet "$TELIUM_SFU_UNIT"          && [ "$(health_field ok)" = "true" ]; then
         up=1
         break
       fi
