@@ -181,7 +181,9 @@ impl Default for Updates {
             timeout_secs: 10,
             stale_after_days: 14,
             urgent_after_days: 45,
-            manifest_public_key: String::new(),
+            // Official release artifacts compile in the publisher key. Hand
+            // builds with no such key retain the explicit opt-in behavior.
+            manifest_public_key: option_env!("TELIUM_RELEASE_PUBLIC_KEY").unwrap_or("").into(),
             manifest_signature_url: String::new(),
             drain_max_secs: 900,
         }
