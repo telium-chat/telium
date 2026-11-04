@@ -198,6 +198,14 @@ IMAGE="$("${COMPOSE[@]}" config --images)"
 # deferred for a maintenance window, manual approval, or a breaking release:
 # subsequent runs see a warm cache and never reach the deployment path.
 container="$("${COMPOSE[@]}" ps -q sfu 2>/dev/null || true)"
+# Installation enables the timer before the operator starts the stack.
+# Never launch an unconfigured relay just because a timer checked for updates;
+# an intentionally stopped relay should likewise stay stopped.
+if [ -z "$container" ] && [ "$FORCE_NOW" -eq 0 ]; then
+  announce_once waiting-start "pending" \
+    "relay is not running; configure the host and start the Compose stack before automatic updates begin"
+  exit 0
+fi
 before=""
 if [ -n "$container" ]; then
   before="$(docker inspect --format '{{.Image}}' "$container" 2>/dev/null || true)"
