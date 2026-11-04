@@ -169,7 +169,7 @@ if [ -n "$TELIUM_SFU_PIN" ]; then
     # names. Shortest-suffix trims, not longest: a registry with a port in its
     # name has a colon of its own.
     sha256:*)
-      channel_image="$(docker compose -f compose.yml config --images sfu)"
+      channel_image="$(docker compose -f compose.yml config --images)"
       repository="${channel_image%@*}"
       pinned_image="${repository%:*}@${TELIUM_SFU_PIN}"
       ;;
@@ -189,16 +189,23 @@ fi
 
 # Named, not assumed: there is exactly one service here today, and naming it
 # is what keeps that true if there are ever two.
-IMAGE="$("${COMPOSE[@]}" config --images sfu)"
+IMAGE="$("${COMPOSE[@]}" config --images)"
 
 # ------------------------------------------------- is there anything new
 
-# The id of what we have, or nothing on the very first run.
-before="$(docker image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null || true)"
+# Compare the image *running in the container* with the desired image.
+# Comparing the local cache before and after pull incorrectly loses updates
+# deferred for a maintenance window, manual approval, or a breaking release:
+# subsequent runs see a warm cache and never reach the deployment path.
+container="$("${COMPOSE[@]}" ps -q sfu 2>/dev/null || true)"
+before=""
+if [ -n "$container" ]; then
+  before="$(docker inspect --format '{{.Image}}' "$container" 2>/dev/null || true)"
+fi
 
-# A pull with nothing to fetch is one manifest request.
+# Pull regardless of whether a maintenance window is open: the pending image
+# can be cached early, but only the running container decides if it was applied.
 "${COMPOSE[@]}" pull --quiet sfu
-
 after="$(docker image inspect --format '{{.Id}}' "$IMAGE")"
 
 # A pin with no stated reason is reported on every run, forever. It is still
@@ -322,7 +329,6 @@ fi
 # that never shows draining (an image too old to understand the signal, or a
 # relay already down) is drained by the ceiling timing out, which is the
 # honest outcome: proceed with calls active and say so.
-container="$("${COMPOSE[@]}" ps -q sfu 2>/dev/null || true)"
 if [ -n "$container" ]; then
   if docker kill --signal=USR1 "$container" >/dev/null 2>&1; then
     echo "drain requested; waiting up to ${TELIUM_SFU_DRAIN_TIMEOUT}s for rooms to empty"
