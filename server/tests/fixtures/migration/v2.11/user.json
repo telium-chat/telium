@@ -1,0 +1,244 @@
+{
+  "chain": [
+    {
+      "id": "@ana:z.example",
+      "moved_at": 900,
+      "server": "z.example"
+    }
+  ],
+  "created_at": 1000,
+  "devices": [
+    {
+      "created_at": 1000,
+      "device_id": "DEVICE-LAPTOP",
+      "name": "laptop",
+      "pubkey": "DEVICE-PUBKEY-LAPTOP"
+    }
+  ],
+  "dm_outbox": [
+    {
+      "attempts": 5,
+      "conversation_id": "CONVERSATION-REANCHORED",
+      "created_at": 2000,
+      "destination": "c.example",
+      "id": "FRAME-1",
+      "last_error": "connection refused",
+      "message_id": "DM-MESSAGE-1",
+      "next_attempt_at": 3000,
+      "path": "/_telium/v1/dm/deliver",
+      "payload": {
+        "conversation": {
+          "id": "CONVERSATION-REANCHORED",
+          "members": [],
+          "sequencer": "a.example"
+        },
+        "message": {
+          "ciphertext": "DM-CIPHERTEXT-1",
+          "conversation_id": "CONVERSATION-REANCHORED",
+          "created_at": 2000,
+          "epoch": 2,
+          "id": "DM-MESSAGE-1",
+          "kind": "application",
+          "sender": "@ana:a.example",
+          "sender_device": "DEVICE-LAPTOP",
+          "seq": 4
+        }
+      }
+    }
+  ],
+  "exported_at": 1767225600000,
+  "friends": [
+    {
+      "created_at": 1000,
+      "peer_domain": "b.example",
+      "peer_id": "@bo:b.example",
+      "state": "accepted",
+      "updated_at": 1100
+    },
+    {
+      "created_at": 1000,
+      "peer_domain": "d.example",
+      "peer_id": "@dan:d.example",
+      "state": "blocked",
+      "updated_at": 1200
+    }
+  ],
+  "key_backup": [
+    {
+      "ciphertext": "BACKUP-CIPHERTEXT-2",
+      "item": "conversation-2",
+      "scope": "dm",
+      "updated_at": 1960
+    },
+    {
+      "ciphertext": "BACKUP-CIPHERTEXT-1",
+      "item": "conversation-1",
+      "scope": "dm",
+      "updated_at": 1950
+    }
+  ],
+  "key_backup_omitted": 0,
+  "key_vault": {
+    "ciphertext": "VAULT-CIPHERTEXT",
+    "independent_ciphertext": "k1.INDEPENDENT-CIPHERTEXT",
+    "mode": "self_custody",
+    "updated_at": 1900,
+    "version": 7
+  },
+  "kind": "user",
+  "localpart": "ana",
+  "media": [
+    {
+      "data": "Y29uZm9ybWFuY2UgYXZhdGFyOiBhIGZhY2U",
+      "media": {
+        "capability": "conformance-avatar-capability",
+        "created_at": 1500,
+        "expires_at": null,
+        "filename": "avatar.png",
+        "hash": "c38df68838474d4ba9721458ba582d245c8067c1df80ed39b1ef73d0292efb44",
+        "height": 256,
+        "mime": "image/png",
+        "purpose": "profile",
+        "size": 26,
+        "thumbhash": "THUMBHASH-AVATAR",
+        "width": 256
+      }
+    },
+    {
+      "data": "Y29uZm9ybWFuY2UgYXR0YWNobWVudDogYSBwaG90bw",
+      "media": {
+        "capability": "conformance-photo-capability",
+        "created_at": 1600,
+        "expires_at": 4102444800000,
+        "filename": "photo.png",
+        "hash": "8785576ea2058be762ff9d562eb51bd794ce110bd2a033a9ee51812d6209d7fd",
+        "height": 480,
+        "mime": "image/png",
+        "purpose": "attachment",
+        "size": 31,
+        "thumbhash": "THUMBHASH-PHOTO",
+        "width": 640
+      }
+    }
+  ],
+  "media_omitted": [],
+  "media_preference": {
+    "origin": "media.example",
+    "tier": 2
+  },
+  "memberships": [
+    "01JC0NF0RMANCE000000000001"
+  ],
+  "message_requests": [
+    {
+      "conversation_id": "CONVERSATION-LEGACY-DM",
+      "created_at": 1500,
+      "sender_id": "@trent:t.example",
+      "state": "accepted",
+      "updated_at": 1520
+    },
+    {
+      "conversation_id": "CONVERSATION-REQUEST-ACCEPTED",
+      "created_at": 1300,
+      "sender_id": "@eve:e.example",
+      "state": "accepted",
+      "updated_at": 1320
+    },
+    {
+      "conversation_id": "CONVERSATION-REQUEST-DECLINED",
+      "created_at": 1400,
+      "sender_id": "@mallory:m.example",
+      "state": "declined",
+      "updated_at": 1420
+    }
+  ],
+  "original_created_at": 500,
+  "profile": {
+    "accent_color": 3447003,
+    "avatar_ref": "media://a.example/c38df68838474d4ba9721458ba582d245c8067c1df80ed39b1ef73d0292efb44",
+    "banner_ref": "media://a.example/8785576ea2058be762ff9d562eb51bd794ce110bd2a033a9ee51812d6209d7fd",
+    "bio": "moving house",
+    "created_at": 500,
+    "display_name": "Ana",
+    "is_bot": false,
+    "profile_version": 4,
+    "pronouns": "she/her",
+    "public_activity_enabled": false,
+    "public_page_enabled": true,
+    "public_status_enabled": false,
+    "theme_colors": [
+      15786176,
+      0
+    ],
+    "updated_at": 1700,
+    "user_id": "@ana:a.example"
+  },
+  "remote_memberships": [
+    {
+      "guild_id": "GUILD-FAR",
+      "guild_server": "g.example",
+      "joined_at": 4000,
+      "proof": {
+        "action": "joined",
+        "at": 4000,
+        "guild_id": "GUILD-FAR",
+        "guild_server": "g.example",
+        "key_id": "ed25519:g",
+        "kind": "membership",
+        "signature": "MEMBERSHIP-SIGNATURE",
+        "user_id": "@ana:a.example"
+      },
+      "reported_by": "guild"
+    },
+    {
+      "guild_id": "GUILD-FARTHER",
+      "guild_server": "h.example",
+      "joined_at": 4200,
+      "proof": null,
+      "reported_by": "client"
+    },
+    {
+      "guild_id": "01JC0NF0RMANCE000000000001",
+      "guild_server": "a.example",
+      "joined_at": 1100,
+      "proof": null,
+      "reported_by": "guild"
+    }
+  ],
+  "source": "a.example",
+  "subject": "@ana:a.example",
+  "sync_sealed": true,
+  "sync_store": [
+    {
+      "key": "drafts.v2",
+      "updated_at": 1864,
+      "value": "{\"ct\":\"SEALED-DRAFTS\",\"iv\":\"IV-DRAFTS\",\"kid\":\"KEYRING-1\",\"sealed\":\"v1\"}"
+    },
+    {
+      "key": "emoji.recent.v1",
+      "updated_at": 1861,
+      "value": "{\"ct\":\"SEALED-EMOJI-RECENT\",\"iv\":\"IV-EMOJI-RECENT\",\"kid\":\"KEYRING-1\",\"sealed\":\"v1\"}"
+    },
+    {
+      "key": "emoji.tone.v1",
+      "updated_at": 1862,
+      "value": "{\"ct\":\"SEALED-EMOJI-TONE\",\"iv\":\"IV-EMOJI-TONE\",\"kid\":\"KEYRING-1\",\"sealed\":\"v1\"}"
+    },
+    {
+      "key": "gif.favorites.v1",
+      "updated_at": 1863,
+      "value": "{\"ct\":\"SEALED-GIF-FAVORITES\",\"iv\":\"IV-GIF-FAVORITES\",\"kid\":\"KEYRING-1\",\"sealed\":\"v1\"}"
+    },
+    {
+      "key": "prefs.v1",
+      "updated_at": 1800,
+      "value": "{\"theme\":\"dark\"}"
+    },
+    {
+      "key": "stickers.saved.v1",
+      "updated_at": 1865,
+      "value": "{\"ct\":\"SEALED-SAVED-STICKERS\",\"iv\":\"IV-SAVED-STICKERS\",\"kid\":\"KEYRING-1\",\"sealed\":\"v1\"}"
+    }
+  ],
+  "version": 2
+}
