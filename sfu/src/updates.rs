@@ -699,7 +699,15 @@ pub async fn read_manifest(cfg: &Updates) -> Result<Manifest, (Unknown, String)>
     .await
     .map_err(|e| (Unknown::Unreachable, e.to_string()))?;
 
-    if !cfg.manifest_public_key.is_empty() {
+    // An explicit empty field in an older sfu.toml must not silently disable
+    // verification in an official binary with a publisher key compiled in.
+    let built_in_key = option_env!("TELIUM_RELEASE_PUBLIC_KEY").unwrap_or("");
+    let verification_key = if cfg.manifest_public_key.is_empty() {
+        built_in_key
+    } else {
+        &cfg.manifest_public_key
+    };
+    if !verification_key.is_empty() {
         let sig = crate::fetch::get_bytes(
             &signature_url(cfg),
             crate::fetch::AddressPolicy::OperatorConfigured,
@@ -713,7 +721,7 @@ pub async fn read_manifest(cfg: &Updates) -> Result<Manifest, (Unknown, String)>
                 format!("release signature could not be read: {e}"),
             )
         })?;
-        verify_manifest_signature(&bytes, &sig, &cfg.manifest_public_key)
+        verify_manifest_signature(&bytes, &sig, verification_key)
             .map_err(|e| (Unknown::Unverified, e))?;
     }
 
