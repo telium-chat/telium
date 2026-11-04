@@ -33,6 +33,7 @@ export function Timeline({
   hasMore = false, fetchingOlder = false, onLoadOlder = null,
   firstUnread = null,
   editing = null, onEdit, onReply,
+  onResend = null, onDropQueued = null,
   mobile = false, onOpenNavigation = null,
 }) {
   const t = useT();
@@ -315,6 +316,8 @@ export function Timeline({
                     editing={editing === msg.id}
                     onEdit={onEdit}
                     onReply={onReply}
+                    onResend={onResend}
+                    onDropQueued={onDropQueued}
                     onOpenNavigation={onOpenNavigation}
                   />
                 );
@@ -362,7 +365,11 @@ function withPending(items, pending, surfaceId) {
     else if (!m.pending) mine.push(m);
   }
   const claimed = new Set();
+  const seenNonce = new Set();
   const waiting = pending.filter((g) => {
+    // A queued send hands its row to the store's outbox: the same nonce must not draw twice.
+    if (g.nonce && seenNonce.has(g.nonce)) return false;
+    if (g.nonce) seenNonce.add(g.nonce);
     if (confirmed.has(g.nonce)) return false;
     const echo = mine.find((m) => (
       !claimed.has(m.id)
@@ -379,6 +386,7 @@ function withPending(items, pending, surfaceId) {
     kind: 'msg',
     id: g.nonce,
     nonce: g.nonce,
+    outboxKey: g.key || null,
     channel_id: surfaceId,
     author: g.author,
     created_at: g.created_at,
@@ -387,6 +395,7 @@ function withPending(items, pending, surfaceId) {
     attachments: [],
     reactions: [],
     pending: true,
+    failed: Boolean(g.failed),
   })));
 }
 

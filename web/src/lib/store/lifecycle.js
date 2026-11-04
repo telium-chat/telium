@@ -84,7 +84,8 @@ export const lifecycleMethods = {
 
     this.adoptLocalDmDrafts();
     this.sync.load(this.home)
-      .catch((e) => console.warn('sync store unavailable', e));
+      .catch((e) => console.warn('sync store unavailable', e))
+      .then(() => this.adoptDmOutbox());
 
     // Not awaited, not fatal: failure should cost only DMs. Recovery key first: every sign-in is a new MLS device.
     encryption()
@@ -149,7 +150,10 @@ export const lifecycleMethods = {
           // Drain before the ready emit so the first render has them read.
           .then(() => this.drainStartup().catch((e) => {
             console.warn('could not walk frames that arrived during startup', e);
-          }));
+          }))
+          // Cold start: the list was fetched before the engine could walk anything, so the
+          // badges the rail opens with come from this pass.
+          .then(() => this.catchUpDmUnread().catch(() => {}));
       })
       .then(() => this.emit('dm', { ready: true }))
       .then(() => this.startTrust())

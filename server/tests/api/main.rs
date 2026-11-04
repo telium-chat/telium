@@ -348,8 +348,10 @@ async fn open_dm(s: &Server, from: &User, to: &User) -> String {
 
 async fn dm_send(s: &Server, conv: &str, who: &User, ct: &str) {
     let path = format!("/_telium/v1/conversations/{conv}/messages");
-    let (status, sent) =
-        s.post(&path, Some(&who.home), json!({ "kind": "application", "ciphertext": ct })).await;
+    // A client's message send marks itself loud (`notify`), the way `mls.post` does.
+    let (status, sent) = s
+        .post(&path, Some(&who.home), json!({ "kind": "application", "ciphertext": ct, "notify": true }))
+        .await;
     assert_eq!(status, 200, "{sent}");
 }
 
@@ -370,6 +372,7 @@ mod live_updates;
 mod media;
 mod profile;
 mod roles;
+mod sfu_directory;
 mod social;
 mod voice;
 

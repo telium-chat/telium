@@ -1,0 +1,556 @@
+---
+import Icon from './Icon.astro'
+import { defaultOrder, BAND_LABEL, BAND_RANK, type Sfu } from '../lib/sfus'
+
+interface Props {
+  class?: string
+}
+
+const { class: className = '' } = Astro.props
+
+const rows: Sfu[] = defaultOrder
+
+/* Every column sorts. `align` is only ever "is this a number", which decides
+   both the cell alignment and which side of the label the sort arrow sits on. */
+const columns = [
+  { key: 'name', label: 'Relay', align: 'left' },
+  { key: 'region', label: 'Region', align: 'left' },
+  { key: 'band', label: 'Capacity', align: 'right' },
+  { key: 'uptime', label: 'Uptime', align: 'right' },
+  { key: 'latency', label: 'Latency', align: 'right' },
+] as const
+---
+
+<div class={`server-table ${className}`} data-sfu-table data-autosort="latency">
+  <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <label class="relative flex-1 sm:max-w-xs">
+      <span class="sr-only">Filter relays</span>
+      <span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted">
+        <Icon name="search" size={15} />
+      </span>
+      <input
+        type="search"
+        data-filter-text
+        placeholder="Filter by name, address, region or operator"
+        autocomplete="off"
+        class="field w-full py-2 pr-3 pl-9 text-[13.5px] placeholder:text-muted"
+      />
+    </label>
+    <span class="tnum text-[13px] text-muted" data-result-count aria-live="polite" />
+  </div>
+
+  <table class="w-full border-collapse text-left">
+    <caption class="sr-only">
+      Community-run Telium relays, with region, declared uplink capacity, measured uptime and
+      latency from your browser.
+    </caption>
+    <thead>
+      <tr class="head-row">
+        {
+          columns.map((column) => (
+            <th
+              scope="col"
+              class:list={[
+                'eyebrow py-2.5 font-medium whitespace-nowrap',
+                column.align === 'right' && 'text-right',
+                column.key === 'region' && 'hidden md:table-cell',
+                column.key === 'band' && 'hidden lg:table-cell',
+                column.key === 'uptime' && 'hidden sm:table-cell',
+              ]}
+              aria-sort={column.key === 'name' ? 'ascending' : 'none'}
+              data-column={column.key}
+            >
+              <button type="button" class="sort-button" data-sort={column.key}>
+                <span>{column.label}</span>
+                <span class="sort-arrow" aria-hidden="true">
+                  <Icon name="chevron-up" size={12} />
+                </span>
+              </button>
+            </th>
+          ))
+        }
+        <th scope="col" class="w-8"><span class="sr-only">Details</span></th>
+      </tr>
+    </thead>
+
+    <tbody>
+      {
+        rows.map((relay) => {
+          const { probe } = relay
+          const detailId = `detail-${relay.url.replace(/[^a-z0-9]/gi, '-')}`
+
+          return (
+            <>
+              <tr
+                class="group body-row align-middle"
+                data-row
+                data-url={relay.url}
+                data-name={relay.name.toLowerCase()}
+                data-region={`${relay.region.label} ${relay.region.code}`.toLowerCase()}
+                data-operator={relay.operator.name.toLowerCase()}
+                data-band={BAND_RANK[relay.capacity_band]}
+                data-uptime={probe.uptime_30d ?? ''}
+              >
+                <td class="py-3.5 pr-4">
+                  <div class="flex items-center gap-2">
+                    <span class="font-medium">{relay.name}</span>
+                    {!probe.ok && (
+                      <span class="badge badge-down" title={probe.error ?? 'Unreachable'}>
+                        Offline
+                      </span>
+                    )}
+                    {probe.ok && probe.accepting === false && (
+                      <span class="badge badge-moved" title="The relay reports it is not taking new calls right now">
+                        Full
+                      </span>
+                    )}
+                    {relay.feed?.opt_in === true && (
+                      <span class="badge badge-open" title="Opted into the signed feed servers fetch for automatic mode">
+                        Automatic
+                      </span>
+                    )}
+                  </div>
+                  <div class="mt-0.5 font-mono text-[12.5px] text-muted">{relay.url}</div>
+                  <p class="mt-1.5 max-w-[46ch] text-[13px] leading-snug text-muted md:hidden">
+                    {relay.description}
+                  </p>
+                </td>
+
+                <td class="hidden py-3.5 pr-4 text-[13.5px] text-muted md:table-cell" data-label="Region">
+                  {relay.region.label}
+                </td>
+
+                <td
+                  class="tnum hidden py-3.5 pr-4 text-right text-[13.5px] text-muted lg:table-cell"
+                  data-label="Capacity"
+                >
+                  <span title="Declared by the operator — the relay's own admission ceilings are set in its sfu.toml.">
+                    {BAND_LABEL[relay.capacity_band]}
+                  </span>
+                </td>
+
+                <td
+                  class="tnum hidden py-3.5 pr-4 text-right text-[13.5px] sm:table-cell"
+                  data-label="Uptime"
+                >
+                  {probe.uptime_30d === null ? (
+                    <span class="text-muted">—</span>
+                  ) : (
+                    <span class:list={[probe.uptime_30d < 99 && 'text-warning']}>
+                      {probe.uptime_30d.toFixed(1)}%
+                    </span>
+                  )}
+                </td>
+
+                <td class="tnum py-3.5 text-right text-[13.5px]" data-label="Latency">
+                  <span data-latency class="text-muted">—</span>
+                </td>
+
+                <td class="py-3.5 text-right">
+                  <button
+                    type="button"
+                    class="detail-toggle icon-btn size-7"
+                    aria-expanded="false"
+                    aria-controls={detailId}
+                  >
+                    <span class="sr-only">Details for {relay.name}</span>
+                    <span class="detail-chevron"><Icon name="chevron-down" size={15} /></span>
+                  </button>
+                </td>
+              </tr>
+
+              <tr class="detail-row body-row" id={detailId} hidden data-detail>
+                <td colspan="6" class="px-0 pb-5">
+                  <div class="panel-inset grid gap-x-10 gap-y-4 p-4 sm:grid-cols-2">
+                    <div class="sm:col-span-2">
+                      <p class="max-w-[62ch] text-[13.5px] leading-relaxed text-muted">
+                        {relay.description}
+                      </p>
+                    </div>
+
+                    <dl class="grid grid-cols-[auto_1fr] gap-x-5 gap-y-1.5 text-[13px]">
+                      <dt class="text-muted">Operator</dt>
+                      <dd>
+                        <a
+                          href={relay.operator.contact}
+                          rel="noreferrer nofollow"
+                          class="rounded text-link hover:underline"
+                        >
+                          {relay.operator.name}
+                        </a>
+                      </dd>
+
+                      <dt class="text-muted">Capacity</dt>
+                      <dd class="tnum">{BAND_LABEL[relay.capacity_band]} — declared</dd>
+
+                      <dt class="text-muted">Listed</dt>
+                      <dd class="tnum">{relay.added}</dd>
+                    </dl>
+
+                    <dl class="grid grid-cols-[auto_1fr] gap-x-5 gap-y-1.5 text-[13px]">
+                      <dt class="text-muted">Automatic mode</dt>
+                      <dd>{relay.feed?.opt_in === true ? 'Opted in' : 'Directory only'}</dd>
+
+                      <dt class="text-muted">Probe samples</dt>
+                      <dd class="tnum">{probe.samples}</dd>
+
+                      <dt class="text-muted">First seen</dt>
+                      <dd class="tnum">{probe.first_probe_at ? probe.first_probe_at.slice(0, 10) : '—'}</dd>
+                    </dl>
+
+                    <div class="sm:col-span-2">
+                      <p class="text-[13px] leading-relaxed text-muted">
+                        Calls through this relay stay end-to-end encrypted; the relay forwards
+                        ciphertext and sees only connection metadata.
+                      </p>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            </>
+          )
+        })
+      }
+    </tbody>
+  </table>
+
+  <p
+    data-empty
+    hidden
+    class="body-row block py-10 text-center text-[13.5px] text-muted"
+  >
+    No relays match that filter.
+  </p>
+</div>
+
+<style>
+  .head-row,
+  .body-row {
+    border-bottom: 1px solid var(--color-separator);
+  }
+
+  .field {
+    border: 0;
+    border-radius: var(--radius-row);
+    background: var(--color-surface-secondary);
+    color: var(--color-foreground);
+  }
+
+  .sort-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    cursor: default;
+  }
+  [data-enhanced] .sort-button {
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  [data-enhanced] .sort-button:focus-visible {
+    outline-offset: 2px;
+  }
+  [data-enhanced] .sort-button:hover {
+    color: var(--color-foreground);
+  }
+  .sort-arrow {
+    opacity: 0;
+    transition: opacity 120ms var(--ease-rise), transform 120ms var(--ease-rise);
+  }
+  [data-enhanced] th[aria-sort='ascending'] .sort-arrow {
+    opacity: 1;
+  }
+  [data-enhanced] th[aria-sort='descending'] .sort-arrow {
+    opacity: 1;
+    transform: rotate(180deg);
+  }
+  th.text-right .sort-button {
+    flex-direction: row-reverse;
+  }
+
+  .badge {
+    display: inline-block;
+    border-radius: 4px;
+    padding: 0.0625rem 0.3125rem;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.45;
+    letter-spacing: 0.01em;
+  }
+  .badge-open {
+    background: var(--color-accent-soft);
+    color: var(--color-accent-soft-foreground);
+  }
+  .badge-down {
+    background: var(--color-danger-soft);
+    color: var(--color-danger-soft-foreground);
+  }
+  .badge-moved {
+    background: color-mix(in oklab, var(--color-warning) 18%, transparent);
+    color: var(--color-warning);
+  }
+
+  .detail-chevron {
+    display: block;
+    transition: transform 160ms var(--ease-rise);
+  }
+  [aria-expanded='true'] .detail-chevron {
+    transform: rotate(180deg);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .detail-chevron,
+    .sort-arrow {
+      transition: none;
+    }
+  }
+</style>
+
+<script>
+  /* Progressive enhancement, as in the servers' table: the rows and every
+     measured value are already in the HTML. This adds sorting, filtering, the
+     detail panels, and the one number the site cannot know — how far each
+     relay is from the person reading. Relays expose a CORS-open /health, so
+     the timed probe is a plain request; the no-cors fallback stays for the
+     odd relay behind a stricter proxy. */
+
+  const LATENCY_KEY = 'telium-sfu-latency'
+  const PROBE_KEY = 'telium-sfu-probe'
+  const CACHE_TTL_MS = 5 * 60 * 1000
+  const SAMPLES = 3
+  const CONCURRENCY = 6
+  const TIMEOUT_MS = 5000
+
+  type Cache = Record<string, { ms: number | null; at: number }>
+
+  const readCache = (): Cache => {
+    try {
+      return JSON.parse(sessionStorage.getItem(LATENCY_KEY) ?? '{}')
+    } catch {
+      return {}
+    }
+  }
+  const writeCache = (cache: Cache) => {
+    try {
+      sessionStorage.setItem(LATENCY_KEY, JSON.stringify(cache))
+    } catch {
+      /* private mode, quota — a missing cache costs a re-probe, nothing more */
+    }
+  }
+
+  const probingEnabled = () => localStorage.getItem(PROBE_KEY) !== 'off'
+
+  const sample = async (url: string): Promise<number | null> => {
+    const target = `${url}/health?p=${Math.random().toString(36).slice(2)}`
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+    const started = performance.now()
+    try {
+      try {
+        await fetch(target, { signal: controller.signal, cache: 'no-store' })
+      } catch {
+        await fetch(target, { mode: 'no-cors', signal: controller.signal, cache: 'no-store' })
+      }
+      const entry = performance.getEntriesByName(target).at(-1) as PerformanceResourceTiming | undefined
+      const measured = entry?.duration && entry.duration > 0 ? entry.duration : performance.now() - started
+      return Math.round(measured)
+    } catch {
+      return null
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  const measure = async (url: string): Promise<number | null> => {
+    const results: number[] = []
+    for (let i = 0; i < SAMPLES; i++) {
+      const ms = await sample(url)
+      if (ms === null) break
+      results.push(ms)
+    }
+    return results.length ? Math.min(...results) : null
+  }
+
+  const pool = async <T,>(items: T[], limit: number, worker: (item: T) => Promise<void>) => {
+    let cursor = 0
+    await Promise.all(
+      Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (cursor < items.length) await worker(items[cursor++]!)
+      }),
+    )
+  }
+
+  const initTable = (root: HTMLElement) => {
+    root.setAttribute('data-enhanced', '')
+
+    const rows = Array.from(root.querySelectorAll<HTMLTableRowElement>('[data-row]'))
+    const tbody = root.querySelector('tbody')
+    const empty = root.querySelector<HTMLElement>('[data-empty]')
+    const count = root.querySelector<HTMLElement>('[data-result-count]')
+    const textInput = root.querySelector<HTMLInputElement>('[data-filter-text]')
+    if (!tbody) return
+
+    const detailFor = (row: HTMLTableRowElement) =>
+      row.nextElementSibling as HTMLTableRowElement | null
+
+    root.querySelectorAll<HTMLButtonElement>('.detail-toggle').forEach((button) => {
+      button.addEventListener('click', () => {
+        const row = button.closest<HTMLTableRowElement>('[data-row]')
+        const detail = row && detailFor(row)
+        if (!detail) return
+        const open = button.getAttribute('aria-expanded') === 'true'
+        button.setAttribute('aria-expanded', String(!open))
+        detail.hidden = open
+      })
+    })
+
+    const applyFilters = () => {
+      const needle = (textInput?.value ?? '').trim().toLowerCase()
+      let visible = 0
+      for (const row of rows) {
+        const haystack = `${row.dataset.name ?? ''} ${row.dataset.url ?? ''} ${row.dataset.region ?? ''} ${row.dataset.operator ?? ''}`
+        const show = !needle || haystack.includes(needle)
+        row.hidden = !show
+        const detail = detailFor(row)
+        if (detail) {
+          if (!show) {
+            detail.hidden = true
+            row.querySelector('.detail-toggle')?.setAttribute('aria-expanded', 'false')
+          } else if (row.querySelector('.detail-toggle')?.getAttribute('aria-expanded') !== 'true') {
+            detail.hidden = true
+          }
+        }
+        if (show) visible++
+      }
+      if (empty) empty.hidden = visible > 0
+      if (count) count.textContent = `${visible} of ${rows.length}`
+    }
+
+    textInput?.addEventListener('input', applyFilters)
+    applyFilters()
+
+    const latency = new Map<string, number | null>()
+
+    const valueOf = (row: HTMLTableRowElement, key: string): string | number => {
+      switch (key) {
+        case 'name':
+          return row.dataset.name ?? ''
+        case 'region':
+          return row.dataset.region ?? ''
+        case 'band':
+          return Number(row.dataset.band ?? -1)
+        case 'uptime':
+          return row.dataset.uptime === '' ? -1 : Number(row.dataset.uptime)
+        case 'latency': {
+          const ms = latency.get(row.dataset.url ?? '')
+          return ms === null || ms === undefined ? Number.POSITIVE_INFINITY : ms
+        }
+        default:
+          return ''
+      }
+    }
+
+    let sortKey = 'name'
+    let ascending = true
+
+    const sort = (key: string, direction?: boolean) => {
+      ascending = direction ?? (key === sortKey ? !ascending : key === 'name' || key === 'region' || key === 'latency')
+      sortKey = key
+
+      const ordered = [...rows].sort((a, b) => {
+        const left = valueOf(a, key)
+        const right = valueOf(b, key)
+        let result: number
+        if (typeof left === 'string' || typeof right === 'string') {
+          result = String(left).localeCompare(String(right))
+        } else {
+          result = left === right ? 0 : left < right ? -1 : 1
+        }
+        return ascending ? result : -result
+      })
+
+      for (const row of ordered) {
+        const detail = detailFor(row)
+        tbody.appendChild(row)
+        if (detail) tbody.appendChild(detail)
+      }
+
+      root.querySelectorAll<HTMLElement>('th[data-column]').forEach((th) => {
+        th.setAttribute(
+          'aria-sort',
+          th.dataset.column === key ? (ascending ? 'ascending' : 'descending') : 'none',
+        )
+      })
+    }
+
+    root.querySelectorAll<HTMLButtonElement>('[data-sort]').forEach((button) => {
+      button.addEventListener('click', () => sort(button.dataset.sort!))
+    })
+
+    const paint = (url: string, ms?: number | null) => {
+      const cell = root.querySelector<HTMLElement>(`[data-url="${CSS.escape(url)}"] [data-latency]`)
+      if (!cell) return
+      if (ms === undefined || ms === null) {
+        cell.textContent = '—'
+        cell.classList.add('text-muted')
+        if (ms === null) cell.title = 'No response'
+        else cell.removeAttribute('title')
+        return
+      }
+      cell.textContent = `${ms} ms`
+      cell.removeAttribute('title')
+      cell.classList.toggle('text-muted', ms > 250)
+    }
+
+    const runProbes = async () => {
+      if (!probingEnabled()) return
+      const cache = readCache()
+      const now = Date.now()
+      const pending: string[] = []
+
+      for (const row of rows) {
+        const url = row.dataset.url!
+        const hit = cache[url]
+        if (hit && now - hit.at < CACHE_TTL_MS) {
+          latency.set(url, hit.ms)
+          paint(url, hit.ms)
+        } else {
+          pending.push(url)
+        }
+      }
+
+      await pool(pending, CONCURRENCY, async (url) => {
+        const ms = await measure(url)
+        latency.set(url, ms)
+        cache[url] = { ms, at: Date.now() }
+        paint(url, ms)
+      })
+
+      writeCache(cache)
+
+      if (sortKey === 'name' && ascending && root.dataset.autosort === 'latency') sort('latency', true)
+    }
+
+    if ('requestIdleCallback' in window) requestIdleCallback(() => void runProbes(), { timeout: 2000 })
+    else setTimeout(() => void runProbes(), 400)
+
+    const toggle = document.querySelector<HTMLInputElement>('[data-probe-toggle]')
+    if (toggle) {
+      toggle.checked = probingEnabled()
+      toggle.addEventListener('change', () => {
+        localStorage.setItem(PROBE_KEY, toggle.checked ? 'on' : 'off')
+        if (toggle.checked) void runProbes()
+        else {
+          latency.clear()
+          sessionStorage.removeItem(LATENCY_KEY)
+          for (const row of rows) paint(row.dataset.url!)
+        }
+      })
+    }
+  }
+
+  document.querySelectorAll<HTMLElement>('[data-sfu-table]').forEach(initTable)
+</script>

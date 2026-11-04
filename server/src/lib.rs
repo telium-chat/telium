@@ -42,6 +42,7 @@ pub mod replicate;
 pub mod retention;
 pub mod rotations;
 pub mod rows;
+pub mod sfu_directory;
 #[path = "routes_secure.rs"]
 pub mod routes;
 pub mod scan;

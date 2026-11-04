@@ -349,12 +349,15 @@ export class Api {
   declineMessageRequest(id) {
     return this.post(`/_telium/v1/conversations/${id}/request/decline`, {});
   }
-  // `tail` is the newest n frames; `after`/`limit` page forward from a floor.
-  dmHistory(id, { after, limit, tail } = {}) {
-    return this.get(`/_telium/v1/conversations/${id}/messages`, { after, limit, tail });
+  // `tail` is the newest n frames; `after`/`limit` page forward from a floor;
+  // `before`/`limit` page backward from a ceiling, answered ascending.
+  dmHistory(id, { after, before, limit, tail } = {}) {
+    return this.get(`/_telium/v1/conversations/${id}/messages`, { after, before, limit, tail });
   }
   // Sent under an id derived from the ciphertext, so a repeat is safe (`frame-id.js`, `retry.js`).
   sendFrame(id, body) { return this.post(`/_telium/v1/conversations/${id}/messages`, withFrameId(body)); }
+  // The member's delivery cursor: a MAX upsert, so a repeat can only hold still.
+  sendDmDelivered(id, seq) { return this.post(`/_telium/v1/conversations/${id}/delivered`, { seq }); }
   dmNotificationKeys(id) {
     return this.get(`/_telium/v1/conversations/${id}/notification-keys`);
   }
@@ -433,6 +436,7 @@ export class Api {
   regions() { return this.get('/_telium/v1/voice/regions'); }
   voiceStates(channelId) { return this.get(`/_telium/v1/channels/${channelId}/voice`); }
   voiceJoin(channelId, body) { return this.post(`/_telium/v1/channels/${channelId}/voice/join`, body || {}).then(joined); }
+  voiceRelayFull(channelId, region) { return this.post(`/_telium/v1/channels/${channelId}/voice/relay-full`, { region }); }
   voiceLeave(channelId) { return this.post(`/_telium/v1/channels/${channelId}/voice/leave`, {}); }
   /// A fresh join token for the session this device already holds, so a call
   /// never runs on an expired LiveKit grant (the resume that follows a network
@@ -476,6 +480,10 @@ export class Api {
   addGuildVoiceRegion(guildId, body) { return this.post(`/_telium/v1/guilds/${encodeURIComponent(guildId)}/voice/regions`, body); }
   setGuildVoiceRegionDefault(guildId, name) { return this.patch(`/_telium/v1/guilds/${encodeURIComponent(guildId)}/voice/regions/default`, { name }); }
   deleteGuildVoiceRegion(guildId, name) { return this.del(`/_telium/v1/guilds/${encodeURIComponent(guildId)}/voice/regions/${encodeURIComponent(name)}`); }
+  /// The held public SFU directory, with one fresh probe round per listing.
+  voiceDirectory() { return this.get('/_telium/v1/voice/directory'); }
+  /// Merges the guild's voice relay mode server-side; no wholesale settings write.
+  setGuildVoiceMode(guildId, voiceMode) { return this.patch(`/_telium/v1/guilds/${encodeURIComponent(guildId)}/voice/mode`, { voice_mode: voiceMode }); }
 
   adminStatus() { return this.get('/_telium/v1/admin/status'); }
   // Admin-only: an exact release lists the advisories that apply.

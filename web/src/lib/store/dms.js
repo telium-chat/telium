@@ -1,6 +1,8 @@
 import { HttpError } from '../api.js';
 import { frameIdOf } from '../frame-id.js';
 import { frameMayInterrupt } from '../interrupts.js';
+import { KEYS } from '../sync.js';
+import { worthRetrying } from '../mls.js';
 import * as vault from '../vault.js';
 
 const PENDING_FRAMES = 200;
@@ -8,6 +10,11 @@ const PENDING_CONVERSATIONS = 32;
 
 /// The newest frames, not the oldest: counting up from a floor opened long conversations on years-old frames.
 const HISTORY_TAIL = 100;
+/// One scrollback page; the server clamps harder.
+const HISTORY_PAGE = 200;
+
+/// Auto-retry waits between outbox pumps, then gives up and asks the person to resend.
+export const OUTBOX_BACKOFF = [5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
 
 async function readWindow(home, id) {
   return (await home.dmHistory(id, { tail: HISTORY_TAIL })).messages || [];
@@ -70,6 +77,77 @@ export const dmMethods = {
     this.emit('conversations');
   },
 
+  /// Tell the home how far this account has actually got, so its unread count — and every
+  /// other device's badge — settles against the delivery cursor. Debounced per conversation;
+  /// the cursor only ever moves forward (the server takes MAX).
+  reportDmDelivered(conversationId, seq = 0) {
+    const walked = this.mls?.walkedTo?.(conversationId) || 0;
+    const next = Math.max(this.dmDeliveredPending?.get(conversationId) || 0, walked, seq);
+    this.dmDeliveredPending?.set(conversationId, next);
+    if (!next || !this.dmDeliveredTimers || this.dmDeliveredTimers.has(conversationId)) return;
+    this.dmDeliveredTimers.set(conversationId, setTimeout(() => {
+      this.dmDeliveredTimers?.delete(conversationId);
+      const pending = this.dmDeliveredPending?.get(conversationId);
+      this.dmDeliveredPending?.delete(conversationId);
+      if (!pending) return;
+      const sent = this.home?.sendDmDelivered?.(conversationId, pending);
+      sent?.catch(() => {});
+    }, 1_500));
+  },
+
+  /// Conversations the gateway could not tell this device about while it was away: the server
+  /// kept every frame, so compare its `last_seq` with the walk watermark each conversation is
+  /// at, fetch what moved, and raise the badges the live frames would have raised. A
+  /// conversation this device has never walked is left alone: it has no watermark to measure
+  /// from, and its first open needs the rejoin flow anyway.
+  catchUpDmUnread() {
+    if (!this.mls || this.vault?.needs_device) return Promise.resolve();
+    if (this.dmCatchUp) return this.dmCatchUp;
+    const run = (async () => {
+      const stale = this.conversations
+        .filter((c) => (c.kind === 'dm' || c.kind === 'gc')
+          && !this.conversationOnScreen(c.id)
+          && (this.mls.walkedTo(c.id) || 0) > 0
+          && (Number(c.last_seq || 0) > (this.mls.walkedTo(c.id) || 0)
+            || (this.dmServerUnread?.get(c.id) || 0) > 0))
+        .sort((a, b) => Number(b.last_seq || 0) - Number(a.last_seq || 0));
+      for (const convo of stale) {
+        try { await this.backfillDmUnread(convo.id); } catch { /* the next conversation still counts */ }
+      }
+    })().finally(() => {
+      if (this.dmCatchUp === run) this.dmCatchUp = null;
+    });
+    this.dmCatchUp = run;
+    return run;
+  },
+
+  /// One conversation's missed frames: fetch the window, walk it, and settle the delivery
+  /// cursor. The badge itself is the server's own count — this snapshot already carries it —
+  /// so nothing is counted twice here; what this does is put the frames in hand and tell the
+  /// home the account now holds them.
+  async backfillDmUnread(conversationId) {
+    const walked = this.mls.walkedTo(conversationId) || 0;
+    const fetched = await readWindow(this.home, conversationId);
+    const merged = this.mergeFrames(conversationId, fetched);
+    await this.mls.sync(conversationId, merged, { backfill: true }).catch(() => {});
+    const convo = this.conversations.find((c) => c.id === conversationId);
+    if (convo?.request_state === 'pending') return;
+    const seen = this.conversationOnScreen(conversationId);
+    let missed = false;
+    for (const frame of merged) {
+      if ((frame.seq || 0) <= walked) continue;
+      if (frame.kind !== 'application' || frame.sender === this.me?.user_id) continue;
+      if (this.mls.isSignal?.(frame.id)) continue;
+      const type = this.mls.payloadTypeOf?.(frame.id);
+      if (type !== undefined && !frameMayInterrupt(type)) continue;
+      missed = true;
+      break;
+    }
+    if (missed && convo && !convo.unread) { convo.unread = true; this.emit('conversations'); }
+    this.reportDmDelivered(conversationId);
+    if (!seen) this.emit('dm', { conversation_id: conversationId });
+  },
+
   /// Called after the engine opens the frame, never on arrival: only `payloadTypeOf` tells a receipt from a message.
   noteUnseen(d) {
     if (d.kind !== 'application' || d.sender === this.me?.user_id) return false;
@@ -81,6 +159,12 @@ export const dmMethods = {
       return false;
     }
     if (convo && !convo.unread) { convo.unread = true; this.emit('conversations'); }
+    // A frame arriving after a read outdates the read: the server snapshot it zeroed is
+    // stale in both directions (it still counts the read frames, not this one), so the
+    // live counter takes over until the next refresh.
+    if (this.dmReadCleared?.delete(d.conversation_id)) {
+      this.dmServerUnread?.set(d.conversation_id, 0);
+    }
     this.dmUnread.set(d.conversation_id, (this.dmUnread.get(d.conversation_id) || 0) + 1);
     this.emit('unread', null);
     return true;
@@ -106,7 +190,8 @@ export const dmMethods = {
     return waiting;
   },
 
-  /// Merged by frame id keeping the server's copy, ordered by `seq`.
+  /// Merged by frame id keeping the server's copy, ordered by `seq`. Replaces the loaded window,
+  /// so the scrollback floor moves with it.
   loadFrames(conversationId, fetched) {
     const waiting = this.dmPending.get(conversationId);
     this.dmPending.delete(conversationId);
@@ -120,7 +205,28 @@ export const dmMethods = {
       }
     }
     this.dmFrames.set(conversationId, frames);
+    this.noteOldest(conversationId, frames);
     return frames;
+  },
+
+  /// Prepends an older page without dropping anything already in the timeline, including live frames.
+  mergeFrames(conversationId, older) {
+    const below = new Set(older.map((f) => f.id));
+    const current = (this.dmFrames.get(conversationId) || []).filter((f) => !below.has(f.id));
+    const waiting = this.dmPending.get(conversationId) || [];
+    const known = new Set([...below, ...current.map((f) => f.id)]);
+    const extra = waiting.filter((f) => !known.has(f.id));
+    this.dmPending.delete(conversationId);
+    this.dmPendingFull.delete(conversationId);
+    const frames = [...older, ...current, ...extra].sort((a, b) => (a.seq || 0) - (b.seq || 0));
+    this.dmFrames.set(conversationId, frames);
+    this.noteOldest(conversationId, frames);
+    return frames;
+  },
+
+  noteOldest(conversationId, frames) {
+    const top = frames[0]?.seq;
+    if (Number.isInteger(top)) this.dmOldest?.set(conversationId, top);
   },
 
   async refreshCustody() {
@@ -169,6 +275,8 @@ export const dmMethods = {
     const convo = await this.loadConversation(id);
     // Opening is the only read receipt a DM has.
     if (this.dmUnread.delete(id)) this.emit('unread', null);
+    this.dmReadCleared?.add(id);
+    this.reportDmDelivered(id);
     return convo;
   },
 
@@ -185,6 +293,45 @@ export const dmMethods = {
   prefetchConversation(id) {
     if (!id || this.dmFrames.has(id)) return;
     this.loadConversation(id).catch(() => {});
+  },
+
+  /// One page of history below the loaded window, merged into the timeline and walked.
+  /// Resolves true when frames were added; deduplicates concurrent callers.
+  loadOlderDm(id) {
+    if (!id || !this.dmFrames.has(id) || this.dmHistoryEnd.has(id)) return Promise.resolve(false);
+    const running = this.dmLoadingOlder.get(id);
+    if (running) return running;
+    const load = this.loadOlderDmNow(id).finally(() => {
+      if (this.dmLoadingOlder.get(id) === load) this.dmLoadingOlder.delete(id);
+    });
+    this.dmLoadingOlder.set(id, load);
+    return load;
+  },
+
+  async loadOlderDmNow(id) {
+    const floor = this.dmOldest.get(id) ?? (this.dmFrames.get(id) || [])[0]?.seq;
+    if (!Number.isInteger(floor) || floor <= 1) {
+      this.dmHistoryEnd.add(id);
+      this.emit('dm', { conversation_id: id });
+      return false;
+    }
+    let answer;
+    try {
+      answer = await this.home.dmHistory(id, { before: floor, limit: HISTORY_PAGE });
+    } catch (e) {
+      this.emit('dm', { conversation_id: id });
+      throw e;
+    }
+    const fetched = answer?.messages || [];
+    // A short page is the beginning; an incomplete one has a hole below it that
+    // paging cannot cross, so stop here either way.
+    if (fetched.length < HISTORY_PAGE || answer?.incomplete) this.dmHistoryEnd.add(id);
+    if (fetched.length) {
+      const merged = this.mergeFrames(id, fetched);
+      if (this.mls) await this.mls.sync(id, merged, { backfill: true }).catch(() => {});
+    }
+    this.emit('dm', { conversation_id: id });
+    return fetched.length > 0;
   },
 
   async loadConversationNow(id) {
@@ -206,6 +353,7 @@ export const dmMethods = {
     }
     // Set last so "loaded once" means the group state was walked too.
     this.dmOpened.set(id, convo);
+    this.reportDmDelivered(id);
     this.emit('dm', { conversation_id: id });
     return convo;
   },
@@ -459,20 +607,190 @@ export const dmMethods = {
       throw new Error('Encryption is not available on this device yet. Try again in a moment.');
     }
     if (!this.mls.joined(conversationId)) await this.rejoinConversation(conversationId);
+    // Set when the send failed but the exact wire body is now queued for retry: the message is
+    // not lost, so this resolves instead of throwing, and the composer clears as usual.
+    let hold = null;
     this.sending.add(conversationId);
     let frame;
     try {
-      frame = await this.mls.send(conversationId, text, attachments, reply);
+      frame = await this.mls.send(conversationId, text, attachments, reply, {
+        queued: (body, plain) => {
+          hold = this.queueDmSend(conversationId, body, plain, { text, attachments, reply, nonce });
+        },
+      });
+    } catch (e) {
+      // Queued is not failed: the message is sitting in the outbox, so the composer
+      // clears as usual and the row stays pending until the pump lands it.
+      if (!hold) throw e;
     } finally {
       this.sending.delete(conversationId);
     }
-    // The composer's nonce lets its optimistic row become this message.
+    if (hold) {
+      this.emit('outbox', conversationId);
+      return null;
+    }
+    this.finishSentDm(conversationId, frame, nonce);
+    return frame;
+  },
+
+  /// What a delivered send does to the timeline, shared by `sendDm` and the outbox pump.
+  finishSentDm(conversationId, frame, nonce = null) {
     if (nonce && frame) frame.nonce = nonce;
     const list = this.dmFrames.get(conversationId);
     if (list && frame?.id && !list.some((f) => f.id === frame.id)) list.push(frame);
     if (frame?.id) this.noteActivity(frame);
     this.emit('dm', { conversation_id: conversationId });
-    return frame;
+  },
+
+  /// A send the wire refused but that may already be sequenced: the only safe retry is the
+  /// identical body (the frame id makes a repeat idempotent), so it waits here and pumps.
+  queueDmSend(conversationId, body, plain, { text, attachments, reply, nonce }) {
+    const entry = {
+      key: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      conversationId,
+      body,
+      plain,
+      text,
+      attachments: attachments || [],
+      reply,
+      nonce,
+      attempts: 0,
+      createdAt: Date.now(),
+      nextAt: Date.now(),
+      failed: false,
+      error: null,
+    };
+    const queue = this.dmOutbox.get(conversationId) || [];
+    queue.push(entry);
+    this.dmOutbox.set(conversationId, queue);
+    this.persistDmOutbox();
+    this.scheduleDmPump(conversationId, 0);
+    return entry;
+  },
+
+  dmOutboxIn(conversationId) {
+    return this.dmOutbox.get(conversationId) || [];
+  },
+
+  /// The wait until the next entry worth pumping is due, or null when nothing is waiting.
+  /// The pump aims its next wake at this, so no entry can outlast its own backoff timer.
+  dmOutboxWait(conversationId) {
+    const now = Date.now();
+    let wait = null;
+    for (const entry of this.dmOutboxIn(conversationId)) {
+      if (entry.failed) continue;
+      const until = Math.max(0, (entry.nextAt || 0) - now);
+      if (wait === null || until < wait) wait = until;
+    }
+    return wait;
+  },
+
+  scheduleDmPump(conversationId, delay) {
+    clearTimeout(this.dmOutboxTimers.get(conversationId));
+    const timer = setTimeout(() => {
+      this.dmOutboxTimers.delete(conversationId);
+      this.pumpDmOutbox(conversationId);
+    }, delay);
+    this.dmOutboxTimers.set(conversationId, timer);
+  },
+
+  async pumpDmOutbox(conversationId) {
+    if (this.dmOutboxPumping.has(conversationId)) return;
+    this.dmOutboxPumping.add(conversationId);
+    try {
+      const queue = this.dmOutbox.get(conversationId) || [];
+      let changed = false;
+      for (const entry of [...queue]) {
+        if (entry.failed || entry.nextAt > Date.now()) continue;
+        try {
+          // Same body, same frame id: a repeat answers with the frame the first attempt ordered.
+          const frame = await this.home.sendFrame(conversationId, entry.body);
+          this.dmOutbox.set(
+            conversationId,
+            (this.dmOutbox.get(conversationId) || []).filter((e) => e !== entry),
+          );
+          this.persistDmOutbox();
+          // Under the send lock, where the direct path lands its completion too, so another
+          // tab receiving the echo cannot read the plaintext store mid-write.
+          await this.mls?.run(conversationId, () => this.mls.notedSent(conversationId, frame, entry.plain));
+          this.finishSentDm(conversationId, frame, entry.nonce);
+        } catch (e) {
+          entry.attempts += 1;
+          entry.error = e;
+          // Every wait in the table is spent before the give-up: the last entry is a
+          // wait, not a spare.
+          if (!worthRetrying(e) || entry.attempts > OUTBOX_BACKOFF.length) {
+            entry.failed = true;
+          } else {
+            entry.nextAt = Date.now() + OUTBOX_BACKOFF[entry.attempts - 1];
+          }
+        }
+        changed = true;
+      }
+      if (changed) this.emit('outbox', conversationId);
+    } finally {
+      this.dmOutboxPumping.delete(conversationId);
+      // Whatever is still waiting sets the next wake itself: a wake that arrived mid-pump,
+      // or a timer an earlier schedule replaced, cannot strand an entry past its backoff.
+      const wait = this.dmOutboxWait(conversationId);
+      if (wait !== null) this.scheduleDmPump(conversationId, wait);
+    }
+  },
+
+  /// A failed send the person is sending again: a fresh frame rather than the stored body,
+  /// whose keys may have aged out while it waited.
+  async resendQueuedDm(conversationId, key) {
+    const queue = this.dmOutbox.get(conversationId) || [];
+    const entry = queue.find((e) => e.key === key);
+    if (!entry) return null;
+    this.dmOutbox.set(conversationId, queue.filter((e) => e !== entry));
+    this.persistDmOutbox();
+    this.emit('outbox', conversationId);
+    return this.sendDm(conversationId, entry.text, entry.attachments, entry.reply, entry.nonce);
+  },
+
+  dropQueuedDm(conversationId, key) {
+    const queue = this.dmOutbox.get(conversationId) || [];
+    if (!queue.some((e) => e.key === key)) return;
+    this.dmOutbox.set(conversationId, queue.filter((e) => e.key !== key));
+    this.persistDmOutbox();
+    this.emit('outbox', conversationId);
+  },
+
+  persistDmOutbox() {
+    const all = {};
+    for (const [id, queue] of this.dmOutbox) {
+      if (queue.length) {
+        all[id] = queue.map(({ conversationId: _dropped, ...rest }) => rest);
+      }
+    }
+    this.sync.set(KEYS.outbox, all);
+  },
+
+  /// Re-arms sends that were still queued when this device last stopped. Merges by key so a
+  /// device that already pumped an entry cannot have it handed back by a slower sync.
+  adoptDmOutbox() {
+    const all = this.sync.get(KEYS.outbox);
+    if (!all || typeof all !== 'object') return;
+    for (const [id, queue] of Object.entries(all)) {
+      if (!Array.isArray(queue) || !queue.length) continue;
+      const held = this.dmOutbox.get(id) || [];
+      const keys = new Set(held.map((e) => e.key));
+      const fresh = queue
+        .filter((e) => e?.key && e.body && !keys.has(e.key))
+        .map((e) => ({
+          ...e,
+          conversationId: id,
+          nextAt: Date.now(),
+          failed: Boolean(e.failed),
+          error: e.error ?? null,
+        }));
+      if (fresh.length) {
+        this.dmOutbox.set(id, [...held, ...fresh]);
+        // Let the socket settle before the first retry after a start.
+        this.scheduleDmPump(id, 2_000);
+      }
+    }
   },
 
   async reactDm(conversationId, frameId, emoji) {

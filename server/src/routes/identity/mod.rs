@@ -1235,8 +1235,8 @@ pub async fn issue_assertion(
     })))
 }
 
-pub const SEALED_ONLY_SYNC_KEYS: [&str; 3] =
-    ["drafts.v2", "stickers.saved.v1", "identity.pins.v1"];
+pub const SEALED_ONLY_SYNC_KEYS: [&str; 4] =
+    ["drafts.v2", "stickers.saved.v1", "identity.pins.v1", "outbox.v1"];
 
 pub fn is_sealed_sync_value(value: &Value) -> bool {
     let Some(object) = value.as_object() else {

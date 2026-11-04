@@ -83,6 +83,8 @@ export const signalMethods = {
     if (!last) return;
     this.mls.noteRead(conversationId, last);
     this.scheduleSignals(conversationId);
+    // The read cursor the server keeps: every other device's badge follows.
+    this.reportDmDelivered(conversationId, this.mls.seqOf?.get(last) || 0);
   },
 
   scheduleSignals(conversationId) {

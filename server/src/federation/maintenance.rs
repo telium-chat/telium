@@ -93,6 +93,9 @@ pub fn spawn_maintenance(state: AppState) {
             if let Err(e) = crate::hosting::refresh_due(&state).await {
                 tracing::warn!(target: crate::logcat::MAINTENANCE, error = %e, "hosting catalog refresh failed");
             }
+            if let Err(e) = crate::sfu_directory::refresh_due(&state).await {
+                tracing::warn!(target: crate::logcat::MAINTENANCE, error = %e, "sfu directory refresh failed");
+            }
         }
     });
 }

@@ -11,7 +11,7 @@ import { CallStage, ChatToggle, DockButton } from './CallStage.jsx';
 import { Tooltip } from '../components/Tooltip.jsx';
 import {
   Avatar, ChoiceCard, ChoiceList, EmojiText, EmptyState, GlobeIcon, HashIcon, Hint, Loading,
-  ModalShell, ServerIcon, VoiceIcon,
+  ModalShell, ServerIcon, VoiceIcon, WarnIcon,
 } from '../components/index.js';
 import { ChatView } from './ChatView.jsx';
 import { MobileSheet, MobileTopbar } from './mobile/MobileNavigation.jsx';
@@ -221,6 +221,15 @@ export function VoiceView({
               {region}
             </button>
           ) : null}
+          {voice.server?.mode === 'sfu' && voice.server?.region ? (
+            <span
+              title={t('voice.sfu.carriedBy', { relay: voice.server.region })}
+              className="flex shrink-0 items-center gap-1.5 rounded-full bg-surface-secondary px-2.5 py-1 text-xs font-medium text-muted"
+            >
+              <ServerIcon className="size-3.5" />
+              <span className="max-w-40 truncate">{voice.server.region}</span>
+            </span>
+          ) : null}
           <ChatToggle
             open={chatOpen}
             unread={chatOpen ? null : unread}
@@ -244,6 +253,20 @@ export function VoiceView({
                 {channel.voice_status ? t('voice.status.edit') : t('voice.status.set')}
               </button>
             ) : null}
+          </div>
+        ) : null}
+
+        {voice.server?.mode === 'mesh' ? (
+          <div
+            role="status"
+            className="flex shrink-0 items-center gap-2 border-b border-border bg-warning/10 px-4 py-2 text-sm text-warning"
+          >
+            <WarnIcon className="size-4 shrink-0" />
+            <span className="min-w-0 flex-1">
+              {typeof voice.server?.max_participants === 'number'
+                ? t('voice.mesh.banner', { count: voice.server.max_participants })
+                : t('voice.mesh.bannerUnknown')}
+            </span>
           </div>
         ) : null}
 

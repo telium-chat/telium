@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://telium.chat/registry/sfus-schema.json",
+  "title": "Public SFU relay directory",
+  "description": "One entry per volunteer-operated relay. Machine-checkable facts (reachability, uptime, load) are probed hourly and never declared here; this file carries only what a probe cannot see. The relay's HTTPS origin is the entry's identity.",
+  "type": "array",
+  "items": { "$ref": "#/$defs/entry" },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "name", "description", "region", "capacity_band", "operator", "added"],
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Base URL of a telium-sfu. Bare HTTPS origin: no path, query, credentials or trailing slash. Browsers probe relays from a secure page, so http:// is not listable.",
+          "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$",
+          "maxLength": 200
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 40,
+          "description": "What the relay is called, shown to guild owners picking one."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 160,
+          "description": "One sentence. Say who it is for and anything a caller should know."
+        },
+        "region": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["label", "code"],
+          "properties": {
+            "label": { "type": "string", "minLength": 2, "maxLength": 40 },
+            "code": { "$ref": "#/$defs/regionCode" }
+          }
+        },
+        "capacity_band": {
+          "enum": ["<100m", "100m", "1g", "10g"],
+          "description": "The operator's declared uplink. Self-declared like a server's size band, and cross-checked by the load the probes observe. The relay's own admission ceilings are set in its sfu.toml, not here."
+        },
+        "operator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "contact"],
+          "properties": {
+            "name": { "type": "string", "minLength": 2, "maxLength": 60 },
+            "contact": {
+              "type": "string",
+              "pattern": "^(https://|mailto:)",
+              "maxLength": 200,
+              "description": "How guild owners reach the operator. Shown as text, never turned into a link."
+            }
+          }
+        },
+        "weight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3,
+          "default": 1,
+          "description": "Damps automatic selection: 3 for relays with a long track record and real headroom, 1 by default. A damping factor, never a share quota."
+        },
+        "pubkey_hint": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Optional key hint carried to clients; nothing reads it yet."
+        },
+        "feed": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "opt_in": {
+              "type": "boolean",
+              "description": "Consent to appear in the signed feed servers fetch. Omit it or set opt_in=false to stay directory-only: listed on the website, never suggested to automatic mode."
+            }
+          }
+        },
+        "added": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "description": "The day the PR landed, as YYYY-MM-DD. Backdating cannot skip the observation period; the probe history enforces that independently."
+        }
+      }
+    },
+    "regionCode": {
+      "enum": [
+        "af-south", "ap-east", "ap-south", "ap-southeast", "eu-central", "eu-north",
+        "eu-west", "me-central", "na-central", "na-east", "na-west", "oc-southeast", "sa-east"
+      ]
+    }
+  }
+}

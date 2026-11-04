@@ -136,12 +136,18 @@ export const timelineMethods = {
 
   unreadFor(channelId) { return this.readState.get(channelId) || { unread: 0, mentions: 0 }; },
 
-  dmUnreadFor(conversationId) { return this.dmUnread.get(conversationId) || 0; },
+  /// The server's count at the last refresh, plus what arrived live since. Reading a
+  /// conversation zeroes the badge until the server's next word, which will agree.
+  dmUnreadFor(conversationId) {
+    if (this.dmReadCleared?.has(conversationId)) return 0;
+    return (this.dmServerUnread?.get(conversationId) || 0)
+      + (this.dmUnread?.get(conversationId) || 0);
+  },
 
   /// Summed over conversations, not the counter map: orphan counts (no row) have nothing to open.
   dmUnreadTotal() {
     let total = 0;
-    for (const convo of this.conversations) total += this.dmUnread.get(convo.id) || 0;
+    for (const convo of this.conversations) total += this.dmUnreadFor(convo.id);
     return total;
   },
 

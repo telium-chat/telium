@@ -9,7 +9,7 @@ export function Conversation({
   notices = null, intro = null, empty = null,
   hasMore = false, fetchingOlder = false, onLoadOlder = null,
   firstUnread = null, send = null, above = null, mobile = false,
-  onOpenNavigation = null,
+  onOpenNavigation = null, extraPending = null, onResend = null, onDropQueued = null,
 }) {
   const store = useStore();
   const [replyTo, setReplyTo] = useState(null);
@@ -48,7 +48,7 @@ export function Conversation({
       <Timeline
         surface={surface}
         items={items}
-        pending={pending}
+        pending={extraPending?.length ? [...pending, ...extraPending] : pending}
         loading={loading}
         error={error}
         notices={notices}
@@ -61,6 +61,8 @@ export function Conversation({
         editing={editing}
         onEdit={setEditing}
         onReply={setReplyTo}
+        onResend={onResend}
+        onDropQueued={onDropQueued}
         mobile={mobile}
         onOpenNavigation={onOpenNavigation}
       />

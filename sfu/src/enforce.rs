@@ -39,6 +39,20 @@ pub fn cap_for(state: &AppState, room: &str, p: &ParticipantInfo) -> Option<i64>
         .or_else(|| state.sessions.cap_for(room, &p.identity))
 }
 
+/// The rate one participant's device has declared it may send, in bits per
+/// second: every unmuted video layer plus a fixed allowance for unmuted audio
+/// (audio tracks do not carry a declared ladder).
+fn sender_rate(p: &ParticipantInfo) -> i64 {
+    let video: i64 = p
+        .tracks
+        .iter()
+        .filter(|t| t.kind == TrackKind::Video && !t.muted)
+        .map(|t| t.declared_bitrate.max(0))
+        .sum();
+    let audio = if p.tracks.iter().any(|t| t.kind == TrackKind::Audio && !t.muted) { 32_000 } else { 0 };
+    video + audio
+}
+
 pub async fn sweep_once(state: &AppState) -> usize {
     let mut muted = 0;
     for room in state.sessions.rooms() {
@@ -51,6 +65,22 @@ pub async fn sweep_once(state: &AppState) -> usize {
         };
         let present: Vec<String> = participants.iter().map(|p| p.identity.clone()).collect();
         state.sessions.retain_present(&room, &present, JOIN_GRACE);
+
+        // Usage estimate for this interval: every sender's stream is forwarded
+        // to n-1 receivers, so egress ~ Sum(sender rate) x (n-1) x interval.
+        // Declared layers over-estimate idle senders -- the conservative
+        // direction for protecting a transfer-capped operator.
+        let n = participants.len() as i64;
+        if n > 1 {
+            let interval = state.cfg.limits.poll_interval_secs.max(1) as i64;
+            let rate: i64 = participants.iter().map(|p| sender_rate(p)).sum();
+            let bytes = rate.saturating_mul(n - 1).saturating_mul(interval);
+            if bytes > 0 {
+                if let Some(origin) = state.sessions.room_origin(&room) {
+                    state.usage.add(&origin, bytes);
+                }
+            }
+        }
 
         for p in &participants {
             let Some(cap) = cap_for(state, &room, p) else { continue };

@@ -128,6 +128,40 @@ variable: RECOMMENDATIONS_ENABLED=true
 optional variable: TELIUM_RECOMMENDATION_URL
 ```
 
+## SFU directory feed
+
+The public relay directory (`/sfus`, `registry/sfus.json`) publishes its own signed feed at
+`/.well-known/telium/sfu-directory.json`, which every Telium server fetches and verifies. It
+is signed with a **dedicated key** — sharing the recommendations seed would couple two
+rotations — generated the same way:
+
+```sh
+cd site
+npm run sfu-directory:keygen
+```
+
+The workflows expect:
+
+```text
+secret: TELIUM_SFU_DIRECTORY_SIGNING_KEY
+variable: TELIUM_SFU_DIRECTORY_PUBLIC_KEY
+variable: TELIUM_SFU_DIRECTORY_KEY_ID
+variable: SFU_DIRECTORY_ENABLED=true
+```
+
+Until `SFU_DIRECTORY_ENABLED` is set and the key pinned, the feed is simply never written —
+and a server whose pin matches nothing stays silent rather than trusting an unverified list.
+The same public key must be embedded as `DEFAULT_SFU_DIRECTORY_PUBLIC_KEY` in the server's
+`config.rs` so the directory is usable without operator configuration. The feed's
+eligibility gates can be relaxed for launch with `SFU_DIRECTORY_MIN_OBSERVED_AGE_DAYS`,
+`SFU_DIRECTORY_MIN_UPTIME_PERCENT`, `SFU_DIRECTORY_MAX_PROBE_AGE_MINUTES` and
+`SFU_DIRECTORY_MIN_PROBE_SAMPLES`; they travel inside the signed document, so subscribers
+can always see which rules produced the list.
+
+The serial lives in `data/sfu-directory-serial.json` and only moves forward — the probe
+workflow commits it, so a rebuild can never replay or equivocate an older document past a
+server that already held a newer one.
+
 `site.yml` reads the signing secret only while producing the static signed feed. Before it
 writes anything, the generator derives the public key from that secret and requires it to
 match `TELIUM_RECOMMENDATION_PUBLIC_KEY`. A stale or mistyped client pin therefore fails the

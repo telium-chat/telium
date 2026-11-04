@@ -78,11 +78,17 @@ jobs:
       - name: Test account-home recommendation rules and signatures
         run: npm run test:recommendations
 
+      - name: Test the SFU directory feed library
+        run: npm run test:sfu-directory
+
       # This intentionally succeeds with zero eligible servers. Registry opt-in
       # and the live homeserver signal are both required, so deploying the
       # machinery cannot silently enroll existing directory operators.
       - name: Check recommendation eligibility
         run: npm run recommendations:check
+
+      - name: Check the SFU directory feed builds
+        run: npm run sfu-directory:check
 
       # Publishing is independently gated until the project has created and
       # pinned a dedicated Ed25519 key. Pull requests never receive the private
@@ -95,6 +101,19 @@ jobs:
           TELIUM_RECOMMENDATION_PUBLIC_KEY: ${{ vars.TELIUM_RECOMMENDATION_PUBLIC_KEY }}
           TELIUM_RECOMMENDATION_KEY_ID: ${{ vars.TELIUM_RECOMMENDATION_KEY_ID }}
         run: npm run recommendations:write
+
+      # Same gate as the recommendations feed: publishing is independent until
+      # the project has created and pinned the directory's Ed25519 key, and a
+      # pull request never sees the seed. `enabled = true` plus an empty pin on
+      # a subscriber means silence, not trust, so a missing key here simply
+      # keeps every server's directory empty.
+      - name: Sign and publish the SFU directory feed
+        if: github.event_name != 'pull_request' && vars.SFU_DIRECTORY_ENABLED == 'true'
+        env:
+          TELIUM_SFU_DIRECTORY_SIGNING_KEY: ${{ secrets.TELIUM_SFU_DIRECTORY_SIGNING_KEY }}
+          TELIUM_SFU_DIRECTORY_PUBLIC_KEY: ${{ vars.TELIUM_SFU_DIRECTORY_PUBLIC_KEY }}
+          TELIUM_SFU_DIRECTORY_KEY_ID: ${{ vars.TELIUM_SFU_DIRECTORY_KEY_ID }}
+        run: npm run sfu-directory:write
 
       - name: Build
         run: bun run build

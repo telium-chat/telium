@@ -90,6 +90,60 @@ automatic signup traffic.
 This is intentionally stricter than being listed. Recommendation means **eligible for the
 beginner flow under published criteria**, not an endorsement or guarantee by Telium.
 
+## Relays (SFUs) are a separate directory, with the same rules
+
+Voice and video calls scale past a handful of participants by routing through a relay — a
+`telium-sfu`. Relays are listed in `site/registry/sfus.json`, validated by
+`scripts/validate-sfus.mjs`, and probed hourly by `scripts/probe-sfus.mjs`, which writes
+`data/sfu-status.json` and `data/sfu-probe-history.json`. The rules mirror the servers'
+directory:
+
+**What you supply, and what you don't.** The relay's HTTPS origin, a name, one sentence,
+a region, your operator contact, and a capacity band for your uplink (`<100m`, `100m`,
+`1g`, `10g`). Everything a probe can see — reachability, uptime, load, whether the relay
+is accepting — is measured hourly and never declared. Your relay's admission ceilings
+live in its own `sfu.toml` (`[limits]`), not here.
+
+**Requirements.** The relay must run `telium-sfu` reachable at the listed HTTPS origin
+(browsers probe it from a secure page, so `http://` is not listable), answer `GET
+/health`, and be listable by its own operator — list only a relay you run. List only
+your own relay's origin; you cannot volunteer somebody else's bandwidth.
+
+**Public mode.** For a relay to be useful to guilds at all it must accept guilds it has
+never met: set `[trust] public = true` in its `sfu.toml`. It verifies every guild server
+by fetching that server's own published keys, so a public relay needs no per-guild
+configuration — but it is carrying strangers' traffic, and the dashboard's per-guild
+usage view and block list are how you keep that sane. A relay on a metered connection
+should also set a transfer budget there.
+
+**Automatic use is opt-in, twice.** Being listed does not volunteer your relay to carry
+strangers' calls automatically. Guilds route through a listed relay on their own only
+when a guild owner chooses Automatic mode, and the feed a server fetches includes only
+relays that opted in publicly in the registry entry:
+
+```json
+"feed": { "opt_in": true }
+```
+
+Omit `feed` or use `"opt_in": false` to remain directory-only: shown on the website,
+addable by hand by any guild owner, never suggested to automatic mode.
+
+The feed generator then applies mechanical gates before a relay enters the signed
+document: reachable, HTTPS, enough probe samples, above the published uptime threshold,
+fresh probes, and the same double age check as the servers' directory — the registry's
+`added` date must be old enough, and the observed probe history must independently agree.
+A new operator cannot backdate their way into carrying automatic traffic. The criteria
+travel inside the signed feed, so they are visible to every subscriber and the publisher
+can tighten them as the directory matures.
+
+**Weight** (1–3, default 1) damps automatic selection — a heavily-proven relay with real
+headroom may run 2 or 3. It is a damping factor, never a share quota: no relay is
+everyone's default, and a full relay is routed around regardless of its weight.
+
+Calls through a listed relay are end-to-end encrypted; the relay forwards ciphertext and
+sees only connection metadata. Relaying is real bandwidth cost — list a relay you are
+willing to keep fed.
+
 ## Opening the pull request
 
 1. Fork this repository and add your entry to `site/registry/servers.json`.
