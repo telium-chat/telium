@@ -68,11 +68,17 @@ impl Usage {
 
     /// Adds one sweep's estimated forwarding for `origin`.
     pub fn add(&self, origin: &str, bytes: i64) {
+        self.add_at(origin, bytes, now_ms());
+    }
+
+    /// Same accounting operation with a supplied clock for deterministic
+    /// tests across UTC midnight and across CI execution dates.
+    fn add_at(&self, origin: &str, bytes: i64, at_ms: i64) {
         if bytes <= 0 || origin.is_empty() {
             return;
         }
         let mut ledger = self.lock();
-        *ledger.by_origin.entry(origin.to_string()).or_default().entry(day_of(now_ms())).or_insert(0) += bytes;
+        *ledger.by_origin.entry(origin.to_string()).or_default().entry(day_of(at_ms)).or_insert(0) += bytes;
         self.persist(&ledger);
     }
 
@@ -188,9 +194,9 @@ mod tests {
         let now = days_from_civil(2026, 11, 3) * 86_400_000 + 12 * 3_600_000;
         {
             let usage = Usage::load(&dir);
-            usage.add("guild.one", 1_000);
-            usage.add("guild.one", 2_000);
-            usage.add("guild.two", 500);
+            usage.add_at("guild.one", 1_000, now);
+            usage.add_at("guild.one", 2_000, now);
+            usage.add_at("guild.two", 500, now);
             // Pretend yesterday forwarded 7 KB as well, by writing its bucket
             // directly -- `add` always lands in today's bucket.
             {
