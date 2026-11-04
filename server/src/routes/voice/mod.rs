@@ -1607,24 +1607,10 @@ pub async fn health_check(state: &AppState) -> ApiResult<()> {
 async fn probe_region(
     state: &AppState, key: &str, sfu: &str, region_name: &str, guild_filter: Option<&str>,
 ) -> ApiResult<()> {
-    let url = format!("{}/health", sfu.trim_end_matches('/'));
     let started = now_ms();
-    let (operational, accepting) = match state.http
-        .get(&url)
-        .timeout(std::time::Duration::from_secs(5))
-        .send()
-        .await
-    {
-        Ok(response) if response.status().is_success() => {
-            let body = response.json::<Value>().await.ok();
-            let operational = body.as_ref()
-                .and_then(|v| v.get("ok").and_then(Value::as_bool)) != Some(false);
-            let accepting = body.as_ref()
-                .and_then(|v| v.get("accepting").and_then(Value::as_bool)) != Some(false);
-            (operational, accepting)
-        }
-        _ => (false, false),
-    };
+    let probe = crate::sfu_directory::probe_relay(state, sfu).await;
+    let operational = probe.ok;
+    let accepting = probe.accepting != Some(false);
     let available = operational && accepting;
     let latency = now_ms() - started;
 

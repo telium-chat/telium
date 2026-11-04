@@ -18,6 +18,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
+import { request as httpsRequest } from 'node:https'
 import { sfuEligibility } from './sfu-directory-lib.mjs'
 
 const root = new URL('../', import.meta.url)
@@ -86,23 +87,42 @@ export async function assertPublicRelayUrl(raw, resolve = lookup) {
   if (!addresses.length || addresses.some((entry) => !isPublicIp(entry.address))) {
     throw new Error('relay resolves to a non-public address')
   }
+  return addresses
 }
 
 const getJson = async (url) => {
-  await assertPublicRelayUrl(url)
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      redirect: 'error',
+  const addresses = await assertPublicRelayUrl(url)
+  const pinned = addresses[0]
+  return await new Promise((resolve, reject) => {
+    // This is deliberately not fetch(): https.request lets us pin the vetted
+    // DNS answer for the actual TLS socket. Redirects are never followed.
+    const req = httpsRequest(url, {
+      method: 'GET',
       headers: { accept: 'application/json', 'user-agent': 'telium-sfu-directory-probe/1.0' },
+      lookup: (_host, _options, callback) => callback(null, pinned.address, pinned.family),
+    }, (response) => {
+      if (response.statusCode !== 200) {
+        response.resume()
+        reject(new Error('HTTP ' + response.statusCode + ' (redirects are not allowed)'))
+        return
+      }
+      let body = ''
+      response.setEncoding('utf8')
+      response.on('data', (chunk) => {
+        body += chunk
+        if (body.length > 16 * 1024) {
+          req.destroy(new Error('health response too large'))
+        }
+      })
+      response.on('end', () => {
+        try { resolve(JSON.parse(body)) } catch { reject(new Error('invalid health JSON')) }
+      })
+      response.on('error', reject)
     })
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    return await response.json()
-  } finally {
-    clearTimeout(timer)
-  }
+    req.setTimeout(TIMEOUT_MS, () => req.destroy(new Error('timeout')))
+    req.on('error', reject)
+    req.end()
+  })
 }
 
 const probe = async (entry) => {
