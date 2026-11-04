@@ -35,3 +35,6 @@ web/src-tauri/resources/
 # ever part of the project.
 .zcode/
 /target/
+
+# Local tooling installs.
+server/node_modules/
