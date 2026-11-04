@@ -30,3 +30,8 @@ web/src-tauri/resources/
 *.p12.b64
 *.jks
 *.keystore
+
+# Local agent session state and a stray root build directory; nothing here is
+# ever part of the project.
+.zcode/
+/target/
