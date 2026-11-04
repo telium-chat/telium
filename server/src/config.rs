@@ -1309,6 +1309,8 @@ pub struct Voice {
     /// How long a voice state outlives its gateway connection, so a socket drop doesn't evict a live call.
     #[serde(deserialize_with = "de_secs_u64")]
     pub reconnect_grace_secs: u64,
+    /// The public SFU directory this server fetches so guild owners can pick a relay.
+    pub directory: VoiceDirectory,
 }
 
 impl Voice {
@@ -1326,6 +1328,59 @@ pub struct VoiceRegion {
     pub turn: Option<String>,
     /// Carried to the client; nothing reads it yet.
     pub pubkey_hint: Option<String>,
+}
+
+/// The publisher's Ed25519 public key for the public SFU directory, base64.
+/// The signing seed lives in telium-chat/telium-keys (sfu-directory.env) and
+/// as that repo's Actions secret. Empty here would leave the directory
+/// silent rather than trusting an unverified list; an operator can always
+/// pin a key of their own choosing with `[voice.directory] key`.
+pub const DEFAULT_SFU_DIRECTORY_PUBLIC_KEY: &str = "baQHGGy8rgH0NbRMhn7zYbqtYAGwJu9k12l9SIHNBcM";
+
+/// The public SFU directory: one signed document naming volunteer-operated
+/// relays, fetched and held so guild owners have something to pick from even
+/// when this server's own `[voice.regions]` is empty. On by default; entries
+/// are suggestions only -- a relay nobody chose carries nobody's calls.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct VoiceDirectory {
+    pub enabled: bool,
+    /// The signed document this server fetches. Repointable at a private directory.
+    pub url: String,
+    /// The publisher's Ed25519 public key, base64. Empty falls back to
+    /// `DEFAULT_SFU_DIRECTORY_PUBLIC_KEY`; a directory is only ever trusted
+    /// with the key its subscriber pinned.
+    pub key: String,
+    pub refresh_secs: i64,
+    pub retry_secs: i64,
+    pub timeout_secs: u64,
+}
+
+impl VoiceDirectory {
+    pub fn effective_key(&self) -> &str {
+        if self.key.trim().is_empty() {
+            DEFAULT_SFU_DIRECTORY_PUBLIC_KEY
+        } else {
+            self.key.trim()
+        }
+    }
+
+    pub fn is_subscribed(&self) -> bool {
+        self.enabled && !self.url.trim().is_empty() && !self.effective_key().is_empty()
+    }
+}
+
+impl Default for VoiceDirectory {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            url: "https://telium.chat/.well-known/telium/sfu-directory.json".into(),
+            key: String::new(),
+            refresh_secs: 6 * 60 * 60,
+            retry_secs: 15 * 60,
+            timeout_secs: 10,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1617,6 +1672,7 @@ impl std::fmt::Debug for Voice {
             .field("turn_secret", &redacted(self.turn_secret.as_deref().unwrap_or("")))
             .field("turn_ttl_secs", &self.turn_ttl_secs)
             .field("turn", &self.turn)
+            .field("directory", &self.directory)
             .finish_non_exhaustive()
     }
 }
@@ -1727,6 +1783,7 @@ impl Default for Voice {
             max_streamers_per_channel: 4,
             mesh_max_participants: 4,
             reconnect_grace_secs: 15,
+            directory: VoiceDirectory::default(),
         }
     }
 }
@@ -2183,6 +2240,30 @@ impl Config {
                 target: crate::logcat::STARTUP,
                 mesh_max_participants = self.voice.mesh_max_participants,
                 "voice: no SFU regions configured; calls run peer-to-peer in mesh mode"
+            );
+        }
+
+        // A subscribed directory that cannot be trusted is silent to the operator
+        // until a guild owner opens voice settings and finds it empty.
+        if self.voice.directory.enabled && !self.voice.directory.effective_key().is_empty() {
+            if let Err(e) = crate::federation::feeds::check_url_loose(
+                self.voice.directory.url.trim(),
+                false,
+            ) {
+                tracing::warn!(
+                    target: crate::logcat::STARTUP,
+                    url = %self.voice.directory.url,
+                    error = %e,
+                    "voice: the public SFU directory URL is unusable, so guild owners will see \
+                     no relay suggestions. Check [voice.directory] url."
+                );
+            }
+        } else if self.voice.directory.enabled {
+            tracing::warn!(
+                target: crate::logcat::STARTUP,
+                "voice: the public SFU directory is enabled but no publisher key is pinned, so \
+                 it stays silent rather than trusting an unverified list. Set [voice.directory] \
+                 key to the publisher's Ed25519 public key, or set enabled = false to quiet this."
             );
         }
 

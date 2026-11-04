@@ -6,6 +6,7 @@ pub mod friends;
 pub mod voice;
 pub mod guild;
 pub mod hosting;
+pub mod sfu_directory;
 pub mod identity;
 pub mod identity_continuity;
 pub mod media;
@@ -360,6 +361,8 @@ fn federation_routes() -> Router<AppState> {
         )
         .route("/_telium/v1/admin/hosting-catalogs", get(hosting::admin_catalogs))
         .route("/_telium/v1/admin/hosting-catalogs/refresh", post(hosting::admin_refresh))
+        .route("/_telium/v1/admin/sfu-directory", get(sfu_directory::admin_directory))
+        .route("/_telium/v1/admin/sfu-directory/refresh", post(sfu_directory::admin_refresh))
         .route("/_telium/v1/admin/status", get(federation::routes::admin_status))
         .route("/_telium/v1/admin/version", get(crate::updates::admin_version))
         .route("/_telium/v1/admin/ownership", get(crate::ownership::overview))
@@ -500,6 +503,7 @@ fn federation_routes() -> Router<AppState> {
             put(friends::block).delete(friends::unblock),
         )
         .route("/_telium/v1/voice/regions", get(voice::regions))
+    .route("/_telium/v1/voice/directory", get(sfu_directory::directory))
         .route(
             "/_telium/v1/guilds/{guild_id}/voice/regions",
             get(voice::guild_voice_regions_list).post(voice::guild_voice_region_add),
@@ -507,6 +511,10 @@ fn federation_routes() -> Router<AppState> {
         .route(
             "/_telium/v1/guilds/{guild_id}/voice/regions/default",
             patch(voice::guild_voice_region_set_default),
+        )
+        .route(
+            "/_telium/v1/guilds/{guild_id}/voice/mode",
+            patch(voice::guild_voice_mode_set),
         )
         .route(
             "/_telium/v1/guilds/{guild_id}/voice/regions/{name}",

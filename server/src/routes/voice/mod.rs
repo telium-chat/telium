@@ -53,9 +53,6 @@ pub(crate) async fn resolve_region(state: &AppState, guild_id: &str, requested: 
     .fetch_all(&state.pool)
     .await
     .unwrap_or_default();
-    if cfg.regions.is_empty() && guild_rows.is_empty() {
-        return None;
-    }
 
     let unhealthy: std::collections::HashSet<String> =
         sqlx::query_scalar::<_, String>("SELECT region FROM sfu_health WHERE healthy = 0")
@@ -82,9 +79,6 @@ pub(crate) async fn resolve_region(state: &AppState, guild_id: &str, requested: 
             cands.push(Cand { region, health_key: format!("g{guild_id}/{name}") });
         }
     }
-    if cands.is_empty() {
-        return None;
-    }
 
     let healthy = |c: &Cand| !unhealthy.contains(&c.health_key);
 
@@ -92,6 +86,13 @@ pub(crate) async fn resolve_region(state: &AppState, guild_id: &str, requested: 
         if let Some(c) = cands.iter().find(|c| c.region.name == requested && healthy(c)) {
             return Some(c.region.clone());
         }
+    }
+
+    // The directory answers only when the pool is empty: an operator or guild
+    // owner who configured regions gets exactly the regions they configured,
+    // and the directory fills the void, never overrides it.
+    if cands.is_empty() {
+        return directory_region(state, guild_id, requested, &unhealthy).await;
     }
 
     let guild_default: Option<String> = sqlx::query_scalar(
@@ -116,6 +117,86 @@ pub(crate) async fn resolve_region(state: &AppState, guild_id: &str, requested: 
         return Some(c.region.clone());
     }
     cands.into_iter().next().map(|c| c.region)
+}
+
+/// A guild's voice relay mode, from its settings blob: `automatic` (the
+/// default) lets the public directory fill a guild whose server and owner
+/// configured no regions, `fixed` confines calls to the regions that were
+/// configured, `direct` declines directory relays entirely -- an explicit
+/// choice to keep calls out of anyone else's infrastructure. Configured
+/// regions survive every mode; only the directory is optional.
+pub(crate) async fn guild_voice_mode(state: &AppState, guild_id: &str) -> &'static str {
+    let settings: Option<String> = sqlx::query_scalar("SELECT settings FROM guilds WHERE id = ?")
+        .bind(guild_id)
+        .fetch_optional(&state.pool)
+        .await
+        .ok()
+        .flatten();
+    let Some(settings) = settings else { return "automatic" };
+    let mode = serde_json::from_str::<Value>(&settings)
+        .ok()
+        .and_then(|v| v.get("voice_mode").and_then(Value::as_str).map(str::to_owned));
+    match mode.as_deref() {
+        Some("fixed") => "fixed",
+        Some("direct") => "direct",
+        _ => "automatic",
+    }
+}
+
+/// The automatic directory pick: one qualifying relay for this guild and hour.
+///
+/// Weighted by the publisher's recommendation weight and rotated hourly per
+/// guild, so load spreads across relays and hours while staying stable long
+/// enough for a call's members to converge on the same relay and pin to it.
+/// There is no background probing here: a relay the server has measured as
+/// down is skipped, and an unmeasured one is trusted until the relay's own
+/// admission check says otherwise.
+async fn directory_region(
+    state: &AppState,
+    guild_id: &str,
+    requested: &str,
+    unhealthy: &std::collections::HashSet<String>,
+) -> Option<Region> {
+    if guild_voice_mode(state, guild_id).await != "automatic" {
+        return None;
+    }
+    let relays = crate::sfu_directory::relays(state).await.unwrap_or_default();
+    if relays.is_empty() {
+        return None;
+    }
+    let alive: Vec<&crate::sfu_directory::Relay> = relays
+        .iter()
+        .filter(|r| !unhealthy.contains(&crate::sfu_directory::health_key(&r.url)))
+        .collect();
+    if alive.is_empty() {
+        return None;
+    }
+    // An explicit request -- the relay a call already pinned, followed by late
+    // joiners -- is honoured only when it names a listed relay.
+    if !(requested.is_empty() || requested == "auto") {
+        if let Some(r) = alive.iter().find(|r| r.url == requested) {
+            return directory_relay_region(r);
+        }
+    }
+    let hour = (now_ms() / 3_600_000) as u64;
+    let seed = blake3::hash(format!("{guild_id}|{hour}").as_bytes()).to_hex();
+    let offset = u64::from_str_radix(&seed[..16], 16).unwrap_or(0);
+    let total: u64 = alive.iter().map(|r| r.weight.max(1) as u64).sum();
+    let mut point = offset % total.max(1);
+    for r in &alive {
+        let w = r.weight.max(1) as u64;
+        if point < w {
+            return directory_relay_region(r);
+        }
+        point -= w;
+    }
+    alive.first().and_then(|r| directory_relay_region(r))
+}
+
+/// The relay's URL is the region name, so `voice_states` round-trips the
+/// pinned relay through every later join's `requested`.
+fn directory_relay_region(relay: &crate::sfu_directory::Relay) -> Option<Region> {
+    Region::new(relay.url.clone(), &relay.url, None, relay.pubkey_hint.clone())
 }
 
 fn turn_credentials(secret: &str, user_id: &str, ttl_secs: i64) -> Value {
@@ -1156,6 +1237,10 @@ pub struct GuildRegionAdd {
     pub pubkey_hint: Option<String>,
     #[serde(default)]
     pub set_default: bool,
+    /// True when the region was added from the public directory's browse
+    /// cards; only these rows earn a "no longer listed" warning.
+    #[serde(default)]
+    pub from_directory: bool,
 }
 
 #[derive(Deserialize)]
@@ -1192,30 +1277,53 @@ pub async fn guild_voice_regions_list(
         })
         .collect();
 
-    let guild_rows: Vec<(String, String, Option<String>, Option<String>, i64)> = sqlx::query_as(
-        "SELECT name, sfu, turn, pubkey_hint, is_default FROM guild_voice_regions WHERE guild_id = ?",
+    let guild_rows: Vec<(String, String, Option<String>, Option<String>, i64, i64)> = sqlx::query_as(
+        "SELECT name, sfu, turn, pubkey_hint, is_default, from_directory FROM guild_voice_regions WHERE guild_id = ?",
     )
     .bind(&guild_id)
     .fetch_all(&state.pool)
     .await?;
+    // Only rows added from the directory can be "no longer listed"; a URL an
+    // owner typed by hand was never listed to begin with.
+    let directory_held: Option<std::collections::HashSet<String>> =
+        if state.cfg.voice.directory.is_subscribed() {
+            Some(
+                crate::sfu_directory::relays(&state)
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|r| r.url)
+                    .collect(),
+            )
+        } else {
+            None
+        };
     let mut guild_default: Option<String> = None;
-    for (name, sfu, turn, pk, is_def) in &guild_rows {
+    for (name, sfu, turn, pk, is_def, from_directory) in &guild_rows {
         if *is_def != 0 {
             guild_default = Some(name.clone());
         }
         let key = format!("g{guild_id}/{name}");
         let h = health_of(&key);
+        let listed = if *from_directory != 0 {
+            directory_held.as_ref().map(|held| held.contains(sfu))
+        } else {
+            None
+        };
         regions.push(json!({
             "name": name, "sfu": sfu, "turn": turn, "pubkey_hint": pk,
             "guild": true, "default": *is_def != 0,
             "healthy": h.map(|(_, ok, _)| *ok != 0).unwrap_or(true),
             "latency_ms": h.and_then(|(_, _, l)| *l),
+            "listed": listed,
         }));
     }
 
     Ok(Json(json!({
         "server_default": state.cfg.voice.default_region,
         "guild_default": guild_default,
+        "voice_mode": guild_voice_mode(&state, &guild_id).await,
+        "mesh_max_participants": state.cfg.voice.mesh_max_participants,
         "regions": regions,
     })))
 }
@@ -1242,6 +1350,12 @@ pub async fn guild_voice_region_add(
         return Err(ApiError::BadRequest("guild voice region limit reached".into()));
     }
 
+    // Advisory reachability probe: the server's vantage is a courtesy, not a
+    // gate. An SFU reachable by clients but not by this server is legitimate
+    // (the media path is client-to-relay), and a relay that fails this probe
+    // is recorded unhealthy and skipped by the resolver, never fatal.
+    let probe = crate::sfu_directory::probe_relay(&state, &req.sfu).await;
+
     if req.set_default {
         sqlx::query("UPDATE guild_voice_regions SET is_default = 0 WHERE guild_id = ?")
             .bind(&guild_id)
@@ -1249,10 +1363,11 @@ pub async fn guild_voice_region_add(
             .await?;
     }
     sqlx::query(
-        "INSERT INTO guild_voice_regions (guild_id, name, sfu, turn, pubkey_hint, is_default, created_by, created_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
+        "INSERT INTO guild_voice_regions (guild_id, name, sfu, turn, pubkey_hint, is_default, from_directory, created_by, created_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) \
          ON CONFLICT(guild_id, name) DO UPDATE SET sfu = excluded.sfu, turn = excluded.turn, \
              pubkey_hint = excluded.pubkey_hint, is_default = excluded.is_default, \
+             from_directory = excluded.from_directory, \
              created_by = excluded.created_by, created_at = excluded.created_at",
     )
     .bind(&guild_id)
@@ -1261,12 +1376,73 @@ pub async fn guild_voice_region_add(
     .bind(&req.turn)
     .bind(&req.pubkey_hint)
     .bind(req.set_default as i64)
+    .bind(req.from_directory as i64)
     .bind(&auth.user_id)
     .bind(now_ms())
     .execute(&state.pool)
     .await?;
 
-    Ok(Json(json!({ "ok": true, "name": name, "sfu": req.sfu })))
+    // Seed the region's health only on a measured-good probe. A failed probe
+    // records nothing: the server's vantage is not authoritative (a relay
+    // reachable by clients but not by this server is legitimate), so an
+    // unmeasured relay stays unknown -- counted healthy until the maintenance
+    // loop's probes say otherwise -- and the add response carries the warning.
+    if probe.ok {
+        sqlx::query(
+            "INSERT INTO sfu_health (region, endpoint, healthy, failures, latency_ms, checked_at) \
+             VALUES (?, ?, 1, 0, ?, ?) \
+             ON CONFLICT(region) DO UPDATE SET endpoint = excluded.endpoint, healthy = 1, \
+                 failures = 0, latency_ms = excluded.latency_ms, checked_at = excluded.checked_at",
+        )
+        .bind(format!("g{guild_id}/{name}"))
+        .bind(&req.sfu)
+        .bind(probe.latency_ms)
+        .bind(now_ms())
+        .execute(&state.pool)
+        .await?;
+    }
+
+    Ok(Json(json!({
+        "ok": true, "name": name, "sfu": req.sfu,
+        "reachable": probe.ok, "accepting": probe.accepting,
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct GuildVoiceModeSet {
+    pub voice_mode: String,
+}
+
+/// Sets the guild's voice relay mode by merging one key into its settings
+/// blob server-side, so the client never has to read-modify-write (and
+/// clobber) the whole blob to reach this switch.
+pub async fn guild_voice_mode_set(
+    State(state): State<AppState>,
+    auth: GuildAuth,
+    Path(guild_id): Path<String>,
+    Json(req): Json<GuildVoiceModeSet>,
+) -> ApiResult<Json<Value>> {
+    guildstore::require_guild_perm(&state, &guild_id, &auth.user_id, perms::MANAGE_GUILD).await?;
+    if !matches!(req.voice_mode.as_str(), "automatic" | "fixed" | "direct") {
+        return Err(ApiError::BadRequest(
+            "voice_mode must be automatic, fixed or direct".into(),
+        ));
+    }
+    let settings: Option<String> = sqlx::query_scalar("SELECT settings FROM guilds WHERE id = ?")
+        .bind(&guild_id)
+        .fetch_optional(&state.pool)
+        .await?
+        .flatten();
+    let mut parsed: Value = settings
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| json!({}));
+    parsed["voice_mode"] = json!(req.voice_mode);
+    sqlx::query("UPDATE guilds SET settings = ? WHERE id = ?")
+        .bind(parsed.to_string())
+        .bind(&guild_id)
+        .execute(&state.pool)
+        .await?;
+    Ok(Json(json!({ "ok": true, "voice_mode": req.voice_mode })))
 }
 
 pub async fn guild_voice_region_set_default(

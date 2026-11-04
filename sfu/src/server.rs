@@ -8,12 +8,14 @@ use serde_json::{json, Value};
 use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 
+use crate::admission;
 use crate::config::SfuConfig;
 use crate::control::control_handler;
 use crate::livekit::LivekitManager;
 use crate::session::session_handler;
 use crate::sessions::SessionRegistry;
 use crate::trust::TrustedKeys;
+use crate::usage::Usage;
 
 #[allow(dead_code)]
 pub struct AppState {
@@ -21,6 +23,8 @@ pub struct AppState {
     pub trust: Arc<RwLock<TrustedKeys>>,
     pub livekit: Arc<LivekitManager>,
     pub sessions: Arc<SessionRegistry>,
+    /// The estimated-transfer ledger, shared with admission and the dashboard.
+    pub usage: Arc<Usage>,
 }
 
 async fn root(State(_state): State<Arc<AppState>>) -> Json<Value> {
@@ -29,7 +33,9 @@ async fn root(State(_state): State<Arc<AppState>>) -> Json<Value> {
 
 async fn health(State(state): State<Arc<AppState>>) -> Json<Value> {
     let ok = state.livekit.health().await;
-    Json(json!({ "ok": ok }))
+    // What a guild server or the directory learns from one knock: liveness,
+    // whether new calls are taken, and the room/participant/budget facts.
+    Json(admission::health_body(&state, ok))
 }
 
 pub fn router(state: Arc<AppState>) -> Router {

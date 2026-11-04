@@ -22,6 +22,7 @@ export const URLS = {
      screen. The site stays where it is. */
   client: '/channels/@me',
   servers: '/servers',
+  sfus: '/sfus',
   download: '/download',
   github: 'https://github.com/telium-chat/telium',
   docs: 'https://docs.telium.chat',
@@ -29,6 +30,7 @@ export const URLS = {
   migrationSpec: 'https://docs.telium.chat/federation/migration/',
   license: 'https://github.com/telium-chat/telium/blob/main/LICENSE',
   registry: 'https://github.com/telium-chat/telium/tree/main/site/registry',
+  sfuRegistry: 'https://github.com/telium-chat/telium/tree/main/site/registry',
   releases: 'https://github.com/telium-chat/telium/releases',
   downloads: {
     // The artifact names are stable across releases (`build.artifactName` in

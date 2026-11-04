@@ -19,6 +19,7 @@ use crate::config::{LivekitConfig, LivekitMode, SfuConfig, TrustConfig, TrustedO
 use crate::livekit::{room_name, LivekitManager};
 use crate::server::AppState;
 use crate::sessions::SessionRegistry;
+use crate::usage::Usage;
 use crate::trust::TrustedKeys;
 use telium_protocol as proto;
 
@@ -84,6 +85,20 @@ use telium_protocol as proto;
     }
 
     async fn harness() -> Harness {
+        harness_with(|_| {}).await
+    }
+
+fn unique_usage_dir() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "telium-sfu-test-usage-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).ok();
+        dir
+    }
+
+    async fn harness_with(tweak: impl FnOnce(&mut SfuConfig)) -> Harness {
         let (lk_url, record, roster) = mock_livekit_with_roster().await;
         let signing = SigningKey::from_bytes(&[7u8; 32]);
         let public_b64 = proto::b64(signing.verifying_key().as_bytes());
@@ -109,6 +124,7 @@ use telium_protocol as proto;
             ..LivekitConfig::default()
         };
         cfg.limits.max_bitrate = 2_000_000;
+        tweak(&mut cfg);
         let (tx, rx) = watch::channel(false);
         let livekit = LivekitManager::start(&cfg, rx).await.unwrap();
         let state = Arc::new(AppState {
@@ -116,6 +132,7 @@ use telium_protocol as proto;
             trust: Arc::new(RwLock::new(trust)),
             livekit,
             sessions: Arc::new(SessionRegistry::new()),
+            usage: Arc::new(Usage::load(&unique_usage_dir())),
         });
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -454,6 +471,7 @@ use telium_protocol as proto;
             trust: Arc::new(RwLock::new(trust)),
             livekit,
             sessions: Arc::new(SessionRegistry::new()),
+            usage: Arc::new(Usage::load(&unique_usage_dir())),
         });
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -490,5 +508,71 @@ use telium_protocol as proto;
         let (status, body, host) = public_discovery_attempt(true).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body.unwrap()["room"], room_name(&host, "g1", "c1"));
+    }
+
+    #[tokio::test]
+    async fn a_blocked_origin_is_refused_before_anything_is_minted() {
+        let h = harness_with(|cfg| cfg.limits.blocked_origins = vec!["home.example".into()]).await;
+        let (status, body) = join(&h, "alice", 1_000_000).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert_eq!(body["code"], "origin_blocked", "{body}");
+        assert!(h.record.lock().await.is_empty(), "nothing reaches LiveKit for a blocked guild");
+    }
+
+    #[tokio::test]
+    async fn a_full_relay_refuses_new_joins_but_keeps_its_health_truthful() {
+        let h = harness_with(|cfg| cfg.limits.max_participants = 1).await;
+
+        let (status, health) = get_health(&h).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(health["accepting"], true, "{health}");
+
+        let (status, first) = join(&h, "alice", 1_000_000).await;
+        assert_eq!(status, StatusCode::OK, "{first:?}");
+
+        let (status, second) = join(&h, "bob", 1_000_000).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{second}");
+        assert_eq!(second["code"], "relay_full", "{second}");
+
+        let (_, health) = get_health(&h).await;
+        assert_eq!(health["accepting"], false, "{health}");
+        assert_eq!(health["participants"], 1, "{health}");
+        assert_eq!(health["reason"], "participant limit reached", "{health}");
+    }
+
+    #[tokio::test]
+    async fn an_exhausted_transfer_budget_refuses_new_joins_and_flags_near_budget() {
+        let h = harness_with(|cfg| {
+            cfg.limits.transfer_budget_bytes = 1_000_000;
+            cfg.limits.transfer_period_days = 30;
+        })
+        .await;
+
+        // No usage yet: accepting, and the transfer block reports the budget.
+        let (_, health) = get_health(&h).await;
+        assert_eq!(health["accepting"], true, "{health}");
+        assert_eq!(health["transfer"]["budget_bytes"], 1_000_000, "{health}");
+        assert_eq!(health["transfer"]["estimate_bytes"], 0, "{health}");
+
+        // Cross 80%: near_budget flags, but the relay still accepts.
+        h.state.usage.add("home.example", 850_000);
+        let (_, health) = get_health(&h).await;
+        assert_eq!(health["transfer"]["near_budget"], true, "{health}");
+        assert_eq!(health["accepting"], true, "near is not full");
+
+        // Cross 100%: new joins are refused.
+        h.state.usage.add("home.example", 200_000);
+        let (status, body) = join(&h, "alice", 1_000_000).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+        assert_eq!(body["code"], "relay_full", "{body}");
+        let (_, health) = get_health(&h).await;
+        assert_eq!(health["accepting"], false, "{health}");
+        assert_eq!(health["transfer"]["estimate_bytes"], 1_050_000, "{health}");
+    }
+
+    async fn get_health(h: &Harness) -> (StatusCode, Value) {
+        let resp = reqwest::Client::new().get(format!("{}/health", h.base)).send().await.unwrap();
+        let status = resp.status();
+        (status, resp.json::<Value>().await.unwrap_or(Value::Null))
     }
 }

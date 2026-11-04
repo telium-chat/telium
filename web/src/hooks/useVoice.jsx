@@ -12,7 +12,7 @@ import {
   displayAudioFailureReason, displayAudioSupport, withScreenShareConstraints,
 } from '../lib/screenShare.js';
 import { neuralCapability, normalizeNoiseMode } from '../lib/denoise.js';
-import { chooseVoiceRegion } from '../lib/voiceRegion.js';
+import { chooseGuildVoiceRegion } from '../lib/voiceRegion.js';
 import { sleep } from '../lib/util.js';
 import { ScreenShareDialog } from '../views/dialogs/ScreenShareDialog.jsx';
 import {
@@ -643,8 +643,8 @@ export function VoiceProvider({ children }) {
         self_deaf: localRef.current.self_deaf,
         region: conversationCall(targetChannelId)
           ? (store.prefs.voiceRegion || 'auto')
-          : await chooseVoiceRegion(
-            store.apiForChannel(targetChannelId), store.prefs.voiceRegion || 'auto',
+          : await chooseGuildVoiceRegion(
+            store.apiForChannel(targetChannelId), targetChannelId, store.prefs.voiceRegion || 'auto',
           ),
       };
       hellosRef.current = new Map();

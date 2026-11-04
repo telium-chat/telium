@@ -645,6 +645,28 @@ export const guild = {
   // -- SFU, TURN, relay -- because the person adding one is reading that
   // documentation in another window. Those three stay in Latin letters.
 
+  // -- Relay mode: how this guild chooses the relay its calls run through.
+  // 'automatic' is the default everywhere; the one-time notice exists so a
+  // community is never surprised by where its metadata flows.
+  'guild.voice.mode.title': 'Relay mode',
+  'guild.voice.mode.description': 'How this guild picks the relay its calls run through.',
+  'guild.voice.mode.automatic': 'Automatic (recommended)',
+  'guild.voice.mode.fixed': 'Fixed list',
+  'guild.voice.mode.direct': 'Direct only',
+  'guild.voice.mode.hint.automatic': 'Calls pick a healthy public relay that has room, closest to whoever starts the call. Regions configured below always win when they exist.',
+  'guild.voice.mode.hint.fixed': 'Calls use only the regions listed below.',
+  'guild.voice.mode.hint.direct': 'Calls never route through a public relay — only the regions below, if any.',
+  'guild.voice.mode.changeFailed': 'Could not change the relay mode',
+  'guild.voice.mode.noticeTitle': 'Automatic relays are on. ',
+  'guild.voice.mode.notice': 'Calls may route through a vetted public relay. Media stays end-to-end encrypted — the relay passes it along without being able to listen. Its operator sees only connection metadata. Switch to Fixed list or Direct only below any time.',
+  'guild.voice.mode.noticeDismiss': 'Got it',
+  // Mesh fallback: what a guild with no relay at all needs to know.
+  'guild.voice.meshNoticeTitle': 'Calls here are direct, person-to-person. ',
+  'guild.voice.meshNotice': 'That caps them at about {count} participants. Pick a public relay below or add your own to lift the cap.',
+  'guild.voice.meshNoticeUnknown': 'That caps them at a handful of participants. Pick a public relay below or add your own to lift the cap.',
+  // A directory-backed region the publisher no longer lists.
+  'guild.voice.unlisted': 'This relay is no longer on the public directory. It still works; consider reviewing it.',
+
   'guild.voice.regions.title': 'Voice regions',
   'guild.voice.regions.description': 'Add your own relay so this guild, or individual voice channels, uses it.',
   // The two defaults, above the table. `<code>` marks the value as an address
@@ -686,6 +708,19 @@ export const guild = {
   // pointing at a region holds it, and the fix is to move the channel rather
   // than to try again.
   'guild.voice.removeFailed': 'Could not remove region (it may still be used by a channel)',
+  // -- Public relay directory: the server's held copy of the signed public
+  // list, with one fresh probe round per entry when this pane opens.
+  'guild.voice.directory.title': 'Public relay directory',
+  'guild.voice.directory.description': 'Vetted community relays this server already checks for health. Adding one routes calls through its operator; media stays end-to-end encrypted.',
+  'guild.voice.directory.empty': 'No relays are listed yet.',
+  'guild.voice.directory.disabled': 'This server has the public relay directory switched off. An admin can enable it under [voice.directory] in the server config.',
+  'guild.voice.directory.add': 'Add',
+  'guild.voice.directory.added': 'Added',
+  'guild.voice.directory.addFailed': 'Could not add the relay',
+  'guild.voice.directory.by': 'by {operator}',
+  'guild.voice.directory.full': 'full',
+  'guild.voice.directory.offline': 'offline',
+  'guild.voice.directory.latency': '{ms} ms',
 
   // ------------------------------------------------------- adding a region
 

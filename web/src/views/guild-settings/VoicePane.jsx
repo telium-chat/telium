@@ -12,6 +12,7 @@ import {
   Hint,
   Notice,
   Section,
+  Select,
   SpinnerIcon,
   Switch,
   TextInput,
@@ -89,12 +90,25 @@ const VERDICT = {
 const DEPTH = { address: 0, details: 1 };
 const DOTS = ['address', 'details'];
 
+const NOTICE_SEEN_KEY = 'telium.voice.automaticNotice.v1';
+
+const VOICE_MODES = ['automatic', 'fixed', 'direct'];
+
 export function VoicePane({ guildId, api }) {
   const tr = useT();
   const [loading, setLoading] = useState(true);
   const [serverDefault, setServerDefault] = useState('');
   const [guildDefault, setGuildDefault] = useState(null);
   const [regions, setRegions] = useState([]);
+  const [voiceMode, setVoiceMode] = useState('automatic');
+  const [meshMax, setMeshMax] = useState(null);
+  const [modeBusy, setModeBusy] = useState(false);
+  const [modeNoticeSeen, setModeNoticeSeen] = useState(() => {
+    try { return localStorage.getItem(NOTICE_SEEN_KEY) === '1'; } catch { return false; }
+  });
+  const [directory, setDirectory] = useState({ enabled: false, entries: [] });
+  const [directoryLoading, setDirectoryLoading] = useState(true);
+  const [directoryBusy, setDirectoryBusy] = useState('');
   const [form, setForm] = useState({ name: '', sfu: '', turn: '', setDefault: false });
   const [step, setStep] = useState('address');
   const [busy, setBusy] = useState(false);
@@ -117,6 +131,8 @@ export function VoicePane({ guildId, api }) {
       setServerDefault(data.server_default || '');
       setGuildDefault(data.guild_default ?? null);
       setRegions(data.regions || []);
+      setVoiceMode(data.voice_mode || 'automatic');
+      setMeshMax(data.mesh_max_participants ?? null);
     } catch (e) {
       reportError(e, t('guild.voice.loadFailed'));
     } finally {
@@ -125,6 +141,56 @@ export function VoicePane({ guildId, api }) {
   }
 
   useEffect(() => { load(); }, [guildId, api]);
+
+  // The public directory is one fresh probe round served by this guild's own
+  // server; loaded alongside the regions so the pane renders in one pass.
+  useEffect(() => {
+    let live = true;
+    setDirectoryLoading(true);
+    api.voiceDirectory()
+      .then((data) => { if (live) setDirectory({ enabled: data.enabled !== false, entries: data.entries || [] }); })
+      .catch(() => { if (live) setDirectory({ enabled: false, entries: [] }); })
+      .finally(() => { if (live) setDirectoryLoading(false); });
+    return () => { live = false; };
+  }, [api]);
+
+  const setMode = async (mode) => {
+    setModeBusy(true);
+    try {
+      await api.setGuildVoiceMode(guildId, mode);
+      setVoiceMode(mode);
+    } catch (e) {
+      reportError(e, t('guild.voice.mode.changeFailed'));
+    } finally {
+      setModeBusy(false);
+    }
+  };
+
+  const dismissModeNotice = () => {
+    setModeNoticeSeen(true);
+    try { localStorage.setItem(NOTICE_SEEN_KEY, '1'); } catch { /* private mode: notice returns next visit */ }
+  };
+
+  const addFromDirectory = async (entry) => {
+    if (directoryBusy) return;
+    setDirectoryBusy(entry.url);
+    try {
+      // The first relay a mesh-only guild gains becomes its default, so the
+      // one-click add actually lifts the mesh cap.
+      await api.addGuildVoiceRegion(guildId, {
+        name: suggestName(entry.url) || entry.name,
+        sfu: entry.url,
+        pubkey_hint: entry.pubkey_hint || undefined,
+        from_directory: true,
+        set_default: !regions.some((r) => r.guild),
+      });
+      await load();
+    } catch (e) {
+      reportError(e, t('guild.voice.directory.addFailed'));
+    } finally {
+      setDirectoryBusy('');
+    }
+  };
 
   useEffect(() => {
     if (!valid) return undefined;
@@ -208,13 +274,43 @@ export function VoicePane({ guildId, api }) {
 
   const said = VERDICT[verdict];
 
+  const noRegions = regions.every((r) => !r.sfu || !r.sfu.trim());
+  const addedUrls = new Set(regions.map((r) => (r.sfu || '').replace(/\/$/, '')));
+
   return (
     <>
+      <Section
+        title={tr('guild.voice.mode.title')}
+        description={tr('guild.voice.mode.description')}
+      >
+        <div className="flex flex-col gap-3">
+          <Select
+            aria-label={tr('guild.voice.mode.title')}
+            value={voiceMode}
+            isDisabled={modeBusy || loading}
+            options={VOICE_MODES.map((m) => [m, tr(`guild.voice.mode.${m}`)])}
+            onChange={(e) => setMode(e.target.value)}
+          />
+          <Hint>{tr(`guild.voice.mode.hint.${voiceMode}`)}</Hint>
+          {voiceMode === 'automatic' && !modeNoticeSeen ? (
+            <Notice tone="warn">
+              <strong>{tr('guild.voice.mode.noticeTitle')}</strong>
+              {tr('guild.voice.mode.notice')}
+              <div className="mt-2">
+                <Button variant="ghost" onClick={dismissModeNotice}>
+                  {tr('guild.voice.mode.noticeDismiss')}
+                </Button>
+              </div>
+            </Notice>
+          ) : null}
+        </div>
+      </Section>
+
       <Section
         title={tr('guild.voice.regions.title')}
         description={tr('guild.voice.regions.description')}
       >
-        {loading ? null : (
+        {loading ? null : !noRegions ? (
           <Hint>
             {serverDefault
               ? (
@@ -236,6 +332,13 @@ export function VoicePane({ guildId, api }) {
               </>
             ) : null}
           </Hint>
+        ) : (
+          <Notice tone="warn">
+            <strong>{tr('guild.voice.meshNoticeTitle')}</strong>
+            {meshMax != null
+              ? tr('guild.voice.meshNotice', { count: meshMax })
+              : tr('guild.voice.meshNoticeUnknown')}
+          </Notice>
         )}
 
         <DataTable
@@ -251,6 +354,7 @@ export function VoicePane({ guildId, api }) {
                 <span className="font-medium">
                   {region.name}
                   {region.default ? <span title={tr('guild.voice.defaultMarker')}>{' ★'}</span> : null}
+                  {region.listed === false ? <span title={tr('guild.voice.unlisted')} className="text-warning">{' ⚠'}</span> : null}
                 </span>
               ),
             },
@@ -420,6 +524,68 @@ export function VoicePane({ guildId, api }) {
             )}
           </Flow>
         </div>
+      </Section>
+
+      <Section
+        title={tr('guild.voice.directory.title')}
+        description={tr('guild.voice.directory.description')}
+      >
+        {directoryLoading ? (
+          <p className="text-sm text-muted">{tr('common.loading')}</p>
+        ) : !directory.enabled || !directory.entries.length ? (
+          <Hint>{directory.enabled ? tr('guild.voice.directory.empty') : tr('guild.voice.directory.disabled')}</Hint>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {directory.entries.map((entry) => {
+              const added = addedUrls.has((entry.url || '').replace(/\/$/, ''));
+              const busy = directoryBusy === entry.url;
+              return (
+                <div key={entry.url} className="flex flex-col gap-1.5 rounded-2xl bg-surface-secondary px-4 pb-4 pt-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold tracking-tight">{entry.name}</p>
+                      <p className="truncate text-xs text-muted">
+                        {entry.region_label}
+                        {entry.operator_name ? ` · ${tr('guild.voice.directory.by', { operator: entry.operator_name })}` : ''}
+                      </p>
+                    </div>
+                    <span
+                      className={
+                        'shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ' +
+                        (!entry.reachable
+                          ? 'bg-warning/15 text-warning'
+                          : entry.accepting === false
+                            ? 'bg-warning/15 text-warning'
+                            : 'bg-success/15 text-success')
+                      }
+                    >
+                      {!entry.reachable
+                        ? tr('guild.voice.directory.offline')
+                        : entry.accepting === false
+                          ? tr('guild.voice.directory.full')
+                          : entry.latency_ms != null
+                            ? tr('guild.voice.directory.latency', { ms: entry.latency_ms })
+                            : tr('guild.voice.healthOk')}
+                    </span>
+                  </div>
+                  {entry.description ? (
+                    <p className="text-xs leading-[1.5] text-muted">{entry.description}</p>
+                  ) : null}
+                  <div className="mt-auto pt-1">
+                    <Button
+                      variant="primary"
+                      isDisabled={added}
+                      loading={busy}
+                      onClick={() => addFromDirectory(entry)}
+                    >
+                      {added ? tr('guild.voice.directory.added') : tr('guild.voice.directory.add')}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </Section>
     </>
   );

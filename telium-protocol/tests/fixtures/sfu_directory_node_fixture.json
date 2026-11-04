@@ -1,0 +1,39 @@
+{
+  "kind": "telium.sfu_directory",
+  "version": 1,
+  "publisher": "telium.chat",
+  "serial": 4,
+  "issued_at": 1799000000000,
+  "expires_at": 1801000000000,
+  "criteria": {
+    "min_observed_age_days": 7,
+    "min_uptime_percent": 99,
+    "max_probe_age_minutes": 180
+  },
+  "sfus": [
+    {
+      "url": "https://sfu.example",
+      "name": "Example Relay",
+      "description": "A community-run relay in Frankfurt.",
+      "region": "eu-central",
+      "region_label": "Frankfurt, DE",
+      "operator_name": "Example Collective",
+      "contact": "mailto:ops@example.org",
+      "capacity_band": "1g",
+      "weight": 2
+    },
+    {
+      "url": "https://sfu2.example:8443",
+      "name": "Second Relay",
+      "region": "na-east",
+      "region_label": "Ashburn, US",
+      "operator_name": "Second Operator",
+      "contact": "https://second.example/contact",
+      "capacity_band": "<100m",
+      "weight": 1,
+      "pubkey_hint": "ed25519:hint"
+    }
+  ],
+  "key_id": "ed25519:test",
+  "signature": "1XdXYju8c33MZJ58vCkuitGbPn5gOlDWkeqNBKfbuqWSbB4kbAm9l4P6iwmWDJM7ddV0Q_ZeFmOCRzQZ9XnNBw"
+}
