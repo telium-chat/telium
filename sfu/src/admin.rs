@@ -441,6 +441,20 @@ async fn setup_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) ->
     if !authenticated(&state, &headers).await {
         return Redirect::to("/admin/login").into_response();
     }
+    // Compose deployments do not have the native host-side sudo helper, and
+    // their sfu.toml is intentionally read-only. Do not present a wizard
+    // that will fail after asking for domains and certificates.
+    if !std::path::Path::new(&state.cfg.admin.helper_path).is_file() {
+        return page(
+            "Configure the Compose SFU",
+            r#"<h1>Configure your Compose SFU on the host</h1>
+            <p>This dashboard can monitor the SFU, but the native nginx/Certbot
+            setup wizard is not available inside a container.</p>
+            <p>Edit <code>/opt/telium-sfu/sfu.toml</code> on the host and configure
+            TLS for the SFU and LiveKit domains with your host reverse proxy.</p>
+            <p><a href="https://github.com/telium-chat/telium/blob/main/deploy/README.md#compose-sfu-setup">Compose setup instructions</a></p>"#,
+        );
+    }
     let current = SfuConfig::load(&state.config_path).unwrap_or_else(|_| state.cfg.clone());
     let sfu_domain = headers
         .get(header::HOST)
@@ -499,6 +513,12 @@ async fn apply_setup(
 ) -> Response {
     if !authenticated(&state, &headers).await {
         return Redirect::to("/admin/login").into_response();
+    }
+    if !std::path::Path::new(&state.cfg.admin.helper_path).is_file() {
+        return error_page(
+            StatusCode::BAD_REQUEST,
+            "The setup wizard requires the native host helper. Configure Compose on the host; see deploy/README.md.",
+        );
     }
 
     let sfu_domain = form.sfu_domain.trim().to_ascii_lowercase();
