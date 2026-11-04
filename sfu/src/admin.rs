@@ -22,6 +22,14 @@ use crate::updates;
 
 const SESSION_TTL: Duration = Duration::from_secs(43_200);
 
+// The native installer installs this root-owned, sudoers-allowlisted helper.
+// Never use a configurable path for checking or invoking a privileged helper.
+const NATIVE_ADMIN_HELPER: &str = "/usr/local/libexec/telium-sfu-admin-helper";
+
+fn native_admin_helper_available(configured: &str) -> bool {
+    configured == NATIVE_ADMIN_HELPER && Path::new(NATIVE_ADMIN_HELPER).is_file()
+}
+
 const LOGIN_FAILURES_BEFORE_LOCKOUT: u32 = 5;
 const BASE_LOGIN_LOCKOUT: Duration = Duration::from_secs(15);
 /// Short: the lockout is global, so a long one lets an attacker lock the operator out.
@@ -444,7 +452,7 @@ async fn setup_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) ->
     // Compose deployments do not have the native host-side sudo helper, and
     // their sfu.toml is intentionally read-only. Do not present a wizard
     // that will fail after asking for domains and certificates.
-    if !std::path::Path::new(&state.cfg.admin.helper_path).is_file() {
+    if !native_admin_helper_available(&state.cfg.admin.helper_path) {
         return page(
             "Configure the Compose SFU",
             r#"<h1>Configure your Compose SFU on the host</h1>
@@ -514,7 +522,7 @@ async fn apply_setup(
     if !authenticated(&state, &headers).await {
         return Redirect::to("/admin/login").into_response();
     }
-    if !std::path::Path::new(&state.cfg.admin.helper_path).is_file() {
+    if !native_admin_helper_available(&state.cfg.admin.helper_path) {
         return error_page(
             StatusCode::BAD_REQUEST,
             "The setup wizard requires the native host helper. Configure Compose on the host; see deploy/README.md.",
@@ -555,7 +563,7 @@ async fn apply_setup(
         }
     }
 
-    if let Err(e) = apply_proxy(&cfg.admin.helper_path, &sfu_domain, &livekit_domain, form.email.trim()).await {
+    if let Err(e) = apply_proxy(&sfu_domain, &livekit_domain, form.email.trim()).await {
         return error_page(
             StatusCode::BAD_GATEWAY,
             &format!("nginx/Certbot setup failed: {e}. Check DNS, then submit this page again."),
@@ -566,7 +574,7 @@ async fn apply_setup(
         return error_page(StatusCode::INTERNAL_SERVER_ERROR, &format!("Could not save sfu.toml: {e}"));
     }
 
-    schedule_restart(cfg.admin.helper_path.clone(), Duration::from_millis(800));
+    schedule_restart(Duration::from_millis(800));
 
     page(
         "Telium SFU configured",
@@ -728,26 +736,32 @@ async fn restart(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Re
     if !authenticated(&state, &headers).await {
         return Redirect::to("/admin/login").into_response();
     }
-    schedule_restart(state.cfg.admin.helper_path.clone(), Duration::from_millis(500));
+    if !native_admin_helper_available(&state.cfg.admin.helper_path) {
+        return error_page(
+            StatusCode::BAD_REQUEST,
+            "Restart this Compose deployment on the host using docker compose restart sfu.",
+        );
+    }
+    schedule_restart(Duration::from_millis(500));
     page("Restarting", "<h1>Restarting SFU…</h1><p>The service will be back in a moment.</p>")
 }
 
-fn schedule_restart(helper: String, delay: Duration) {
+fn schedule_restart(delay: Duration) {
     tokio::spawn(async move {
         tokio::time::sleep(delay).await;
         let _ = tokio::process::Command::new("sudo")
             .arg("-n")
-            .arg(helper)
+            .arg(NATIVE_ADMIN_HELPER)
             .arg("restart")
             .status()
             .await;
     });
 }
 
-async fn apply_proxy(helper: &str, sfu_domain: &str, livekit_domain: &str, email: &str) -> anyhow::Result<()> {
+async fn apply_proxy(sfu_domain: &str, livekit_domain: &str, email: &str) -> anyhow::Result<()> {
     let output = tokio::process::Command::new("sudo")
         .arg("-n")
-        .arg(helper)
+        .arg(NATIVE_ADMIN_HELPER)
         .arg("proxy")
         .arg(sfu_domain)
         .arg(livekit_domain)
@@ -1052,6 +1066,13 @@ section,aside{{background:#15161a;border:1px solid #292a30;border-radius:13px;pa
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_helper_does_not_follow_operator_configured_paths() {
+        for path in ["/tmp/forged-helper", "bin/../other-helper", "/usr/local/bin/sudo"] {
+            assert!(!native_admin_helper_available(path), "unexpected helper path: {path}");
+        }
+    }
 
     #[test]
     fn login_gate_locks_out_boundedly_and_clears_on_success() {
