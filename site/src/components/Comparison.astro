@@ -94,52 +94,51 @@ const sources = [
 ] as const
 ---
 
-<section class="band overflow-hidden" id="compare">
+<section class="band" id="compare">
   <div class="page">
-    <div class="reveal grid gap-6 lg:grid-cols-[minmax(0,.8fr)_minmax(0,1.2fr)] lg:items-end">
+    <div class="reveal grid gap-5 md:grid-cols-[minmax(0,.8fr)_minmax(0,1.2fr)] md:items-end">
       <div>
-        <p class="eyebrow">How we compare</p>
-        <h2 class="h2 mt-3 max-w-[15ch]">Different architecture. Different trade-offs.</h2>
+        <p class="eyebrow">Compare</p>
+        <h2 class="h2 comparison-title mt-3 max-w-[18ch]">See what stays in your hands.</h2>
       </div>
-      <p class="max-w-[62ch] text-[15px] leading-relaxed text-muted lg:justify-self-end">
-        Telium is not trying to win a checklist. The difference is the combination: community-style
-        chat, servers you can run yourself, cross-server participation, and a built-in way to move
-        your account later.
+      <p class="max-w-[60ch] text-[16px] leading-relaxed text-muted md:justify-self-end">
+        A familiar set of chat features, with a different approach to server choice,
+        cross-server communities and account portability.
       </p>
     </div>
 
-    <div class="comparison-shell panel reveal mt-10 overflow-hidden">
-      <p class="scroll-hint flex items-center gap-1.5 px-5 py-2.5 text-[12px] text-muted sm:hidden" aria-hidden="true">
-        Swipe to see Discord, Matrix, Stoat and Fluxer
-        <span class="scroll-hint-arrow">→</span>
+    <div class="comparison-shell reveal mt-10">
+      <p class="comparison-cue mb-4 text-[13px] text-muted sm:hidden">
+        Swipe sideways to compare more services <span aria-hidden="true">→</span>
       </p>
-      <div class="table-scroll overflow-x-auto">
-        <table class="comparison-table w-full min-w-[980px] table-fixed border-collapse text-left">
+      <div
+        class="comparison-scroll overflow-x-auto"
+        role="region"
+        aria-label="Feature comparison; scroll horizontally to see more services"
+        tabindex="0"
+      >
+        <table class="comparison-table w-full table-fixed">
           <caption class="sr-only">
-            Comparison of Telium, Discord, Matrix with Element, Stoat, and Fluxer.
+            Telium compared with Discord, Matrix and Element, Stoat, and Fluxer.
+            Detailed explanations are provided in the cell labels and tooltips.
           </caption>
           <colgroup>
-            <col class="w-[220px]" />
-            {products.map(() => <col class="w-[170px]" />)}
+            <col class="feature-col" />
+            {products.map(() => <col />)}
           </colgroup>
           <thead>
-            <tr class="comparison-head-row">
-              <th scope="col" class="feature-head sticky left-0 z-20 px-5 py-5 align-bottom">
-                <span class="eyebrow">What matters</span>
-              </th>
+            <tr>
+              <th scope="col" class="feature-label feature-heading">Feature</th>
               {
                 products.map((product) => (
                   <th
                     scope="col"
                     class:list={[
-                      'px-4 py-5 align-bottom',
-                      product.telium && 'comparison-telium',
+                      'product-heading',
+                      product.telium && 'telium-column',
                     ]}
                   >
-                    <strong class:list={['block text-[15px] font-semibold', product.telium && 'text-accent-soft-foreground']}>
-                      {product.name}
-                    </strong>
-                    <span class="mt-1 block text-[11.5px] font-normal leading-snug text-muted">{product.note}</span>
+                    {product.name}
                   </th>
                 ))
               }
@@ -148,31 +147,27 @@ const sources = [
           <tbody>
             {
               rows.map((row) => (
-                <tr class="comparison-row">
-                  <th
-                    scope="row"
-                    class="feature-cell sticky left-0 z-10 px-5 py-5 align-top"
-                  >
-                    <strong class="block text-[13.5px] font-medium leading-snug">{row.label}</strong>
-                    <span class="mt-1.5 block text-[11.5px] font-normal leading-relaxed text-muted">{row.hint}</span>
+                <tr>
+                  <th scope="row" class="feature-label" title={row.hint}>
+                    <span>{row.label}</span>
                   </th>
                   {
                     products.map((product) => {
                       const value = row.values[product.key]
                       return (
                         <td
-                          class:list={[
-                            'px-4 py-5 align-top',
-                            product.telium && 'comparison-telium',
-                          ]}
+                          class:list={['status-cell', product.telium && 'telium-column']}
+                          title={value.detail ? `${value.label} — ${value.detail}` : value.label}
                         >
-                          <span class="inline-flex items-center gap-2 text-[13px] font-medium">
-                            <span class:list={['status-dot', `status-${value.state}`]}></span>
-                            {value.label}
+                          <span class:list={['status-glyph', `status-${value.state}`]} aria-hidden="true">
+                            {value.state === 'yes' ? '✓' : value.state === 'neutral' ? '·' : ''}
                           </span>
-                          {value.detail && (
-                            <span class="mt-1.5 block text-[11.5px] leading-relaxed text-muted">{value.detail}</span>
+                          {(value.state === 'partial' || value.state === 'neutral' || (product.telium && value.label !== 'Yes')) && (
+                            <span class="status-caption">{value.label}</span>
                           )}
+                          <span class="sr-only">
+                            {`${product.name}: ${value.label}. ${value.detail ?? ''}`}
+                          </span>
                         </td>
                       )
                     })
@@ -184,124 +179,194 @@ const sources = [
         </table>
       </div>
 
-      <div class="comparison-sources flex flex-wrap items-center justify-between gap-3 px-5 py-3 text-[11.5px] text-muted">
-        <span>Checked against current public product documentation in August 2026.</span>
-        <span class="flex flex-wrap gap-x-3 gap-y-1">
-          <span>Sources:</span>
+      <div class="comparison-footer mt-7 space-y-5 text-[13px] text-muted">
+        <div class="comparison-legend flex flex-wrap items-center gap-x-6 gap-y-3" aria-label="Comparison key">
+          <span><i class="status-glyph status-yes" aria-hidden="true">✓</i> Yes</span>
+          <span><i class="status-glyph status-partial" aria-hidden="true"></i> Limited</span>
+          <span><i class="status-glyph status-no" aria-hidden="true"></i> No</span>
+          <span><i class="status-glyph status-neutral" aria-hidden="true">·</i> Not comparable / unconfirmed</span>
+        </div>
+        <div class="comparison-sources max-w-[90ch] leading-relaxed">
+          <span>Public documentation reviewed August 2026. </span>
+          <span>Sources: </span>
           {
-            sources.map((source) => (
-              <a href={source.href} rel="noreferrer" class="text-link hover:underline">{source.label}</a>
+            sources.map((source, index) => (
+              <>
+                {index > 0 && <span aria-hidden="true"> · </span>}
+                <a href={source.href} rel="noreferrer" class="text-link underline-offset-2 hover:underline">{source.label}</a>
+              </>
             ))
           }
-        </span>
+        </div>
       </div>
     </div>
-
   </div>
 </section>
 
 <style>
-  /* Rules, not boxes: the table's own row separators. A shell that is a fill
-     needs no outline, so what used to be a tinted 1px border plus a 70px purple
-     drop shadow under the whole panel is gone and only the internal rules stay. */
-  .comparison-head-row {
-    border-bottom: 1px solid var(--color-separator);
+  /* The docs graphic is a visual reference, not an embedded asset. Every
+     feature and result remains selectable, themeable and accessible HTML. */
+  .comparison-table {
+    min-width: 970px;
+    border-collapse: separate;
+    border-spacing: 0;
+    text-align: center;
   }
 
-  .comparison-row {
-    border-bottom: 1px solid var(--color-separator);
-  }
-
-  .comparison-row:last-child {
-    border-bottom: 0;
-  }
-
-  .scroll-hint {
-    border-bottom: 1px solid var(--color-separator);
-  }
-
-  .comparison-sources {
-    border-top: 1px solid var(--color-separator);
-  }
+  .comparison-table .feature-col { width: 248px; }
 
   .comparison-table th,
   .comparison-table td {
-    vertical-align: top;
+    padding: 1.42rem 0.85rem;
+    vertical-align: middle;
   }
 
-  /* The frozen first column has to be opaque, because the other five scroll
-     underneath it. It takes the panel's own fill, and the 1px rule marking the
-     scroll boundary stays a `box-shadow` for a mechanical reason rather than a
-     decorative one: `border-collapse` drops a border on a `position: sticky`
-     cell, and a shadow with no blur and no offset is the only 1px line that
-     survives there. */
-  .feature-head,
-  .feature-cell {
-    background: var(--color-surface);
+  .comparison-table .feature-label {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    width: 248px;
+    padding-inline: 1.2rem;
+    text-align: left;
+    font-size: 15px;
+    line-height: 1.4;
+    font-weight: 500;
+    background: var(--color-background);
     box-shadow: 1px 0 0 var(--color-separator);
   }
 
-  /* Our own column, marked by fill rather than by two vertical borders and an
-     8% accent wash. `--accent-soft` is the client's quietest accent surface and
-     is the same idea as a selected row there. */
-  .comparison-telium {
-    background: color-mix(in oklab, var(--color-accent-soft) 60%, var(--color-surface));
+  .comparison-table .feature-heading {
+    z-index: 3;
+    color: var(--color-muted);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
   }
 
-  .status-dot {
-    width: 0.48rem;
-    height: 0.48rem;
+  .comparison-table .product-heading {
+    padding-block: 1.65rem;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.3;
+    white-space: normal;
+  }
+
+  /* Alternating horizontal bands are easier to trace than a box around
+     every cell. Keep the frozen feature label opaque when the table scrolls. */
+  .comparison-table tbody tr:nth-child(odd) > :not(.telium-column) {
+    background: var(--color-surface);
+  }
+  .comparison-table tbody tr:nth-child(odd) > .feature-label {
+    border-radius: var(--radius-row) 0 0 var(--radius-row);
+  }
+  .comparison-table tbody tr:nth-child(odd) > :last-child:not(.telium-column) {
+    border-radius: 0 var(--radius-row) var(--radius-row) 0;
+  }
+
+  /* The sticky feature label paints over the edge of the adjacent column.
+     Draw the Telium rails *inside* its cells so the left rail can't vanish
+     behind that sticky label when the comparison scrolls. */
+  .comparison-table .telium-column {
+    background: color-mix(in oklab, var(--color-accent-soft) 66%, var(--color-surface));
+    box-shadow:
+      inset 2px 0 0 var(--color-accent),
+      inset -1px 0 0 var(--color-accent);
+  }
+  .comparison-table .product-heading.telium-column {
+    border-top: 1px solid var(--color-accent);
+    border-radius: 12px 12px 0 0;
+    color: var(--color-accent-soft-foreground);
+  }
+  .comparison-table tbody tr:last-child > .telium-column {
+    border-bottom: 1px solid var(--color-accent);
+    border-radius: 0 0 12px 12px;
+  }
+
+  .status-cell { text-align: center; }
+  .status-glyph {
+    display: inline-flex;
+    width: 28px;
+    height: 28px;
     flex: none;
-    border-radius: 999px;
-    background: var(--color-muted);
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    font-family: var(--font-sans);
+    font-size: 18px;
+    font-weight: 650;
+    line-height: 1;
+    font-style: normal;
+    vertical-align: middle;
   }
+  .status-yes {
+    background: var(--color-accent-solid);
+    color: var(--color-accent-solid-foreground);
+  }
+  .status-no {
+    border: 1.5px solid var(--color-muted);
+    opacity: 0.85;
+  }
+  .status-partial {
+    border: 1.5px solid var(--color-warning);
+    color: var(--color-warning);
+  }
+  /* Glyph baselines differ by font and size. A geometric stroke stays
+     precisely centered in both the 28px table icons and 19px legend icons. */
+  .status-partial::before {
+    content: '';
+    display: block;
+    width: 11px;
+    height: 2px;
+    border-radius: 1px;
+    background: currentColor;
+  }
+  .status-neutral {
+    border: 1.5px solid var(--color-muted);
+    color: var(--color-muted);
+    font-size: 19px;
+    opacity: 0.85;
+  }
+  .status-caption {
+    display: block;
+    max-width: 132px;
+    margin: 0.4rem auto 0;
+    color: var(--color-muted);
+    font-size: 12px;
+    line-height: 1.35;
+  }
+  .comparison-legend > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    white-space: nowrap;
+  }
+  .comparison-legend .status-glyph {
+    width: 19px;
+    height: 19px;
+    font-size: 12px;
+  }
+  .comparison-legend .status-partial::before { width: 8px; height: 2px; }
+  .comparison-legend .status-neutral { font-size: 14px; }
 
-  /* The four states were told apart by hue and by a 4px halo each. The halo was
-     the shadow rule's last hiding place on this page and it never survived on a
-     tinted cell anyway; hue and the label beside it carry the meaning. */
-  .status-yes { background: var(--color-success); }
-  .status-no { background: var(--color-danger); }
-  .status-partial { background: var(--color-warning); }
-  .status-neutral { background: var(--color-muted); opacity: 0.7; }
+  .comparison-title {
+    font-size: clamp(2.3rem, 1.6rem + 2.3vw, 2.85rem);
+    line-height: 1.12;
+  }
 
   @media (max-width: 640px) {
-    .comparison-shell {
+    .comparison-scroll {
       margin-inline: -0.5rem;
+      scrollbar-width: thin;
     }
-  }
-
-  .scroll-hint-arrow {
-    display: inline-block;
-    animation: scroll-hint-nudge 1.4s ease-in-out infinite;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .scroll-hint-arrow {
-      animation: none;
-    }
-  }
-
-  @keyframes scroll-hint-nudge {
-    0%, 100% { transform: translateX(0); }
-    50% { transform: translateX(3px); }
-  }
-
-  .scroll-hint[data-dismissed] {
-    display: none;
+    .comparison-table { min-width: 900px; }
+    .comparison-table .feature-col,
+    .comparison-table .feature-label { width: 188px; }
+    .comparison-table .feature-label { padding-inline: 0.8rem; font-size: 14px; }
+    .comparison-table .product-heading { font-size: 15px; }
+    .comparison-table th,
+    .comparison-table td { padding-block: 1.25rem; }
+    .status-caption { font-size: 11.5px; }
   }
 </style>
-
-<script>
-  const shell = document.querySelector('.comparison-shell')
-  const scroller = shell?.querySelector<HTMLElement>('.table-scroll')
-  const label = shell?.querySelector<HTMLElement>('.scroll-hint')
-  if (scroller && label) {
-    const update = () => {
-      const atEnd = scroller.scrollLeft + scroller.clientWidth >= scroller.scrollWidth - 4
-      label.toggleAttribute('data-dismissed', atEnd)
-    }
-    update()
-    scroller.addEventListener('scroll', update, { passive: true })
-    addEventListener('resize', update, { passive: true })
-  }
-</script>

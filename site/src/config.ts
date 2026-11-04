@@ -11,7 +11,7 @@ export const SITE = {
   domain: 'telium.chat',
   /* Used for the <title> suffix and social metadata. It describes the user
      choice the site should make clear before it explains the architecture. */
-  tagline: 'Group chat with a server you can choose.',
+  tagline: 'Choose your server. Keep your people.',
 } as const
 
 export const URLS = {

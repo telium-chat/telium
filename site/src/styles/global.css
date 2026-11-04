@@ -131,15 +131,6 @@
      client's value is invisible at that distance. */
   --separator: oklch(90.5% 0.014 298);
 
-  /* The two page glows, which the client has no equivalent of — it is a fixed
-     app shell and this is a scrolling page. Purple carries on a dark ground and
-     turns to mud on a pale one, so the light theme spends much less of it. It
-     spends less again than first drawn: on a pale page a glow can only darken,
-     and `--muted` over the near glow's centre measured 4.7:1 where the same
-     text on bare `--background` measures 5.22:1. The glow is decoration and the
-     text is not, so the glow gives the margin back. */
-  --glow-near: color-mix(in oklab, var(--telium-amethyst) 5.5%, transparent);
-  --glow-far: color-mix(in oklab, var(--telium-violet) 4.5%, transparent);
 
   color-scheme: light;
   accent-color: var(--accent);
@@ -147,9 +138,6 @@
 
 :root[data-theme="dark"] {
   --separator: oklch(30% 0.022 296);
-  --glow-near: color-mix(in oklab, #6740c7 20%, transparent);
-  --glow-far: color-mix(in oklab, #8b5fe8 9%, transparent);
-
   color-scheme: dark;
 }
 
@@ -190,36 +178,9 @@
     text-rendering: optimizeLegibility;
   }
 
-  /* Two glows for the whole document, fixed to the viewport, rather than one
-     per section. Seven sections each fading their own corner is what made the
-     old page read as a stack of unrelated panels; a single light source behind
-     all of them is one page. They are `fixed` and unblurred — a `filter: blur()`
-     on something this large is a full-viewport raster on every scroll, and a
-     radial-gradient with a soft stop already has no edge to blur. */
-  body::before,
-  body::after {
-    content: "";
-    position: fixed;
-    z-index: -1;
-    border-radius: 999px;
-    pointer-events: none;
-  }
-
-  body::before {
-    width: min(70vw, 900px);
-    aspect-ratio: 1;
-    right: -12vw;
-    top: -24vw;
-    background: radial-gradient(circle, var(--glow-near), transparent 70%);
-  }
-
-  body::after {
-    width: min(52vw, 680px);
-    aspect-ratio: 1;
-    left: -16vw;
-    top: 42vh;
-    background: radial-gradient(circle, var(--glow-far), transparent 68%);
-  }
+  /* Keep page lighting flat and continuous. The old fixed radial bubbles
+     drew attention from the content in every section. The hero alone now
+     carries a subtle, logo-aligned ambient accent. */
 
   ::selection {
     background-color: color-mix(in oklab, var(--color-accent) 26%, transparent);

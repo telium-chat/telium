@@ -33,14 +33,6 @@
       />
     </div>
 
-    <div class="floating-chip floating-chip-left" aria-hidden="true">
-      <span class="chip-dot"></span>
-      Channels & voice rooms
-    </div>
-    <div class="floating-chip floating-chip-right" aria-hidden="true">
-      <span class="chip-dot"></span>
-      Members & presence
-    </div>
   </figure>
 </section>
 
@@ -69,31 +61,5 @@
     border-radius: calc(var(--radius-card) - 6px);
   }
 
-  /* A chip sits on the frame's fill, so it takes the step above it rather than
-     an outline and a backdrop blur. */
-  .floating-chip {
-    position: absolute;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    border-radius: 999px;
-    background: var(--color-surface-secondary);
-    padding: 0.5rem 0.75rem;
-    font-size: 11px;
-    font-weight: 500;
-  }
 
-  .floating-chip-left { left: -1rem; top: 27%; }
-  .floating-chip-right { right: -1rem; top: 14%; }
-
-  .chip-dot {
-    width: 0.45rem;
-    height: 0.45rem;
-    border-radius: 999px;
-    background: var(--color-accent);
-  }
-
-  @media (max-width: 760px) {
-    .floating-chip { display: none; }
-  }
 </style>
