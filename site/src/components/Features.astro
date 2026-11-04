@@ -1,20 +1,33 @@
 ---
+import Icon from './Icon.astro'
+
+/* "How it works" already explains homeservers, federation and migration.
+ * This section answers the separate question: what does the app feel like
+ * to use every day? Keep features grounded in the shipped client. */
 const features = [
   {
-    title: 'A server you actually choose',
-    body: "Join a public homeserver or run your own. Your first choice doesn't have to be permanent.",
+    icon: 'music-2',
+    title: 'Music presence, built in',
+    body: "Show friends what you're listening to from supported desktop media players. Your choice to share.",
+    note: 'Desktop app',
   },
   {
-    title: 'Move without starting over',
-    body: 'Move your account to another homeserver later, instead of rebuilding your identity.',
+    icon: 'gamepad-2',
+    title: 'Game rich presence',
+    body: "Let friends see what you're playing, with richer game details where supported.",
+    note: 'Desktop app',
   },
   {
-    title: 'Private messages stay private',
-    body: 'Direct messages and group DMs are end-to-end encrypted, with encrypted history recovery.',
+    icon: 'monitor-up',
+    title: 'Voice, video & screenshare',
+    body: 'Hop into a call, share your screen and keep chatting without leaving your community.',
+    note: 'Web & desktop',
   },
   {
-    title: 'One account, many communities',
-    body: 'Join communities on other Telium servers without signing up again for each one.',
+    icon: 'lock-keyhole',
+    title: 'Private conversations',
+    body: 'Direct messages and group DMs use end-to-end encryption, not just encryption in transit.',
+    note: 'End-to-end encrypted',
   },
 ] as const
 ---
@@ -23,40 +36,77 @@ const features = [
   <div class="page">
     <div class="reveal grid gap-5 md:grid-cols-[minmax(0,.9fr)_minmax(0,1.1fr)] md:items-end">
       <div>
-        <p class="eyebrow">Why Telium</p>
-        <h2 class="h2 mt-3 max-w-[17ch]">Familiar chat. More control.</h2>
+        <p class="eyebrow">What you get</p>
+        <h2 class="h2 mt-3 max-w-[18ch]">The good stuff comes standard.</h2>
       </div>
-      <p class="max-w-[55ch] text-[15px] leading-relaxed text-muted md:justify-self-end">
-        You get the communities, calls and conversations you expect. You also get a say in
-        where your account lives.
+      <p class="max-w-[56ch] text-[16px] leading-relaxed text-muted md:justify-self-end">
+        From what you're playing to who you're calling, Telium has the
+        everyday features that make a chat app feel like home.
       </p>
     </div>
 
     <div class="feature-grid mt-12 grid gap-x-14 sm:grid-cols-2">
       {
-        features.map((feature, index) => (
-          <article class="feature-item reveal grid grid-cols-[2rem_minmax(0,1fr)] gap-4 py-7">
-            <span class="feature-number" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
-            <div>
-              <h3 class="text-[18px] font-semibold leading-snug tracking-[-.02em]">{feature.title}</h3>
-              <p class="mt-2 max-w-[47ch] text-[14px] leading-relaxed text-muted">{feature.body}</p>
+        features.map((feature) => (
+          <article class="feature-item reveal flex gap-4 py-7 sm:py-8">
+            <span class="feature-icon mt-1 shrink-0" aria-hidden="true">
+              <Icon name={feature.icon} size={21} />
+            </span>
+            <div class="min-w-0">
+              <h3 class="text-[19px] font-semibold leading-snug tracking-[-.02em]">{feature.title}</h3>
+              <p class="mt-2 max-w-[42ch] text-[15px] leading-relaxed text-muted">{feature.body}</p>
+              <p class="feature-note mt-4">{feature.note}</p>
             </div>
           </article>
         ))
       }
     </div>
+
+    <div class="no-plus reveal mt-6 grid gap-5 py-8 sm:mt-8 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] sm:items-center sm:py-10">
+      <div>
+        <p class="eyebrow">Included, not upsold</p>
+        <p class="no-plus-title mt-2">No Plus plan. Period.</p>
+      </div>
+      <p class="max-w-[48ch] text-[15px] leading-relaxed text-muted">
+        Telium doesn't have a premium subscription or a separate tier of app features.
+        No paywall to unlock the good stuff.
+      </p>
+    </div>
   </div>
 </section>
 
 <style>
-  /* Editorial rows instead of a second set of UI tiles. The client screenshot
-     above carries the visual weight; these explain the choices. */
-  .feature-item { border-top: 1px solid var(--color-separator); }
-  .feature-number {
-    padding-top: 0.18rem;
-    font-family: var(--font-mono);
-    font-size: 12px;
+  /* Four quiet editorial rows, not a second set of "how it works" cards.
+     The icons are an accent to the actual features, not decorative art. */
+  .feature-item {
+    border-top: 1px solid var(--color-separator);
+  }
+  .feature-icon {
+    display: grid;
+    width: 2.5rem;
+    height: 2.5rem;
+    place-items: center;
+    border-radius: 0.65rem;
+    background: var(--color-accent-soft);
+    color: var(--color-accent-soft-foreground);
+  }
+  .feature-note {
     color: var(--color-accent);
-    font-variant-numeric: tabular-nums;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.015em;
+  }
+  /* The absence of a paid tier deserves a plainspoken sign-off, not a
+     glowing purple sales card or an "exclusive" badge. */
+  .no-plus {
+    border-top: 1px solid var(--color-separator);
+    border-bottom: 1px solid var(--color-separator);
+  }
+  .no-plus-title {
+    font-size: clamp(1.7rem, 1.35rem + 1.25vw, 2.2rem);
+    line-height: 1.2;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    color: var(--color-foreground);
   }
 </style>
