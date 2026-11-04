@@ -168,11 +168,12 @@ timeout_secs = 10
 stale_after_days = 14
 urgent_after_days = 45
 
-# The project's Ed25519 manifest-signing key, url-safe base64. Empty means the
-# manifest is trusted on transport alone (HTTPS, no signature check) -- pin the
-# key to make a forged or replayed manifest fail closed. The current value is
-# published in the repo's GitHub Actions variables (TELIUM_RELEASE_PUBLIC_KEY).
-manifest_public_key = ""
+# Official release-built binaries carry Telium's Ed25519 public release key.
+# The publisher signature is verified automatically (also when this field is
+# empty in a legacy config). For a separately signed fork or custom feed, set
+# its own url-safe base64 public key here. Hand-built binaries without an
+# embedded key should set a trusted key before enabling native auto-updates.
+# manifest_public_key = "<your publisher's public key>"
 
 # Where the detached signature lives. Empty means manifest_url + ".sig".
 manifest_signature_url = ""
