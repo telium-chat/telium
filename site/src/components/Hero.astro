@@ -34,25 +34,29 @@ import { URLS } from '../config'
   .hero-mark-wrap {
     position: absolute;
     z-index: 0;
-    width: clamp(30rem, 58vw, 53rem);
+    /* Keep the entire orbit inside the hero's painted bounds. Previously it
+       was deliberately shoved ~20rem to the right and clipped by the section. */
+    width: clamp(21rem, 40vw, 31rem);
     aspect-ratio: 1;
-    right: clamp(-21rem, -18vw, -9rem);
+    right: max(2rem, 4vw);
     top: 50%;
-    transform: translateY(-49%) rotate(-9deg);
+    transform: translateY(-50%) rotate(-9deg);
     pointer-events: none;
-    opacity: 0.2;
+    opacity: 0.19;
     filter: saturate(0.85);
   }
   .hero-mark { display: block; width: 100%; height: 100%; }
-  :root[data-theme='light'] .hero-mark-wrap { opacity: 0.11; }
+  :root[data-theme='light'] .hero-mark-wrap { opacity: 0.095; }
   .hero-facts span { margin-inline: 0.6rem; color: var(--color-accent); }
   @media (max-width: 900px) {
-    .hero-mark-wrap { right: -20rem; opacity: 0.13; }
-    :root[data-theme='light'] .hero-mark-wrap { opacity: 0.075; }
+    .hero-mark-wrap { width: min(42vw, 22rem); right: 1.5rem; opacity: 0.12; }
+    :root[data-theme='light'] .hero-mark-wrap { opacity: 0.07; }
   }
   @media (max-width: 640px) {
-    .hero-mark-wrap { width: 31rem; right: -18rem; top: 56%; opacity: 0.085; }
-    :root[data-theme='light'] .hero-mark-wrap { opacity: 0.055; }
+    /* Small screens use a quieter watermark behind the content, never a
+       cropped ring protruding off the right edge. */
+    .hero-mark-wrap { width: min(75vw, 21rem); right: 1rem; top: 61%; opacity: 0.065; }
+    :root[data-theme='light'] .hero-mark-wrap { opacity: 0.045; }
     .hero-facts span { margin-inline: 0.3rem; }
   }
 </style>
