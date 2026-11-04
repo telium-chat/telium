@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicU32, Ordering};
-use telium_server::{config::Config, AppState};
+use telium_server::{config::Config, AppState, Role};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -37,7 +37,10 @@ async fn state() -> TestState {
         media_dir: dir.join("media"),
         ..Config::default()
     };
-    let state = telium_server::build_state(cfg).await.unwrap();
+    // This test calls the one-off relocation tool directly. A serving state
+    // starts a lease heartbeat that can write while remap has a read snapshot,
+    // yielding SQLITE_BUSY_SNAPSHOT (517) even though remap is correct.
+    let state = telium_server::build_state_as(cfg, Role::Tool).await.unwrap();
     TestState { state, dir }
 }
 

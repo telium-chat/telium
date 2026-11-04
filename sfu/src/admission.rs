@@ -46,24 +46,42 @@ pub fn status(state: &AppState) -> Status {
 /// operator decision and get 403; capacity and budget are the relay saying
 /// "full" and get 503 so callers route around without treating it as an error
 /// of their own.
-pub fn refuse(state: &AppState, origin: &str) -> Option<(axum::http::StatusCode, Value)> {
+pub fn refuse(state: &AppState, origin: &str, room: &str, identity: &str) -> Option<(axum::http::StatusCode, Value)> {
     if state.cfg.limits.blocked_origins.iter().any(|o| o == origin) {
         return Some((
             axum::http::StatusCode::FORBIDDEN,
             json!({ "error": format!("this relay does not serve {origin}"), "code": "origin_blocked" }),
         ));
     }
-    let status = status(state);
-    if !status.accepting {
-        return Some((
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            json!({
-                "error": format!("relay is not accepting new calls: {}", status.reason),
-                "code": "relay_full",
-            }),
-        ));
-    }
-    None
+    // A room cap limits *new rooms*, never a new listener in an existing call.
+    // A participant cap limits new identities; an existing identity must still
+    // be able to renew its token or reconnect when the relay is full.
+    // A transfer budget stops new calls, but doesn't strand an active call.
+    let limits = &state.cfg.limits;
+    let existing_room = state.sessions.rooms().iter().any(|r| r == room);
+    let existing_seat = state.sessions.cap_for(room, identity).is_some();
+    let rooms_full = !existing_room && limits.max_rooms > 0
+        && state.sessions.rooms().len() as u32 >= limits.max_rooms;
+    let seats_full = !existing_seat && limits.max_participants > 0
+        && state.sessions.join_count_all() as u32 >= limits.max_participants;
+    let budget_full = !existing_room && limits.transfer_budget_bytes > 0
+        && state.usage.total_estimate(now_ms(), limits.transfer_period_days) >= limits.transfer_budget_bytes;
+    let reason = if rooms_full {
+        Some("room limit reached")
+    } else if seats_full {
+        Some("participant limit reached")
+    } else if budget_full {
+        Some("transfer budget reached")
+    } else {
+        None
+    };
+    reason.map(|reason| (
+        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        json!({
+            "error": format!("relay is not accepting new calls: {reason}"),
+            "code": "relay_full",
+        }),
+    ))
 }
 
 /// The `/health` body: what a guild server or the directory learns from one
@@ -73,6 +91,7 @@ pub fn health_body(state: &AppState, livekit_ok: bool) -> Value {
     let status = status(state);
     let limits = &state.cfg.limits;
     json!({
+        "service": "telium-sfu",
         "ok": livekit_ok,
         "accepting": status.accepting && livekit_ok,
         "reason": if status.accepting { Value::Null } else { Value::String(status.reason.into()) },

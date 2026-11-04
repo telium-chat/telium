@@ -478,23 +478,38 @@ pub async fn statuses(state: &AppState) -> ApiResult<Vec<Value>> {
 pub async fn probe_relay(state: &AppState, sfu: &str) -> Probe {
     let url = format!("{}/health", sfu.trim_end_matches('/'));
     let started = std::time::Instant::now();
-    let probe = match state.http.get(&url).timeout(Duration::from_secs(5)).send().await {
-        Ok(response) => {
-            let ok = response.status().is_success();
-            let accepting = if ok {
-                response
-                    .json::<Value>()
-                    .await
-                    .ok()
-                    .and_then(|body| body.get("accepting").and_then(Value::as_bool))
-            } else {
-                None
-            };
-            Probe { ok, latency_ms: Some(started.elapsed().as_millis() as i64), accepting }
+    let timeout = Duration::from_secs(5);
+    let is_public = is_listed(state, sfu).await.unwrap_or(false);
+    // Public relay URLs are signed but their DNS is controlled by their
+    // operators. Pin a checked public address and refuse redirects to avoid
+    // turning every subscribed homeserver into an SSRF proxy.
+    let body = if is_public {
+        match url::Url::parse(&url) {
+            Ok(parsed) => crate::federation::feeds::fetch_bytes(
+                false, parsed, 16 * 1024, timeout, "telium-sfu-health/1.0",
+            )
+            .await
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok()),
+            Err(_) => None,
         }
-        Err(_) => Probe::default(),
+    } else {
+        // An admin may intentionally configure a localhost SFU on their own
+        // machine. Still do not follow redirects out of that destination.
+        match state.http_no_redirect.get(&url).timeout(timeout).send().await {
+            Ok(response) if response.status().is_success() => response.json::<Value>().await.ok(),
+            _ => None,
+        }
     };
-    probe
+    let ok = body.as_ref().is_some_and(|v| {
+        v.get("ok").and_then(Value::as_bool) == Some(true)
+            && (!is_public || v.get("service").and_then(Value::as_str) == Some("telium-sfu"))
+    });
+    Probe {
+        ok,
+        latency_ms: if body.is_some() { Some(started.elapsed().as_millis() as i64) } else { None },
+        accepting: if ok { body.as_ref().and_then(|v| v.get("accepting").and_then(Value::as_bool)) } else { None },
+    }
 }
 
 /// Probes a set of relays concurrently, for the on-demand browse listing: one

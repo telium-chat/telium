@@ -17,7 +17,7 @@
     "sfu-directory:keygen": "node scripts/generate-sfu-directory-key.mjs",
     "sfu-directory:write": "node scripts/sfu-directory.mjs --write",
     "sfu-directory:check": "node scripts/sfu-directory.mjs",
-    "test:sfu-directory": "node --test scripts/sfu-directory.test.mjs",
+    "test:sfu-directory": "node --test scripts/sfu-directory.test.mjs scripts/probe-sfus.test.mjs",
     "probe": "node scripts/probe.mjs",
     "recommendations:keygen": "node scripts/generate-recommendation-key.mjs",
     "recommendations:check": "node scripts/recommendations.mjs --check",

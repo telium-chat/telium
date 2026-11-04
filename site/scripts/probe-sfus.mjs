@@ -15,7 +15,10 @@
  */
 
 import { readFile, writeFile } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { lookup } from 'node:dns/promises'
+import { isIP } from 'node:net'
+import { request as httpsRequest } from 'node:https'
 import { sfuEligibility } from './sfu-directory-lib.mjs'
 
 const root = new URL('../', import.meta.url)
@@ -38,20 +41,88 @@ const readJson = async (url, fallback) => {
 }
 
 /** fetch with a hard deadline; a hung relay must not hold the whole run open. */
-const getJson = async (url) => {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      redirect: 'follow',
-      headers: { accept: 'application/json', 'user-agent': 'telium-sfu-directory-probe/1.0' },
-    })
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    return await response.json()
-  } finally {
-    clearTimeout(timer)
+// A registry PR is not permission to connect a GitHub Actions runner to
+// loopback or private networks. DNS is checked before fetch and redirects are
+// forbidden. Runner-level egress restrictions remain desirable against DNS
+// rebinding between validation and the actual connection.
+export function isPublicIp(address) {
+  const ip = String(address).toLowerCase().split('%')[0]
+  const kind = isIP(ip)
+  if (kind === 4) {
+    const p = ip.split('.').map(Number)
+    const [a, b, c] = p
+    return a !== 0 && a !== 10 && a !== 127 && a < 224
+      && !(a === 100 && b >= 64 && b <= 127)
+      && !(a === 169 && b === 254)
+      && !(a === 172 && b >= 16 && b <= 31)
+      && !(a === 192 && b === 168)
+      && !(a === 192 && b === 0)
+      && !(a === 192 && b === 88 && c === 99)
+      && !(a === 198 && (b === 18 || b === 19))
+      && !(a === 192 && b === 0 && c === 0)
+      && !(a === 192 && b === 0 && c === 2)
+      && !(a === 198 && b === 51 && c === 100)
+      && !(a === 203 && b === 0 && c === 113)
   }
+  if (kind === 6) {
+    if (ip.startsWith('::ffff:')) {
+      const suffix = ip.slice('::ffff:'.length)
+      return isIP(suffix) === 4 && isPublicIp(suffix)
+    }
+    const first = Number.parseInt(ip.split(':')[0], 16)
+    return first >= 0x2000 && first < 0x4000 && !ip.startsWith('2001:db8:')
+      && !ip.startsWith('2001:0:')
+  }
+  return false
+}
+
+export async function assertPublicRelayUrl(raw, resolve = lookup) {
+  const url = new URL(raw)
+  if (url.protocol !== 'https:' || url.username || url.password) {
+    throw new Error('only credential-free HTTPS relay URLs are probeable')
+  }
+  const addresses = isIP(url.hostname)
+    ? [{ address: url.hostname }]
+    : await resolve(url.hostname, { all: true })
+  if (!addresses.length || addresses.some((entry) => !isPublicIp(entry.address))) {
+    throw new Error('relay resolves to a non-public address')
+  }
+  return addresses
+}
+
+const getJson = async (url) => {
+  const addresses = await assertPublicRelayUrl(url)
+  const pinned = addresses[0]
+  return await new Promise((resolve, reject) => {
+    // This is deliberately not fetch(): https.request lets us pin the vetted
+    // DNS answer for the actual TLS socket. Redirects are never followed.
+    const req = httpsRequest(url, {
+      method: 'GET',
+      headers: { accept: 'application/json', 'user-agent': 'telium-sfu-directory-probe/1.0' },
+      lookup: (_host, _options, callback) => callback(null, pinned.address, pinned.family),
+    }, (response) => {
+      if (response.statusCode !== 200) {
+        response.resume()
+        reject(new Error('HTTP ' + response.statusCode + ' (redirects are not allowed)'))
+        return
+      }
+      let body = ''
+      response.setEncoding('utf8')
+      response.on('data', (chunk) => {
+        body += chunk
+        if (body.length > 16 * 1024) {
+          req.destroy(new Error('health response too large'))
+        }
+      })
+      response.on('end', () => {
+        try { resolve(JSON.parse(body)) } catch { reject(new Error('invalid health JSON')) }
+      })
+      response.on('error', reject)
+    })
+    req.setTimeout(TIMEOUT_MS, () => req.destroy(new Error('timeout')))
+    req.on('error', reject)
+    req.end()
+  })
 }
 
 const probe = async (entry) => {
@@ -70,8 +141,12 @@ const probe = async (entry) => {
 
   try {
     const body = await getJson(`${entry.url.replace(/\/$/, '')}/health`)
+    if (body?.service !== 'telium-sfu' || body?.ok !== true
+        || typeof body.accepting !== 'boolean') {
+      throw new Error('the endpoint did not return a healthy Telium SFU response')
+    }
     result.ok = true
-    result.accepting = typeof body.accepting === 'boolean' ? body.accepting : null
+    result.accepting = body.accepting
     result.rooms = Number.isInteger(body.rooms) ? body.rooms : null
     result.participants = Number.isInteger(body.participants) ? body.participants : null
     result.service = typeof body.service === 'string' ? body.service : null
@@ -164,7 +239,9 @@ const main = async () => {
   }
 }
 
-main().catch((error) => {
-  console.error(error.message)
-  process.exit(1)
-})
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  main().catch((error) => {
+    console.error(error.message)
+    process.exit(1)
+  })
+}

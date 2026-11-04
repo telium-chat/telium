@@ -522,6 +522,7 @@ fn federation_routes() -> Router<AppState> {
         )
         .route("/_telium/v1/channels/{id}/voice", get(voice::channel_states))
         .route("/_telium/v1/channels/{id}/voice/join", post(voice::join))
+        .route("/_telium/v1/channels/{id}/voice/relay-full", post(voice::report_relay_full))
         .route("/_telium/v1/channels/{id}/voice/leave", post(voice::leave))
         .route("/_telium/v1/channels/{id}/voice/state", post(voice::update_state))
         .route("/_telium/v1/channels/{id}/voice/token", post(voice::refresh_token))
