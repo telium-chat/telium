@@ -143,16 +143,22 @@ say "telium-sfu-update.timer is enabled and running"
 
 step "Still to do, by hand"
 
-if [ ! -s "$RUN_HOME/.docker/config.json" ]; then
-  say "the registry credential (read:packages only), as $RUN_AS, not root:"
-  say "    <your password manager> | docker login ghcr.io -u <user> --password-stdin"
+# The timer's service runs as root (it calls Docker and reconciles files).
+# Checking an undefined RUN_HOME here used to abort the installer under set -u,
+# and directing operators to login as RUN_AS did not authenticate that service.
+if [ ! -s /root/.docker/config.json ]; then
+  say "if the registry requires authentication, login as root for the systemd updater:"
+  say "    <your password manager> | sudo docker login ghcr.io -u <user> --password-stdin"
 fi
 
-say "the compose stack has not been started yet. Start it and read the first-boot"
-say "journal for the one-time admin setup URL:"
-say "    cd $PREFIX && docker compose up -d && docker compose logs sfu | grep FIRST-RUN"
-say "nginx + TLS for https://<your-sfu-domain>/ is worth doing before announcing the"
-say "relay to a guild server; the dashboard's setup wizard walks through it."
+say "the compose stack has not been started yet. The native dashboard wizard"
+say "cannot configure host nginx/Certbot from inside a container."
+say "Set livekit.public_url in $PREFIX/sfu.toml, configure host nginx + HTTPS"
+say "for the SFU and LiveKit domains, then start the stack:"
+say "    cd $PREFIX && docker compose up -d"
+say "Full instructions: https://github.com/telium-chat/telium/blob/main/deploy/README.md#compose-sfu-setup"
+say "The dashboard is available over an SSH tunnel to localhost:7891 for"
+say "administration and first-run password setup; do not expose it publicly."
 say ""
 say "updates are ON. $PREFIX/update-sfu.conf says so in a field with a name;"
 say "'$PREFIX/update-sfu.sh --status' will tell you what this box currently thinks."
