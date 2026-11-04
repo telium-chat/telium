@@ -519,6 +519,33 @@ fn unique_usage_dir() -> std::path::PathBuf {
         assert!(h.record.lock().await.is_empty(), "nothing reaches LiveKit for a blocked guild");
     }
 
+
+    #[tokio::test]
+    async fn room_limit_keeps_existing_call_joinable_and_allows_renewal() {
+        let h = harness_with(|cfg| cfg.limits.max_rooms = 1).await;
+        let (status, first) = join(&h, "alice", 1_000_000).await;
+        assert_eq!(status, StatusCode::OK, "{first}");
+        let (status, second) = join(&h, "bob", 1_000_000).await;
+        assert_eq!(status, StatusCode::OK, "same room must remain joinable: {second}");
+        let (status, renewed) = join(&h, "alice", 1_000_000).await;
+        assert_eq!(status, StatusCode::OK, "a renewal must not be refused: {renewed}");
+        let (_, health) = get_health(&h).await;
+        assert_eq!(health["accepting"], false, "new room admission is still closed");
+        assert_eq!(health["rooms"], 1);
+    }
+
+    #[tokio::test]
+    async fn participant_limit_allows_existing_identity_to_reconnect() {
+        let h = harness_with(|cfg| cfg.limits.max_participants = 1).await;
+        let (status, first) = join(&h, "alice", 1_000_000).await;
+        assert_eq!(status, StatusCode::OK, "{first}");
+        let (status, renewed) = join(&h, "alice", 1_000_000).await;
+        assert_eq!(status, StatusCode::OK, "same identity should be able to reconnect: {renewed}");
+        let (status, rejected) = join(&h, "bob", 1_000_000).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{rejected}");
+        assert_eq!(rejected["code"], "relay_full");
+    }
+
     #[tokio::test]
     async fn a_full_relay_refuses_new_joins_but_keeps_its_health_truthful() {
         let h = harness_with(|cfg| cfg.limits.max_participants = 1).await;

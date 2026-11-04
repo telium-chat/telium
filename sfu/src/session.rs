@@ -89,14 +89,15 @@ pub async fn session_handler(
     };
     let max_bitrate = effective_bitrate(requested, state.cfg.limits.max_bitrate);
 
-    // Admission: a full relay, a blocked guild or an exhausted transfer budget
-    // refuses the join before anything is minted. Existing calls are untouched;
-    // the caller routes around a 503 exactly as it would around a dead relay.
-    if let Some((code, body)) = crate::admission::refuse(&state, origin) {
+    // Admission is scoped to this room/identity: a room limit does not evict
+    // late participants, and existing identities can always renew tokens.
+    // When participant capacity is genuinely exhausted the guild can migrate
+    // the entire call on an authenticated, server-verified 503 report.
+    let room = room_name(origin, guild, channel);
+    if let Some((code, body)) = crate::admission::refuse(&state, origin, &room, user_id) {
         return Err((code, Json(body)));
     }
 
-    let room = room_name(origin, guild, channel);
     let lk_token = match state.livekit.mint_token(&room, user_id, &flags, exp_secs, max_bitrate) {
         Ok(t) => t,
         Err(e) => {
