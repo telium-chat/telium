@@ -1,0 +1,33 @@
+---
+import Icon from './Icon.astro'
+import { URLS } from '../config'
+---
+
+<section class="band" aria-labelledby="community-heading">
+  <div class="page">
+    <div class="reveal grid gap-7 md:grid-cols-[minmax(0,.9fr)_minmax(0,1.1fr)] md:items-center">
+      <div>
+        <p class="eyebrow">People behind the project</p>
+        <h2 id="community-heading" class="h2 mt-3 max-w-[18ch]">
+          Built with the community.
+        </h2>
+      </div>
+      <div>
+        <p class="max-w-[53ch] text-[16px] leading-relaxed text-muted">
+          Telium wouldn't be possible without the people contributing code, reporting bugs,
+          testing features and sharing ideas. This project belongs to the community building it.
+        </p>
+        <div class="mt-7 flex flex-wrap gap-3">
+          <a href={URLS.github} rel="noreferrer" class="btn btn-primary btn-lg">
+            View source code
+            <Icon name="arrow-up-right" size={16} />
+          </a>
+          <a href="/people" class="btn btn-secondary btn-lg">
+            Meet the contributors
+            <Icon name="arrow-right" size={16} />
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
