@@ -1,0 +1,12 @@
+# Build context for Dockerfile.sfu only. This takes precedence over the
+# server image's root .dockerignore without widening its build context.
+*
+!sfu/
+!telium-protocol/
+!deploy/compose.sfu.yml
+
+# Rust outputs are never inputs to the release build.
+sfu/target/
+telium-protocol/target/
+**/.DS_Store
+**/*.log
