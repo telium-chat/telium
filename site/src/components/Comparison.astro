@@ -160,7 +160,7 @@ const sources = [
                           title={value.detail ? `${value.label} — ${value.detail}` : value.label}
                         >
                           <span class:list={['status-glyph', `status-${value.state}`]} aria-hidden="true">
-                            {value.state === 'yes' ? '✓' : value.state === 'partial' ? '−' : value.state === 'neutral' ? '·' : ''}
+                            {value.state === 'yes' ? '✓' : value.state === 'neutral' ? '·' : ''}
                           </span>
                           {(value.state === 'partial' || value.state === 'neutral' || (product.telium && value.label !== 'Yes')) && (
                             <span class="status-caption">{value.label}</span>
@@ -182,7 +182,7 @@ const sources = [
       <div class="comparison-footer mt-7 space-y-5 text-[13px] text-muted">
         <div class="comparison-legend flex flex-wrap items-center gap-x-6 gap-y-3" aria-label="Comparison key">
           <span><i class="status-glyph status-yes" aria-hidden="true">✓</i> Yes</span>
-          <span><i class="status-glyph status-partial" aria-hidden="true">−</i> Limited</span>
+          <span><i class="status-glyph status-partial" aria-hidden="true"></i> Limited</span>
           <span><i class="status-glyph status-no" aria-hidden="true"></i> No</span>
           <span><i class="status-glyph status-neutral" aria-hidden="true">·</i> Not comparable / unconfirmed</span>
         </div>
@@ -265,12 +265,14 @@ const sources = [
     border-radius: 0 var(--radius-row) var(--radius-row) 0;
   }
 
-  /* One uninterrupted Telium column, with a clear outline rather than five
-     disconnected tinted squares. It scrolls as a normal table column. */
+  /* The sticky feature label paints over the edge of the adjacent column.
+     Draw the Telium rails *inside* its cells so the left rail can't vanish
+     behind that sticky label when the comparison scrolls. */
   .comparison-table .telium-column {
     background: color-mix(in oklab, var(--color-accent-soft) 66%, var(--color-surface));
-    border-left: 1px solid var(--color-accent);
-    border-right: 1px solid var(--color-accent);
+    box-shadow:
+      inset 2px 0 0 var(--color-accent),
+      inset -1px 0 0 var(--color-accent);
   }
   .comparison-table .product-heading.telium-column {
     border-top: 1px solid var(--color-accent);
@@ -309,7 +311,16 @@ const sources = [
   .status-partial {
     border: 1.5px solid var(--color-warning);
     color: var(--color-warning);
-    font-size: 19px;
+  }
+  /* Glyph baselines differ by font and size. A geometric stroke stays
+     precisely centered in both the 28px table icons and 19px legend icons. */
+  .status-partial::before {
+    content: '';
+    display: block;
+    width: 11px;
+    height: 2px;
+    border-radius: 1px;
+    background: currentColor;
   }
   .status-neutral {
     border: 1.5px solid var(--color-muted);
@@ -336,7 +347,7 @@ const sources = [
     height: 19px;
     font-size: 12px;
   }
-  .comparison-legend .status-partial,
+  .comparison-legend .status-partial::before { width: 8px; height: 2px; }
   .comparison-legend .status-neutral { font-size: 14px; }
 
   .comparison-title {
