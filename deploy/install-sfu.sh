@@ -127,6 +127,17 @@ EOF
   fi
 done
 
+# Seed a baseline only when the operator's compose file still exactly matches
+# the one this installer shipped. Future updates can then safely reconcile it.
+# Never guess a baseline for a locally edited file.
+if [ ! -f "$PREFIX/.baseline/compose.yml" ] \
+   && cmp -s "$PREFIX/compose.yml" "$here/compose.sfu.yml"; then
+  install -d -o "$RUN_AS" -g "$RUN_GROUP" "$PREFIX/.baseline"
+  install -o "$RUN_AS" -g "$RUN_GROUP" -m 644 \
+    "$here/compose.sfu.yml" "$PREFIX/.baseline/compose.yml"
+  say "seeded the Compose baseline for safe future updates"
+fi
+
 # ------------------------------------------------------------------- the units
 
 step "systemd"
