@@ -26,7 +26,16 @@ const { createRelayBridge } = require('./relay.cjs');
 const { createRelayGuard } = require('./relay-guard.cjs');
 const { installPageZoom } = require('./page-zoom.cjs');
 const { createScreenShareAudioService } = require('./screen-share-audio.cjs');
-const { createUpdateService, runningAppImage } = require('./updater.cjs');
+const {
+  Phase,
+  createUpdateService,
+  launchStagedInstaller,
+  readPendingUpdate,
+  removePendingUpdate,
+  reconcilePendingUpdate,
+  runningAppImage,
+  writePendingUpdate,
+} = require('./updater.cjs');
 const { createDesktopUpdater } = require('./desktop-updater.cjs');
 const { createTrayController } = require('./tray-lifecycle.cjs');
 const { installRendererCrashHandlers } = require('./renderer-crash.cjs');
@@ -476,6 +485,71 @@ const updates = createUpdateService({
   },
 });
 
+// The pending-update record lives in the user's own data directory, not the
+// temp staging directory: a temp cleaner running between the restart click and
+// the next launch must not be able to erase the only trace of the failed update.
+function pendingUpdateDirectory() {
+  try {
+    return app.getPath('userData');
+  } catch {
+    return null;
+  }
+}
+
+// Keep the Restart button when the staged installer still exists. If it
+// vanished, the service clears the stage and offers a fresh download.
+// A failed process launch is not a failed installation: erase its breadcrumb.
+function notifyUpdateRestartFailed() {
+  const directory = pendingUpdateDirectory();
+  if (directory) removePendingUpdate({ directory });
+  updates.restartFailed();
+}
+
+// NSIS deletes the old installation before extracting the new one, so an
+// installer that dies partway leaves a machine with no app at all and no
+// process left to say so. The record written just before the spawn is read
+// here, on the next launch of whatever version survived. Once the grace
+// period expires, an older build signals a likely incomplete installation;
+// the staged installer is left alone because NSIS could still be running.
+// Defer the diagnosis while NSIS may still be updating the old build.
+function reconcileStartupUpdate() {
+  const directory = pendingUpdateDirectory();
+  if (!directory || !readPendingUpdate({ directory })) return;
+  const reconciled = reconcilePendingUpdate({
+    directory,
+    currentVersion: app.getVersion(),
+  });
+  if (reconciled.outcome === 'pending') {
+    setTimeout(() => {
+      try {
+        reconcileStartupUpdate();
+      } catch (error) {
+        console.warn('[Telium desktop] Could not recheck the last update:', error?.message || error);
+      }
+    }, reconciled.retryAfterMs + 1000);
+    return;
+  }
+  if (reconciled.outcome !== 'incomplete') return;
+
+  const previous = reconciled.record?.version || '';
+  console.warn(`[Telium desktop] The previous update did not complete; still on ${app.getVersion()}${previous ? ` (asked for ${previous})` : ''}.`);
+  const answer = dialog.showMessageBoxSync({
+    type: 'warning',
+    title: 'Telium update did not finish',
+    message: 'The last Telium update did not finish installing.',
+    detail: previous
+      ? `Telium is still on version ${app.getVersion()}, not ${previous}. You can check for updates again in Settings, or download the installer from telium.chat.`
+      : `Telium is still on version ${app.getVersion()}. You can check for updates again in Settings, or download the installer from telium.chat.`,
+    buttons: ['Check for updates now', 'Later'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (answer === 0) void updates.install();
+}
+
+let restartInFlight = null;
+
 function installUpdateBridge() {
   // None of the verbs takes an argument: the renderer cannot name a URL, version or digest.
   ipcMain.handle('telium:updates-state', (event) => {
@@ -495,15 +569,30 @@ function installUpdateBridge() {
 
   ipcMain.handle('telium:updates-restart', (event) => {
     assertTrustedSender(event);
-    // Refused unless something is staged, or any frame could close the app on every launch.
-    if (!updates.stagedPath()) return false;
+    // Only one installer may start, even if Restart is clicked twice.
+    if (restartInFlight) return restartInFlight;
+    if (updates.state().phase !== Phase.Ready || !updates.stagedPath()) return false;
+
     if (process.platform === 'win32') {
-      // Runs the staged, verified NSIS installer: spawn detached and exit; the installer restarts the app.
-      const child = spawn(updates.stagedPath(), ['/S'], { detached: true, stdio: 'ignore' });
-      child.unref();
-      app.exit(0);
-      return true;
+      restartInFlight = (async () => {
+        const stagedPath = updates.stagedPath();
+        writePendingUpdate({
+          directory: pendingUpdateDirectory(),
+          version: updates.state().version,
+          stagedPath,
+        });
+        // The app exits only after the installer process exists.
+        const { launched } = await launchStagedInstaller({
+          stagedPath,
+          spawnFn: spawn,
+          exitFn: () => app.exit(0),
+          onLaunchFailed: notifyUpdateRestartFailed,
+        });
+        return launched;
+      })().finally(() => { restartInFlight = null; });
+      return restartInFlight;
     }
+
     // `execPath` is the AppImage, not the unpacked binary inside its disappearing mount.
     const image = runningAppImage();
     app.relaunch(image ? { execPath: image } : {});
@@ -913,6 +1002,15 @@ app.whenReady().then(async () => {
       trayController.install();
     } catch (error) {
       console.warn('[Telium desktop] Could not create system tray:', error?.message || error);
+    }
+
+    // Before any update check: the previous launch may have left an unfinished
+    // update behind, and the user should hear that from us before anything else
+    // offers to try again.
+    try {
+      reconcileStartupUpdate();
+    } catch (error) {
+      console.warn('[Telium desktop] Could not reconcile the last update:', error?.message || error);
     }
 
     // The signed path takes precedence once a build has a key; running both would leave a signed build with an unsigned way to update.
