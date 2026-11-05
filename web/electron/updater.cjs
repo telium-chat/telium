@@ -16,7 +16,7 @@ const {
   writeFileSync,
 } = require('node:fs');
 const { tmpdir } = require('node:os');
-const { basename, dirname, join } = require('node:path');
+const { dirname, join } = require('node:path');
 const { pipeline } = require('node:stream/promises');
 const { Readable } = require('node:stream');
 
@@ -368,7 +368,15 @@ function launchStagedInstaller({
       return;
     }
 
-    const child = spawnFn(stagedPath, STAGED_INSTALLER_ARGS, { detached: true, stdio: 'ignore' });
+    let child;
+    try {
+      child = spawnFn(stagedPath, STAGED_INSTALLER_ARGS, { detached: true, stdio: 'ignore' });
+    } catch {
+      // Native spawn failures emit 'error', but an injected/custom spawn can
+      // throw synchronously. Neither path should close a working client.
+      finish(false);
+      return;
+    }
     timer = setTimeout(() => finish(false), timeoutMs);
     // Created: the installer owns the machine from here. Unref'd so it does not
     // hold the app's event loop; `exitFn` is expected to exit the process anyway.
@@ -391,6 +399,9 @@ const PENDING_UPDATE_FILE = 'pending-update.json';
 /// for (the machine was off for a month, or the version was rolled back by
 /// hand); it is cleaned up rather than reported.
 const PENDING_UPDATE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+// An old build can be opened while NSIS is still installing. Do not diagnose
+// failure immediately or interfere with a potentially running installer.
+const PENDING_UPDATE_GRACE_MS = 10 * 60 * 1000;
 
 function writePendingUpdate({ directory, version, stagedPath, now = Date.now() }) {
   const record = {
@@ -438,40 +449,39 @@ function removePendingUpdate({ directory }) {
 }
 
 /// Called once at startup with the record's directory and this build's version.
-/// Returns `{ outcome: 'none' | 'completed' | 'stale' | 'incomplete', record? }`;
-/// every outcome leaves no record behind, and `incomplete` additionally removes
-/// the staged installer it names, so a failed attempt cannot be re-run against
-/// a version the publisher has since replaced.
+/// Returns `{ outcome: 'none' | 'completed' | 'pending' | 'stale' | 'incomplete', record?, retryAfterMs? }`.
+/// Pending leaves the record for a later check: the old build could have been
+/// started while the installer is still working. A failed attempt's installer
+/// is replaced by the next staging operation, not removed here: without
+/// observing NSIS exit we cannot safely know it has stopped executing.
 function reconcilePendingUpdate({
   directory,
   currentVersion,
-  stagedDirectory = join(tmpdir(), 'telium-update'),
   now = Date.now(),
   maxAgeMs = PENDING_UPDATE_MAX_AGE_MS,
+  graceMs = PENDING_UPDATE_GRACE_MS,
 }) {
   const record = readPendingUpdate({ directory });
   if (!record) return { outcome: 'none' };
-  removePendingUpdate({ directory });
 
   if (compareVersions(currentVersion, record.version) >= 0) {
+    removePendingUpdate({ directory });
     return { outcome: 'completed', record };
   }
-  if (now - record.requestedAt > maxAgeMs) {
+  const elapsed = now - record.requestedAt;
+  if (elapsed > maxAgeMs) {
+    removePendingUpdate({ directory });
     return { outcome: 'stale', record };
   }
-
-  // Only the file this module stages, under the directory it stages into, is
-  // removed -- the record is honoured for cleanup but never trusted for paths
-  // beyond that.
-  if (record.stagedPath
-    && basename(record.stagedPath) === 'telium-setup.exe'
-    && dirname(record.stagedPath) === stagedDirectory) {
-    try {
-      rmSync(record.stagedPath, { force: true });
-    } catch {
-      // Already gone, or held by a still-running installer: harmless.
-    }
+  if (elapsed < graceMs) {
+    // Keep the breadcrumb and check again after the grace period. Never
+    // delete an executable that might still be running under NSIS.
+    return { outcome: 'pending', record, retryAfterMs: Math.max(1, graceMs - Math.max(elapsed, 0)) };
   }
+
+  removePendingUpdate({ directory });
+  // No reliable installer-process handle survives the old app exiting.
+  // Leave the staged file alone; a fresh install will replace it.
   return { outcome: 'incomplete', record };
 }
 
@@ -578,6 +588,20 @@ function createUpdateService({
     return state;
   }
 
+  const restartFailed = () => {
+    if (state.phase !== Phase.Ready || !staged) return;
+    let reusable = false;
+    try {
+      reusable = statSync(staged).isFile();
+    } catch {
+      // AV, a temp cleaner, or an interrupted download may have removed it.
+    }
+    if (!reusable) staged = '';
+    // Reusable installer: leave Restart available and show the failure.
+    // Missing installer: clear Ready so install() can download a new one.
+    publish({ phase: reusable ? Phase.Ready : Phase.Failed, fault: Fault.NotLaunched });
+  };
+
   const start = (install) => {
     if (inFlight) return inFlight;
     // Once staged only restarting remains; checking again would report "up to date" and wipe the restart message.
@@ -591,6 +615,7 @@ function createUpdateService({
     check: () => start(false),
     install: () => start(true),
     stagedPath: () => staged,
+    restartFailed,
   };
 }
 
@@ -599,6 +624,7 @@ module.exports = {
   Phase,
   PENDING_UPDATE_FILE,
   PENDING_UPDATE_MAX_AGE_MS,
+  PENDING_UPDATE_GRACE_MS,
   SPAWN_SETTLE_TIMEOUT_MS,
   STAGED_INSTALLER_ARGS,
   createUpdateService,
