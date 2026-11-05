@@ -26,6 +26,10 @@ pub const MAX_BITRATE_ATTRIBUTE: &str = "telium.max_bitrate";
 
 pub const WATCH_TOPIC: &str = "telium.watch";
 
+/// Relay-to-participants notice that the relay is draining for an update (or
+/// about to restart now). Only the SFU may speak on it, like `WATCH_TOPIC`.
+pub const DRAIN_TOPIC: &str = "telium.drain";
+
 pub fn b64(bytes: &[u8]) -> String {
     B64.encode(bytes)
 }

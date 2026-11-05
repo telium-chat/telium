@@ -39,6 +39,10 @@ export const EVENT_INTENT = {
   DM_MEMBER_LEAVE: BOOKKEEPING,
   DM_REQUEST_UPDATE: BOOKKEEPING,
 
+  // Restart bookkeeping: a banner somewhere, never a notification.
+  SERVER_RESTART_SCHEDULED: BOOKKEEPING,
+  SERVER_RESTART_CANCELLED: BOOKKEEPING,
+
   // Same event as above; this later entry wins. The server sends its own push for a bounce.
   RECOVERY_EMAIL_UPDATE: BOOKKEEPING,
 

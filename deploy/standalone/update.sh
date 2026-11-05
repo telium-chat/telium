@@ -4,9 +4,10 @@
 # and if it did, move with it. Enabled by install.sh; runs every minute.
 #
 # Same questions, same answers, same config file as the tunnel kit's updater
-# (deploy/update.sh) -- update.conf's four fields mean the same thing to both,
-# because "automatic or manual, pinned to what, restarted when" is one set of
-# decisions regardless of which kit answers them. What this one does not do is
+# (deploy/update.sh) -- update.conf's shared fields mean the same thing to
+# both, because "automatic or manual, pinned to what, restarted when, with
+# how much warning" is one set of decisions regardless of which kit answers
+# them. What this one does not do is
 # reconcile shipped config files: the standalone kit's compose.yml, Caddyfile
 # and .env are fetched from the repository release by you, and a release that
 # changes the kit says so in its notes. The image carries reference copies of
@@ -149,6 +150,31 @@ rm -f "$STATE/waiting-breaking"
 if ! in_window; then
   echo "image moved but $(date +%H:%M) is outside TELIUM_UPDATE_WINDOW=${TELIUM_UPDATE_WINDOW}; waiting"
   exit 0
+fi
+
+# One warning before the whole stack moves over whoever is using it: the
+# server is told a restart is scheduled (SIGUSR1 -- it stands a notice in
+# front of every connected client), the SFU is asked to drain (SIGUSR1 -- it
+# refuses new joins and lets calls finish), and this script sleeps the notice
+# out before recreating anything. The server's own `shutdown.notice_secs` and
+# the relay's `updates.drain_max_secs` are their safety nets if this script
+# dies mid-wait. `--now` signals nothing and waits for nothing.
+notice_secs="${TELIUM_RESTART_NOTICE_SECS:-300}"
+case "$notice_secs" in
+  ''|*[!0-9]*)
+    echo "WARNING: TELIUM_RESTART_NOTICE_SECS=${notice_secs} is not a number; restarting without a notice" >&2
+    notice_secs=0
+    ;;
+esac
+if [ "$FORCE_NOW" -ne 1 ] && [ "$notice_secs" -gt 0 ]; then
+  server_container="$("${COMPOSE[@]}" ps -q server 2>/dev/null || true)"
+  sfu_container="$("${COMPOSE[@]}" ps -q sfu 2>/dev/null || true)"
+  if [ -n "$server_container" ] || [ -n "$sfu_container" ]; then
+    [ -n "$server_container" ] && docker kill --signal=USR1 "$server_container" >/dev/null 2>&1 || true
+    [ -n "$sfu_container" ] && docker kill --signal=USR1 "$sfu_container" >/dev/null 2>&1 || true
+    echo "restart notices sent; waiting ${notice_secs}s before recreating the stack"
+    sleep "$notice_secs"
+  fi
 fi
 
 echo "images moved; applying"

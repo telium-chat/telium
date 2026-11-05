@@ -211,6 +211,14 @@ async fn main() -> anyhow::Result<()> {
                         drain_max_secs = drain_state.cfg.updates.drain_max_secs,
                         "drain requested (SIGUSR1): refusing new joins until rooms empty or the deadline passes"
                     );
+                    // Tell whoever is in a call. Best effort and off the signal
+                    // path: the drain is real whether or not the notice lands.
+                    let until =
+                        drain_state.drain_until_ms.load(std::sync::atomic::Ordering::Relaxed);
+                    let notice_state = drain_state.clone();
+                    tokio::spawn(async move {
+                        announce_drain(&notice_state, "draining", Some(until)).await;
+                    });
                 }
             }
         });
@@ -263,17 +271,45 @@ async fn main() -> anyhow::Result<()> {
             }
         });
     }
-    let app = router(state);
+    let app = router(state.clone());
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     tracing::info!(%bind, "telium-sfu up");
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal(shutdown_tx))
+        .with_graceful_shutdown(shutdown_signal(shutdown_tx, state))
         .await?;
     Ok(())
 }
 
-async fn shutdown_signal(shutdown_tx: watch::Sender<bool>) {
+/// One `telium.drain` message to every occupied room, phrased `draining` (an
+/// update is scheduled, `until_ms` is the drain deadline) or `now` (the relay
+/// is going away). The room list comes from the session registry, which the
+/// sweeper only prunes when `[limits].enforce` is on -- and even then only
+/// every poll interval -- so each room's occupancy is confirmed against
+/// LiveKit before speaking; announcing into a dead room would be an error
+/// line per room per restart. Failures are logged and swallowed: the notice
+/// is a courtesy, never a coordination step the drain depends on.
+async fn announce_drain(state: &AppState, phase: &str, until_ms: Option<i64>) {
+    let mut payload = serde_json::json!({ "phase": phase });
+    if let Some(until) = until_ms {
+        payload["until_ms"] = serde_json::json!(until);
+    }
+    for room in state.sessions.rooms() {
+        match state.livekit.list_participants(&room).await {
+            Ok(participants) if participants.is_empty() => continue,
+            Ok(_) => {}
+            Err(e) => {
+                tracing::debug!(room = %room, error = %e, "could not count participants for a drain notice");
+                continue;
+            }
+        }
+        if let Err(e) = state.livekit.broadcast(&room, telium_protocol::DRAIN_TOPIC, &payload).await {
+            tracing::warn!(room = %room, error = %e, "drain notice did not reach this room");
+        }
+    }
+}
+
+async fn shutdown_signal(shutdown_tx: watch::Sender<bool>, state: Arc<AppState>) {
     let ctrl_c = async { tokio::signal::ctrl_c().await.ok(); };
     #[cfg(unix)]
     let term = async {
@@ -288,6 +324,12 @@ async fn shutdown_signal(shutdown_tx: watch::Sender<bool>) {
         _ = term => {},
     }
     tracing::info!("shutting down");
+    // Normally the drain has already emptied the rooms and this says nothing
+    // to nobody. It is for the deadline-expired stragglers: they get one
+    // message that the media plane is going away *before* LiveKit drops them,
+    // then the client's usual drop ladder takes over.
+    announce_drain(&state, "now", None).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
     let _ = shutdown_tx.send(true);
 }
 

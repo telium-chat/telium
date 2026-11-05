@@ -4967,6 +4967,9 @@ export const messages = {
   'voice.error.rejoin': '通話に再参加できませんでした',
   // The server says this device is no longer in the channel it was calling from.
   'voice.call.removed': 'ボイスチャンネルから外されました',
+  'voice.drain.soonIn': '音声リレーはこの先約 {count, plural, other {# 分}}以内にアップデートを適用するため再起動する予定です',
+  'voice.drain.soon': '音声リレーはまもなくアップデートを適用するため再起動する予定です',
+  'voice.drain.now': '{name} は今再起動しています。通話が一時的に切れる可能性があります',
   // The device panel's four. `readRoutes` and `switchOutput` are shared with
   // Android's output sheet, which asks the same two questions of a different
   // implementation — so 出力先 here is the same 出力先 as `voice.route.title`,
@@ -5728,6 +5731,11 @@ export const messages = {
   'shell.socket.offline': 'この端末はオフラインです。接続が戻り次第、Telium は続きから再開します。',
   'shell.socket.reconnecting': '{role, select, home {再接続しています：{name} へ。} other {再接続しています：{name} へ。ほかのサーバーには影響しません。}}',
   'shell.socket.restarting': '{name} は再起動中です。これは自然に復旧します。',
+  'shell.restart.server': '{name} は約 {count, plural, other {# 分}}後にアップデートを適用するため再起動する予定です。',
+  'shell.restart.sfu': '{name} はこの先約 {count, plural, other {# 分}}以内にアップデートを適用するため再起動する予定です。',
+  'shell.restart.sfuSoon': '{name} はまもなくアップデートを適用するため再起動する予定です。',
+  'shell.restart.sfuNow': '{name} は今再起動しています。',
+  'shell.restart.brief': '一時的に中断する可能性があります。',
   'shell.socket.sessionRefused': '{role, select, home {{name} はこのセッションを認識しなくなりました。続けるにはもう一度サインインしてください。} other {{name} はこのセッションを認識しなくなりました。そこへ再接続してください。Telium の残りの部分には影響しません。}}',
   'shell.socket.unnamedServer': 'そのサーバー',
   'shell.tabs.forum': 'フォーラムの投稿',

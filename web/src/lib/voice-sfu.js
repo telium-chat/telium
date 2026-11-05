@@ -8,7 +8,7 @@ import { micConstraints, normalizeNoiseMode } from './denoise.js';
 import {
   CAMERA_CAPTURE, clampPlaybackVolume, createPlaybackContext, displayMedia, micLive,
   openDenoiser, setPlaybackMuted, setPlaybackVolume, stopPlaybackGraph, userMedia, sameSet,
-  rttFromPc, MAX_BITRATE_ATTRIBUTE, WATCH_TOPIC, preferredScreenCodec,
+  rttFromPc, MAX_BITRATE_ATTRIBUTE, WATCH_TOPIC, DRAIN_TOPIC, preferredScreenCodec,
 } from './voice-media.js';
 import {
   KeyTrouble, keyFailure, unopenedMedia,
@@ -446,15 +446,31 @@ export class SfuCall {
 
   /// Only the server (no participant) may speak on `telium.watch`.
   onData(payload, participant, topic) {
-    if (participant != null || topic !== WATCH_TOPIC) return;
-    let message;
-    try {
-      message = JSON.parse(new TextDecoder().decode(payload));
-    } catch {
+    if (participant != null) return;
+    if (topic === WATCH_TOPIC) {
+      let message;
+      try {
+        message = JSON.parse(new TextDecoder().decode(payload));
+      } catch {
+        return;
+      }
+      if (!message || typeof message.streamer !== 'string') return;
+      this.setWatchQuality(message.streamer, message.quality);
       return;
     }
-    if (!message || typeof message.streamer !== 'string') return;
-    this.setWatchQuality(message.streamer, message.quality);
+    // `telium.drain`: the relay is draining for an update, or going away now.
+    // A courtesy notice, not a coordination step -- the drop ladder at
+    // RoomEvent.Disconnected still owns what happens when the socket dies.
+    if (topic === DRAIN_TOPIC) {
+      let message;
+      try {
+        message = JSON.parse(new TextDecoder().decode(payload));
+      } catch {
+        return;
+      }
+      if (!message || typeof message.phase !== 'string') return;
+      this.onDrainNotice?.(message);
+    }
   }
 
   setScreenSubscription(identity, on, quality) {

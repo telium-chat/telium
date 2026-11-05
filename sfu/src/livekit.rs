@@ -503,6 +503,12 @@ impl LivekitManager {
         self.twirp("SendData", &send_data_body(room, identity, topic, payload)).await
     }
 
+    /// A room-wide data message, as the drain notice uses. Best effort by the
+    /// caller: a relay that cannot reach LiveKit still drains and restarts.
+    pub(crate) async fn broadcast(&self, room: &str, topic: &str, payload: &Value) -> Result<()> {
+        self.twirp("SendData", &broadcast_body(room, topic, payload)).await
+    }
+
     /// A missing room yields an empty list, not an error.
     pub(crate) async fn list_participants(&self, room: &str) -> Result<Vec<ParticipantInfo>> {
         let resp = match self.twirp_raw("ListParticipants", &json!({ "room": room })).await {
@@ -731,6 +737,19 @@ pub(crate) fn send_data_body(room: &str, identity: &str, topic: &str, payload: &
     })
 }
 
+/// The same envelope minus `destinationIdentities`: an absent destination list
+/// is LiveKit's "everyone in the room".
+pub(crate) fn broadcast_body(room: &str, topic: &str, payload: &Value) -> Value {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine;
+    json!({
+        "room": room,
+        "data": STANDARD.encode(payload.to_string().as_bytes()),
+        "kind": "RELIABLE",
+        "topic": topic,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -844,6 +863,23 @@ mod tests {
         let b = get_participant_body("telium_c1", "u1");
         assert_eq!(b["room"], "telium_c1");
         assert_eq!(b["identity"], "u1");
+    }
+
+    #[test]
+    fn a_broadcast_names_no_destination_so_livekit_reaches_everyone() {
+        use base64::engine::general_purpose::STANDARD;
+        use base64::Engine;
+        let b = broadcast_body("telium_c1", telium_protocol::DRAIN_TOPIC, &json!({ "phase": "draining" }));
+        assert_eq!(b["room"], "telium_c1");
+        assert_eq!(b["topic"], "telium.drain");
+        assert_eq!(b["kind"], "RELIABLE");
+        assert!(b.get("destinationIdentities").is_none(), "an absent destination list is the broadcast");
+        // The payload travels as padded-standard-base64 text, unlike Telium's own URL-safe encoding.
+        let data = b["data"].as_str().unwrap();
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD.decode(data).unwrap(),
+            serde_json::to_vec(&json!({ "phase": "draining" })).unwrap(),
+        );
     }
 
     #[test]

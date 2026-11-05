@@ -147,6 +147,18 @@ export const shell = {
   // should sound like it.
   'shell.socket.restarting': '{name} is restarting. This will come back on its own.',
 
+  // A scheduled restart, announced while the server is still up -- the update
+  // script signals it before pulling the container. The deadline is exact and
+  // the banner counts down in whole minutes, so the sentence can be precise.
+  'shell.restart.server': '{name} is scheduled to restart to apply an update in about {count, plural, one {# minute} other {# minutes}}.',
+  // The voice relay counts down to its drain deadline: the restart lands
+  // whenever rooms empty inside it, so the honest promise is an upper bound.
+  'shell.restart.sfu': '{name} is scheduled to restart to apply an update within the next {count, plural, one {# minute} other {# minutes}}.',
+  // A draining relay that named no deadline (an older SFU talking to a newer client).
+  'shell.restart.sfuSoon': '{name} is scheduled to restart soon to apply an update.',
+  'shell.restart.sfuNow': '{name} is restarting now.',
+  'shell.restart.brief': 'Expect a brief interruption.',
+
   // The first few seconds of any unexplained disconnection, before the client is
   // willing to call it an outage. Same selector, same reason as above.
   'shell.socket.reconnecting': '{role, select, home {Reconnecting to {name}.} other {Reconnecting to {name}. Other servers are unaffected.}}',
