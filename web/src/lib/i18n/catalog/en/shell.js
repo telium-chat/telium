@@ -147,10 +147,12 @@ export const shell = {
   // should sound like it.
   'shell.socket.restarting': '{name} is restarting. This will come back on its own.',
 
+  // The notice expiry is not the actual restart time; the updater may have a
+  // different wait interval. Never promise an exact ETA in the banner.
   // A scheduled restart, announced while the server is still up -- the update
   // script signals it before pulling the container. The deadline is exact and
   // the banner counts down in whole minutes, so the sentence can be precise.
-  'shell.restart.server': '{name} is scheduled to restart to apply an update in about {count, plural, one {# minute} other {# minutes}}.',
+  'shell.restart.server': '{name} is scheduled to restart soon to apply an update.',
   // The voice relay counts down to its drain deadline: the restart lands
   // whenever rooms empty inside it, so the honest promise is an upper bound.
   'shell.restart.sfu': '{name} is scheduled to restart to apply an update within the next {count, plural, one {# minute} other {# minutes}}.',

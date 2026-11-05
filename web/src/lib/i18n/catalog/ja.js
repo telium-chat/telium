@@ -5731,7 +5731,7 @@ export const messages = {
   'shell.socket.offline': 'この端末はオフラインです。接続が戻り次第、Telium は続きから再開します。',
   'shell.socket.reconnecting': '{role, select, home {再接続しています：{name} へ。} other {再接続しています：{name} へ。ほかのサーバーには影響しません。}}',
   'shell.socket.restarting': '{name} は再起動中です。これは自然に復旧します。',
-  'shell.restart.server': '{name} は約 {count, plural, other {# 分}}後にアップデートを適用するため再起動する予定です。',
+  'shell.restart.server': '{name} はまもなくアップデートを適用するため再起動する予定です。',
   'shell.restart.sfu': '{name} はこの先約 {count, plural, other {# 分}}以内にアップデートを適用するため再起動する予定です。',
   'shell.restart.sfuSoon': '{name} はまもなくアップデートを適用するため再起動する予定です。',
   'shell.restart.sfuNow': '{name} は今再起動しています。',

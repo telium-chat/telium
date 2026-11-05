@@ -1773,7 +1773,7 @@ export const messages = {
   'shell.socket.offline': '此设备已离线。连接恢复后，Telium 会从中断处继续。',
   'shell.socket.reconnecting': '{role, select, home {正在重新连接到 {name}。} other {正在重新连接到 {name}。其他服务器不受影响。}}',
   'shell.socket.restarting': '{name} 正在重启。它会自行恢复。',
-  'shell.restart.server': '{name} 计划在约 {count, plural, other {# 分钟}}后重启以应用更新。',
+  'shell.restart.server': '{name} 计划很快重启以应用更新。',
   'shell.restart.sfu': '{name} 计划将在 {count, plural, other {# 分钟}}内重启以应用更新。',
   'shell.restart.sfuSoon': '{name} 计划很快重启以应用更新。',
   'shell.restart.sfuNow': '{name} 现在正在重启。',

@@ -2649,7 +2649,7 @@ export const messages = {
   'shell.socket.offline': 'Cet appareil est hors ligne. Telium reprendra là où il s’est arrêté dès que la connexion sera rétablie.',
   'shell.socket.reconnecting': '{role, select, home {Reconnexion à {name}.} other {Reconnexion à {name}. Les autres serveurs ne sont pas affectés.}}',
   'shell.socket.restarting': '{name} redémarre. Cela reviendra tout seul.',
-  'shell.restart.server': '{name} redémarrera pour appliquer une mise à jour dans environ {count, plural, one {# minute} other {# minutes}}.',
+  'shell.restart.server': '{name} redémarrera bientôt pour appliquer une mise à jour.',
   'shell.restart.sfu': '{name} redémarrera pour appliquer une mise à jour d’ici {count, plural, one {# minute} other {# minutes}}.',
   'shell.restart.sfuSoon': '{name} redémarrera bientôt pour appliquer une mise à jour.',
   'shell.restart.sfuNow': '{name} redémarre maintenant.',

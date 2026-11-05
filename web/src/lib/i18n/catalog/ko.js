@@ -1768,7 +1768,7 @@ export const messages = {
   'shell.socket.offline': '이 기기는 오프라인 상태예요. 연결이 돌아오면 Telium이 멈춘 곳부터 이어서 해요.',
   'shell.socket.reconnecting': '{role, select, home {{name}에 다시 연결하는 중이에요.} other {{name}에 다시 연결하는 중이에요. 다른 서버는 영향을 받지 않아요.}}',
   'shell.socket.restarting': '{name}이(가) 재시작 중이에요. 곧 저절로 돌아와요.',
-  'shell.restart.server': '{name}이(가) 약 {count, plural, other {#분}} 후에 업데이트를 적용하기 위해 재시작할 예정이에요.',
+  'shell.restart.server': '{name}이(가) 곧 업데이트를 적용하기 위해 재시작할 예정이에요.',
   'shell.restart.sfu': '{name}이(가) 앞으로 약 {count, plural, other {#분}} 안에 업데이트를 적용하기 위해 재시작할 예정이에요.',
   'shell.restart.sfuSoon': '{name}이(가) 곧 업데이트를 적용하기 위해 재시작할 예정이에요.',
   'shell.restart.sfuNow': '{name}이(가) 지금 재시작하고 있어요.',

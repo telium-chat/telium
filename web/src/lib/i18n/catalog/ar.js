@@ -6211,7 +6211,7 @@ export const messages = {
   'shell.socket.offline': 'هذا الجهاز غير متصل. سيكمل Telium من حيث توقّف عند عودة الاتصال.',
   'shell.socket.reconnecting': '{role, select, home {جارٍ إعادة الاتصال بـ{name}.} other {جارٍ إعادة الاتصال بـ{name}. والخوادم الأخرى غير متأثّرة.}}',
   'shell.socket.restarting': '{name} يعيد التشغيل. وسيعود من تلقاء نفسه.',
-  'shell.restart.server': '{name} من المقرر أن يعيد التشغيل لتطبيق تحديث بعد نحو {count, plural, one {دقيقة واحدة} two {دقيقتين} few {# دقائق} many {# دقيقة} other {# دقيقة}}.',
+  'shell.restart.server': '{name} من المقرر أن يعيد التشغيل قريبًا لتطبيق تحديث.',
   'shell.restart.sfu': '{name} من المقرر أن يعيد التشغيل لتطبيق تحديث خلال {count, plural, one {دقيقة واحدة} two {دقيقتين} few {# دقائق} many {# دقيقة} other {# دقيقة}} القادمة.',
   'shell.restart.sfuSoon': '{name} من المقرر أن يعيد التشغيل قريبًا لتطبيق تحديث.',
   'shell.restart.sfuNow': '{name} يعيد التشغيل الآن.',

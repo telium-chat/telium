@@ -17,7 +17,8 @@ pub const SESSION_REVOKED: &str = "SESSION_REVOKED";
 pub const SERVER_GOING_AWAY: &str = "SERVER_GOING_AWAY";
 
 /// A restart has been scheduled (SIGUSR1 from the update script): `data.at`
-/// is the epoch-ms deadline, `data.in_ms` the lead time. Unlike
+/// is the notice's epoch-ms expiry (not an assured restart time),
+/// `data.in_ms` the remaining notice TTL. Unlike
 /// `SERVER_GOING_AWAY` this is an ordinary dispatch -- nobody's socket breaks.
 pub const SERVER_RESTART_SCHEDULED: &str = "SERVER_RESTART_SCHEDULED";
 

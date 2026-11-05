@@ -1486,8 +1486,8 @@ async fn serve(state: telium_server::AppState, config_path: Option<PathBuf>) -> 
 /// SIGUSR1 is the update script's "a restart has been scheduled": stand a
 /// notice with the deadline in front of every connected session, keep serving,
 /// and withdraw the notice on our own if the script dies before acting. The
-/// script sleeps roughly `shutdown.notice_secs` between the signal and the
-/// restart; the two ceilings disagree by design, this one being the safety
+/// script may sleep a different duration before the restart, so this is the
+/// notice expiry rather than an exact restart ETA. This is the safety
 /// net -- the same arrangement the SFU's `updates.drain_max_secs` has with
 /// its updater. `notice_secs = 0` ignores the signal entirely, which is how
 /// an operator opts out of the feature.

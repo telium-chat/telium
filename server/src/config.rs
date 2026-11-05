@@ -586,8 +586,8 @@ pub struct Shutdown {
     pub settle_ms: u64,
     /// How long a scheduled-restart notice (SIGUSR1 from `update.sh`) stays
     /// standing before this server clears it on its own. The update script
-    /// sleeps roughly the same interval between the signal and the restart;
-    /// the two ceilings disagree by design, this one being the safety net
+    /// may sleep a different interval before restarting, so this is only
+    /// a notice TTL, not a promised restart timestamp. This is the safety net
     /// that withdraws the notice if the script dies mid-wait. Zero disables
     /// the notice: SIGUSR1 is then ignored and a restart lands unwarned.
     #[serde(deserialize_with = "de_secs_u64")]

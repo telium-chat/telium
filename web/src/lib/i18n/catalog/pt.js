@@ -1768,7 +1768,7 @@ export const messages = {
   'shell.socket.offline': 'Este dispositivo está offline. O Telium vai continuar de onde parou quando a conexão voltar.',
   'shell.socket.reconnecting': '{role, select, home {Reconectando a {name}.} other {Reconectando a {name}. Os outros servidores não são afetados.}}',
   'shell.socket.restarting': '{name} está reiniciando. Isto volta sozinho.',
-  'shell.restart.server': '{name} será reiniciado para aplicar uma atualização em cerca de {count, plural, one {# minuto} other {# minutos}}.',
+  'shell.restart.server': '{name} será reiniciado em breve para aplicar uma atualização.',
   'shell.restart.sfu': '{name} será reiniciado para aplicar uma atualização nos próximos {count, plural, one {# minuto} other {# minutos}}.',
   'shell.restart.sfuSoon': '{name} será reiniciado em breve para aplicar uma atualização.',
   'shell.restart.sfuNow': '{name} está reiniciando agora.',

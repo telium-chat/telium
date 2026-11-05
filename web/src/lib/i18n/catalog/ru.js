@@ -1768,7 +1768,7 @@ export const messages = {
   'shell.socket.offline': 'Это устройство не в сети. Telium продолжит с того места, где остановился, когда соединение вернётся.',
   'shell.socket.reconnecting': '{role, select, home {Переподключение к {name}.} other {Переподключение к {name}. Другие серверы не затронуты.}}',
   'shell.socket.restarting': '{name} перезапускается. Это вернётся само по себе.',
-  'shell.restart.server': '{name} перезапустится для применения обновления примерно через {count, plural, one {# минуту} few {# минуты} many {# минут} other {# минут}}.',
+  'shell.restart.server': '{name} скоро перезапустится для применения обновления.',
   'shell.restart.sfu': '{name} перезапустится для применения обновления в ближайшие {count, plural, one {# минуту} few {# минуты} many {# минут} other {# минут}}.',
   'shell.restart.sfuSoon': '{name} скоро перезапустится для применения обновления.',
   'shell.restart.sfuNow': '{name} перезапускается сейчас.',
