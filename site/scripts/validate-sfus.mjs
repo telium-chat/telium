@@ -47,7 +47,7 @@ const relayUrl = (value) => {
   if (typeof value !== 'string') return 'must be a string'
   // WHATWG URL parsing strips embedded tabs and newlines. They must never
   // survive validation and become additional GITHUB_OUTPUT lines.
-  if (/[\\u0000-\\u001f\\u007f]/.test(value)) return 'must not contain control characters'
+  if (/[\u0000-\u001f\u007f]/.test(value)) return 'must not contain control characters'
   let url
   try {
     url = new URL(value)
