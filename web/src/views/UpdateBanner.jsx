@@ -143,7 +143,7 @@ export function UpdateBanner() {
           </span>
         </span>
       ) : null}
-      {failed ? <span>{t(desktop.fault === 'not-launched' ? 'updates.state.restartFailed' : 'updates.state.failed')}</span> : null}
+      {failed ? <span>{desktop.fault === 'not-launched' ? t('updates.state.restartFailed') : t('updates.state.failed')}</span> : null}
 
       <UpdateAction notice={notice} busy={busy} installable={installable} desktop={desktop} store={store} />
 
