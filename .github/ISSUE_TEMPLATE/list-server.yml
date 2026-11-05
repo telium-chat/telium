@@ -2,12 +2,9 @@ name: List a homeserver
 description: Add your homeserver to the public directory at telium.chat/servers.
 labels: ['directory']
 body:
-  # The invisible marker is how the listing automation tells this template
-  # apart from the relay one. Do not remove it.
   - type: markdown
     attributes:
       value: |
-        <!-- telium-registry: server -->
         This issue is turned into a one-entry pull request against
         `site/registry/servers.json` by automation; a maintainer merges it once
         CI has checked the validator and probed your server. The easiest way to
