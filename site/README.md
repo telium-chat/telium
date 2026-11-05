@@ -243,6 +243,13 @@ and whatever served the domain until then stops.
 
 What the dashboard needs to build the portal rather than the marketing site alone:
 
+- **Bun**: this site's `package.json` pins `bun@1.4.4` via `packageManager`.
+  Cloudflare Workers Builds must install that version (or a newer compatible
+  version) before its automatic `bun install --frozen-lockfile` step: Bun
+  1.2.15 cannot parse the committed `bun.lock` v2. If the Cloudflare build
+  log still reports `bun@1.2.15`, set `BUN_VERSION=1.4.4` in
+  **Settings → Build → Build Variables and Secrets** and retry the build.
+
 - **Build command**: `npm run build:production` — one command that writes the signed
   account-home recommendation feed, then builds the client (`../web`, installing its
   dependencies itself) and the site, and merges them into `dist-portal/`.
