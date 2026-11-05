@@ -25,6 +25,7 @@ export function UpdateBanner() {
   const [dismissal, setDismissal] = useState(() => readDismissal(storage()));
   const [now, setNow] = useState(() => Date.now());
   const [desktop, setDesktop] = useState(null);
+  const [restarting, setRestarting] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -66,11 +67,17 @@ export function UpdateBanner() {
     return (
       <Banner role="status">
         <span className="font-medium">{t('updates.state.ready', { version: desktop.version })}</span>
+        {desktop.fault === 'not-launched' ? <span>{t('updates.state.restartFailed')}</span> : null}
         <Button
           size="sm"
           variant="flat"
           className="ms-1 min-h-9 shrink-0 rounded-lg"
-          onClick={() => { desktopUpdates()?.restart()?.catch(() => {}); }}
+          disabled={restarting}
+          onClick={() => {
+            if (restarting) return;
+            setRestarting(true);
+            Promise.resolve(desktopUpdates()?.restart()).catch(() => {}).finally(() => setRestarting(false));
+          }}
         >
           {t('updates.action.restart')}
         </Button>
@@ -78,6 +85,23 @@ export function UpdateBanner() {
     );
   }
 
+  // The verified installer can disappear after it was staged, even when the
+  // release-manifest request is offline. Give the user a recovery button.
+  if (!notice && desktop?.phase === 'failed' && desktop.fault === 'not-launched') {
+    return (
+      <Banner role="alert">
+        <span>{t('updates.state.restartFailed')}</span>
+        <Button
+          size="sm"
+          variant="flat"
+          className="ms-1 min-h-9 shrink-0 rounded-lg"
+          onClick={() => { desktopUpdates()?.install()?.catch(() => {}); }}
+        >
+          {t('updates.action.retry')}
+        </Button>
+      </Banner>
+    );
+  }
   if (!notice) return null;
 
   const busy = desktop?.phase === 'downloading' || desktop?.phase === 'verifying';
@@ -119,7 +143,7 @@ export function UpdateBanner() {
           </span>
         </span>
       ) : null}
-      {failed ? <span>{t('updates.state.failed')}</span> : null}
+      {failed ? <span>{t(desktop.fault === 'not-launched' ? 'updates.state.restartFailed' : 'updates.state.failed')}</span> : null}
 
       <UpdateAction notice={notice} busy={busy} installable={installable} desktop={desktop} store={store} />
 
