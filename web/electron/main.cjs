@@ -508,9 +508,9 @@ function notifyUpdateRestartFailed() {
 // NSIS deletes the old installation before extracting the new one, so an
 // installer that dies partway leaves a machine with no app at all and no
 // process left to say so. The record written just before the spawn is read
-// here, on the next launch of whatever version actually survived: current or
-// newer means the update completed; older means it did not, and the user is
-// told that in plain words rather than left with a missing Start Menu entry.
+// here, on the next launch of whatever version survived. Once the grace
+// period expires, an older build signals a likely incomplete installation;
+// the staged installer is left alone because NSIS could still be running.
 // Defer the diagnosis while NSIS may still be updating the old build.
 function reconcileStartupUpdate() {
   const directory = pendingUpdateDirectory();
