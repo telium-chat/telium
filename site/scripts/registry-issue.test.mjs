@@ -249,3 +249,37 @@ test('the CLI detects a real marker-free relay issue', async () => {
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('reject control characters in a relay URL before writing workflow outputs', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'registry-issue-injection-'))
+  try {
+    const registry = join(dir, 'sfus.json')
+    const bodyFile = join(dir, 'body.md')
+    const output = join(dir, 'outputs.txt')
+    await writeFile(registry, '[]\n')
+    const relay = {
+      url: 'https://exa\nmple.com',
+      name: 'Injected Relay',
+      description: 'Testing an invalid hostname with a newline.',
+      region: { label: 'Oregon, US', code: 'na-west' },
+      capacity_band: '1g',
+      operator: { name: 'Example Operator', contact: 'https://example.org/contact' },
+    }
+    await writeFile(bodyFile, [
+      '### Registry entry', '',
+      '```json', JSON.stringify(relay), '```', '',
+      '### Ownership', '',
+      "- [X] I run this relay myself — it is not someone else's relay.",
+    ].join('\n'))
+    const run = spawnSync(process.execPath, [
+      CLI, '--body-file', bodyFile,
+      '--created', '2026-11-04T09:30:00Z',
+      '--registry', registry,
+    ], { encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: output } })
+    assert.equal(run.status, 1)
+    assert.match(run.stderr, /control characters/)
+    await assert.rejects(readFile(output), { code: 'ENOENT' })
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
