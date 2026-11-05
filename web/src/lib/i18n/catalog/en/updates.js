@@ -126,6 +126,7 @@ export const updates = {
   // closed the window at this moment would be running the old build.
   'updates.state.ready': 'Telium {version} is ready. Restart to use it.',
   'updates.action.restart': 'Restart',
+  'updates.action.retry': 'Retry update',
   // The failure sentence does not say why, and that is deliberate. The reasons
   // -- a truncated download, a signature that did not verify, a read-only
   // install directory -- are all things the reader cannot act on differently,
@@ -133,6 +134,7 @@ export const updates = {
   // an explanation somebody clicks past. It goes to the log in full; here it
   // says the outcome and offers the manual route, which always works.
   'updates.state.failed': 'That update could not be installed. Download it yourself instead.',
+  'updates.state.restartFailed': 'Telium could not start the installer. Retry the update or download it manually.',
 
   // ------------------------------------------------- the settings footer
 
