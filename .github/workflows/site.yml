@@ -58,7 +58,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.4.0
+          bun-version: 1.4.4
 
       # setup-bun caches only the bun executable, so the package cache that
       # setup-node's `cache: npm` used to manage has to be its own step.
