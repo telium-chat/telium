@@ -26,7 +26,16 @@ const { createRelayBridge } = require('./relay.cjs');
 const { createRelayGuard } = require('./relay-guard.cjs');
 const { installPageZoom } = require('./page-zoom.cjs');
 const { createScreenShareAudioService } = require('./screen-share-audio.cjs');
-const { createUpdateService, runningAppImage } = require('./updater.cjs');
+const {
+  Fault,
+  Phase,
+  createUpdateService,
+  launchStagedInstaller,
+  readPendingUpdate,
+  reconcilePendingUpdate,
+  runningAppImage,
+  writePendingUpdate,
+} = require('./updater.cjs');
 const { createDesktopUpdater } = require('./desktop-updater.cjs');
 const { createTrayController } = require('./tray-lifecycle.cjs');
 const { installRendererCrashHandlers } = require('./renderer-crash.cjs');
@@ -476,6 +485,60 @@ const updates = createUpdateService({
   },
 });
 
+// The pending-update record lives in the user's own data directory, not the
+// temp staging directory: a temp cleaner running between the restart click and
+// the next launch must not be able to erase the only trace of the failed update.
+function pendingUpdateDirectory() {
+  try {
+    return app.getPath('userData');
+  } catch {
+    return null;
+  }
+}
+
+// The renderer's failed-phase sentence replaces the restart banner, and a
+// second click on Restart re-runs the spawn, which is the retry.
+function notifyUpdateRestartFailed() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('telium:updates-changed', {
+    ...updates.state(),
+    phase: Phase.Failed,
+    fault: Fault.NotLaunched,
+  });
+}
+
+// NSIS deletes the old installation before extracting the new one, so an
+// installer that dies partway leaves a machine with no app at all and no
+// process left to say so. The record written just before the spawn is read
+// here, on the next launch of whatever version actually survived: current or
+// newer means the update completed; older means it did not, and the user is
+// told that in plain words rather than left with a missing Start Menu entry.
+function reconcileStartupUpdate() {
+  const directory = pendingUpdateDirectory();
+  if (!directory || !readPendingUpdate({ directory })) return;
+  const reconciled = reconcilePendingUpdate({
+    directory,
+    currentVersion: app.getVersion(),
+  });
+  if (reconciled.outcome !== 'incomplete') return;
+
+  const previous = reconciled.record?.version || '';
+  console.warn(`[Telium desktop] The previous update did not complete; still on ${app.getVersion()}${previous ? ` (asked for ${previous})` : ''}.`);
+  const answer = dialog.showMessageBoxSync({
+    type: 'warning',
+    title: 'Telium update did not finish',
+    message: 'The last Telium update did not finish installing.',
+    detail: previous
+      ? `Telium is still on version ${app.getVersion()}, not ${previous}. Nothing was lost; you can check for updates again in Settings, or download the installer from telium.chat.`
+      : `Telium is still on version ${app.getVersion()}. Nothing was lost; you can check for updates again in Settings, or download the installer from telium.chat.`,
+    buttons: ['Check for updates now', 'Later'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (answer === 0) void updates.install();
+}
+
 function installUpdateBridge() {
   // None of the verbs takes an argument: the renderer cannot name a URL, version or digest.
   ipcMain.handle('telium:updates-state', (event) => {
@@ -493,16 +556,29 @@ function installUpdateBridge() {
     return updates.install();
   });
 
-  ipcMain.handle('telium:updates-restart', (event) => {
+  ipcMain.handle('telium:updates-restart', async (event) => {
     assertTrustedSender(event);
     // Refused unless something is staged, or any frame could close the app on every launch.
     if (!updates.stagedPath()) return false;
     if (process.platform === 'win32') {
-      // Runs the staged, verified NSIS installer: spawn detached and exit; the installer restarts the app.
-      const child = spawn(updates.stagedPath(), ['/S'], { detached: true, stdio: 'ignore' });
-      child.unref();
-      app.exit(0);
-      return true;
+      // The breadcrumb for the next launch: if the installer never completes its
+      // silent run, this is the only trace left to tell the user what happened.
+      writePendingUpdate({
+        directory: pendingUpdateDirectory(),
+        version: updates.state().version,
+        stagedPath: updates.stagedPath(),
+      });
+      // Runs the staged, verified NSIS installer: silent install, then the
+      // installer relaunches Telium (`--force-run`). The app stays open until
+      // the installer process exists -- a spawn that never starts must not
+      // close a working client onto a machine whose update never began.
+      const { launched } = await launchStagedInstaller({
+        stagedPath: updates.stagedPath(),
+        spawnFn: spawn,
+        exitFn: () => app.exit(0),
+        onLaunchFailed: notifyUpdateRestartFailed,
+      });
+      return launched;
     }
     // `execPath` is the AppImage, not the unpacked binary inside its disappearing mount.
     const image = runningAppImage();
@@ -913,6 +989,15 @@ app.whenReady().then(async () => {
       trayController.install();
     } catch (error) {
       console.warn('[Telium desktop] Could not create system tray:', error?.message || error);
+    }
+
+    // Before any update check: the previous launch may have left an unfinished
+    // update behind, and the user should hear that from us before anything else
+    // offers to try again.
+    try {
+      reconcileStartupUpdate();
+    } catch (error) {
+      console.warn('[Telium desktop] Could not reconcile the last update:', error?.message || error);
     }
 
     // The signed path takes precedence once a build has a key; running both would leave a signed build with an unsigned way to update.

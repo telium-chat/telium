@@ -3,9 +3,20 @@
 // The half of the updater allowed to write to disk. Accepts no URL, digest or version from the renderer: everything is re-derived from the publisher URL and public key baked into this build.
 
 const { createHash, createPublicKey, verify: edVerify } = require('node:crypto');
-const { chmodSync, copyFileSync, createWriteStream, mkdirSync, renameSync, rmSync, statSync } = require('node:fs');
+const {
+  chmodSync,
+  copyFileSync,
+  createWriteStream,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} = require('node:fs');
 const { tmpdir } = require('node:os');
-const { dirname, join } = require('node:path');
+const { basename, dirname, join } = require('node:path');
 const { pipeline } = require('node:stream/promises');
 const { Readable } = require('node:stream');
 
@@ -30,6 +41,9 @@ const Fault = {
   NoArtifact: 'no-artifact',
   Corrupt: 'corrupt',
   NotWritable: 'not-writable',
+  /// The staged installer process could not be started (blocked, quarantined,
+  /// vanished); the app stayed open rather than closing onto a dead update.
+  NotLaunched: 'not-launched',
 };
 
 const fromUrlB64 = (text) => {
@@ -299,6 +313,168 @@ function stageInstaller({ downloaded, directory = join(tmpdir(), 'telium-update'
   return { path: staged };
 }
 
+/// How long `launchStagedInstaller` waits for the installer process to be created.
+/// A successful CreateProcess reports within milliseconds; the timeout only has to
+/// outlast a briefly busy machine, and while it runs the app stays alive and usable.
+const SPAWN_SETTLE_TIMEOUT_MS = 15 * 1000;
+
+/// The NSIS flags for a silent update: `/S` runs the installer without UI, and
+/// `--force-run` is what makes it launch the new build when it is done -- an
+/// assisted installer only auto-runs the app in silent mode when that flag is
+/// present, so without it "Restart to update" closes Telium and never reopens it.
+const STAGED_INSTALLER_ARGS = ['/S', '--force-run'];
+
+/// Runs the staged, verified NSIS installer and closes the app only once the
+/// installer process exists. Exiting first turns every spawn failure -- an
+/// installer quarantined by antivirus, a temp cleaner that ate it, a blocked
+/// executable -- into "Telium closed and never came back", which is the one
+/// outcome a self-update must not produce: it leaves the user without the app
+/// and without a way to know why. `exitFn` runs only on `spawn`; `error` (the
+/// process could not be created) or the timeout keep the app alive and report
+/// the failure through `onLaunchFailed` so the renderer can say so.
+/// Resolves `{ launched }`; never throws.
+function launchStagedInstaller({
+  stagedPath,
+  spawnFn,
+  exitFn,
+  onLaunchFailed = () => {},
+  timeoutMs = SPAWN_SETTLE_TIMEOUT_MS,
+}) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let timer = null;
+    const finish = (launched) => {
+      if (settled) return;
+      settled = true;
+      if (timer != null) clearTimeout(timer);
+      if (launched) {
+        exitFn();
+      } else {
+        onLaunchFailed();
+      }
+      resolve({ launched });
+    };
+
+    // Staged by `stageInstaller`, but the file can disappear between staging and
+    // this call; spawning a missing file would fail asynchronously, after the
+    // app has already closed, so it is checked here, where failure is survivable.
+    try {
+      if (!statSync(stagedPath).isFile()) {
+        finish(false);
+        return;
+      }
+    } catch {
+      finish(false);
+      return;
+    }
+
+    const child = spawnFn(stagedPath, STAGED_INSTALLER_ARGS, { detached: true, stdio: 'ignore' });
+    timer = setTimeout(() => finish(false), timeoutMs);
+    // Created: the installer owns the machine from here. Unref'd so it does not
+    // hold the app's event loop; `exitFn` is expected to exit the process anyway.
+    child.once('spawn', () => {
+      child.unref();
+      finish(true);
+    });
+    child.once('error', () => finish(false));
+  });
+}
+
+/// Written before the installer is spawned and read after the next launch: the
+/// only place the app can learn that a requested update never completed. NSIS's
+/// silent path deletes the old installation before it extracts the new one, so
+/// a failure in between leaves no app to notice anything -- this record is the
+/// breadcrumb that lets the next launch say what happened instead of leaving a
+/// silent, app-less machine.
+const PENDING_UPDATE_FILE = 'pending-update.json';
+/// A record older than this predates any update the user could still be waiting
+/// for (the machine was off for a month, or the version was rolled back by
+/// hand); it is cleaned up rather than reported.
+const PENDING_UPDATE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+function writePendingUpdate({ directory, version, stagedPath, now = Date.now() }) {
+  const record = {
+    version: String(version || ''),
+    stagedPath: String(stagedPath || ''),
+    requestedAt: now,
+  };
+  try {
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, PENDING_UPDATE_FILE), `${JSON.stringify(record, null, 2)}\n`);
+    return true;
+  } catch {
+    // The record is a recovery aid, not a gate: a full disk must not stop the
+    // update from being attempted.
+    return false;
+  }
+}
+
+/// The record, or null when absent, unreadable or shaped by something else.
+function readPendingUpdate({ directory }) {
+  let bytes;
+  try {
+    bytes = readFileSync(join(directory, PENDING_UPDATE_FILE));
+  } catch {
+    return null;
+  }
+  try {
+    const record = JSON.parse(bytes.toString('utf8'));
+    if (!record || typeof record !== 'object') return null;
+    if (typeof record.version !== 'string') return null;
+    if (typeof record.stagedPath !== 'string') return null;
+    if (!Number.isFinite(record.requestedAt)) return null;
+    return record;
+  } catch {
+    return null;
+  }
+}
+
+function removePendingUpdate({ directory }) {
+  try {
+    unlinkSync(join(directory, PENDING_UPDATE_FILE));
+  } catch {
+    // Absent or undeletable: either way there is nothing left to reconcile.
+  }
+}
+
+/// Called once at startup with the record's directory and this build's version.
+/// Returns `{ outcome: 'none' | 'completed' | 'stale' | 'incomplete', record? }`;
+/// every outcome leaves no record behind, and `incomplete` additionally removes
+/// the staged installer it names, so a failed attempt cannot be re-run against
+/// a version the publisher has since replaced.
+function reconcilePendingUpdate({
+  directory,
+  currentVersion,
+  stagedDirectory = join(tmpdir(), 'telium-update'),
+  now = Date.now(),
+  maxAgeMs = PENDING_UPDATE_MAX_AGE_MS,
+}) {
+  const record = readPendingUpdate({ directory });
+  if (!record) return { outcome: 'none' };
+  removePendingUpdate({ directory });
+
+  if (compareVersions(currentVersion, record.version) >= 0) {
+    return { outcome: 'completed', record };
+  }
+  if (now - record.requestedAt > maxAgeMs) {
+    return { outcome: 'stale', record };
+  }
+
+  // Only the file this module stages, under the directory it stages into, is
+  // removed -- the record is honoured for cleanup but never trusted for paths
+  // beyond that.
+  if (record.stagedPath
+    && basename(record.stagedPath) === 'telium-setup.exe'
+    && dirname(record.stagedPath) === stagedDirectory) {
+    try {
+      rmSync(record.stagedPath, { force: true });
+    } catch {
+      // Already gone, or held by a still-running installer: harmless.
+    }
+  }
+  return { outcome: 'incomplete', record };
+}
+
 /// `APPIMAGE` is set by the AppImage runtime; without it the build does not self-install.
 function runningAppImage(env = process.env) {
   const path = env.APPIMAGE;
@@ -421,15 +597,24 @@ function createUpdateService({
 module.exports = {
   Fault,
   Phase,
+  PENDING_UPDATE_FILE,
+  PENDING_UPDATE_MAX_AGE_MS,
+  SPAWN_SETTLE_TIMEOUT_MS,
+  STAGED_INSTALLER_ARGS,
   createUpdateService,
   STATEMENT_VERSION,
   artifactKeyFor,
   checkForUpdate,
   compareVersions,
   downloadArtifact,
+  launchStagedInstaller,
+  readPendingUpdate,
+  reconcilePendingUpdate,
+  removePendingUpdate,
   runningAppImage,
   stageAppImage,
   stageInstaller,
   statementFor,
   verifyManifestSignature,
+  writePendingUpdate,
 };

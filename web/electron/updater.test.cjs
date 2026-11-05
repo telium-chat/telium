@@ -322,3 +322,206 @@ test('an install publishes byte progress while downloading and clears it when do
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------- restart --
+// The Windows restart closes the app onto the installer; these cover the two
+// ways that handoff used to be able to go wrong: closing before the installer
+// exists, and never learning that it never started.
+
+const { EventEmitter } = require('node:events');
+const {
+  PENDING_UPDATE_FILE,
+  PENDING_UPDATE_MAX_AGE_MS,
+  STAGED_INSTALLER_ARGS,
+  launchStagedInstaller,
+  readPendingUpdate,
+  reconcilePendingUpdate,
+  removePendingUpdate,
+  writePendingUpdate,
+} = require('./updater.cjs');
+
+/// A child process double: `emits('spawn')` or `emits('error', ...)` decides
+/// which event the real CreateProcess would have produced.
+function fakeChild(emits) {
+  const child = new EventEmitter();
+  child.unref = () => {};
+  setImmediate(() => {
+    if (emits.error) child.emit('error', new Error(emits.error));
+    else child.emit('spawn');
+  });
+  return child;
+}
+
+test('a restart exits only after the installer process exists, with the silent and force-run flags', async () => {
+  const stagedPath = join(tmpdir(), 'telium-updater-fake-installer.exe');
+  writeFileSync(stagedPath, 'not really an installer');
+  try {
+    let spawned = null;
+    let exits = 0;
+    const result = await launchStagedInstaller({
+      stagedPath,
+      spawnFn: (path, args, options) => {
+        spawned = { path, args, options };
+        return fakeChild({});
+      },
+      exitFn: () => { exits += 1; },
+    });
+    assert.deepEqual(spawned.args, STAGED_INSTALLER_ARGS, 'silent install, then the installer relaunches the app');
+    assert.equal(spawned.options.detached, true);
+    assert.equal(spawned.options.stdio, 'ignore');
+    assert.equal(exits, 1, 'the app closes exactly once, after the process exists');
+    assert.deepEqual(result, { launched: true });
+  } finally {
+    rmSync(stagedPath, { force: true });
+  }
+});
+
+test('a spawn that cannot start keeps the app alive and says so', async () => {
+  let exits = 0;
+  let failures = 0;
+  const result = await launchStagedInstaller({
+    stagedPath: join(tmpdir(), 'telium-updater-fake-installer.exe'),
+    spawnFn: () => fakeChild({ error: 'EACCES' }),
+    exitFn: () => { exits += 1; },
+    onLaunchFailed: () => { failures += 1; },
+  });
+  assert.deepEqual(result, { launched: false });
+  assert.equal(exits, 0, 'closing here would leave the user with no app and no update');
+  assert.equal(failures, 1);
+});
+
+test('a staged installer that vanished before the restart refuses without spawning anything', async () => {
+  let spawns = 0;
+  let failures = 0;
+  const result = await launchStagedInstaller({
+    stagedPath: join(tmpdir(), 'telium-updater-never-staged.exe'),
+    spawnFn: () => { spawns += 1; return fakeChild({}); },
+    exitFn: () => {},
+    onLaunchFailed: () => { failures += 1; },
+  });
+  assert.deepEqual(result, { launched: false });
+  assert.equal(spawns, 0);
+  assert.equal(failures, 1);
+});
+
+test('an installer that never reports either way times out with the app still open', async () => {
+  let exits = 0;
+  const child = new EventEmitter();
+  child.unref = () => {};
+  const result = await launchStagedInstaller({
+    stagedPath: join(tmpdir(), 'telium-updater-fake-installer.exe'),
+    spawnFn: () => child,
+    exitFn: () => { exits += 1; },
+    timeoutMs: 20,
+  });
+  assert.deepEqual(result, { launched: false });
+  assert.equal(exits, 0);
+});
+
+// ---------------------------------------------------- pending-update record --
+test('the pending-update record round-trips and cleans up', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'telium-updater-'));
+  try {
+    assert.equal(readPendingUpdate({ directory }), null, 'nothing written, nothing read');
+    assert.ok(writePendingUpdate({
+      directory,
+      version: '0.2.0',
+      stagedPath: join(directory, 'telium-setup.exe'),
+      now: 1000,
+    }));
+    assert.deepEqual(readPendingUpdate({ directory }), {
+      version: '0.2.0',
+      stagedPath: join(directory, 'telium-setup.exe'),
+      requestedAt: 1000,
+    });
+    removePendingUpdate({ directory });
+    assert.equal(readPendingUpdate({ directory }), null);
+    removePendingUpdate({ directory });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('a corrupt or foreign pending-update record reads as nothing', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'telium-updater-'));
+  try {
+    for (const contents of ['not json', '[]', '{"version":42}', '{"version":"1.0.0"}', '{"stagedPath":"/x"}']) {
+      writeFileSync(join(directory, PENDING_UPDATE_FILE), contents);
+      assert.equal(readPendingUpdate({ directory }), null, contents);
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('a launch that reaches a current-or-newer version reconciles as completed', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'telium-updater-'));
+  try {
+    writePendingUpdate({ directory, version: '0.2.0', stagedPath: '/x/telium-setup.exe', now: 1000 });
+    assert.deepEqual(
+      reconcilePendingUpdate({ directory, currentVersion: '0.2.0', now: 2000 }).outcome,
+      'completed',
+    );
+    assert.equal(readPendingUpdate({ directory }), null, 'the record is consumed either way');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('an incomplete update removes its record and its staged installer, and nothing else', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'telium-updater-'));
+  const stagedDirectory = mkdtempSync(join(tmpdir(), 'telium-updater-stage-'));
+  try {
+    const staged = join(stagedDirectory, 'telium-setup.exe');
+    const foreign = join(stagedDirectory, 'something-else.exe');
+    writeFileSync(staged, 'installer');
+    writeFileSync(foreign, 'not the installer');
+    writePendingUpdate({
+      directory,
+      version: '9.9.9',
+      stagedPath: staged,
+      now: 1000,
+    });
+    const result = reconcilePendingUpdate({
+      directory,
+      currentVersion: '0.2.0',
+      stagedDirectory,
+      now: 2000,
+    });
+    assert.equal(result.outcome, 'incomplete');
+    assert.equal(result.record.version, '9.9.9');
+    assert.ok(!existsSync(staged), 'a failed attempt cannot be re-run against a replaced release');
+    assert.ok(existsSync(foreign), 'only the file the updater stages is cleaned');
+    assert.equal(readPendingUpdate({ directory }), null);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+    rmSync(stagedDirectory, { recursive: true, force: true });
+  }
+});
+
+test('a pending-update record older than any plausible wait goes stale without touching files', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'telium-updater-'));
+  const stagedDirectory = mkdtempSync(join(tmpdir(), 'telium-updater-stage-'));
+  try {
+    const staged = join(stagedDirectory, 'telium-setup.exe');
+    writeFileSync(staged, 'installer');
+    writePendingUpdate({
+      directory,
+      version: '9.9.9',
+      stagedPath: staged,
+      now: 0,
+    });
+    const result = reconcilePendingUpdate({
+      directory,
+      currentVersion: '0.2.0',
+      stagedDirectory,
+      now: PENDING_UPDATE_MAX_AGE_MS + 1,
+    });
+    assert.equal(result.outcome, 'stale');
+    assert.ok(existsSync(staged), 'a month-old installer is somebody else\'s cleanup decision');
+    assert.equal(readPendingUpdate({ directory }), null);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+    rmSync(stagedDirectory, { recursive: true, force: true });
+  }
+});
