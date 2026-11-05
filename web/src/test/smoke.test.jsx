@@ -701,10 +701,12 @@ describe('links and stickers', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Account menu' }));
     await user.click(await screen.findByRole('menuitem', { name: 'Set a custom status' }));
-    const dialog = await screen.findByRole('dialog');
+    // Toasts also use role=dialog; select the named modal so an unrelated
+    // voice-error toast cannot make this presence test fail intermittently.
+    const dialog = await screen.findByRole('dialog', { name: 'Custom status' });
     await user.type(within(dialog).getByLabelText('Status'), 'writing tests');
     await user.click(within(dialog).getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Custom status' })).toBeNull());
 
     const published = () => server.framesFor(GUILD)
       .filter((f) => f.op === 'PRESENCE_UPDATE').at(-1)?.d;

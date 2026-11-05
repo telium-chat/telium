@@ -584,11 +584,19 @@ pub struct Shutdown {
     /// Milliseconds for close frames to flush before the wait begins.
     #[serde(deserialize_with = "de_millis_u64")]
     pub settle_ms: u64,
+    /// How long a scheduled-restart notice (SIGUSR1 from `update.sh`) stays
+    /// standing before this server clears it on its own. The update script
+    /// may sleep a different interval before restarting, so this is only
+    /// a notice TTL, not a promised restart timestamp. This is the safety net
+    /// that withdraws the notice if the script dies mid-wait. Zero disables
+    /// the notice: SIGUSR1 is then ignored and a restart lands unwarned.
+    #[serde(deserialize_with = "de_secs_u64")]
+    pub notice_secs: u64,
 }
 
 impl Default for Shutdown {
     fn default() -> Self {
-        Self { grace_secs: 15, settle_ms: 250 }
+        Self { grace_secs: 15, settle_ms: 250, notice_secs: 300 }
     }
 }
 
@@ -2186,6 +2194,15 @@ impl Config {
                  already written, not a wait for anything to be decided)"
             );
         }
+        // Zero is the off switch; a notice longer than an hour is a maintenance
+        // window, which is what TELIUM_UPDATE_WINDOW is for.
+        if self.shutdown.notice_secs > 3_600 {
+            anyhow::bail!(
+                "shutdown.notice_secs must be between 0 and 3600 (it is how long a \
+                 scheduled-restart notice stays standing before this server withdraws it \
+                 on its own; zero turns the notice off)"
+            );
+        }
         self.warn_about_voice_reachability();
         Ok(())
     }
@@ -2486,6 +2503,27 @@ browser_direct = false
         .expect("Gofile host config parses");
 
         assert!(cfg.media_registry.external_hosts[0].browser_direct_enabled());
+    }
+
+    #[test]
+    fn a_restart_notice_is_bounded_and_zero_means_off() {
+        let ok = |toml_src: &str| {
+            let cfg: Config = toml::from_str(toml_src).expect("config parses");
+            cfg.validate()
+        };
+        let base = "server_name = \"a.test\"\n[federation]\n";
+
+        // The default stands a five-minute notice; zero is the documented off switch.
+        let defaults: Config = toml::from_str(base).expect("config parses");
+        assert_eq!(defaults.shutdown.notice_secs, 300);
+        assert!(ok(&format!("{base}[shutdown]\nnotice_secs = 0\n")).is_ok());
+        assert!(ok(&format!("{base}[shutdown]\nnotice_secs = 3600\n")).is_ok());
+
+        for bad in ["3601", "999999"] {
+            let out = ok(&format!("{base}[shutdown]\nnotice_secs = {bad}\n"));
+            assert!(out.is_err(), "{bad} must be refused");
+            assert!(out.err().unwrap().to_string().contains("notice_secs"), "{bad} names the key");
+        }
     }
 
     #[test]

@@ -4933,6 +4933,9 @@ export const messages = {
   'voice.error.rejoin': 'Der erneute Beitritt zum Gespräch schlug fehl',
   // The server says this device is no longer in the channel it was calling from.
   'voice.call.removed': 'Du wurdest aus dem Sprachkanal entfernt',
+  'voice.drain.soonIn': 'Das Sprach-Relay wird in den nächsten {count, plural, one {# Minute} other {# Minuten}} neu gestartet, um ein Update anzuwenden',
+  'voice.drain.soon': 'Das Sprach-Relay wird bald neu gestartet, um ein Update anzuwenden',
+  'voice.drain.now': '{name} startet jetzt neu; das Gespräch könnte kurz unterbrochen werden',
   // The device panel's four. `readRoutes` and `switchOutput` are shared with
   // Android's output sheet, which asks the same two questions of a different
   // implementation — so the German has to work in both, and neither of them
@@ -5664,6 +5667,11 @@ export const messages = {
   'shell.socket.offline': 'Dieses Gerät ist offline. Telium macht dort weiter, wo es aufgehört hat, sobald die Verbindung wieder da ist.',
   'shell.socket.reconnecting': '{role, select, home {Verbindung zu {name} wird wiederhergestellt.} other {Verbindung zu {name} wird wiederhergestellt. Andere Server sind nicht betroffen.}}',
   'shell.socket.restarting': '{name} startet neu. Die Verbindung kommt von selbst zurück.',
+  'shell.restart.server': '{name} wird bald neu gestartet, um ein Update anzuwenden.',
+  'shell.restart.sfu': '{name} wird in den nächsten {count, plural, one {# Minute} other {# Minuten}} neu gestartet, um ein Update anzuwenden.',
+  'shell.restart.sfuSoon': '{name} wird bald neu gestartet, um ein Update anzuwenden.',
+  'shell.restart.sfuNow': '{name} startet jetzt neu.',
+  'shell.restart.brief': 'Rechne mit einer kurzen Unterbrechung.',
   'shell.socket.sessionRefused': '{role, select, home {{name} erkennt diese Sitzung nicht mehr. Melde dich neu an, um fortzufahren.} other {{name} erkennt diese Sitzung nicht mehr. Verbinde dich neu damit; der Rest von Telium ist nicht betroffen.}}',
   'shell.socket.unnamedServer': 'dieser Server',
   'shell.tabs.forum': 'Forenbeiträge',

@@ -830,6 +830,13 @@ export const voice = {
   'voice.error.rejoin': 'Could not rejoin the call',
   // The server says this device is no longer in the channel it was calling from.
   'voice.call.removed': 'You were removed from the voice channel',
+  // The relay is draining for an update. A courtesy notice, not trouble: the
+  // call keeps running until the relay actually goes away, and the drop ladder
+  // owns what happens then. The countdown is to the drain deadline -- an upper
+  // bound, since the restart lands whenever rooms empty inside it.
+  'voice.drain.soonIn': 'The voice relay is scheduled to restart for an update within the next {count, plural, one {# minute} other {# minutes}}',
+  'voice.drain.soon': 'The voice relay is scheduled to restart for an update soon',
+  'voice.drain.now': '{name} is restarting now; expect the call to drop briefly',
   // The device panel's four. `readRoutes` and `switchOutput` are shared with
   // Android's output sheet, which asks the same two questions of a different
   // implementation.

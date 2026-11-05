@@ -16,6 +16,16 @@ pub const SESSION_REVOKED: &str = "SESSION_REVOKED";
 
 pub const SERVER_GOING_AWAY: &str = "SERVER_GOING_AWAY";
 
+/// A restart has been scheduled (SIGUSR1 from the update script): `data.at`
+/// is the notice's epoch-ms expiry (not an assured restart time),
+/// `data.in_ms` the remaining notice TTL. Unlike
+/// `SERVER_GOING_AWAY` this is an ordinary dispatch -- nobody's socket breaks.
+pub const SERVER_RESTART_SCHEDULED: &str = "SERVER_RESTART_SCHEDULED";
+
+/// The scheduled restart was withdrawn: the update script died mid-wait
+/// before the deadline passed. The deadline itself is the other exit.
+pub const SERVER_RESTART_CANCELLED: &str = "SERVER_RESTART_CANCELLED";
+
 pub const DEFAULT_INTENTS: u64 =
     INTENT_GUILD_MESSAGES | INTENT_GUILD_MEMBERS | INTENT_GUILD_STRUCTURE
         | INTENT_GUILD_EXPRESSIONS | INTENT_DIRECT_MESSAGES | INTENT_GUILD_VOICE_STATES;

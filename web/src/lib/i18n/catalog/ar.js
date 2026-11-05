@@ -5445,6 +5445,9 @@ export const messages = {
   'voice.error.rejoin': 'تعذّرت إعادة الانضمام إلى المكالمة',
   // The server says this device is no longer in the channel it was calling from.
   'voice.call.removed': 'تمت إزالتك من القناة الصوتية',
+  'voice.drain.soonIn': 'من المقرر أن يعيد موجّه الصوت التشغيل لتطبيق تحديث خلال {count, plural, one {دقيقة واحدة} two {دقيقتين} few {# دقائق} many {# دقيقة} other {# دقيقة}}',
+  'voice.drain.soon': 'من المقرر أن يعيد موجّه الصوت التشغيل قريبًا لتطبيق تحديث',
+  'voice.drain.now': '{name} يعيد التشغيل الآن؛ توقّع انقطاع المكالمة قليلًا',
   // The device panel's four. `readRoutes` and `switchOutput` are shared with
   // Android's output sheet, which asks the same two questions of a different
   // implementation -- so both use «مخرج الصوت», the same phrase as
@@ -6208,6 +6211,11 @@ export const messages = {
   'shell.socket.offline': 'هذا الجهاز غير متصل. سيكمل Telium من حيث توقّف عند عودة الاتصال.',
   'shell.socket.reconnecting': '{role, select, home {جارٍ إعادة الاتصال بـ{name}.} other {جارٍ إعادة الاتصال بـ{name}. والخوادم الأخرى غير متأثّرة.}}',
   'shell.socket.restarting': '{name} يعيد التشغيل. وسيعود من تلقاء نفسه.',
+  'shell.restart.server': '{name} من المقرر أن يعيد التشغيل قريبًا لتطبيق تحديث.',
+  'shell.restart.sfu': '{name} من المقرر أن يعيد التشغيل لتطبيق تحديث خلال {count, plural, one {دقيقة واحدة} two {دقيقتين} few {# دقائق} many {# دقيقة} other {# دقيقة}} القادمة.',
+  'shell.restart.sfuSoon': '{name} من المقرر أن يعيد التشغيل قريبًا لتطبيق تحديث.',
+  'shell.restart.sfuNow': '{name} يعيد التشغيل الآن.',
+  'shell.restart.brief': 'توقّع انقطاعًا قصيرًا.',
   'shell.socket.sessionRefused': '{role, select, home {{name} لم يعد يتعرّف على هذه الجلسة. سجّل الدخول من جديد للمتابعة.} other {{name} لم يعد يتعرّف على هذه الجلسة. أعد الاتصال به؛ وبقية Telium غير متأثّرة.}}',
   'shell.socket.unnamedServer': 'ذلك الخادم',
   'shell.tabs.forum': 'منشورات المنتدى',

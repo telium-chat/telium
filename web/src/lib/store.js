@@ -186,6 +186,11 @@ export class Store extends Emitter {
 
     this.cachedAt = null;
 
+    // Scheduled-restart notices: which server domain is restarting when, plus
+    // the active call's relay-drain notice. Cleared on READY, cancellation or expiry.
+    this.restartNotices = new Map();
+    this.sfuNotice = null;
+
     this.route = { view: 'chat', guildId: null, channelId: null, conversationId: null };
     this.pendingJump = null;
     this.committedSearch = null;

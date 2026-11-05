@@ -146,6 +146,7 @@ pub async fn build_state_as(cfg: Config, role: Role) -> anyhow::Result<AppState>
         authority_workers_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         shutting_down: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         shutdown: Arc::new(tokio::sync::Notify::new()),
+        restart_notice_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
         replica_host_pool: None,
         hub,
         metrics: Arc::new(crate::metrics::Metrics::new()),

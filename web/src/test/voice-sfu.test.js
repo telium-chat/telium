@@ -70,6 +70,24 @@ describe('SfuCall callbacks', () => {
     expect(() => call.stop()).not.toThrow();
   });
 
+  it('delivers server-originated SFU drain notices to the supplied callback', () => {
+    const onDrainNotice = vi.fn();
+    const call = new SfuCall({
+      me: '@a:h', endpoint: 'https://sfu.example', joinToken: 'token',
+      iceServers: [], onDrainNotice,
+    });
+    const draining = { phase: 'draining', until_ms: Date.now() + 60_000 };
+    const bytes = new TextEncoder().encode(JSON.stringify(draining));
+    call.onData(bytes, null, 'telium.drain');
+    expect(onDrainNotice).toHaveBeenCalledExactlyOnceWith(draining);
+
+    // Another participant cannot impersonate a relay notice.
+    call.onData(bytes, { identity: '@other:h' }, 'telium.drain');
+    call.onData(bytes, null, 'telium.unrelated');
+    call.onData(new TextEncoder().encode('not json'), null, 'telium.drain');
+    expect(onDrainNotice).toHaveBeenCalledTimes(1);
+  });
+
   it('subscribes ordinary call media but gates screen video and audio on Watch', () => {
     const call = new SfuCall({
       me: '@a:h',

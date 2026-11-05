@@ -14,7 +14,8 @@
 #   2. Pulls it, and stops here if nothing moved. Silence is the healthy state.
 #   3. Reconciles the configuration files that ship with a release against the
 #      ones on this box, which is the half this script used to skip entirely.
-#   4. Restarts the server, inside the operator's window if they set one.
+#   4. Restarts the server, inside the operator's window if they set one,
+#      after telling everyone connected that the restart is coming.
 #
 # On step 3, at length, because it is the part where being wrong is expensive:
 #
@@ -72,6 +73,7 @@ TELIUM_UPDATES=automatic
 TELIUM_PIN=
 TELIUM_PIN_REASON=
 TELIUM_UPDATE_WINDOW=
+TELIUM_RESTART_NOTICE_SECS=300
 TELIUM_MANAGE_COMPOSE=yes
 if [ -r /opt/telium/update.conf ]; then
   # shellcheck source=/dev/null
@@ -105,6 +107,7 @@ case "${1:-}" in
     echo "pin:     ${TELIUM_PIN:-<none, following the channel>}"
     echo "reason:  ${TELIUM_PIN_REASON:-<none>}"
     echo "window:  ${TELIUM_UPDATE_WINDOW:-<any time>}"
+    echo "notice:  ${TELIUM_RESTART_NOTICE_SECS:-300}s before an in-window restart"
     echo "compose: $TELIUM_MANAGE_COMPOSE"
     if [ -f "$STATE/compose.conflict" ]; then
       echo "conflict: compose.yml.dist is waiting to be merged"
@@ -366,6 +369,34 @@ if ! in_window; then
   announce_once waiting-window "$after" \
     "a new release is available; holding it until the update window ${TELIUM_UPDATE_WINDOW}"
   exit 0
+fi
+
+# A restart that nobody saw coming is worse than a restart that can be
+# planned around, and this script is the only thing that knows when one is
+# coming. So before recreating the container it signals the running server
+# (SIGUSR1, the SFU drain's mechanism): the server stands a notice in front
+# of every connected client and keeps serving, and this script sleeps the
+# notice out before pulling the container from under them.
+#
+# The server's own `shutdown.notice_secs` is its ceiling for withdrawing the
+# notice if this script dies mid-wait; the two disagree by design, the
+# server's is the safety net and this one is the plan -- the same arrangement
+# the SFU's drain timeout has with its updater. `--now` signals nothing and
+# waits for nothing: it is the operator saying now, and presumably watching.
+notice_secs="${TELIUM_RESTART_NOTICE_SECS:-300}"
+case "$notice_secs" in
+  ''|*[!0-9]*)
+    echo "WARNING: TELIUM_RESTART_NOTICE_SECS=${notice_secs} is not a number; restarting without a notice" >&2
+    notice_secs=0
+    ;;
+esac
+if [ "$FORCE_NOW" -eq 0 ] && [ "$notice_secs" -gt 0 ]; then
+  server_container="$("${COMPOSE[@]}" ps -q server 2>/dev/null || true)"
+  if [ -n "$server_container" ]; then
+    docker kill --signal=USR1 "$server_container" >/dev/null 2>&1 || true
+    echo "restart notice sent; waiting ${notice_secs}s before recreating the server"
+    sleep "$notice_secs"
+  fi
 fi
 
 "${COMPOSE[@]}" up -d server

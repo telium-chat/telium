@@ -25,6 +25,44 @@ export const serverMethods = {
     return Boolean(this.fallback) && this.fallback.status?.read_only !== false;
   },
 
+  /// Scheduled-restart notices, per server domain: dispatch told everyone
+  /// connected, READY re-tells anyone who loaded mid-window, and the deadline
+  /// passing, a cancellation or a READY without one all withdraw it.
+  onRestartScheduled(domain, d) {
+    const at = Number(d?.at);
+    if (!Number.isFinite(at) || at <= Date.now()) return;
+    this.restartNotices.set(domain, at);
+    this.emit('restart-notice');
+  },
+
+  onRestartCancelled(domain) {
+    if (!this.restartNotices.delete(domain)) return;
+    this.emit('restart-notice');
+  },
+
+  onReadyRestart(domain, restart) {
+    const at = Number(restart?.at);
+    if (Number.isFinite(at) && at > Date.now()) {
+      this.onRestartScheduled(domain, { at });
+    } else {
+      this.onRestartCancelled(domain);
+    }
+  },
+
+  /// The voice relay's own courtesy notice (`telium.drain` over LiveKit):
+  /// one active call at a time, so one slot, cleared when the call ends or a
+  /// drop moves the call elsewhere.
+  setSfuNotice(notice) {
+    // The relay can resume accepting on its own if an updater dies. Never
+    // leave a draining banner hanging around for the rest of a long call.
+    const until = Number(notice?.until_ms);
+    const expiresAt = notice?.phase === 'now'
+      ? Date.now() + 15_000
+      : (Number.isFinite(until) && until > 0 ? until : Date.now() + 60_000);
+    this.sfuNotice = notice ? { ...notice, expires_at: expiresAt } : null;
+    this.emit('restart-notice');
+  },
+
   /// Not on the first failure (tunnel reconnects, wakes, deploys); only a sustained absence.
   watchHome(e) {
     const domain = this.session?.home?.domain;

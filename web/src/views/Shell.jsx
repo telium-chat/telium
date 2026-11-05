@@ -27,6 +27,7 @@ import { MigrationBanner } from './MigrationBanner.jsx';
 import { SunsetBanner } from './SunsetBanner.jsx';
 import { VersionBanner } from './VersionBanner.jsx';
 import { UpdateBanner } from './UpdateBanner.jsx';
+import { RestartBanner } from './RestartBanner.jsx';
 import { ReceiveMigrationDialog } from './user-settings/ReceiveMigrationDialog.jsx';
 import { clearHandoff, pendingHandoff } from '../lib/handoff.js';
 import { ForumView } from './ForumView.jsx';
@@ -527,6 +528,7 @@ function BannerStack() {
       <SunsetBanner />
       <VersionBanner />
       <UpdateBanner />
+      <RestartBanner />
     </div>
   );
 }

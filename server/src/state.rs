@@ -20,6 +20,10 @@ pub struct AppState {
     pub hub: Arc<Hub>,
     pub shutting_down: Arc<std::sync::atomic::AtomicBool>,
     pub shutdown: Arc<tokio::sync::Notify>,
+    /// Epoch-ms deadline of a scheduled-restart notice (SIGUSR1 from the
+    /// update script); 0 = no notice standing. An Atomic so READY and the
+    /// announce path read it without awaiting a lock.
+    pub restart_notice_ms: Arc<std::sync::atomic::AtomicI64>,
     pub metrics: Arc<crate::metrics::Metrics>,
     pub http: reqwest::Client,
     pub http_no_redirect: reqwest::Client,

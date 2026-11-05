@@ -350,6 +350,33 @@ impl Hub {
         told
     }
 
+    /// Broadcast a scheduled-restart notice (or its withdrawal) to every
+    /// connected session. Same direct-outbox loop as `close_all` -- a full
+    /// queue must not mark anybody lagging over a piece of news -- but the
+    /// socket stays up: this is an ordinary dispatch the client renders as a
+    /// banner, and `at` also rides READY for anyone connecting mid-window.
+    pub async fn announce_restart(&self, kind: &'static str, at_ms: i64) -> usize {
+        let accounts = self.accounts.read().await;
+        let now = crate::util::now_ms();
+        let event = Arc::new(Event {
+            t: kind,
+            guild_id: String::new(),
+            channel_id: None,
+            intent: 0,
+            only_user: None,
+            data: json!({ "at": at_ms, "in_ms": (at_ms - now).max(0) }),
+        });
+        let mut told = 0;
+        for sessions in accounts.values() {
+            for out in sessions.values() {
+                if out.tx.try_send(event.clone()).is_ok() {
+                    told += 1;
+                }
+            }
+        }
+        told
+    }
+
     pub async fn unsubscribe_all(&self, session_id: u64) {
         let mut subs = self.guild_subs.write().await;
         subs.retain(|_, sessions| {
@@ -718,6 +745,37 @@ mod tests {
         .to_user("@b:x");
         hub.publish(ev).await;
         assert!(rx_a.try_recv().is_err());
+        assert!(rx_b.try_recv().is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_scheduled_restart_reaches_every_account_and_names_the_deadline() {
+        let hub = Hub::new(30);
+        let (tx_a, mut rx_a) = tokio::sync::mpsc::channel(8);
+        let (tx_b, mut rx_b) = tokio::sync::mpsc::channel(8);
+        let (out_a, _) = Outbox::new(tx_a);
+        let (out_b, _) = Outbox::new(tx_b);
+        // The announce loop walks `accounts`, which every authenticated socket
+        // registers through `watch_account` -- not the guild subscription table.
+        hub.watch_account(1, "@a:x", out_a, 8).await;
+        hub.watch_account(2, "@b:x", out_b, 8).await;
+
+        let at = now_ms() + 300_000;
+        assert_eq!(hub.announce_restart(super::super::events::SERVER_RESTART_SCHEDULED, at).await, 2);
+
+        let a = rx_a.try_recv().expect("a was told");
+        assert_eq!(a.t, super::super::events::SERVER_RESTART_SCHEDULED);
+        assert_eq!(a.intent, 0, "an announcement needs no intents");
+        assert_eq!(a.guild_id, "", "an announcement is not guild-scoped");
+        assert_eq!(a.data["at"], at);
+        assert!(a.data["in_ms"].as_i64().unwrap_or(0) > 0);
+
+        let b = rx_b.try_recv().expect("b was told too");
+        assert_eq!(b.data["at"], at);
+
+        // The withdrawal is the same plumbing and reaches the same everyone.
+        assert_eq!(hub.announce_restart(super::super::events::SERVER_RESTART_CANCELLED, 0).await, 2);
+        assert!(rx_a.try_recv().is_ok());
         assert!(rx_b.try_recv().is_ok());
     }
 

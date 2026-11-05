@@ -1452,6 +1452,7 @@ async fn serve(state: telium_server::AppState, config_path: Option<PathBuf>) -> 
     let server_name = state.cfg.server_name.clone();
     let roles = state.cfg.roles.clone();
     let shutdown_state = state.clone();
+    spawn_restart_notice_handler(state.clone());
     let app = routes::router_with_standbys(state, &replicas);
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;
@@ -1480,6 +1481,70 @@ async fn serve(state: telium_server::AppState, config_path: Option<PathBuf>) -> 
         ),
     }
     Ok(())
+}
+
+/// SIGUSR1 is the update script's "a restart has been scheduled": stand a
+/// notice with the deadline in front of every connected session, keep serving,
+/// and withdraw the notice on our own if the script dies before acting. The
+/// script may sleep a different duration before the restart, so this is the
+/// notice expiry rather than an exact restart ETA. This is the safety
+/// net -- the same arrangement the SFU's `updates.drain_max_secs` has with
+/// its updater. `notice_secs = 0` ignores the signal entirely, which is how
+/// an operator opts out of the feature.
+fn spawn_restart_notice_handler(state: telium_server::AppState) {
+    #[cfg(unix)]
+    {
+        tokio::spawn(async move {
+            let Ok(mut s) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1())
+            else {
+                tracing::warn!(target: telium_server::logcat::STARTUP, "SIGUSR1 could not be watched; restart notices are unavailable");
+                return;
+            };
+            while s.recv().await.is_some() {
+                let notice_secs = state.cfg.shutdown.notice_secs;
+                if notice_secs == 0 {
+                    tracing::info!(
+                        target: telium_server::logcat::STARTUP,
+                        "restart notice requested (SIGUSR1) but shutdown.notice_secs = 0; restarting unwarned is the deal you made"
+                    );
+                    continue;
+                }
+                let now = telium_server::util::now_ms();
+                let at = now + (notice_secs as i64).saturating_mul(1000);
+                state.restart_notice_ms.store(at, std::sync::atomic::Ordering::Relaxed);
+                let told = state
+                    .hub
+                    .announce_restart(telium_server::gateway::events::SERVER_RESTART_SCHEDULED, at)
+                    .await;
+                tracing::info!(
+                    target: telium_server::logcat::STARTUP,
+                    sessions = told, notice_secs,
+                    "restart scheduled (SIGUSR1); notice standing"
+                );
+                // The withdrawal must not erase a *newer* notice, and must not
+                // fight a real shutdown: both are checked before speaking.
+                let clear_state = state.clone();
+                let deadline = at;
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(notice_secs + 60)).await;
+                    if clear_state.restart_notice_ms.load(std::sync::atomic::Ordering::Relaxed) == deadline
+                        && !clear_state.shutting_down.load(std::sync::atomic::Ordering::Relaxed)
+                    {
+                        clear_state.restart_notice_ms.store(0, std::sync::atomic::Ordering::Relaxed);
+                        let told = clear_state
+                            .hub
+                            .announce_restart(telium_server::gateway::events::SERVER_RESTART_CANCELLED, 0)
+                            .await;
+                        tracing::info!(
+                            target: telium_server::logcat::STARTUP,
+                            sessions = told,
+                            "restart notice withdrawn: the updater never acted on it"
+                        );
+                    }
+                });
+            }
+        });
+    }
 }
 
 async fn shutdown_signal(state: telium_server::AppState) {

@@ -8,6 +8,7 @@ export const guildMethods = {
   onReady({ domain, data }) {
     const d = data.d || {};
     this.cachedAt = null;
+    this.onReadyRestart(domain, d.restart);
     const listed = new Set();
     for (const guild of d.guilds || []) {
       listed.add(guild.id);

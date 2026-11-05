@@ -58,6 +58,7 @@ TELIUM_UPDATES=automatic
 TELIUM_PIN=
 TELIUM_PIN_REASON=
 TELIUM_UPDATE_WINDOW=
+TELIUM_RESTART_NOTICE_SECS=300
 TELIUM_ARTIFACT=
 TELIUM_SERVER_BIN=/usr/local/bin/telium-server
 TELIUM_CONFIG=/etc/telium/telium.toml
@@ -101,6 +102,7 @@ case "${1:-}" in
     echo "pin:     ${TELIUM_PIN:-<none, following the channel>}"
     echo "reason:  ${TELIUM_PIN_REASON:-<none>}"
     echo "window:  ${TELIUM_UPDATE_WINDOW:-<any time>}"
+    echo "notice:  ${TELIUM_RESTART_NOTICE_SECS:-300}s before an in-window restart"
     echo "unit:    $TELIUM_UNIT"
     echo "binary:  $TELIUM_SERVER_BIN"
     echo "artifact: $TELIUM_ARTIFACT"
@@ -440,6 +442,26 @@ if ! cmp -s "$STATE/staged/telium.example.toml" "$example"; then
 fi
 
 echo "installed ${before} -> ${after_name}; restarting ${TELIUM_UNIT}"
+
+# The swap is done and nothing above it can be interrupted harmlessly, so this
+# is the moment to warn whoever is connected before the restart itself. Same
+# contract as the container path: SIGUSR1 makes the running server stand a
+# notice in front of every session and keep serving, this script sleeps the
+# notice out, and the server's own `shutdown.notice_secs` withdraws the notice
+# if this script dies mid-wait. `--now` signals nothing and waits for nothing.
+notice_secs="${TELIUM_RESTART_NOTICE_SECS:-300}"
+case "$notice_secs" in
+  ''|*[!0-9]*)
+    echo "WARNING: TELIUM_RESTART_NOTICE_SECS=${notice_secs} is not a number; restarting without a notice" >&2
+    notice_secs=0
+    ;;
+esac
+if [ "$FORCE_NOW" -eq 0 ] && [ "$notice_secs" -gt 0 ]; then
+  systemctl kill --signal=SIGUSR1 --kill-whom=main "$TELIUM_UNIT" 2>/dev/null || true
+  echo "restart notice sent; waiting ${notice_secs}s before restarting"
+  sleep "$notice_secs"
+fi
+
 systemctl restart "$TELIUM_UNIT"
 
 up=0

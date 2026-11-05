@@ -895,6 +895,15 @@ async fn build_ready(
         }));
     }
 
+    // A standing scheduled-restart notice rides READY so a client that loads
+    // mid-window sees the same banner the dispatch told everyone else about.
+    let restart_notice_ms = state.restart_notice_ms.load(std::sync::atomic::Ordering::Relaxed);
+    let restart = if restart_notice_ms > now_ms() {
+        json!({ "at": restart_notice_ms })
+    } else {
+        Value::Null
+    };
+
     Ok(json!({
         "op": "READY",
         "d": {
@@ -916,6 +925,7 @@ async fn build_ready(
             "guilds": guilds,
             "voice_reclaimed": reclaimed,
             "resume_supported": false,
+            "restart": restart,
         }
     }))
 }

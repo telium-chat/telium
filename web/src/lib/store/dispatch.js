@@ -11,6 +11,8 @@ export const dispatchMethods = {
       case 'MIGRATION_UPDATE':
         if (domain === this.home?.domain) this.onMigrationAlert(d);
         break;
+      case 'SERVER_RESTART_SCHEDULED': this.onRestartScheduled(domain, d); break;
+      case 'SERVER_RESTART_CANCELLED': this.onRestartCancelled(domain); break;
       case 'RECOVERY_EMAIL_UPDATE':
         if (domain === this.home?.domain) this.onRecoveryEmail(d);
         break;

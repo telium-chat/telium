@@ -159,6 +159,7 @@ export function VoiceProvider({ children }) {
   const hangUp = useCallback(() => {
     callRef.current?.stop();
     callRef.current = null;
+    store.setSfuNotice(null);
     setSpeaking(new Set());
     setConnected(new Set());
     setScreens(new Map());
@@ -166,7 +167,7 @@ export function VoiceProvider({ children }) {
     setMicDenied(false);
     setAudioBlocked(false);
     setCameraFacing('user');
-  }, []);
+  }, [store]);
 
   const dropGuildKeys = useCallback(() => {
     guildKeysRef.current?.stop();
@@ -382,6 +383,9 @@ export function VoiceProvider({ children }) {
 
   const dial = useCallback(async (voiceServer, targetChannelId, { swap = false } = {}) => {
     if (callRef.current && !swap) return;
+    // A fresh call owes its user a fresh notice: whatever the previous relay
+    // said is not this relay's news.
+    store.setSfuNotice(null);
     const me = store.me?.user_id;
     const api = store.voiceApi(targetChannelId);
     const onError = (e) => reportError(e, t('voice.error.trouble'));
@@ -392,6 +396,9 @@ export function VoiceProvider({ children }) {
       if (gate.mode === 'held') gate.queue.push(() => fn(...args));
       return undefined;
     };
+    // One toast per drain phase per call: 'draining' when the relay announces
+    // the update window, 'now' when it is actually going away.
+    const drainSeen = new Set();
     const callbacks = {
       me,
       onSpeaking: via(setSpeaking),
@@ -456,6 +463,21 @@ export function VoiceProvider({ children }) {
       call = new SfuCall({
         ...callbacks,
         onAudioBlocked: via(setAudioBlocked),
+        onDrainNotice: (message) => {
+          // A courtesy from the relay, best-effort delivered; one toast per
+          // phase per call, then the banner carries it for the duration.
+          const name = (() => { try { return new URL(endpoint).host || endpoint; } catch { return endpoint; } })();
+          if (!drainSeen.has(message.phase)) {
+            drainSeen.add(message.phase);
+            if (message.phase === 'now') toast(t('voice.drain.now', { name }));
+            else if (message.until_ms) {
+              toast(t('voice.drain.soonIn', {
+                count: Math.max(1, Math.ceil((message.until_ms - Date.now()) / 60_000)),
+              }));
+            } else toast(t('voice.drain.soon'));
+          }
+          store.setSfuNotice({ ...message, name });
+        },
         onDropped: (e) => {
           if (callRef.current === call) retakeRef.current?.(targetChannelId, e);
           else onError(e);

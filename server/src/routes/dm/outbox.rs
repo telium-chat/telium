@@ -58,12 +58,17 @@ pub async fn flush_outbox(state: &AppState) -> ApiResult<u64> {
                 let shift = if refused { OUTBOX_MAX_SHIFT } else { attempts.min(OUTBOX_MAX_SHIFT) };
                 let backoff = state.cfg.federation.dm_retry_secs as i64 * 1000 * (1i64 << shift);
                 sqlx::query(
-                    "UPDATE dm_outbox SET attempts = ?, next_attempt_at = ?, last_error = ? WHERE id = ?",
+                    // A background delivery may have read an older attempt count
+                    // while another flush (or an operator) updated this row.
+                    // Never clobber a newer retry state with stale information.
+                    "UPDATE dm_outbox SET attempts = ?, next_attempt_at = ?, last_error = ? \
+                     WHERE id = ? AND attempts = ?",
                 )
                 .bind(attempts)
                 .bind(now_ms() + backoff)
                 .bind(e.to_string())
                 .bind(&id)
+                .bind(attempts - 1)
                 .execute(&state.pool)
                 .await?;
             }
