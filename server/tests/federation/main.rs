@@ -708,10 +708,13 @@ async fn live_claims(server: &Server) -> i64 {
 }
 
 async fn drained(a: &Server, conv_id: &str) {
-    // A healthy outbox drains in milliseconds; the deadline exists to fail a
-    // broken pipeline, not to time a runner out for being busy with the other
-    // suites this job runs beside.
-    for _ in 0..3_000 {
+    // The production server starts a periodic outbox retry worker; this test
+    // harness only mounts the router. Under CI load a transient failed delivery
+    // can back off for 60s, after which no worker wakes to retry it.
+    //
+    // Drive the worker explicitly while waiting for an eventual *successful*
+    // delivery. Retry policy is exercised separately by the outbox tests.
+    for attempt in 0..3_000 {
         let queued: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM dm_outbox WHERE conversation_id = ?")
             .bind(conv_id)
             .fetch_one(&a.state.pool)
@@ -720,9 +723,24 @@ async fn drained(a: &Server, conv_id: &str) {
         if queued == 0 {
             return;
         }
+        if attempt % 20 == 0 {
+            sqlx::query("UPDATE dm_outbox SET next_attempt_at = 0 WHERE conversation_id = ?")
+                .bind(conv_id)
+                .execute(&a.state.pool)
+                .await
+                .unwrap();
+            telium_server::routes::dm::flush_outbox(&a.state).await.unwrap();
+        }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
-    panic!("the delivery of {conv_id} never completed");
+    let errors: Vec<(String, i64, String)> = sqlx::query_as(
+        "SELECT destination, attempts, COALESCE(last_error, '') FROM dm_outbox WHERE conversation_id = ?",
+    )
+    .bind(conv_id)
+    .fetch_all(&a.state.pool)
+    .await
+    .unwrap();
+    panic!("the delivery of {conv_id} never completed: {errors:?}");
 }
 
 async fn group_with_frames(a: &Server, b: &Server, alice: &Account, bob: &Account, n: usize) -> String {
