@@ -145,6 +145,32 @@ Calls through a listed relay are end-to-end encrypted; the relay forwards cipher
 sees only connection metadata. Relaying is real bandwidth cost — list a relay you are
 willing to keep fed.
 
+## One-time maintainer setup for the listing wizard
+
+The GitHub issue forms and `registry-pr.yml` workflow are picked up from
+`main`, so merge the wizard before testing real submissions.
+
+1. [Create the `directory` label](https://github.com/telium-chat/telium/labels/new)
+   if it does not already exist. GitHub does not create labels referenced in
+   issue-form templates.
+2. In **Settings → Actions → General → Workflow permissions**, enable
+   **Allow GitHub Actions to create and approve pull requests**. Otherwise the
+   built-in `GITHUB_TOKEN` cannot create the listing PR.
+3. By default, GitHub holds CI runs on PRs created by `GITHUB_TOKEN` until a
+   maintainer approves them via **Approve workflows to run** on the PR. To have
+   these checks start automatically, add a repository Actions secret named
+   `REGISTRY_BOT_TOKEN`: use a fine-grained personal access token from a
+   maintainer account with access restricted to this repository and **Contents:
+   read/write**, **Pull requests: read/write**, and **Issues: read/write**.
+   Do not put the token in the issue, registry JSON, or source code. The PR
+   creation step uses this secret if present and falls back to `GITHUB_TOKEN`
+   otherwise. Revoke/rotate it if exposed or when no longer needed.
+
+The bot validates the proposed JSON before opening a PR in either mode. A
+human must still review the submitted operator details and decide whether to
+merge the listing. The ownership checkbox is an attestation, not proof of
+control of a hostname or SFU.
+
 ## Opening the pull request
 
 The easy way: [telium.chat/list](https://telium.chat/list). It probes your server from the
