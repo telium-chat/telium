@@ -6,9 +6,13 @@ name: Registry listings
 # run inside the script and again on the pull request itself — the bot adds
 # none of its own.
 #
-# The label has to exist before the first listing arrives; GitHub does not
-# create labels that an issue form names. (The script also matches on the
-# templates' invisible marker, so a mislabeled ordinary issue does nothing.)
+# The 'directory' label has to exist before the first listing arrives; GitHub
+# does not create labels named in issue forms. The script identifies the listing
+# kind from its JSON identity, as markdown form elements are not submitted.
+#
+# If REGISTRY_BOT_TOKEN is configured, the resulting PR triggers CI normally.
+# Otherwise, GitHub requires a maintainer to approve workflow runs on PRs
+# created with GITHUB_TOKEN. See site/registry/README.md for the one-time setup.
 #
 # One listing run at a time: two overlapping issues would each commit against
 # the same registry file. The runs are short; queueing is free.
@@ -65,7 +69,10 @@ jobs:
       - name: Open the pull request
         if: steps.entry.outputs.exit == '0'
         env:
-          GH_TOKEN: ${{ github.token }}
+          # A narrowly scoped PAT (or GitHub App token) makes bot-created
+          # pull requests trigger CI without manual approval. The fallback is
+          # still functional but GitHub requires maintainer CI approval.
+          GH_TOKEN: ${{ secrets.REGISTRY_BOT_TOKEN || github.token }}
           NUMBER: ${{ github.event.issue.number }}
           IDENTITY: ${{ steps.entry.outputs.identity }}
           TITLE: ${{ steps.entry.outputs.title }}
@@ -82,13 +89,13 @@ jobs:
           git push origin "$BRANCH"
 
           cat > pr-body.md <<'EOF'
-          From listing issue #$NUMBER (`Closes #NUMBER`).
+          From listing issue #ISSUE_NUMBER (Closes #ISSUE_NUMBER).
 
           The entry was built by `site/scripts/registry-issue.mjs` from the issue's fields: the JSON is allowlist-rebuilt, the `added` date is stamped from the issue, and the recommendations/feed consent switch is read from the checkbox alone. The validator ran on it already and will run again here, alongside the advisory live probe.
 
           Nothing here is urgent. When it merges, the hourly probe starts building the entry's uptime history, and the recommendation/feed gates apply on their own schedule from that history.
           EOF
-          sed -i "s/#NUMBER/#$NUMBER/g" pr-body.md
+          sed -i "s/ISSUE_NUMBER/$NUMBER/g" pr-body.md
 
           PR_URL=$(gh pr create \
             --base main \
@@ -97,7 +104,7 @@ jobs:
             --body-file pr-body.md)
 
           gh issue comment "$NUMBER" \
-            --body "Opened the listing as $TITLE: $PR_URL — CI validates and probes the server; a maintainer merges. The listing goes live at the next site build."
+            --body "Opened the listing as $TITLE: $PR_URL — CI validates and probes the server (a maintainer may need to approve workflow runs if no bot token is configured). A maintainer merges after validation; the listing goes live at the next site build."
 
       - name: Close as a duplicate
         if: steps.entry.outputs.exit == '3'
