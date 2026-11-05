@@ -22,10 +22,8 @@ import {
    field becomes a `### Label` heading, checkbox fields become `- [X]` lists,
    and a textarea carries whatever the submitter put in it verbatim. */
 
-const serverBody = (entry, { ownership = true, consent = false } = {}) => `<!-- telium-registry: server -->
-This issue is turned into a pull request by automation.
-
-### Registry entry
+// Match the actual GitHub issue-form body: markdown blocks are not submitted.
+const serverBody = (entry, { ownership = true, consent = false } = {}) => `### Registry entry
 
 \`\`\`json
 ${JSON.stringify(entry, null, 2)}
@@ -74,11 +72,14 @@ test('checkboxChecked matches the rendered list item', () => {
   assert.equal(checkboxChecked(checked, 'I run this server myself'), true)
   assert.equal(checkboxChecked(unchecked, 'I run this server myself'), false)
   assert.equal(checkboxChecked(null, 'anything'), false)
+  assert.equal(checkboxChecked('- [X] ', 'I run this server myself'), false)
 })
 
-test('detectKind reads the template marker', () => {
-  assert.equal(detectKind('<!-- telium-registry: server -->\nrest'), 'server')
-  assert.equal(detectKind('<!-- telium-registry: sfu -->'), 'sfu')
+test('detectKind reads the JSON identity from a submitted issue, with no markdown marker', () => {
+  assert.equal(detectKind(serverBody(serverEntry())), 'server')
+  assert.equal(detectKind(serverBody({ url: 'https://sfu.example.com' })), 'sfu')
+  assert.equal(detectKind(serverBody({ domain: 'chat.example', url: 'https://sfu.example' })), null)
+  assert.equal(detectKind(serverBody({ name: 'missing identity' })), null)
   assert.equal(detectKind('a plain issue'), null)
 })
 
@@ -201,6 +202,49 @@ test('the command line refuses duplicates and unparseable entries', async () => 
     assert.equal(runBad.status, 1, 'the validator must gate the commit')
     assert.match(runBad.stderr, /size_band must be one of/)
     assert.match(runBad.stderr, /did not pass the registry validator/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('the CLI detects a real marker-free relay issue', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'registry-issue-relay-'))
+  try {
+    const registry = join(dir, 'sfus.json')
+    await writeFile(registry, '[]\n')
+    const body = join(dir, 'body.md')
+    const relay = {
+      url: 'https://sfu.example.com',
+      name: 'Example Relay',
+      description: 'General-purpose public relay in Oregon.',
+      region: { label: 'Oregon, US', code: 'na-west' },
+      capacity_band: '1g',
+      operator: { name: 'Example Collective', contact: 'https://example.org/contact' },
+    }
+    await writeFile(body, [
+      '### Registry entry',
+      '',
+      '```json',
+      JSON.stringify(relay),
+      '```',
+      '',
+      '### Ownership',
+      '',
+      "- [X] I run this relay myself — it is not someone else's relay.",
+      '',
+      '### Automatic call routing',
+      '',
+      '- [X] Also let guilds in automatic mode route calls through this relay',
+    ].join('\n'))
+    const run = spawnSync(process.execPath, [
+      CLI, '--body-file', body,
+      '--created', '2026-11-04T09:30:00Z',
+      '--registry', registry,
+    ], { encoding: 'utf8' })
+    assert.equal(run.status, 0, `expected success, got:\n${run.stdout}\n${run.stderr}`)
+    const entries = JSON.parse(await readFile(registry, 'utf8'))
+    assert.equal(entries[0].url, relay.url)
+    assert.deepEqual(entries[0].feed, { opt_in: true })
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
