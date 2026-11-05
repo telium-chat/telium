@@ -9,8 +9,12 @@
 
 import registry from '../../registry/sfus.json'
 import status from '../../data/sfu-status.json'
+import { BAND_LABEL, BAND_RANK, type CapacityBand } from './registry-format'
 
-export type CapacityBand = '<100m' | '100m' | '1g' | '10g'
+/* Labels and ranks live in registry-format.ts so the /list wizard's client
+   script can use them without importing the registry or probe data. */
+export { BAND_LABEL, BAND_RANK }
+export type { CapacityBand }
 
 export interface RegistryEntry {
   url: string
@@ -100,18 +104,3 @@ export const defaultOrder: Sfu[] = [...sfus].sort((a, b) => {
   if (uptime) return uptime
   return a.name.localeCompare(b.name)
 })
-
-export const BAND_LABEL: Record<CapacityBand, string> = {
-  '<100m': 'Under 100 Mbps',
-  '100m': '100 Mbps',
-  '1g': '1 Gbps',
-  '10g': '10 Gbps',
-}
-
-/** Sort weight for the band column; the bands are ordered floors. */
-export const BAND_RANK: Record<CapacityBand, number> = {
-  '<100m': 0,
-  '100m': 1,
-  '1g': 2,
-  '10g': 3,
-}

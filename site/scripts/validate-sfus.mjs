@@ -10,12 +10,16 @@
  * signed feed refuses anything else, so a submission that would never list
  * should fail here first, in plainer words.
  *
- * Run: node scripts/validate-sfus.mjs
+ * Run: node scripts/validate-sfus.mjs [path]
  */
 
 import { readFile } from 'node:fs/promises'
 
-const REGISTRY = new URL('../registry/sfus.json', import.meta.url)
+// With an argument, validate that file instead of the checked-in registry —
+// the listing bot points this at the issue's entry merged into a copy, and
+// its tests use the same door so the real file is never touched.
+const REGISTRY = process.argv[2] ?? new URL('../registry/sfus.json', import.meta.url)
+const LABEL = typeof REGISTRY === 'string' ? REGISTRY : 'registry/sfus.json'
 
 const REGIONS = new Set([
   'af-south', 'ap-east', 'ap-south', 'ap-southeast', 'eu-central', 'eu-north',
@@ -41,6 +45,9 @@ const str = (where, value, field, { min = 1, max = Infinity } = {}) => {
 // URLs put a trusted-looking part before the `@`.
 const relayUrl = (value) => {
   if (typeof value !== 'string') return 'must be a string'
+  // WHATWG URL parsing strips embedded tabs and newlines. They must never
+  // survive validation and become additional GITHUB_OUTPUT lines.
+  if (/[\u0000-\u001f\u007f]/.test(value)) return 'must not contain control characters'
   let url
   try {
     url = new URL(value)
@@ -63,12 +70,12 @@ const main = async () => {
   try {
     registry = JSON.parse(await readFile(REGISTRY, 'utf8'))
   } catch (error) {
-    console.error(`registry/sfus.json is not valid JSON — ${error.message}`)
+    console.error(`${LABEL} is not valid JSON — ${error.message}`)
     process.exit(1)
   }
 
   if (!Array.isArray(registry)) {
-    console.error('registry/sfus.json must be a JSON array of relay entries')
+    console.error(`${LABEL} must be a JSON array of relay entries`)
     process.exit(1)
   }
 
@@ -165,13 +172,13 @@ const main = async () => {
   }
 
   if (errors.length) {
-    console.error(`registry/sfus.json — ${errors.length} problem${errors.length === 1 ? '' : 's'}:\n`)
+    console.error(`${LABEL} — ${errors.length} problem${errors.length === 1 ? '' : 's'}:\n`)
     for (const error of errors) console.error(`  ${error}`)
     console.error('')
     process.exit(1)
   }
 
-  console.log(`registry/sfus.json ok — ${registry.length} relays`)
+  console.log(`${LABEL} ok — ${registry.length} relays`)
 }
 
 main()

@@ -8,8 +8,12 @@
 
 import registry from '../../registry/servers.json'
 import status from '../../data/status.json'
+import { SIZE_LABEL, SIZE_RANK, formatBytes, roleList, type SizeBand } from './registry-format'
 
-export type SizeBand = '<100' | '100-1k' | '1k-10k' | '10k+'
+/* Labels, ranks and formatters live in registry-format.ts so the /list wizard's
+   client script can use them without importing the registry or probe data. */
+export { SIZE_LABEL, SIZE_RANK, formatBytes, roleList }
+export type { SizeBand }
 
 export interface RegistryEntry {
   domain: string
@@ -130,28 +134,3 @@ export const defaultOrder: Server[] = [...servers].sort((a, b) => {
   if (uptime) return uptime
   return a.name.localeCompare(b.name)
 })
-
-export const SIZE_LABEL: Record<SizeBand, string> = {
-  '<100': 'Under 100',
-  '100-1k': '100 – 1k',
-  '1k-10k': '1k – 10k',
-  '10k+': '10k+',
-}
-
-/** Sort weight for the size column; the bands are ranges, so sort by their floor. */
-export const SIZE_RANK: Record<SizeBand, number> = {
-  '<100': 0,
-  '100-1k': 1,
-  '1k-10k': 2,
-  '10k+': 3,
-}
-
-export const formatBytes = (bytes: number | null): string => {
-  if (bytes === null || !Number.isFinite(bytes)) return '—'
-  const mb = bytes / 1024 / 1024
-  return mb >= 1024 ? `${(mb / 1024).toFixed(mb % 1024 === 0 ? 0 : 1)} GB` : `${Math.round(mb)} MB`
-}
-
-/** Roles are the honest summary of what a server actually offers. */
-export const roleList = (roles: Record<string, boolean> | null): string[] =>
-  roles ? Object.entries(roles).filter(([, on]) => on).map(([role]) => role) : []

@@ -51,12 +51,12 @@ const checked = generatedAt
       <div class="panel-inset px-6 py-12 text-center sm:px-10">
         <p class="text-[15px] font-medium">No homeservers are listed yet.</p>
         <p class="mx-auto mt-2 max-w-[56ch] text-[13.5px] leading-relaxed text-muted">
-          The directory fills in as operators add theirs. There is no application form and no
-          approval queue — you open a pull request against the public registry, and the page
-          rebuilds with your server in it when it merges.
+          The directory fills in as operators add theirs. The wizard checks your server live
+          in the browser, builds the registry entry, and files the request for you — the
+          entry itself still lands as a public pull request, and a person still merges it.
         </p>
         <a
-          href={URLS.registry}
+          href={URLS.list}
           class="mt-4 inline-flex items-center gap-1.5 rounded text-[13.5px] text-link hover:underline"
         >
           Run a server? List it here
@@ -152,7 +152,7 @@ const checked = generatedAt
             Measure latency from my browser
           </label>
 
-          <a href={URLS.registry} class="inline-flex items-center gap-1.5 rounded text-[13.5px] text-link hover:underline">
+          <a href={URLS.list} class="inline-flex items-center gap-1.5 rounded text-[13.5px] text-link hover:underline">
             Run a server? List it here
             <Icon name="arrow-up-right" size={14} />
           </a>

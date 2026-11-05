@@ -24,6 +24,7 @@
     "recommendations:check": "node scripts/recommendations.mjs --check",
     "recommendations:write": "node scripts/recommendations.mjs --write",
     "test:recommendations": "node --test scripts/recommendations.test.mjs",
+    "test:registry-issue": "node --test scripts/registry-issue.test.mjs",
     "check": "node scripts/check-no-third-party.mjs",
     "capture": "node scripts/capture/run.mjs",
     "og": "node scripts/og.mjs"

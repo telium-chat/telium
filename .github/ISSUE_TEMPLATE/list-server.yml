@@ -1,0 +1,57 @@
+name: List a homeserver
+description: Add your homeserver to the public directory at telium.chat/servers.
+labels: ['directory']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue is turned into a one-entry pull request against
+        `site/registry/servers.json` by automation; a maintainer merges it once
+        CI has checked the validator and probed your server. The easiest way to
+        fill in the JSON below is the wizard at
+        [telium.chat/list](https://telium.chat/list) — it checks your server
+        live as you type. Writing the entry by hand is equally welcome; the
+        rules it must satisfy are in the
+        [registry README](https://github.com/telium-chat/telium/blob/main/site/registry/README.md).
+
+        The registry holds only the facts a machine cannot determine for you.
+        Registration state, server version, roles, uptime — the hourly probe
+        reads all of that from your server itself. And one rule the automation
+        cannot check: **list only a server you run yourself.**
+  - type: textarea
+    id: entry-json
+    attributes:
+      label: Registry entry
+      description: One JSON object. The wizard generates it for you; the README documents every field.
+      placeholder: |
+        ```json
+        {
+          "domain": "chat.example.org",
+          "name": "Example Chat",
+          "description": "General-purpose homeserver for the Example community, open registration.",
+          "region": { "label": "Frankfurt, DE", "code": "eu-central" },
+          "size_band": "100-1k",
+          "operator": { "name": "Example Collective", "contact": "https://example.org/contact" }
+        }
+        ```
+    validations:
+      required: true
+  - type: checkboxes
+    id: ownership
+    attributes:
+      label: Ownership
+      options:
+        - label: I run this server myself — it is not someone else's server.
+          required: true
+  - type: checkboxes
+    id: recommendations
+    attributes:
+      label: Automatic suggestions
+      description: Optional. If you tick this, the client may suggest your server automatically to people picking their first server. Your server has to allow it too, and the health rules still apply.
+      options:
+        - label: Also suggest this server automatically to people picking their first server
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Optional. Anything a maintainer should know that the entry does not say.

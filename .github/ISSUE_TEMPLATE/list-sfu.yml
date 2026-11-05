@@ -1,0 +1,58 @@
+name: List a relay (SFU)
+description: Add your SFU relay to the public directory at telium.chat/sfus.
+labels: ['directory']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue is turned into a one-entry pull request against
+        `site/registry/sfus.json` by automation; a maintainer merges it once CI
+        has checked the validator and probed your relay. The easiest way to
+        fill in the JSON below is the wizard at
+        [telium.chat/list](https://telium.chat/list) — it checks your relay
+        live as you type. Writing the entry by hand is equally welcome; the
+        rules it must satisfy are in the
+        [registry README](https://github.com/telium-chat/telium/blob/main/site/registry/README.md).
+
+        The registry holds only the facts a machine cannot determine for you.
+        Reachability, uptime, whether the relay is accepting calls — the hourly
+        probe measures all of that. Carrying strangers' calls is real
+        bandwidth, so one rule the automation cannot check: **list only a relay
+        you run yourself.**
+  - type: textarea
+    id: entry-json
+    attributes:
+      label: Registry entry
+      description: One JSON object. The wizard generates it for you; the README documents every field.
+      placeholder: |
+        ```json
+        {
+          "url": "https://sfu.example.com",
+          "name": "Example Relay",
+          "description": "General-purpose relay for the Example community, fed by a 10 Gbps uplink.",
+          "region": { "label": "Oregon, US", "code": "na-west" },
+          "capacity_band": "1g",
+          "operator": { "name": "Example Collective", "contact": "https://example.org/contact" }
+        }
+        ```
+    validations:
+      required: true
+  - type: checkboxes
+    id: ownership
+    attributes:
+      label: Ownership
+      options:
+        - label: I run this relay myself — it is not someone else's relay.
+          required: true
+  - type: checkboxes
+    id: feed
+    attributes:
+      label: Automatic call routing
+      description: Optional. If you tick this, guild owners in automatic mode may route calls through your relay. The health rules still apply.
+      options:
+        - label: Also let guilds in automatic mode route calls through this relay
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Optional. Anything a maintainer should know that the entry does not say.

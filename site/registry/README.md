@@ -1,8 +1,9 @@
 # Adding your homeserver
 
 The directory at [telium.chat/servers](https://telium.chat/servers) is this folder. There
-is no application form, no approval queue and no database — you open a pull request against
-`servers.json`, and when it merges the site rebuilds with your server in it.
+is no approval queue and no database — an entry lands as a pull request against
+`servers.json` (the [wizard](https://telium.chat/list) files it for you), and when it
+merges the site rebuilds with your server in it.
 
 ## What you supply, and what you don't
 
@@ -144,7 +145,43 @@ Calls through a listed relay are end-to-end encrypted; the relay forwards cipher
 sees only connection metadata. Relaying is real bandwidth cost — list a relay you are
 willing to keep fed.
 
+## One-time maintainer setup for the listing wizard
+
+The GitHub issue forms and `registry-pr.yml` workflow are picked up from
+`main`, so merge the wizard before testing real submissions.
+
+1. [Create the `directory` label](https://github.com/telium-chat/telium/labels/new)
+   if it does not already exist. GitHub does not create labels referenced in
+   issue-form templates.
+2. In **Settings → Actions → General → Workflow permissions**, enable
+   **Allow GitHub Actions to create and approve pull requests**. Otherwise the
+   built-in `GITHUB_TOKEN` cannot create the listing PR.
+3. By default, GitHub holds CI runs on PRs created by `GITHUB_TOKEN` until a
+   maintainer approves them via **Approve workflows to run** on the PR. To have
+   these checks start automatically, add a repository Actions secret named
+   `REGISTRY_BOT_TOKEN`: use a fine-grained personal access token from a
+   maintainer account with access restricted to this repository and **Contents:
+   read/write**, **Pull requests: read/write**, and **Issues: read/write**.
+   Do not put the token in the issue, registry JSON, or source code. The PR
+   creation step uses this secret if present and falls back to `GITHUB_TOKEN`
+   otherwise. Revoke/rotate it if exposed or when no longer needed.
+
+The bot validates the proposed JSON before opening a PR in either mode. A
+human must still review the submitted operator details and decide whether to
+merge the listing. The ownership checkbox is an attestation, not proof of
+control of a hostname or SFU.
+
 ## Opening the pull request
+
+The easy way: [telium.chat/list](https://telium.chat/list). It probes your server from the
+browser, asks only for the fields below, builds a schema-perfect entry, and files a
+prefilled listing issue. Automation turns that issue into a one-entry pull request
+(`site/scripts/registry-issue.mjs` rebuilds the entry from an allowlist, stamps the
+`added` date, and runs this same validator), CI probes your server again on the PR, and a
+maintainer merges. The wizard is a convenience layer over this section, not a replacement
+for it — everything it produces lands here as an ordinary public commit.
+
+Doing it by hand is equally welcome:
 
 1. Fork this repository and add your entry to `site/registry/servers.json`.
 2. Keep the file sorted by domain, with `telium.chat` first. The validator enforces this so
