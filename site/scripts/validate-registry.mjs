@@ -8,12 +8,16 @@
  * checks two things a schema cannot: duplicate domains, and that the file stays
  * sorted, so merging two PRs never produces a conflict over row order.
  *
- * Run: node scripts/validate-registry.mjs
+ * Run: node scripts/validate-registry.mjs [path]
  */
 
 import { readFile } from 'node:fs/promises'
 
-const REGISTRY = new URL('../registry/servers.json', import.meta.url)
+// With an argument, validate that file instead of the checked-in registry —
+// the listing bot points this at the issue's entry merged into a copy, and
+// its tests use the same door so the real file is never touched.
+const REGISTRY = process.argv[2] ?? new URL('../registry/servers.json', import.meta.url)
+const LABEL = typeof REGISTRY === 'string' ? REGISTRY : 'registry/servers.json'
 
 const REGIONS = new Set([
   'af-south', 'ap-east', 'ap-south', 'ap-southeast', 'eu-central', 'eu-north',
@@ -46,12 +50,12 @@ const main = async () => {
   try {
     registry = JSON.parse(await readFile(REGISTRY, 'utf8'))
   } catch (error) {
-    console.error(`registry/servers.json is not valid JSON — ${error.message}`)
+    console.error(`${LABEL} is not valid JSON — ${error.message}`)
     process.exit(1)
   }
 
   if (!Array.isArray(registry)) {
-    console.error('registry/servers.json must be a JSON array of server entries')
+    console.error(`${LABEL} must be a JSON array of server entries`)
     process.exit(1)
   }
 
@@ -147,13 +151,13 @@ const main = async () => {
   }
 
   if (errors.length) {
-    console.error(`registry/servers.json — ${errors.length} problem${errors.length === 1 ? '' : 's'}:\n`)
+    console.error(`${LABEL} — ${errors.length} problem${errors.length === 1 ? '' : 's'}:\n`)
     for (const error of errors) console.error(`  ${error}`)
     console.error('')
     process.exit(1)
   }
 
-  console.log(`registry/servers.json ok — ${registry.length} servers`)
+  console.log(`${LABEL} ok — ${registry.length} servers`)
 }
 
 main()

@@ -1,8 +1,9 @@
 # Adding your homeserver
 
 The directory at [telium.chat/servers](https://telium.chat/servers) is this folder. There
-is no application form, no approval queue and no database — you open a pull request against
-`servers.json`, and when it merges the site rebuilds with your server in it.
+is no approval queue and no database — an entry lands as a pull request against
+`servers.json` (the [wizard](https://telium.chat/list) files it for you), and when it
+merges the site rebuilds with your server in it.
 
 ## What you supply, and what you don't
 
@@ -145,6 +146,16 @@ sees only connection metadata. Relaying is real bandwidth cost — list a relay 
 willing to keep fed.
 
 ## Opening the pull request
+
+The easy way: [telium.chat/list](https://telium.chat/list). It probes your server from the
+browser, asks only for the fields below, builds a schema-perfect entry, and files a
+prefilled listing issue. Automation turns that issue into a one-entry pull request
+(`site/scripts/registry-issue.mjs` rebuilds the entry from an allowlist, stamps the
+`added` date, and runs this same validator), CI probes your server again on the PR, and a
+maintainer merges. The wizard is a convenience layer over this section, not a replacement
+for it — everything it produces lands here as an ordinary public commit.
+
+Doing it by hand is equally welcome:
 
 1. Fork this repository and add your entry to `site/registry/servers.json`.
 2. Keep the file sorted by domain, with `telium.chat` first. The validator enforces this so
