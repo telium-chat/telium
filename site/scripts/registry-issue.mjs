@@ -31,9 +31,8 @@ import { resolve } from 'node:path'
 // on the command line; fs and child_process want plain paths.
 const asPath = (value) => (typeof value === 'string' ? value : fileURLToPath(value))
 
-/* The templates open with one of these invisible markers; it is how the
-   workflow tells the two directories apart when it runs this script. */
-const MARKERS = { server: '<!-- telium-registry: server -->', sfu: '<!-- telium-registry: sfu -->' }
+/* GitHub drops display-only markdown elements from the submitted issue.
+   Determine the kind from the mutually exclusive JSON identity fields. */
 
 const MAX_BODY_BYTES = 200 * 1024
 const MAX_ENTRY_CHARS = 8 * 1024
@@ -82,15 +81,24 @@ export const checkboxChecked = (body, optionText) => {
     const match = line.match(/^\s*[-*] \[([xX])\]\s*(.*)$/)
     if (!match) continue
     const label = norm(match[2])
-    if (label.includes(wanted) || wanted.includes(label)) return true
+    if (label === wanted || label.startsWith(wanted + ' ')) return true
   }
   return false
 }
 
 export const detectKind = (body) => {
-  for (const [kind, marker] of Object.entries(MARKERS)) {
-    if (body.includes(marker)) return kind
+  const section = sectionFor(body, 'Registry entry')
+  if (section === null) return null
+  let entry
+  try {
+    entry = parseEntryObject(section)
+  } catch {
+    return null
   }
+  if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return null
+  // Both fields together are ambiguous, even if only one is a string.
+  if (typeof entry.domain === 'string' && !('url' in entry)) return 'server'
+  if (typeof entry.url === 'string' && !('domain' in entry)) return 'sfu'
   return null
 }
 
@@ -217,7 +225,7 @@ const main = async () => {
 
   const kind = kindArg ?? detectKind(body)
   if (kind !== 'server' && kind !== 'sfu') {
-    fail('the issue does not come from a listing template (no marker found). List through telium.chat/list, or follow site/registry/README.md by hand.')
+    fail('cannot determine the listing type — provide exactly one of "domain" (server) or "url" (relay) in the Registry entry JSON. Use telium.chat/list, or follow site/registry/README.md by hand.')
   }
 
   const added = new Date(created)
