@@ -2,12 +2,9 @@ name: List a relay (SFU)
 description: Add your SFU relay to the public directory at telium.chat/sfus.
 labels: ['directory']
 body:
-  # The invisible marker is how the listing automation tells this template
-  # apart from the homeserver one. Do not remove it.
   - type: markdown
     attributes:
       value: |
-        <!-- telium-registry: sfu -->
         This issue is turned into a one-entry pull request against
         `site/registry/sfus.json` by automation; a maintainer merges it once CI
         has checked the validator and probed your relay. The easiest way to
