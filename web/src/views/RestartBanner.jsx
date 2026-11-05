@@ -31,9 +31,14 @@ export function RestartBanner() {
     for (const [domain, at] of store.restartNotices) {
       if (at <= now) store.onRestartCancelled(domain);
     }
+    if (store.sfuNotice && store.sfuNotice.expires_at <= now) {
+      store.setSfuNotice(null);
+    }
   });
 
-  const sfu = store.sfuNotice;
+  // The SFU's drain has a ceiling, not a permanent warning. Even when its
+  // updater dies (and no cancellation message arrives), the banner expires.
+  const sfu = store.sfuNotice?.expires_at > now ? store.sfuNotice : null;
   if (!notices.length && !sfu) return null;
 
   return (
@@ -43,7 +48,6 @@ export function RestartBanner() {
           <span className="font-medium">
             {t('shell.restart.server', {
               name: store.gw.connections.get(domain)?.name || domain,
-              count: Math.max(1, Math.round((at - now) / 60_000)),
             })}
           </span>
           <span>{t('shell.restart.brief')}</span>

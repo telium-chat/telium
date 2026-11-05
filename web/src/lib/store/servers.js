@@ -53,7 +53,13 @@ export const serverMethods = {
   /// one active call at a time, so one slot, cleared when the call ends or a
   /// drop moves the call elsewhere.
   setSfuNotice(notice) {
-    this.sfuNotice = notice || null;
+    // The relay can resume accepting on its own if an updater dies. Never
+    // leave a draining banner hanging around for the rest of a long call.
+    const until = Number(notice?.until_ms);
+    const expiresAt = notice?.phase === 'now'
+      ? Date.now() + 15_000
+      : (Number.isFinite(until) && until > 0 ? until : Date.now() + 60_000);
+    this.sfuNotice = notice ? { ...notice, expires_at: expiresAt } : null;
     this.emit('restart-notice');
   },
 

@@ -152,6 +152,18 @@ if ! in_window; then
   exit 0
 fi
 
+# Only warn and drain a running service whose image is actually changing.
+# Compose leaves unchanged services alone on `up -d`, so signalling an
+# unchanged SFU would refuse calls for up to its entire drain timeout.
+service_needs_restart() {
+  local service="$1" container="$2" image desired current
+  [ -n "$container" ] || return 1
+  image="$("${COMPOSE[@]}" config --images "$service" 2>/dev/null | head -n 1)"
+  [ -n "$image" ] || return 1
+  desired="$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null || true)"
+  current="$(docker inspect --format '{{.Image}}' "$container" 2>/dev/null || true)"
+  [ -n "$desired" ] && [ -n "$current" ] && [ "$desired" != "$current" ]
+}
 # One warning before the whole stack moves over whoever is using it: the
 # server is told a restart is scheduled (SIGUSR1 -- it stands a notice in
 # front of every connected client), the SFU is asked to drain (SIGUSR1 -- it
@@ -169,10 +181,15 @@ esac
 if [ "$FORCE_NOW" -ne 1 ] && [ "$notice_secs" -gt 0 ]; then
   server_container="$("${COMPOSE[@]}" ps -q server 2>/dev/null || true)"
   sfu_container="$("${COMPOSE[@]}" ps -q sfu 2>/dev/null || true)"
-  if [ -n "$server_container" ] || [ -n "$sfu_container" ]; then
-    [ -n "$server_container" ] && docker kill --signal=USR1 "$server_container" >/dev/null 2>&1 || true
-    [ -n "$sfu_container" ] && docker kill --signal=USR1 "$sfu_container" >/dev/null 2>&1 || true
-    echo "restart notices sent; waiting ${notice_secs}s before recreating the stack"
+  signalled=0
+  if service_needs_restart server "$server_container"; then
+    if docker kill --signal=USR1 "$server_container" >/dev/null 2>&1; then signalled=1; fi
+  fi
+  if service_needs_restart sfu "$sfu_container"; then
+    if docker kill --signal=USR1 "$sfu_container" >/dev/null 2>&1; then signalled=1; fi
+  fi
+  if [ "$signalled" -eq 1 ]; then
+    echo "restart notices sent; waiting ${notice_secs}s before recreating updated services"
     sleep "$notice_secs"
   fi
 fi

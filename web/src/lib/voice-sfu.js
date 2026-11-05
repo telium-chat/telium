@@ -23,7 +23,7 @@ const RENEW_RETRY_MS = 30_000;
 export class SfuCall {
   constructor({
     me, onSpeaking, onPeers, onScreen, onCamera, onScreenEnd, onCameraEnd, onError,
-    onAudioBlocked, onNoiseFallback, onDropped, onRemoved, onKeyTrouble, endpoint, joinToken,
+    onAudioBlocked, onNoiseFallback, onDropped, onRemoved, onKeyTrouble, onDrainNotice, endpoint, joinToken,
     iceServers, maxBitrate, policy, e2ee, noiseMode, tokenTtl, renewToken,
   }) {
     this.me = me;
@@ -66,6 +66,8 @@ export class SfuCall {
     // Media failed to open for longer than a key-rotation lag; the caller
     // asks the encryption group where it stands.
     this.onKeyTrouble = onKeyTrouble || null;
+    // LiveKit server-originated maintenance notices are delivered to the call UI.
+    this.onDrainNotice = onDrainNotice || null;
     // The join token TTL in seconds; `renewToken` mints a fresh one for the
     // session this call already holds. LiveKit checks the token on every
     // resume, so an expired one turns the first network blip into a drop.

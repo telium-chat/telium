@@ -61,12 +61,23 @@ describe('a restart the server has scheduled', () => {
     expect(store.restartNotices.has('other.example')).toBe(false);
   });
 
+  it('bounds an abandoned relay drain by its actual deadline, and a now notice by 15 seconds', () => {
+    const now = Date.now();
+    store.setSfuNotice({ phase: 'draining', until_ms: now - 1_000, name: 'relay.example' });
+    expect(store.sfuNotice.expires_at).toBe(now - 1_000);
+
+    store.setSfuNotice({ phase: 'now', name: 'relay.example' });
+    expect(store.sfuNotice.expires_at).toBeGreaterThanOrEqual(now + 15_000);
+    expect(store.sfuNotice.expires_at).toBeLessThanOrEqual(Date.now() + 15_000);
+  });
+
   it('hands the voice relay its own slot, cleared when the call ends', () => {
     const seen = [];
     store.on('restart-notice', () => seen.push(1));
 
     store.setSfuNotice({ phase: 'draining', until_ms: SOON(), name: 'relay.example:7890' });
     expect(store.sfuNotice?.phase).toBe('draining');
+    expect(store.sfuNotice?.expires_at).toBeGreaterThan(Date.now());
 
     store.setSfuNotice(null);
     expect(store.sfuNotice).toBe(null);
