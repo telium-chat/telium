@@ -75,6 +75,9 @@ jobs:
       - name: Validate the registry
         run: npm run validate
 
+      - name: Test registry issue submission automation
+        run: npm run test:registry-issue
+
       - name: Test account-home recommendation rules and signatures
         run: npm run test:recommendations
 
