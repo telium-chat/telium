@@ -446,14 +446,21 @@ const regionCodes = [
       capabilitiesResult: FetchResult | null
       health: FetchResult | null
     } | null = null
+    // Invalidate asynchronous probe responses whenever identity or mode changes.
+    let probeGeneration = 0
 
     for (const button of root.querySelectorAll<HTMLButtonElement>('[data-mode-switch]')) {
       button.addEventListener('click', () => setMode(button.dataset.modeSwitch as Mode))
     }
 
     function setMode(next: Mode) {
+      probeGeneration++
       mode = next
       check = null
+      checkInput.value = ''
+      consentInput.checked = false
+      root.querySelector<HTMLElement>('[data-stage-details]')!.hidden = true
+      root.querySelector<HTMLElement>('[data-stage-submit]')!.hidden = true
       for (const button of root.querySelectorAll<HTMLButtonElement>('[data-mode-switch]')) {
         button.setAttribute('aria-pressed', String(button.dataset.modeSwitch === mode))
       }
@@ -474,6 +481,17 @@ const regionCodes = [
     // --- step 1: the probe ----------------------------------------------------
 
     checkButton.addEventListener('click', () => void runCheck())
+    checkInput.addEventListener('input', () => {
+      probeGeneration++
+      check = null
+      continueButton.disabled = true
+      checkButton.disabled = false
+      checkButton.textContent = 'Check'
+      root.querySelector<HTMLElement>('[data-stage-details]')!.hidden = true
+      root.querySelector<HTMLElement>('[data-stage-submit]')!.hidden = true
+      renderGates([])
+      update()
+    })
 
     // Four outcomes, kept distinct because they mean different things: a
     // document that is not Telium is not a CORS problem, and a CORS wall is
@@ -523,6 +541,8 @@ const regionCodes = [
     }
 
     async function runCheck() {
+      const generation = ++probeGeneration
+      const checkedMode = mode
       const raw = checkInput.value.trim().toLowerCase()
       if (mode === 'server') {
         if (!DOMAIN.test(raw)) return gateFailure('Enter the domain as a bare lowercase hostname — like chat.example.org, no scheme or path.')
@@ -539,11 +559,13 @@ const regionCodes = [
       renderGates([])
 
       const identity = check!.identity
-      if (mode === 'server') {
+      if (checkedMode === 'server') {
         const discovery = await fetchJson(`https://${identity}/.well-known/telium/server`)
+        if (generation !== probeGeneration) return
         const wellknown = discovery.kind === 'ok' ? discovery.body : null
         const api = wellknown ? toOrigin(wellknown.api, identity) : null
         const capabilities = api ? await fetchJson(`${api}/_telium/v1/capabilities`) : null
+        if (generation !== probeGeneration) return
         check = {
           identity,
           wellknown,
@@ -554,6 +576,7 @@ const regionCodes = [
         }
       } else {
         const health = await fetchJson(`${identity}/health`)
+        if (generation !== probeGeneration) return
         check = {
           identity,
           wellknown: health.kind === 'ok' ? health.body : null,
@@ -564,7 +587,7 @@ const regionCodes = [
         }
       }
 
-      if (identity !== check!.identity) return // the mode or input changed underneath us
+      if (generation !== probeGeneration || checkedMode !== mode || checkInput.value.trim().toLowerCase() !== raw) return
       renderGates(computeGates())
       checkButton.disabled = false
       checkButton.textContent = 'Check again'
@@ -576,11 +599,12 @@ const regionCodes = [
       try {
         const url = new URL(raw)
         if (url.protocol !== 'https:') return null
+        if (/[\u0000-\u001f\u007f]/.test(raw)) return null
         if (url.username || url.password) return null
         if (url.pathname !== '/' && url.pathname !== '') return null
         if (url.search || url.hash) return null
         if (!url.hostname.includes('.')) return null
-        return raw.replace(/\/+$/, '')
+        return url.origin
       } catch {
         return null
       }
@@ -764,6 +788,12 @@ const regionCodes = [
             })()]
       preflight.replaceChildren(...items)
 
+      if (!current) {
+        githubButton.href = '#'
+        githubButton.setAttribute('aria-disabled', 'true')
+        copyButton.disabled = true
+        jsonCode.textContent = ''
+      }
       if (current) {
         const json = jsonPretty(current)
         jsonCode.textContent = issueBody(json)
@@ -821,6 +851,11 @@ const regionCodes = [
       root.querySelector<HTMLElement>('[data-stage-submit]')!.hidden = false
       update()
       root.querySelector<HTMLElement>('[data-stage-details]')!.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+
+    // An aria-disabled link is only announced as disabled; it is still clickable.
+    githubButton.addEventListener('click', (event) => {
+      if (githubButton.getAttribute('aria-disabled') === 'true') event.preventDefault()
     })
 
     copyButton.addEventListener('click', async () => {
