@@ -505,6 +505,17 @@ export function VoiceProvider({ children }) {
           if (conversationCall(targetChannelId) || callRef.current !== call) return;
           const keys = guildKeysRef.current;
           if (!keys) return;
+          // Before Welcome/founding, the client doesn't yet have an MLS
+          // epoch to compare. Check catch-up, but don't reset an unfinished
+          // handshake.
+          if (!keys.groupId || keys.epoch === null || call.e2eeResetAttempted) {
+            keys.check().catch(() => {});
+            return;
+          }
+          if (call.keyRepair && !call.keyRepair.active()) {
+            call.keyRepair.stop();
+            call.keyRepair = null;
+          }
           if (!call.keyRepair) {
             // A missed commit is recovered by check(). If the same participant
             // still fails to decrypt for another 16s, a quiet group may be
@@ -514,7 +525,11 @@ export function VoiceProvider({ children }) {
             const epoch = keys.epoch;
             call.keyRepair = new KeyRepair({
               check: () => keys.check(),
-              reset: () => store.voiceApi(targetChannelId).voiceE2eeReset(targetChannelId),
+              reset: () => {
+                // One server-guarded group reset at most per media session.
+                call.e2eeResetAttempted = true;
+                return store.voiceApi(targetChannelId).voiceE2eeReset(targetChannelId);
+              },
               recent: (id) => call.unopened.recent(id),
               active: () => callRef.current === call
                 && channelRef.current === targetChannelId && call.live
