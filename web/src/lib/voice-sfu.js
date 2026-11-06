@@ -771,6 +771,8 @@ export class SfuCall {
   stop() {
     // Idempotent; a throwing UI callback must not abort teardown.
     this.live = false;
+    this.keyRepair?.stop();
+    this.keyRepair = null;
     clearTimeout(this.renewTimer);
     this.renewTimer = null;
     const room = this.room;
