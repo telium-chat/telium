@@ -10,7 +10,7 @@ mod extract;
 mod homes;
 mod maintenance;
 mod negotiation;
-mod txt;
+pub(crate) mod txt;
 
 pub use extract::{BigBodies, BigBodyGuard, Fed, FedOrigin, Gate, Anyone, Pace, CONCURRENT_BIG_BODIES};
 pub use homes::{apply_verdict, check_home, learn_tombstone, resolve_id, revalidate_sessions, Verdict};
