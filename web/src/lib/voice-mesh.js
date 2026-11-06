@@ -491,6 +491,7 @@ export class MeshCall {
         // rollback; its prior local offer no longer expects an answer.
         if (offer && collision) peer.pendingOfferId = null;
         await peer.pc.setRemoteDescription(payload.description);
+        if (offer) this.bindRemoteTransceivers(peer);
         if (!offer) peer.pendingOfferId = null;
         if (offer && payload.offerId) {
           peer.seenOffers.add(payload.offerId);
@@ -607,6 +608,22 @@ export class MeshCall {
     show();
   }
 
+  // Chromium creates the answerer's transceivers from the incoming offer.
+  // Preallocating them on BOTH sides leaves the answerer with eight internal
+  // transceivers (four unassociated) and its next offer doubles the m-lines.
+  bindRemoteTransceivers(peer) {
+    if (peer.transceiver) return;
+    const transceivers = peer.pc.getTransceivers();
+    if (transceivers.length < 4) {
+      throw new Error('Peer offer did not contain all four expected media sections');
+    }
+    [peer.transceiver, peer.camera, peer.screen, peer.screenAudio] = transceivers;
+    preferScreenCodec(peer.screen);
+    this.transmit(peer);
+    this.face(peer);
+    this.project(peer);
+  }
+
   // Create one local offer at a time, on the same queue as remote SDP and
   // recovery. Reentrant onnegotiationneeded events cannot send stale offers.
   offer(peer, id) {
@@ -668,28 +685,30 @@ export class MeshCall {
     this.peers.set(id, peer);
     this.watch(id, peer);
 
-    // m-lines are laid down up front in a fixed order (audio, camera, screen, screen audio) so later changes are track swaps, not renegotiations.
-    const [mic] = this.stream?.getAudioTracks() || [];
-    peer.transceiver = mic
-      ? pc.addTransceiver(mic, { direction: 'sendrecv', streams: [this.stream] })
-      : pc.addTransceiver('audio', { direction: 'recvonly' });
+    // Only the designated offerer preallocates SDP media sections. The
+    // answerer binds Chromium's transceivers once it receives the offer.
+    if (!peer.polite) {
+      const [mic] = this.stream?.getAudioTracks() || [];
+      peer.transceiver = mic
+        ? pc.addTransceiver(mic, { direction: 'sendrecv', streams: [this.stream] })
+        : pc.addTransceiver('audio', { direction: 'recvonly' });
 
-    const [face] = this.camera?.getVideoTracks() || [];
-    peer.camera = face
-      ? pc.addTransceiver(face, { direction: 'sendrecv', streams: [this.camera] })
-      : pc.addTransceiver('video', { direction: 'recvonly' });
+      const [face] = this.camera?.getVideoTracks() || [];
+      peer.camera = face
+        ? pc.addTransceiver(face, { direction: 'sendrecv', streams: [this.camera] })
+        : pc.addTransceiver('video', { direction: 'recvonly' });
 
-    const [display] = this.screen?.getVideoTracks() || [];
-    peer.screen = display
-      ? pc.addTransceiver(display, { direction: 'sendrecv', streams: [this.screen] })
-      : pc.addTransceiver('video', { direction: 'recvonly' });
-    // H.264 on Windows reaches the hardware-video path.
-    preferScreenCodec(peer.screen);
+      const [display] = this.screen?.getVideoTracks() || [];
+      peer.screen = display
+        ? pc.addTransceiver(display, { direction: 'sendrecv', streams: [this.screen] })
+        : pc.addTransceiver('video', { direction: 'recvonly' });
+      preferScreenCodec(peer.screen);
 
-    const [screenAudio] = this.screen?.getAudioTracks() || [];
-    peer.screenAudio = screenAudio
-      ? pc.addTransceiver(screenAudio, { direction: 'sendrecv', streams: [this.screen] })
-      : pc.addTransceiver('audio', { direction: 'recvonly' });
+      const [screenAudio] = this.screen?.getAudioTracks() || [];
+      peer.screenAudio = screenAudio
+        ? pc.addTransceiver(screenAudio, { direction: 'sendrecv', streams: [this.screen] })
+        : pc.addTransceiver('audio', { direction: 'recvonly' });
+    }
 
     pc.onnegotiationneeded = () => {
       // Avoid initial glare entirely: only one side may send the first offer.
@@ -725,6 +744,9 @@ export class MeshCall {
       }
     };
     pc.ontrack = ({ track, streams, transceiver }) => {
+      if (!peer.transceiver && pc.getTransceivers().length >= 4) {
+        this.bindRemoteTransceivers(peer);
+      }
       // Never play our own published media back (screenshare feedback loop).
       const localTracks = [
         ...(this.stream?.getTracks?.() || []),
