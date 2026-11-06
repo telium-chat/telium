@@ -70,7 +70,7 @@ struct Peer {
     sent: Arc<AtomicUsize>,
 }
 
-async fn peer(answer: Answer) -> Peer {
+async fn peer(answer: Answer, origin: &'static str) -> Peer {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -101,7 +101,10 @@ async fn peer(answer: Answer) -> Peer {
                     out.extend(body);
                     out
                 };
-                let discovery_doc = json!({ "api": format!("http://{addr}") }).to_string().into_bytes();
+                let discovery_doc = json!({
+                    "server_name": origin,
+                    "api": format!("http://{addr}"),
+                }).to_string().into_bytes();
                 let out = match (&answer, discovery) {
                     (Answer::Missing, _) => {
                         b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
@@ -165,9 +168,9 @@ async fn seed_cache(s: &Server, origin: &str, n: u64, size: i64, hits: i64, expi
 
 #[tokio::test]
 async fn discovery_bodies_are_capped_while_honest_discovery_resolves() {
-    let flood = peer(Answer::Flood).await;
+    let flood = peer(Answer::Flood, "flood.test").await;
     let (obj, _) = object(0);
-    let good = peer(Answer::Honest(obj)).await;
+    let good = peer(Answer::Honest(obj), "good.test").await;
     let (fa, ga) = (flood.addr, good.addr);
     let s = start_with(|cfg| {
         cfg.federation.peers.insert("flood.test".into(), format!("http://{fa}"));
@@ -187,7 +190,7 @@ async fn discovery_bodies_are_capped_while_honest_discovery_resolves() {
 
 #[tokio::test]
 async fn unsigned_requests_naming_unknown_keys_are_rationed_outbound_fetches() {
-    let target = peer(Answer::Missing).await;
+    let target = peer(Answer::Missing, "victim.test").await;
     let addr = target.addr;
     let s = start_with(|cfg| {
         cfg.federation.peers.insert("victim.test".into(), format!("http://{addr}"));
@@ -239,9 +242,9 @@ async fn the_media_cache_budget_evicts_the_heavy_origin_and_leaves_small_caches_
 
 #[tokio::test]
 async fn remote_objects_are_refused_while_arriving_and_honest_ones_are_cached() {
-    let flood = peer(Answer::DiscoverThenFlood).await;
+    let flood = peer(Answer::DiscoverThenFlood, "flood.test").await;
     let (obj, hash) = object(4096);
-    let good = peer(Answer::Honest(obj.clone())).await;
+    let good = peer(Answer::Honest(obj.clone()), "good.test").await;
     let (fa, ga) = (flood.addr, good.addr);
     let s = start_with(|cfg| {
         cfg.federation.peers.insert("flood.test".into(), format!("http://{fa}"));
@@ -275,7 +278,7 @@ async fn remote_objects_are_refused_while_arriving_and_honest_ones_are_cached() 
 #[tokio::test]
 async fn an_origin_at_its_cache_share_is_served_but_not_cached_again() {
     let (obj, hash) = object(4096);
-    let good = peer(Answer::Honest(obj)).await;
+    let good = peer(Answer::Honest(obj), "greedy.test").await;
     let addr = good.addr;
     let s = start_with(|cfg| {
         cfg.federation.media_cache_max_bytes = 32 * 1024;
