@@ -61,6 +61,36 @@ const getJson = async (url) => {
   }
 }
 
+
+/** A website may publish /telium.txt instead of full discovery JSON. */
+const getTxtTarget = async (domain) => {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+  try {
+    const response = await fetch('https://' + domain + '/telium.txt', {
+      signal: controller.signal,
+      redirect: 'error',
+      headers: { 'user-agent': 'telium-directory-probe/1.0' },
+    })
+    if (!response.ok) throw new Error('no text discovery pointer')
+    if (response.headers.get('content-type')?.includes('text/html')) throw new Error('website returned HTML')
+    if (Number(response.headers.get('content-length')) > 512) throw new Error('text pointer is too large')
+    const body = await response.text()
+    const line = body.trim()
+    if (!line || line.length > 512 || /[\r\n]/.test(line)) throw new Error('invalid text pointer')
+    const url = new URL(/^[a-z]+:\/\//i.test(line) ? line : 'https://' + line)
+    if (url.protocol !== 'https:' || url.username || url.password
+      || url.pathname !== '/' || url.search || url.hash
+      || !(url.hostname.toLowerCase() === domain.toLowerCase()
+        || url.hostname.toLowerCase().endsWith('.' + domain.toLowerCase()))) {
+      throw new Error('unsafe text pointer destination')
+    }
+    return url.origin
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /* `api` in .well-known may be a bare host, a host:port, or a full origin — the
  * point of the delegation is that `home.example` can hand off to
  * `telium.home.example:8443`, so all three shapes are legitimate. */
@@ -105,7 +135,18 @@ const probe = async (entry) => {
   }
 
   try {
-    const wellKnown = await getJson(`https://${entry.domain}/.well-known/telium/server`)
+    let wellKnown
+    try {
+      wellKnown = await getJson('https://' + entry.domain + '/.well-known/telium/server')
+    } catch {
+      const api = await getTxtTarget(entry.domain)
+      // Fetch the full document from the real server, not a stale website copy.
+      wellKnown = await getJson(api + '/.well-known/telium/server')
+      if (wellKnown.server_name?.toLowerCase() !== entry.domain.toLowerCase()
+        || toOrigin(wellKnown.api, entry.domain) !== api) {
+        throw new Error('delegated server identity/API did not match telium.txt')
+      }
+    }
     result.server_name = typeof wellKnown.server_name === 'string' ? wellKnown.server_name : null
     result.protocol_version = wellKnown.protocol_version ?? null
     result.moved_to = wellKnown.moved_to ?? null
