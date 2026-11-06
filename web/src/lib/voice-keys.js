@@ -210,8 +210,8 @@ export class KeyRepair {
 export function unopenedMedia(error, who) {
   const whose = who ? `${who}’s` : 'Somebody’s';
   if (keyFailure(error)) {
-    return `${whose} audio and video will not open under any key this device holds. Usually `
-      + 'that is one of you a commit ahead of the other, which the next one settles.';
+    return `${whose} call media cannot be decrypted with this device's current keys. `
+      + 'Telium is checking for missed key updates. If it persists, try rejoining the call.';
   }
   return `${whose} call media could not be decrypted: ${error?.message || String(error)}`;
 }
