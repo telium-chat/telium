@@ -46,7 +46,7 @@ describe('SfuCall media that will not open', () => {
         call.encryptionError(missing(), bob);
       }
       expect(errors).toHaveLength(1);
-      expect(errors[0]).toContain('will not open under any key this device holds');
+      expect(errors[0]).toContain('cannot be decrypted with this device');
       expect(errors[0]).not.toContain('MissingKey');
 
       call.encryptionError(new Error('InternalError: worker died'), bob);
