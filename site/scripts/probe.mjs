@@ -139,6 +139,9 @@ const probe = async (entry) => {
     let wellKnown
     try {
       wellKnown = await getJson('https://' + entry.domain + '/.well-known/telium/server')
+      if (wellKnown.server_name?.toLowerCase() !== entry.domain.toLowerCase()) {
+        throw new Error('not a Telium account-domain discovery document')
+      }
     } catch {
       const api = await getTxtTarget(entry.domain)
       // Fetch the full document from the real server, not a stale website copy.
