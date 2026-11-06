@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { discover, requireGatewayUrl, INSECURE_HTTP_ENV } from '../src/discovery.js';
+import { discover as discoverServer, requireGatewayUrl, INSECURE_HTTP_ENV } from '../src/discovery.js';
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -29,18 +29,34 @@ async function withFetch(routes, fn) {
 
 const WELL_KNOWN = '/.well-known/telium/server';
 const TXT = '/telium.txt';
-const txtOptions = {
-  txtGetText: async (url) => {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error('GET ' + url + ' failed');
-    return response.text();
-  },
-  txtGetJson: async (url) => {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error('GET ' + url + ' failed');
-    return response.json();
-  },
+// Tests substitute in-memory HTTP replies. Production discovery uses the
+// DNS-pinned HTTPS fetcher; its address policy is tested separately.
+const mockGetJson = async (url) => {
+  const response = await fetch(url, { redirect: 'error' });
+  if (!response.ok) {
+    const error = new Error('HTTP ' + response.status);
+    error.status = response.status;
+    throw error;
+  }
+  return response.json();
 };
+const mockGetText = async (url) => {
+  const response = await fetch(url, { redirect: 'error' });
+  if (!response.ok) {
+    const error = new Error('HTTP ' + response.status);
+    error.status = response.status;
+    throw error;
+  }
+  return response.text();
+};
+const discover = (server, options = {}) => discoverServer(server, {
+  directGetJson: mockGetJson,
+  txtGetJson: mockGetJson,
+  txtGetText: mockGetText,
+  ...options,
+});
+const txtOptions = {};
+
 
 test('discovery resolves a bare domain over https', async () => {
   await withFetch({
