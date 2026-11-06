@@ -91,7 +91,9 @@ export async function discover(domain) {
       } catch (err) {
         lastError = err;
       }
-      if (!doc || typeof doc !== 'object') doc = await txtDiscovery(base);
+      if (!doc || typeof doc !== 'object' || typeof doc.server_name !== 'string') {
+        doc = await txtDiscovery(base);
+      }
       if (!doc) continue;
       return {
         server_name: doc.server_name,
