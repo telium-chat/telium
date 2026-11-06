@@ -205,17 +205,9 @@ pub async fn discover(state: &AppState, origin: &str) -> ApiResult<Peer> {
     // Existing deployments keep their full .well-known document. A website
     // without one may instead publish a one-line /telium.txt pointer. Resolve
     // the full *live* discovery document on the delegated API before caching.
-    let direct = state
-        .http
-        .get(format!("{seed}/.well-known/telium/server"))
-        .send()
-        .await
-        .ok()
-        .filter(|r| r.status().is_success());
-    let direct_doc = match direct {
-        Some(resp) => json_capped(resp, FED_JSON_MAX_BYTES, &origin).await.ok(),
-        None => None,
-    };
+    let direct_doc = txt::safe_document(
+        state, &format!("{seed}/.well-known/telium/server"), &origin,
+    ).await;
     let discovered = match direct_doc {
         Some(doc) if doc.get("server_name").and_then(Value::as_str)
             .map(|name| name.eq_ignore_ascii_case(&origin)) == Some(true) => Some(doc),
