@@ -12,8 +12,14 @@ import {
 
 // Opaque session/offer IDs are compatibility-safe: older clients ignore these
 // fields and newer clients still accept untagged offers and answers.
-const meshId = () => globalThis.crypto?.randomUUID?.()
-  || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+function meshId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  // JSDOM and older browser runtimes have getRandomValues without randomUUID.
+  // Never derive a call/session identifier from Math.random().
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
 const MAX_PENDING_ICE = 64;
 
 function iceUfrags(description) {
