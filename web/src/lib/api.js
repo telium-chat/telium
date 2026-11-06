@@ -42,6 +42,41 @@ export async function request(base, method, path, { token, body, query } = {}) {
   return payload;
 }
 
+// An account domain may publish a one-line pointer to its server at /telium.txt.
+// The second request gets *live* metadata from the server, not a stale website copy.
+function readTxtPointer(text, accountHost) {
+  if (typeof text !== 'string' || text.length > 512 || /[\r\n]/.test(text)) {
+    throw new Error('telium.txt must contain one short line');
+  }
+  const line = text.trim();
+  if (!line) throw new Error('telium.txt is empty');
+  const target = new URL(/^[a-z]+:\/\//i.test(line) ? line : 'https://' + line);
+  const host = accountHost.toLowerCase();
+  const delegated = target.hostname.toLowerCase();
+  if (target.protocol !== 'https:' || target.username || target.password
+    || target.pathname !== '/' || target.search || target.hash
+    || !(delegated === host || delegated.endsWith('.' + host))) {
+    throw new Error('telium.txt must point to an HTTPS server on this domain or its subdomain');
+  }
+  return target.origin;
+}
+
+async function txtDiscovery(base) {
+  const response = await teliumFetch(base + '/telium.txt', { method: 'GET' }, { purpose: 'Account discovery' });
+  if (!response.ok || response.headers.get('content-type')?.includes('text/html')) return null;
+  const text = await response.text();
+  const target = readTxtPointer(text, new URL(base).hostname);
+  const live = await request(target, 'GET', '/.well-known/telium/server');
+  const expected = new URL(base).hostname.toLowerCase();
+  if (!live || live.server_name?.toLowerCase() !== expected) {
+    throw new Error('The Telium server at ' + target + ' does not identify itself as ' + expected);
+  }
+  if (!live.api || new URL(live.api).origin !== target) {
+    throw new Error('The Telium server at ' + target + ' advertises a different API address');
+  }
+  return live;
+}
+
 export async function discover(domain) {
   const bases = domain.startsWith('http')
     ? [domain]
@@ -49,7 +84,14 @@ export async function discover(domain) {
   let lastError = null;
   for (const base of bases) {
     try {
-      const doc = await request(base, 'GET', '/.well-known/telium/server');
+      let doc = null;
+      try {
+        doc = await request(base, 'GET', '/.well-known/telium/server');
+      } catch (err) {
+        lastError = err;
+      }
+      if (!doc || typeof doc !== 'object') doc = await txtDiscovery(base);
+      if (!doc) continue;
       return {
         server_name: doc.server_name,
         api: doc.api || base,
