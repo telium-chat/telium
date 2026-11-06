@@ -19,11 +19,13 @@ for (const [network, prefix] of [
   ['240.0.0.0', 4],
 ]) blocked.addSubnet(network, prefix, 'ipv4')
 for (const [network, prefix] of [
-  ['::', 128], ['::1', 128], ['::ffff:0:0', 96], ['fc00::', 7],
+  ['::', 128], ['::1', 128], ['fc00::', 7],
   ['fe80::', 10], ['ff00::', 8], ['2001:db8::', 32],
   ['2001::', 32], ['2002::', 16], ['64:ff9b::', 96],
 ]) blocked.addSubnet(network, prefix, 'ipv6')
 
+// Node maps IPv4 addresses to ::ffff: addresses when checking BlockList.
+// Banning ::ffff:0:0/96 would wrongly block *all* public IPv4 hosts.
 export function publicAddress(ip) {
   const family = isIP(ip)
   return family !== 0 && !blocked.check(ip, family === 4 ? 'ipv4' : 'ipv6')
