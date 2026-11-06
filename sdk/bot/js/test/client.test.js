@@ -1,3 +1,4 @@
+import { discoveryTransport } from './mock-discovery.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
@@ -35,7 +36,7 @@ test('installation refresh notices uninstall and reinstall without restarting th
     throw new Error(`unexpected fetch ${url}`);
   };
 
-  const bot = new BotClient({
+  const bot = new BotClient({ discoveryTransport,
     home: 'home.example',
     token: 'secret',
     installationRefreshMs: false,
@@ -93,7 +94,7 @@ test('a stale active receipt stays suppressed after the guild says the bot is un
   };
   globalThis.fetch = async () => response({ installations: [row] });
 
-  const bot = new BotClient({
+  const bot = new BotClient({ discoveryTransport,
     home: 'home.example',
     token: 'secret',
     installationRefreshMs: false,
@@ -122,7 +123,7 @@ test('a stale active receipt stays suppressed after the guild says the bot is un
 
 
 test('403 not-installed stops gateway refresh until the installation fingerprint changes', () => {
-  const bot = new BotClient({
+  const bot = new BotClient({ discoveryTransport,
     home: 'home.example',
     token: 'secret',
     installationRefreshMs: false,
@@ -146,7 +147,7 @@ test('403 not-installed stops gateway refresh until the installation fingerprint
 });
 
 test('502 during gateway refresh remains retryable and is reported as a warning', () => {
-  const bot = new BotClient({
+  const bot = new BotClient({ discoveryTransport,
     home: 'home.example',
     token: 'secret',
     installationRefreshMs: false,
@@ -179,7 +180,7 @@ test('scheduled installation refresh discovers a new install without calling log
     }],
   });
 
-  const bot = new BotClient({
+  const bot = new BotClient({ discoveryTransport,
     home: 'home.example',
     token: 'secret',
     installationRefreshMs: 1000,
@@ -207,7 +208,7 @@ test('scheduled installation refresh discovers a new install without calling log
 });
 
 test('a transient 401 during session exchange retries instead of taking the domain offline', async () => {
-  const bot = new BotClient({
+  const bot = new BotClient({ discoveryTransport,
     home: 'home.example',
     token: 'secret',
     installationRefreshMs: false,
@@ -240,7 +241,7 @@ test('a transient 401 during session exchange retries instead of taking the doma
 });
 
 test('a 403 that is not the not-installed case is retried like any other auth failure', async () => {
-  const bot = new BotClient({
+  const bot = new BotClient({ discoveryTransport,
     home: 'home.example',
     token: 'secret',
     installationRefreshMs: false,
@@ -264,7 +265,7 @@ test('a 403 that is not the not-installed case is retried like any other auth fa
 });
 
 test('a 400 malformed request and a 404 unknown bot stay terminal on sight', async () => {
-  const bot = new BotClient({ home: 'home.example', token: 'secret', installationRefreshMs: false });
+  const bot = new BotClient({ discoveryTransport, home: 'home.example', token: 'secret', installationRefreshMs: false });
   const errors = [];
   bot.on('error', (error, context) => errors.push(context));
   bot.domainFingerprints.set('guild.example', 'fingerprint-1');
@@ -283,7 +284,7 @@ test('a 400 malformed request and a 404 unknown bot stay terminal on sight', asy
 });
 
 test('a READY clears the accumulated authorisation failures for a domain', async () => {
-  const bot = new BotClient({
+  const bot = new BotClient({ discoveryTransport,
     home: 'home.example',
     token: 'secret',
     installationRefreshMs: false,
@@ -305,7 +306,7 @@ test('a READY clears the accumulated authorisation failures for a domain', async
 });
 
 test('removal is recognised from a machine-readable code as well as from prose', async () => {
-  const bot = new BotClient({ home: 'home.example', token: 'secret', installationRefreshMs: false });
+  const bot = new BotClient({ discoveryTransport, home: 'home.example', token: 'secret', installationRefreshMs: false });
   const warnings = [];
   bot.on('warning', (warning) => warnings.push(warning));
   bot.domainFingerprints.set('guild.example', 'fingerprint-1');
@@ -375,7 +376,7 @@ test('an authorisation failure during the installation poll backs off instead of
     }],
   });
 
-  const bot = new BotClient({
+  const bot = new BotClient({ discoveryTransport,
     home: 'home.example',
     token: 'secret',
     installationRefreshMs: false,
@@ -419,7 +420,7 @@ test('an authorisation failure during the installation poll backs off instead of
 });
 
 test('a not-installed 403 cannot reset a backed-off installation poll to 250ms', async () => {
-  const bot = new BotClient({ home: 'home.example', token: 'secret', installationRefreshMs: 5000 });
+  const bot = new BotClient({ discoveryTransport, home: 'home.example', token: 'secret', installationRefreshMs: 5000 });
   bot.domainFingerprints.set('guild.example', 'fingerprint-1');
   try {
     bot.installationRefreshFailures = 3;
@@ -439,7 +440,7 @@ test('a not-installed 403 cannot reset a backed-off installation poll to 250ms',
 });
 
 test('a healthy poll is still expedited by a removal', async () => {
-  const bot = new BotClient({ home: 'home.example', token: 'secret', installationRefreshMs: 5000 });
+  const bot = new BotClient({ discoveryTransport, home: 'home.example', token: 'secret', installationRefreshMs: 5000 });
   bot.domainFingerprints.set('guild.example', 'fingerprint-1');
   try {
     bot.scheduleInstallationRefresh(5000);
@@ -454,7 +455,7 @@ test('a healthy poll is still expedited by a removal', async () => {
 });
 
 test('on() registers and its returned function unregisters', () => {
-  const bot = new BotClient({ home: 'home.example', token: 'secret', installationRefreshMs: false });
+  const bot = new BotClient({ discoveryTransport, home: 'home.example', token: 'secret', installationRefreshMs: false });
   const seen = [];
   const off = bot.on('MESSAGE_CREATE', (message) => seen.push(message));
   bot.emit('MESSAGE_CREATE', { id: 'a' });
@@ -465,7 +466,7 @@ test('on() registers and its returned function unregisters', () => {
 });
 
 test('a wildcard handler receives the event name ahead of the payload', () => {
-  const bot = new BotClient({ home: 'home.example', token: 'secret', installationRefreshMs: false });
+  const bot = new BotClient({ discoveryTransport, home: 'home.example', token: 'secret', installationRefreshMs: false });
   const seen = [];
   bot.on('*', (...args) => seen.push(args));
   bot.emit('MESSAGE_CREATE', { id: 'a' }, { domain: 'guild.example' });
@@ -474,7 +475,7 @@ test('a wildcard handler receives the event name ahead of the payload', () => {
 });
 
 test('a rejected async handler is routed to the error handler, not the process', async () => {
-  const bot = new BotClient({ home: 'home.example', token: 'secret', installationRefreshMs: false });
+  const bot = new BotClient({ discoveryTransport, home: 'home.example', token: 'secret', installationRefreshMs: false });
   const errors = [];
   bot.on('error', (error, context) => errors.push({ error, context }));
   bot.on('MESSAGE_CREATE', async () => { throw new Error('send failed'); });
@@ -492,7 +493,7 @@ test('a rejected async handler is routed to the error handler, not the process',
 });
 
 test('a synchronous handler throw is routed the same way', async () => {
-  const bot = new BotClient({ home: 'home.example', token: 'secret', installationRefreshMs: false });
+  const bot = new BotClient({ discoveryTransport, home: 'home.example', token: 'secret', installationRefreshMs: false });
   const errors = [];
   bot.on('error', (error) => errors.push(error));
   bot.on('MESSAGE_CREATE', () => { throw new Error('boom'); });
@@ -506,7 +507,7 @@ test('a synchronous handler throw is routed the same way', async () => {
 });
 
 test('one failing handler does not stop the others', async () => {
-  const bot = new BotClient({ home: 'home.example', token: 'secret', installationRefreshMs: false });
+  const bot = new BotClient({ discoveryTransport, home: 'home.example', token: 'secret', installationRefreshMs: false });
   const seen = [];
   bot.on('error', () => {});
   bot.on('MESSAGE_CREATE', async () => { throw new Error('first'); });
@@ -545,7 +546,7 @@ test('sendMessage re-exchanges a session when the guild server answers 401', asy
     throw new Error(`unexpected fetch ${key}`);
   };
 
-  const bot = new BotClient({ home: 'home.example', token: 'secret', installationRefreshMs: false });
+  const bot = new BotClient({ discoveryTransport, home: 'home.example', token: 'secret', installationRefreshMs: false });
   bot.homeInfo = { api: 'https://home.example' };
   const connection = { token: 'expired', gateway: 'wss://guild.example/gateway/v1', close() {} };
   bot.connections.set('guild.example', { remote: { api: 'https://guild.example' }, connection });
@@ -577,7 +578,7 @@ test('sendMessage does not re-exchange a session for a non-401 failure', async (
     throw new Error(`unexpected fetch ${url}`);
   };
 
-  const bot = new BotClient({ home: 'home.example', token: 'secret', installationRefreshMs: false });
+  const bot = new BotClient({ discoveryTransport, home: 'home.example', token: 'secret', installationRefreshMs: false });
   bot.homeInfo = { api: 'https://home.example' };
   bot.connections.set('guild.example', {
     remote: { api: 'https://guild.example' },
@@ -604,7 +605,7 @@ test('sendMessage routes by the channel map learned from dispatch activity', asy
     return response({ id: 'msg-1' });
   };
 
-  const bot = new BotClient({ home: 'home.example', token: 'secret', installationRefreshMs: false });
+  const bot = new BotClient({ discoveryTransport, home: 'home.example', token: 'secret', installationRefreshMs: false });
   bot.connections.set('guild.example', {
     remote: { api: 'https://guild.example' },
     connection: { token: 'session', close() {} },
@@ -639,7 +640,7 @@ test('freshSession exchanges an assertion for a guild session', async () => {
     throw new Error(`unexpected fetch ${key}`);
   };
 
-  const bot = new BotClient({ home: 'home.example', token: 'secret', installationRefreshMs: false });
+  const bot = new BotClient({ discoveryTransport, home: 'home.example', token: 'secret', installationRefreshMs: false });
   bot.homeInfo = { api: 'https://home.example' };
 
   try {
