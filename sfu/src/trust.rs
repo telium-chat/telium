@@ -220,6 +220,29 @@ pub async fn maybe_discover(trust: &Arc<RwLock<TrustedKeys>>, value: &Value) {
     trust.write().await.merge_keys(&origin, keys, Some(base));
 }
 
+/// Text pointers may only select this account domain or its descendants.
+fn parse_txt_pointer(line: &str, origin: &str) -> Option<String> {
+    if line.is_empty() || line.len() > 512 || line.contains('\r') || line.contains('\n') {
+        return None;
+    }
+    let raw = if line.contains("://") { line.to_string() } else { format!("https://{line}") };
+    let url = reqwest::Url::parse(&raw).ok()?;
+    if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some()
+        || url.path() != "/" || url.query().is_some() || url.fragment().is_some()
+    {
+        return None;
+    }
+    let hostname = url.host_str()?.to_ascii_lowercase();
+    let identity = origin.split(':').next()?.trim_end_matches('.').to_ascii_lowercase();
+    if hostname != identity && !hostname.ends_with(&format!(".{identity}")) {
+        return None;
+    }
+    if url.port().is_some() {
+        return None;
+    }
+    Some(url.origin().ascii_serialization())
+}
+
 /// Untrusted origins get https only; falling back to http would undo the domain-key binding.
 async fn discover_base(origin: &str, policy: AddressPolicy) -> Option<String> {
     let (host, port) = fetch::parse_authority(origin)?;
@@ -234,13 +257,31 @@ async fn discover_base(origin: &str, policy: AddressPolicy) -> Option<String> {
     };
     for scheme in schemes {
         let url = format!("{scheme}://{authority}/.well-known/telium/server");
-        let doc = match fetch::get_json(&url, policy, MAX_DOCUMENT_BYTES).await {
-            Ok(d) => d,
+        if let Ok(doc) = fetch::get_json(&url, policy, MAX_DOCUMENT_BYTES).await {
+            if let Some(api) = doc.get("api").and_then(Value::as_str) {
+                // The key fetcher re-validates the API's address and signed keys.
+                return Some(api.to_string());
+            }
+        }
+
+        // A static website may only contain /telium.txt; load live discovery
+        // from that backend and verify the claimed account domain.
+        let pointer_url = format!("{scheme}://{authority}/telium.txt");
+        let bytes = match fetch::get_bytes(&pointer_url, policy, 512, Duration::from_secs(8)).await {
+            Ok(bytes) => bytes,
             Err(_) => continue,
         };
-        if let Some(api) = doc.get("api").and_then(Value::as_str) {
-            // `api` came from an unauthenticated document, so the fetcher re-validates it on the next hop.
-            return Some(api.to_string());
+        let pointer = match std::str::from_utf8(&bytes) {
+            Ok(text) => text.trim(),
+            Err(_) => continue,
+        };
+        let Some(target) = parse_txt_pointer(pointer, origin) else { continue };
+        let live = format!("{target}/.well-known/telium/server");
+        if let Ok(doc) = fetch::get_json(&live, policy, MAX_DOCUMENT_BYTES).await {
+            if doc.get("server_name").and_then(Value::as_str) == Some(origin)
+                && doc.get("api").and_then(Value::as_str).map(|api| api.trim_end_matches('/')) == Some(target.as_str()) {
+                return Some(target);
+            }
         }
     }
     None
@@ -295,6 +336,17 @@ mod tests {
             allow_insecure_discovery: false,
             origins: Vec::new(),
         })
+    }
+
+    #[test]
+    fn text_pointer_is_confined_to_the_account_domain() {
+        assert_eq!(parse_txt_pointer("chat.example.com", "example.com"),
+            Some("https://chat.example.com".into()));
+        for bad in ["http://chat.example.com", "https://attacker.com",
+                    "https://evil-example.com", "https://chat.example.com/path",
+                    "https://chat.example.com\nhttps://attacker.com"] {
+            assert!(parse_txt_pointer(bad, "example.com").is_none(), "{bad}");
+        }
     }
 
     #[test]
