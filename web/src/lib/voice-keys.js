@@ -97,25 +97,36 @@ export function keyFailure(error) {
 export const KEY_TROUBLE_GRACE_MS = 4000;
 /// A pause this long ends the spell.
 export const KEY_TROUBLE_GAP_MS = 2500;
+/// A persistent mismatch may merit another warning, but not every MLS commit.
+export const KEY_TROUBLE_REPORT_COOLDOWN_MS = 120_000;
+/// The server rejects group resets made within 15 seconds of a key commit.
+export const KEY_REPAIR_DELAY_MS = 16_000;
 
 /// No event says a frame opened, so a spell is failures with no gap over `gap`; one lasting `grace` is reported once per key.
 export class KeyTrouble {
   constructor({
-    report, grace = KEY_TROUBLE_GRACE_MS, gap = KEY_TROUBLE_GAP_MS, now = () => Date.now(),
+    report, grace = KEY_TROUBLE_GRACE_MS, gap = KEY_TROUBLE_GAP_MS,
+    cooldown = KEY_TROUBLE_REPORT_COOLDOWN_MS, now = () => Date.now(),
   }) {
     this.report = report;
     this.grace = grace;
     this.gap = gap;
+    this.cooldown = cooldown;
     this.now = now;
     this.spells = new Map();
-    this.reported = new Set();
+    this.reported = new Map();
+    this.lastFailed = new Map();
   }
 
   /// `who` is null when LiveKit couldn't say whose frame it was.
   note(who, error) {
     const id = who || '';
-    if (this.reported.has(id)) return;
     const at = this.now();
+    // Keep observing failures after the first toast. A repair should happen
+    // only if media continues failing, not if an old error was followed by
+    // healthy playback.
+    this.lastFailed.set(id, at);
+    if (at - (this.reported.get(id) ?? -Infinity) < this.cooldown) return;
     let spell = this.spells.get(id);
     if (!spell || at - spell.last > this.gap) {
       spell = { first: at, last: at };
@@ -124,18 +135,74 @@ export class KeyTrouble {
     spell.last = at;
     if (at - spell.first < this.grace) return;
     this.spells.delete(id);
-    this.reported.add(id);
+    this.reported.set(id, at);
     this.report(error, who);
+  }
+
+  recent(who, within = this.gap) {
+    return this.now() - (this.lastFailed.get(who || '') ?? -Infinity) <= within;
   }
 
   keyArrived() {
     this.spells.clear();
-    this.reported.clear();
+    // A new key is not proof that any received media decrypted. Keep the
+    // report cooldown until a peer leaves or the period actually expires.
   }
 
   forget(who) {
     this.spells.delete(who || '');
     this.reported.delete(who || '');
+    this.lastFailed.delete(who || '');
+  }
+}
+
+/// One bounded attempt to repair a persistently incompatible guild media
+/// key. The server decides whether its encryption group is quiet enough to
+/// reset; callers must also guard their call and MLS-group identity.
+export class KeyRepair {
+  constructor({
+    check, reset, recent, active, delay = KEY_REPAIR_DELAY_MS,
+    onFailure = () => {},
+  }) {
+    this.check = check;
+    this.reset = reset;
+    this.recent = recent;
+    this.active = active;
+    this.delay = delay;
+    this.onFailure = onFailure;
+    this.timer = null;
+    this.attempted = false;
+    this.stopped = false;
+  }
+
+  note(who) {
+    if (this.stopped || !this.active()) return;
+    // Give normal commit catch-up the first opportunity to repair the call.
+    Promise.resolve().then(() => this.check()).catch(() => {});
+    if (this.timer || this.attempted) return;
+    this.timer = setTimeout(async () => {
+      this.timer = null;
+      if (this.stopped || !this.active() || !this.recent(who)) return;
+      try {
+        await this.check();
+      } catch {
+        // An unavailable homeserver cannot safely confirm group state.
+        return;
+      }
+      if (this.stopped || !this.active() || !this.recent(who)) return;
+      this.attempted = true;
+      try {
+        await this.reset();
+      } catch (error) {
+        this.onFailure(error);
+      }
+    }, this.delay);
+  }
+
+  stop() {
+    this.stopped = true;
+    clearTimeout(this.timer);
+    this.timer = null;
   }
 }
 
