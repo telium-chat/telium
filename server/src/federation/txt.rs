@@ -9,10 +9,19 @@ use std::time::Duration;
 // Match the hardened URL fetchers used for embeds/relay: no DNS rebinding to
 // private networks, and the vetted address stays pinned for the actual GET.
 pub(crate) async fn safe_client(state: &AppState, raw: &str) -> Option<reqwest::Client> {
+    let url = reqwest::Url::parse(raw).ok()?;
+    // Operator-configured federation peers are an explicit, trusted network
+    // override. Preserve local/private test and homelab routes only for the
+    // *exact origin* entered by the operator, not an untrusted URL suffix.
+    if state.cfg.federation.peers.values().any(|configured| {
+        reqwest::Url::parse(configured).ok()
+            .is_some_and(|peer| peer.origin() == url.origin())
+    }) {
+        return Some(state.http_no_redirect.clone());
+    }
     if state.cfg.federation.allow_http {
         return Some(state.http_no_redirect.clone());
     }
-    let url = reqwest::Url::parse(raw).ok()?;
     if url.scheme() != "https" { return None; }
     let host = url.host_str()?;
     let port = url.port_or_known_default()?;
