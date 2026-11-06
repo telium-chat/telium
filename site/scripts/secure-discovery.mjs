@@ -51,7 +51,19 @@ async function pinnedHttps(url, limit, accept) {
   if (parsed.protocol !== 'https:' || parsed.username || parsed.password) {
     throw new Error('discovery requires HTTPS without URL credentials')
   }
-  const records = await lookup(parsed.hostname, { all: true, verbatim: true })
+  // DNS resolution also counts against the request's deadline.
+  let dnsTimer
+  let records
+  try {
+    records = await Promise.race([
+      lookup(parsed.hostname, { all: true, verbatim: true }),
+      new Promise((_, reject) => {
+        dnsTimer = setTimeout(() => reject(new Error('discovery DNS lookup timed out')), TIMEOUT_MS)
+      }),
+    ])
+  } finally {
+    clearTimeout(dnsTimer)
+  }
   if (records.length === 0 || records.some(({ address }) => !publicAddress(address))) {
     throw new Error('discovery hostname resolves to a non-public address')
   }
@@ -73,7 +85,9 @@ async function pinnedHttps(url, limit, accept) {
     }, (res) => {
       if (res.statusCode !== 200) {
         res.destroy()
-        reject(new Error('discovery returned HTTP ' + res.statusCode))
+        const error = new Error('discovery returned HTTP ' + res.statusCode)
+        error.status = res.statusCode
+        reject(error)
         return
       }
       const declared = Number(res.headers['content-length'])
