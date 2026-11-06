@@ -62,6 +62,41 @@ export function requireGatewayUrl(value, dialled, { allowInsecureHttp } = {}) {
 }
 
 // Callers that know their domain must pass `expectServerName`: `server_name` is self-reported.
+
+function txtTarget(text, dialled) {
+  if (typeof text !== 'string' || text.length > 512) throw new Error('telium.txt is too long');
+  const line = text.trim();
+  if (!line || line.includes('\n') || line.includes('\r')) throw new Error('telium.txt must be one line');
+  const url = parseUrl(/^[a-z]+:\/\//i.test(line) ? line : 'https://' + line);
+  if (!url || url.protocol !== 'https:' || url.username || url.password
+    || url.pathname !== '/' || url.search || url.hash
+    || !withinDelegation(url.hostname, dialled)) {
+    throw new Error('telium.txt must point to an HTTPS server on this account domain or its subdomain');
+  }
+  return url.origin;
+}
+
+async function tryTxtDiscovery(seed, dialled, expectServerName, timeoutMs) {
+  const url = seed + '/telium.txt';
+  // The initial pointer never receives credentials. Redirects are refused.
+  const response = await fetch(url, {
+    method: 'GET',
+    redirect: 'error',
+    ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
+  });
+  if (!response.ok || response.headers.get('content-type')?.includes('text/html')) return null;
+  const target = txtTarget(await response.text(), dialled);
+  const doc = await request(target, 'GET', '/.well-known/telium/server', { timeoutMs });
+  const expected = expectServerName || dialled;
+  if (doc?.server_name?.toLowerCase() !== expected.toLowerCase()) {
+    throw new Error(target + ' does not claim the account domain ' + expected);
+  }
+  if (!doc.api || parseUrl(doc.api)?.origin !== target) {
+    throw new Error(target + ' advertised a different API origin');
+  }
+  return doc;
+}
+
 export async function discover(server, { allowInsecureHttp, expectServerName, timeoutMs } = {}) {
   const allowInsecure = insecureHttpAllowed(allowInsecureHttp);
   const explicit = /^[a-z][a-z0-9+.-]*:\/\//i.test(server);
@@ -96,8 +131,16 @@ export async function discover(server, { allowInsecureHttp, expectServerName, ti
       doc = await request(seed, 'GET', '/.well-known/telium/server', { timeoutMs });
     } catch (error) {
       lastError = error;
-      continue;
     }
+    if (!doc) {
+      try {
+        doc = await tryTxtDiscovery(seed, dialled, expectServerName, timeoutMs);
+      } catch (error) {
+        lastError = error;
+        continue;
+      }
+    }
+    if (!doc) continue;
 
     // `server_name` is self-reported; the assertion audience comes from the home's indexed domain, never from here.
     const expected = expectServerName ?? (explicit ? null : dialled);
