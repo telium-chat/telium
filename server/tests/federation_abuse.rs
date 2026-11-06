@@ -211,7 +211,10 @@ async fn unsigned_requests_naming_unknown_keys_are_rationed_outbound_fetches() {
     };
 
     let _ = purge("k0".into()).await;
-    assert_eq!(target.requests.load(Ordering::SeqCst), 1, "a new peer's keys were not fetched");
+    // The first unknown peer is probed at both discovery endpoints:
+    // /.well-known/telium/server, then /telium.txt after the 404.
+    // Both reads are expected; subsequent unsigned requests must stay rate-limited.
+    assert_eq!(target.requests.load(Ordering::SeqCst), 2, "a new peer was not probed at both discovery paths");
     for n in 1..40 {
         let _ = purge(format!("never-seen-{n}")).await;
     }
