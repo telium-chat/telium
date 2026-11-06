@@ -132,7 +132,7 @@ export async function discover(server, { allowInsecureHttp, expectServerName, ti
     } catch (error) {
       lastError = error;
     }
-    if (!doc) {
+    if (!doc || typeof doc.server_name !== 'string') {
       try {
         doc = await tryTxtDiscovery(seed, dialled, expectServerName, timeoutMs);
       } catch (error) {
