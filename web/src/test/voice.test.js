@@ -620,3 +620,201 @@ describe('mobile camera switching', () => {
     expect(rearTrack.stop).toHaveBeenCalledOnce();
   });
 });
+
+
+describe('mesh signaling generations', () => {
+  beforeEach(() => { FakePC.all = []; vi.unstubAllGlobals(); });
+
+  it('ignores delayed and duplicate answers without corrupting the local offer', async () => {
+    stubCall();
+    const errors = [];
+    const sent = [];
+    const call = new MeshCall({
+      me: '@a:h', signal: async (_target, payload) => sent.push(payload),
+      onError: (error) => errors.push(error),
+    });
+    await call.start([]);
+    call.sync(['@b:h']);
+    await settle();
+
+    const peer = call.peers.get('@b:h');
+    const id = peer.pendingOfferId;
+    expect(id).toBeTruthy();
+    expect(sent.at(-1).offerId).toBe(id);
+    expect(sent.at(-1).session).toBe(call.sessionId);
+
+    await call.accept({
+      from: '@b:h',
+      payload: { session: 'remote-one', answerTo: 'rolled-back-offer',
+        description: { type: 'answer', sdp: 'stale-answer' } },
+    });
+    expect(peer.pc.signalingState).toBe('have-local-offer');
+    expect(peer.pc.remoteDescription).toBeNull();
+
+    const correct = {
+      from: '@b:h',
+      payload: { session: 'remote-one', answerTo: id,
+        description: { type: 'answer', sdp: 'good-answer' } },
+    };
+    await call.accept(correct);
+    expect(peer.pc.signalingState).toBe('stable');
+    await call.accept(correct);
+    expect(peer.pc.remoteDescription.sdp).toBe('good-answer');
+    expect(errors).toEqual([]);
+    call.stop();
+  });
+
+  it('serializes local offer creation with incoming descriptions', async () => {
+    stubCall();
+    const errors = [];
+    const call = new MeshCall({
+      me: '@z:h', signal: vi.fn(async () => {}), onError: (e) => errors.push(e),
+    });
+    await call.start([]);
+    call.sync(['@a:h']);
+    const peer = call.peers.get('@a:h');
+    const original = peer.pc.setLocalDescription.bind(peer.pc);
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    peer.pc.setLocalDescription = async (desc) => {
+      await gate;
+      return original(desc);
+    };
+
+    await settle();
+    expect(peer.makingOffer).toBe(true);
+    const incoming = call.accept({
+      from: '@a:h',
+      payload: { session: 'remote-one', description: { type: 'offer', sdp: 'offer' } },
+    });
+    expect(peer.pc.remoteDescription).toBeNull();
+    release();
+    await incoming;
+    expect(peer.pc.remoteDescription.type).toBe('offer');
+    expect(peer.pc.signalingState).toBe('stable');
+    expect(errors).toEqual([]);
+    call.stop();
+  });
+
+  it('drops a retired call session and resets its transceiver layout on a new one', async () => {
+    stubCall();
+    const sent = [];
+    const call = new MeshCall({
+      me: '@z:h', signal: async (_target, payload) => sent.push(payload),
+    });
+    await call.start([]);
+    call.sync(['@a:h']);
+    const first = { from: '@a:h', payload: {
+      session: 'remote-old', description: { type: 'offer', sdp: 'old-layout' },
+    } };
+    await call.accept(first);
+    const old = call.peers.get('@a:h').pc;
+
+    await call.accept({ from: '@a:h', payload: {
+      session: 'remote-new', description: { type: 'offer', sdp: 'new-layout' },
+    } });
+    const peer = call.peers.get('@a:h');
+    expect(peer.pc).not.toBe(old);
+    expect(old.closed).toBe(true);
+    expect(peer.remoteSession).toBe('remote-new');
+    expect(peer.pc.remoteDescription.sdp).toBe('new-layout');
+    await peer.outbox;
+    expect(sent.at(-1).targetSession).toBe('remote-new');
+
+    await call.accept(first);
+    await call.accept({ from: '@a:h', payload: {
+      session: 'remote-old', candidate: { candidate: 'retired' },
+    } });
+    expect(call.peers.get('@a:h')).toBe(peer);
+    expect(peer.pc.remoteDescription.sdp).toBe('new-layout');
+    expect(peer.pc.candidates).toEqual([]);
+    call.stop();
+  });
+
+  it('ignores messages explicitly addressed to a superseded local call', async () => {
+    stubCall();
+    const call = new MeshCall({ me: '@a:h', signal: vi.fn(async () => {}) });
+    await call.start([]);
+    await call.accept({ from: '@b:h', payload: {
+      targetSession: 'some-other-call', session: 'remote',
+      description: { type: 'offer', sdp: 'old-call' },
+    } });
+    expect(call.peers.size).toBe(0);
+    call.stop();
+  });
+
+  it('holds ICE from a future restart until the matching remote ufrag arrives', async () => {
+    stubCall();
+    const errors = [];
+    const call = new MeshCall({
+      me: '@z:h', signal: vi.fn(async () => {}), onError: (e) => errors.push(e),
+    });
+    await call.start([]);
+    call.sync(['@a:h']);
+    await call.accept({ from: '@a:h', payload: {
+      session: 'remote',
+      description: { type: 'offer', sdp: 'v=0\r\na=ice-ufrag:first\r\n' },
+    } });
+    const peer = call.peers.get('@a:h');
+    await call.accept({ from: '@a:h', payload: {
+      session: 'remote', candidate: { candidate: 'candidate:123', usernameFragment: 'second' },
+    } });
+    expect(peer.pc.candidates).toEqual([]);
+
+    await call.accept({ from: '@a:h', payload: {
+      session: 'remote',
+      description: { type: 'offer', sdp: 'v=0\r\na=ice-ufrag:second\r\n' },
+    } });
+    expect(peer.pc.candidates).toEqual([
+      { candidate: 'candidate:123', usernameFragment: 'second' },
+    ]);
+    expect(errors).toEqual([]);
+    call.stop();
+  });
+
+  it('holds an early candidate from a new session until that session offers', async () => {
+    stubCall();
+    const call = new MeshCall({ me: '@z:h', signal: vi.fn(async () => {}) });
+    await call.start([]);
+    await call.accept({ from: '@a:h', payload: {
+      session: 'remote', candidate: { candidate: 'early' },
+    } });
+    const peer = call.peers.get('@a:h');
+    expect(peer.pc.candidates).toEqual([]);
+    await call.accept({ from: '@a:h', payload: {
+      session: 'remote', description: { type: 'offer', sdp: 'remote-offer' },
+    } });
+    expect(peer.pc.candidates).toEqual([{ candidate: 'early' }]);
+    call.stop();
+  });
+
+  it('does not surface interrupted playback as a call failure', async () => {
+    stubCall();
+    const errors = [];
+    const blocked = [];
+    const call = new MeshCall({
+      me: '@a:h', signal: vi.fn(async () => {}),
+      onError: (error) => errors.push(error),
+      onAudioBlocked: (value) => blocked.push(value),
+    });
+    await call.start([]);
+    call.sync(['@b:h']);
+    const peer = call.peers.get('@b:h');
+
+    HTMLMediaElement.prototype.play = vi.fn(() => Promise.reject(
+      Object.assign(new Error('interrupted by a new load request'), { name: 'AbortError' }),
+    ));
+    peer.pc.receive({ kind: 'audio' }, []);
+    await settle();
+    expect(errors).toEqual([]);
+
+    HTMLMediaElement.prototype.play = vi.fn(() => Promise.reject(
+      Object.assign(new Error('interaction required'), { name: 'NotAllowedError' }),
+    ));
+    peer.pc.receive({ kind: 'audio' }, []);
+    await settle();
+    expect(blocked).toEqual([true]);
+    expect(errors).toEqual([]);
+    call.stop();
+  });
+});
