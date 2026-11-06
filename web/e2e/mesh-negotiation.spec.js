@@ -47,7 +47,13 @@ test('real Chromium negotiates fixed media lines through glare and simultaneous 
       const mediaLines = (description) => description.sdp.split(/\r?\n/)
         .filter((line) => line.startsWith('m=')).map((line) => line.split(' ')[0]);
       const baseline = mediaLines(connection(names[0], names[1]).localDescription);
-      if (baseline.length !== 4) throw new Error('Expected four preallocated m-lines');
+      if (baseline.length !== 4) throw new Error('Expected four negotiated m-lines');
+      for (let i = 0; i < names.length; i += 1) {
+        const pc = connection(names[i], names[1 - i]);
+        if (pc.getTransceivers().length !== 4) {
+          throw new Error('Duplicate internal transceivers on participant ' + names[i]);
+        }
+      }
 
       for (let round = 0; round < 3; round += 1) {
         const count = offers.length;
@@ -60,6 +66,9 @@ test('real Chromium negotiates fixed media lines through glare and simultaneous 
         await until(settled);
         for (let i = 0; i < names.length; i += 1) {
           const pc = connection(names[i], names[1 - i]);
+          if (pc.getTransceivers().length !== 4) {
+            throw new Error('ICE restart duplicated internal transceivers');
+          }
           const actual = mediaLines(pc.localDescription);
           if (actual.join('|') !== baseline.join('|')) {
             throw new Error('m-line layout changed: ' + actual.join(', '));
