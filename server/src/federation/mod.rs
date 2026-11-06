@@ -217,7 +217,8 @@ pub async fn discover(state: &AppState, origin: &str) -> ApiResult<Peer> {
         None => None,
     };
     let discovered = match direct_doc {
-        Some(doc) if doc.is_object() => Some(doc),
+        Some(doc) if doc.get("server_name").and_then(Value::as_str)
+            .map(|name| name.eq_ignore_ascii_case(&origin)) == Some(true) => Some(doc),
         _ => txt::discover_through_txt(state, &seed, &origin).await,
     };
     let Some(doc) = discovered else {
