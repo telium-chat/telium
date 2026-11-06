@@ -29,6 +29,7 @@ deployment already answers:
 
 ```
 GET https://<domain>/.well-known/telium/server
+# Or GET https://<domain>/telium.txt, then GET <pointed-api>/.well-known/telium/server
 GET <api>/_telium/v1/capabilities
 ```
 
@@ -44,9 +45,10 @@ appears filtered out of the default view. Change the setting on your server, not
 
 1. **Open registration.** The directory exists so a stranger has somewhere to go. If your
    server needs an invite, it belongs in your community's own links, not here.
-2. **Reachable over HTTPS** at `https://<domain>/.well-known/telium/server`, with a
-   certificate that validates. A server the probe cannot reach shows as unreachable, which
-   helps nobody.
+2. **Reachable over HTTPS** using either the existing `https://<domain>/.well-known/telium/server`
+   document or a one-line `https://<domain>/telium.txt` file pointing to an HTTPS Telium
+   subdomain. The probe fetches the full live discovery document from that backend and
+   checks its account domain. A server the probe cannot reach shows as unreachable.
 3. **A contact that reaches a person** — an `https://` page or a `mailto:` address that is
    read. This is how anyone reports abuse originating on your server.
 4. **You run it.** List your own server. Don't list someone else's.
@@ -246,7 +248,7 @@ Delete your entry and open a PR; it comes out at the next build, and its probe h
 dropped on the next run.
 
 If you're shutting the server down rather than just leaving the list, announce it in your
-`.well-known` first — Telium has a `sunset` field, and the directory renders it as a badge
+discovery first — Telium has a `sunset` field, and the directory renders it as a badge
 on your row, so people relying on you find out from the page they'd look at anyway. Same
 for `moved_to` if you're changing domains. Then remove yourself once nobody is left.
 
