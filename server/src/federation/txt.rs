@@ -11,10 +11,13 @@ const POINTER_LIMIT: usize = 512;
 /// Accept only an HTTPS origin on the identity domain or one of its subdomains.
 /// Reject URL paths, credentials, query strings, malformed lines and lookalike hosts.
 pub(crate) fn parse_pointer(text: &str, identity: &str, allow_http: bool) -> Option<String> {
-    if text.len() > POINTER_LIMIT || text.contains(['\n', '\r']) {
+    if text.len() > POINTER_LIMIT {
         return None;
     }
     let raw = text.trim();
+    if raw.contains('\n') || raw.contains('\r') {
+        return None;
+    }
     if raw.is_empty() {
         return None;
     }
@@ -104,7 +107,7 @@ mod tests {
     #[test]
     fn short_text_can_delegate_to_a_subdomain() {
         assert_eq!(
-            parse_pointer("chat.example.com\n".trim_end_matches('\n'), "example.com", false),
+            parse_pointer("chat.example.com\n", "example.com", false),
             Some("https://chat.example.com".into())
         );
         assert_eq!(
