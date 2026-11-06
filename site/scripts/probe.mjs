@@ -6,7 +6,8 @@
  * does have is two unauthenticated endpoints on every deployment, and between
  * them they carry almost everything the directory wants to show:
  *
- *   GET /.well-known/telium/server  → server_name, api, gateway,
+ *   GET /.well-known/telium/server (or /telium.txt -> live server discovery)
+ *                                     → server_name, api, gateway,
  *                                     protocol_version, moved_to, sunset,
  *                                     onboarding.recommendations
  *   GET <api>/_telium/v1/capabilities → roles, registration_open, features,
