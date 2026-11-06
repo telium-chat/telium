@@ -157,17 +157,24 @@ async fn old_domain_publishes(state: &AppState, r: &Relocation) -> bool {
         return false;
     }
     let Ok(seed) = federation::seed_base(state, &r.old_domain) else { return false };
-    let Some(resp) = state
+    let direct = state
         .http
         .get(format!("{seed}/.well-known/telium/server"))
-        .send()
-        .await
-        .ok()
-        .filter(|resp| resp.status().is_success())
-    else {
-        return false;
+        .send().await.ok()
+        .filter(|resp| resp.status().is_success());
+    let doc = match direct {
+        Some(resp) => match resp.json::<Value>().await {
+            Ok(doc) => doc,
+            Err(_) => match federation::txt::discover_through_txt(state, &seed, &r.old_domain).await {
+                Some(doc) => doc,
+                None => return false,
+            },
+        },
+        None => match federation::txt::discover_through_txt(state, &seed, &r.old_domain).await {
+            Some(doc) => doc,
+            None => return false,
+        },
     };
-    let Ok(doc) = resp.json::<Value>().await else { return false };
     doc.get("server_name").and_then(Value::as_str) == Some(r.old_domain.as_str())
         && doc.get("relocation") == Some(&r.record)
 }
