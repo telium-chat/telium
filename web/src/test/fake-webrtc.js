@@ -60,6 +60,13 @@ export class FakePC {
     if (desc.type === 'answer' && this.signalingState !== 'have-local-offer') {
       throw new Error('Failed to set remote answer sdp: called in wrong state');
     }
+    // Real Chromium creates the answerer's receiving transceivers from an
+    // offer rather than matching them with unassociated local transceivers.
+    if (desc.type === 'offer' && this.transceivers.length === 0) {
+      for (const kind of ['audio', 'video', 'video', 'audio']) {
+        this.addTransceiver(kind, { direction: 'recvonly' });
+      }
+    }
     this.remoteDescription = desc;
     this.signalingState = desc.type === 'offer' ? 'have-remote-offer' : 'stable';
   }
@@ -74,6 +81,8 @@ export class FakePC {
     }
     this.candidates.push(candidate);
   }
+
+  getTransceivers() { return this.transceivers; }
 
   restartIce() { this.restarts += 1; this.negotiate(); }
   close() { this.closed = true; }
