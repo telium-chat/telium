@@ -8,7 +8,7 @@ use std::time::Duration;
 
 // Match the hardened URL fetchers used for embeds/relay: no DNS rebinding to
 // private networks, and the vetted address stays pinned for the actual GET.
-async fn safe_client(state: &AppState, raw: &str) -> Option<reqwest::Client> {
+pub(crate) async fn safe_client(state: &AppState, raw: &str) -> Option<reqwest::Client> {
     if state.cfg.federation.allow_http {
         return Some(state.http_no_redirect.clone());
     }
@@ -29,6 +29,23 @@ async fn safe_client(state: &AppState, raw: &str) -> Option<reqwest::Client> {
         .build().ok()
 }
 
+
+/// A single consistent, URL-vetted fetch for discovery JSON from any
+/// untrusted account domain or backend. Redirects never cross the boundary.
+pub(crate) async fn safe_document(
+    state: &AppState,
+    url: &str,
+    identity: &str,
+) -> Option<Value> {
+    let client = safe_client(state, url).await?;
+    let resp = client.get(url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    super::json_capped(resp, super::FED_JSON_MAX_BYTES, identity)
+        .await
+        .ok()
+}
 
 const POINTER_LIMIT: usize = 512;
 
@@ -105,14 +122,7 @@ pub(crate) async fn discover_through_txt(
     };
     dialable_server_name(state, &authority).ok()?;
     let live_url = format!("{target}/.well-known/telium/server");
-    let client = safe_client(state, &live_url).await?;
-    let response = client
-        .get(&live_url)
-        .send().await.ok()?;
-    if !response.status().is_success() {
-        return None;
-    }
-    let doc = super::json_capped(response, super::FED_JSON_MAX_BYTES, identity).await.ok()?;
+    let doc = safe_document(state, &live_url, identity).await?;
     if doc.get("server_name").and_then(Value::as_str) != Some(identity) {
         return None;
     }
