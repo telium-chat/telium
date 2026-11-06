@@ -540,6 +540,43 @@ const regionCodes = [
       return `https://${value.replace(/\/+$/, '')}`
     }
 
+    async function fetchTxtDelegation(identity: string): Promise<FetchResult> {
+      try {
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+        let response: Response
+        try {
+          response = await fetch('https://' + identity + '/telium.txt', {
+            signal: controller.signal, redirect: 'error', cache: 'no-store',
+          })
+        } finally {
+          clearTimeout(timer)
+        }
+        if (!response.ok || response.headers.get('content-type')?.includes('text/html')) {
+          return { kind: 'http', status: response.status }
+        }
+        const raw = (await response.text()).trim()
+        if (!raw || raw.length > 512 || /[\r\n]/.test(raw)) {
+          return { kind: 'http', status: 422 }
+        }
+        const url = new URL(/^[a-z]+:\/\//i.test(raw) ? raw : 'https://' + raw)
+        const host = url.hostname.toLowerCase()
+        if (url.protocol !== 'https:' || url.username || url.password
+          || url.pathname !== '/' || url.search || url.hash
+          || !(host === identity || host.endsWith('.' + identity))) {
+          return { kind: 'http', status: 422 }
+        }
+        const live = await fetchJson(url.origin + '/.well-known/telium/server')
+        if (live.kind !== 'ok' || live.body?.server_name !== identity
+          || toOrigin(live.body?.api, identity) !== url.origin) {
+          return { kind: 'http', status: 422 }
+        }
+        return live
+      } catch {
+        return { kind: 'dead' }
+      }
+    }
+
     async function runCheck() {
       const generation = ++probeGeneration
       const checkedMode = mode
@@ -560,7 +597,11 @@ const regionCodes = [
 
       const identity = check!.identity
       if (checkedMode === 'server') {
-        const discovery = await fetchJson(`https://${identity}/.well-known/telium/server`)
+        let discovery = await fetchJson('https://' + identity + '/.well-known/telium/server')
+        if (discovery.kind !== 'ok') {
+          const viaTxt = await fetchTxtDelegation(identity)
+          if (viaTxt.kind === 'ok') discovery = viaTxt
+        }
         if (generation !== probeGeneration) return
         const wellknown = discovery.kind === 'ok' ? discovery.body : null
         const api = wellknown ? toOrigin(wellknown.api, identity) : null
