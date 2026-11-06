@@ -502,27 +502,54 @@ const regionCodes = [
       | { kind: 'unreadable' }
       | { kind: 'dead' }
 
+    async function readCapped(response: Response, limit: number): Promise<string> {
+      const declared = Number(response.headers.get('content-length'))
+      if (declared > limit) throw new Error('Discovery body is too large')
+      if (!response.body) return ''
+      const reader = response.body.getReader()
+      const chunks: Uint8Array[] = []
+      let total = 0
+      try {
+        while (true) {
+          const { value, done } = await reader.read()
+          if (done) break
+          total += value.byteLength
+          if (total > limit) throw new Error('Discovery body is too large')
+          chunks.push(value)
+        }
+        const combined = new Uint8Array(total)
+        let offset = 0
+        for (const chunk of chunks) {
+          combined.set(chunk, offset)
+          offset += chunk.byteLength
+        }
+        return new TextDecoder('utf-8', { fatal: true }).decode(combined)
+      } finally {
+        // A hostile server may keep streaming after our limit is reached.
+        if (total > limit) await reader.cancel().catch(() => {})
+        reader.releaseLock()
+      }
+    }
+
     async function fetchJson(url: string): Promise<FetchResult> {
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
       try {
         const response = await fetch(url, {
-          signal: controller.signal,
-          cache: 'no-store',
+          signal: controller.signal, redirect: 'error', cache: 'no-store',
           headers: { accept: 'application/json' },
         })
         if (!response.ok) return { kind: 'http', status: response.status }
         try {
-          return { kind: 'ok', body: await response.json() }
+          return { kind: 'ok', body: JSON.parse(await readCapped(response, 256 * 1024)) }
         } catch {
-          // It answered, just not with JSON — some other site lives there.
           return { kind: 'http', status: response.status }
         }
       } catch {
-        // The browser never got a readable answer. A no-cors retry tells an
-        // answering server behind a CORS wall from no listener at all.
+        // Differentiate an unreadable CORS response from a network failure.
+        // The no-cors probe conveys no response data and sends no credentials.
         try {
-          await fetch(url, { mode: 'no-cors', signal: controller.signal, cache: 'no-store' })
+          await fetch(url, { mode: 'no-cors', redirect: 'error', signal: controller.signal, cache: 'no-store' })
           return { kind: 'unreadable' }
         } catch {
           return { kind: 'dead' }
@@ -541,27 +568,20 @@ const regionCodes = [
     }
 
     async function fetchTxtDelegation(identity: string): Promise<FetchResult> {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
       try {
-        const controller = new AbortController()
-        const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
-        let response: Response
-        try {
-          response = await fetch('https://' + identity + '/telium.txt', {
-            signal: controller.signal, redirect: 'error', cache: 'no-store',
-          })
-        } finally {
-          clearTimeout(timer)
-        }
+        const response = await fetch('https://' + identity + '/telium.txt', {
+          signal: controller.signal, redirect: 'error', cache: 'no-store',
+        })
         if (!response.ok || response.headers.get('content-type')?.includes('text/html')) {
           return { kind: 'http', status: response.status }
         }
-        const raw = (await response.text()).trim()
-        if (!raw || raw.length > 512 || /[\r\n]/.test(raw)) {
-          return { kind: 'http', status: 422 }
-        }
+        const raw = (await readCapped(response, 512)).trim()
+        if (!raw || /[\r\n]/.test(raw)) return { kind: 'http', status: 422 }
         const url = new URL(/^[a-z]+:\/\//i.test(raw) ? raw : 'https://' + raw)
         const host = url.hostname.toLowerCase()
-        if (url.protocol !== 'https:' || url.username || url.password
+        if (url.protocol !== 'https:' || url.username || url.password || url.port
           || url.pathname !== '/' || url.search || url.hash
           || !(host === identity || host.endsWith('.' + identity))) {
           return { kind: 'http', status: 422 }
@@ -574,6 +594,8 @@ const regionCodes = [
         return live
       } catch {
         return { kind: 'dead' }
+      } finally {
+        clearTimeout(timer)
       }
     }
 
