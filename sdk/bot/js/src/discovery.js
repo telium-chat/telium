@@ -128,8 +128,9 @@ export async function discover(server, {
       try {
         doc = await tryTxtDiscovery(seed, dialled, expectServerName, txtGetText, txtGetJson);
       } catch (error) {
-        lastError = error;
-        continue;
+        // Invalid pointers and identity mismatches fail closed. In particular,
+        // never retry over HTTP after a rejected HTTPS delegation.
+        throw error;
       }
     }
     if (!doc) continue;
