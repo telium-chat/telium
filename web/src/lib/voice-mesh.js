@@ -128,7 +128,8 @@ export class MeshCall {
 
   /// Unknown senders are connected to: their offer can beat the voice state.
   accept({ from, payload }) {
-    if (!this.live || !from || from === this.me || !payload) return Promise.resolve();
+    if (!this.live || !from || from === this.me || !payload
+      || (payload.targetSession && payload.targetSession !== this.sessionId)) return Promise.resolve();
     const peer = this.ensure(from);
     // Serialise: interleaved description updates corrupt the connection state.
     peer.inbox = peer.inbox.then(() => this.apply(from, peer, payload));
