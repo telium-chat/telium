@@ -10,6 +10,42 @@ import {
   setPlaybackVolume, stopPlaybackGraph, userMedia, sameSet, rttFromPc, preferScreenCodec,
 } from './voice-media.js';
 
+// Opaque session/offer IDs are compatibility-safe: older clients ignore these
+// fields and newer clients still accept untagged offers and answers.
+function meshId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  // JSDOM and older browser runtimes have getRandomValues without randomUUID.
+  // Never derive a call/session identifier from Math.random().
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+const MAX_PENDING_ICE = 64;
+
+function iceUfrags(description) {
+  return new Set([...String(description?.sdp || '').matchAll(/(?:^|\r?\n)a=ice-ufrag:([^\r\n]+)/g)]
+    .map((match) => match[1]));
+}
+
+function candidateUfrag(candidate) {
+  return candidate?.usernameFragment
+    || /(?:^|\s)ufrag\s+(\S+)/.exec(candidate?.candidate || '')?.[1]
+    || null;
+}
+
+function candidateMatchesDescription(candidate, description) {
+  if (!description) return false;
+  const fragment = candidateUfrag(candidate);
+  const current = iceUfrags(description);
+  // Some implementations and older test doubles don't expose ICE credentials.
+  return !fragment || current.size === 0 || current.has(fragment);
+}
+
+function staleIceError(error) {
+  return error?.name === 'OperationError'
+    && /ufrag|ice candidate|ice generation/i.test(error.message || '');
+}
+
 /// Relay hops can be lost and perfect negotiation has no retry of its own.
 export const MESH_STALL_MS = 8000;
 /// 'disconnected' often clears itself; 'failed' takes ~30s.
@@ -25,6 +61,7 @@ export class MeshCall {
     onAudioBlocked, onNoiseFallback, policy, noiseMode,
   }) {
     this.me = me;
+    this.sessionId = meshId();
     this.signal = signal;
     // 'relay' pins connections to TURN so no peer learns an address.
     this.policy = policy === 'relay' ? 'relay' : 'all';
@@ -97,7 +134,8 @@ export class MeshCall {
 
   /// Unknown senders are connected to: their offer can beat the voice state.
   accept({ from, payload }) {
-    if (!this.live || !from || from === this.me || !payload) return Promise.resolve();
+    if (!this.live || !from || from === this.me || !payload
+      || (payload.targetSession && payload.targetSession !== this.sessionId)) return Promise.resolve();
     const peer = this.ensure(from);
     // Serialise: interleaved description updates corrupt the connection state.
     peer.inbox = peer.inbox.then(() => this.apply(from, peer, payload));
@@ -353,39 +391,135 @@ export class MeshCall {
     this.raw?.getAudioTracks().forEach((t) => { t.enabled = on; });
   }
 
-  /// Everything downstream may assume the peer exists.
+  /// Signals from a previous call must not outlive their peer connection.
+  /// Sending the offer ahead of candidates is preserved by the outbox.
   send(target, payload) {
     const peer = this.peers.get(target);
     if (!peer) return;
     peer.outbox = peer.outbox
-      .then(() => this.signal(target, payload))
-      .catch((e) => this.onError(e));
+      .then(() => {
+        if (!this.live || this.peers.get(target) !== peer) return;
+        return this.signal(target, {
+          ...payload,
+          session: this.sessionId,
+          ...(peer.remoteSession ? { targetSession: peer.remoteSession } : {}),
+        });
+      })
+      .catch((e) => { if (this.peers.get(target) === peer) this.onError(e); });
+  }
+
+  queueCandidate(peer, candidate, session) {
+    if (peer.pending.length >= MAX_PENDING_ICE) peer.pending.shift();
+    peer.pending.push({ candidate, session });
+  }
+
+  // ICE candidates can arrive before their offer, including during an ICE
+  // restart while the previous remote description is still installed.
+  async flushCandidates(peer) {
+    const pending = peer.pending.splice(0);
+    for (const entry of pending) {
+      if (entry.session && peer.remoteSession && entry.session !== peer.remoteSession) {
+        if (!peer.retiredSessions.has(entry.session)) {
+          this.queueCandidate(peer, entry.candidate, entry.session);
+        }
+      } else if (!candidateMatchesDescription(entry.candidate, peer.pc.remoteDescription)) {
+        this.queueCandidate(peer, entry.candidate, entry.session);
+      } else {
+        try {
+          await peer.pc.addIceCandidate(entry.candidate);
+        } catch (error) {
+          if (!staleIceError(error)) this.onError(error);
+        }
+      }
+    }
   }
 
   async apply(from, peer, payload) {
-    if (this.peers.get(from) !== peer) return;
+    if (!this.live || this.peers.get(from) !== peer) return;
+    // The other participant may have left/rejoined while signals were in
+    // flight. Their old messages must not modify the replacement connection.
+    if (payload.targetSession && payload.targetSession !== this.sessionId) return;
+    if (payload.session && peer.retiredSessions.has(payload.session)) return;
+    if (payload.session && peer.remoteSession && payload.session !== peer.remoteSession) {
+      if (payload.candidate) {
+        this.queueCandidate(peer, payload.candidate, payload.session);
+      } else if (payload.description?.type === 'offer') {
+        // A fresh remote call has a fresh SDP/m-line layout. Reuse neither
+        // the old transceivers nor its outstanding offer/ICE credentials.
+        const waiting = peer.pending.filter((item) => item.session === payload.session);
+        const retired = new Set([...peer.retiredSessions, peer.remoteSession].slice(-16));
+        this.drop(from);
+        const next = this.ensure(from);
+        next.retiredSessions = retired;
+        next.pending = waiting;
+        // The first offer on the replacement must own its inbox before
+        // later candidates arrive, or they can overtake setRemoteDescription.
+        next.inbox = next.inbox.then(() => this.apply(from, next, payload));
+        await next.inbox;
+      }
+      return;
+    }
     try {
+      if (payload.negotiate) {
+        // The smaller identity is the stable offerer. A request for an ICE
+        // restart must cause an ICE-restarting offer, not a surprise restart
+        // only in the answer (which Chromium rejects).
+        if (!peer.polite) {
+          if (payload.iceRestart) peer.pc.restartIce();
+          else this.offer(peer, from);
+        }
+        return;
+      }
       if (payload.description) {
         const offer = payload.description.type === 'offer';
-        // Collision: the impolite side ignores the offer, the polite side rolls back.
+        if (!offer && payload.description.type !== 'answer') return;
+        // A rolled-back offer's answer must not be applied after ICE recovery.
+        // offerId/answerTo additionally guard against an answer to an older
+        // offer arriving while a *new* local offer is outstanding.
+        if (!offer && (
+          peer.pc.signalingState !== 'have-local-offer'
+          || !peer.pendingOfferId
+          || (payload.answerTo && payload.answerTo !== peer.pendingOfferId)
+        )) return;
+        if (offer && payload.offerId && peer.seenOffers.has(payload.offerId)) return;
         const collision = offer
           && (peer.makingOffer || peer.pc.signalingState !== 'stable');
         peer.ignoring = !peer.polite && collision;
         if (peer.ignoring) return;
+        if (payload.session && !peer.remoteSession) peer.remoteSession = payload.session;
+        // setRemoteDescription(offer) performs the polite peer's implicit
+        // rollback; its prior local offer no longer expects an answer.
+        if (offer && collision) peer.pendingOfferId = null;
         await peer.pc.setRemoteDescription(payload.description);
-        for (const candidate of peer.pending.splice(0)) {
-          try { await peer.pc.addIceCandidate(candidate); } catch { /* stale generation */ }
+        if (offer) this.bindRemoteTransceivers(peer);
+        if (!offer) peer.pendingOfferId = null;
+        if (offer && payload.offerId) {
+          peer.seenOffers.add(payload.offerId);
+          if (peer.seenOffers.size > 32) peer.seenOffers.delete(peer.seenOffers.values().next().value);
         }
+        await this.flushCandidates(peer);
         if (offer) {
           await peer.pc.setLocalDescription();
-          this.send(from, { description: peer.pc.localDescription });
+          this.send(from, {
+            description: peer.pc.localDescription,
+            ...(payload.offerId ? { answerTo: payload.offerId } : {}),
+          });
         }
       } else if (payload.candidate) {
-        if (!peer.pc.remoteDescription) peer.pending.push(payload.candidate);
-        else await peer.pc.addIceCandidate(payload.candidate);
+        if (payload.session && !peer.remoteSession) {
+          this.queueCandidate(peer, payload.candidate, payload.session);
+        } else if (!candidateMatchesDescription(payload.candidate, peer.pc.remoteDescription)) {
+          this.queueCandidate(peer, payload.candidate, payload.session || null);
+        } else {
+          try {
+            await peer.pc.addIceCandidate(payload.candidate);
+          } catch (error) {
+            if (!staleIceError(error)) throw error;
+          }
+        }
       }
     } catch (e) {
-      if (!peer.ignoring) this.onError(e);
+      if (!peer.ignoring && this.peers.get(from) === peer) this.onError(e);
     }
   }
 
@@ -474,6 +608,43 @@ export class MeshCall {
     show();
   }
 
+  // Chromium creates the answerer's transceivers from the incoming offer.
+  // Preallocating them on BOTH sides leaves the answerer with eight internal
+  // transceivers (four unassociated) and its next offer doubles the m-lines.
+  bindRemoteTransceivers(peer) {
+    if (peer.transceiver) return;
+    const transceivers = peer.pc.getTransceivers();
+    if (transceivers.length < 4) {
+      throw new Error('Peer offer did not contain all four expected media sections');
+    }
+    [peer.transceiver, peer.camera, peer.screen, peer.screenAudio] = transceivers;
+    preferScreenCodec(peer.screen);
+    this.transmit(peer);
+    this.face(peer);
+    this.project(peer);
+  }
+
+  // Create one local offer at a time, on the same queue as remote SDP and
+  // recovery. Reentrant onnegotiationneeded events cannot send stale offers.
+  offer(peer, id) {
+    peer.inbox = peer.inbox.then(async () => {
+      if (!this.live || this.peers.get(id) !== peer
+        || peer.pc.signalingState !== 'stable') return;
+      try {
+        peer.makingOffer = true;
+        await peer.pc.setLocalDescription();
+        if (peer.pc.localDescription?.type !== 'offer') return;
+        const offerId = meshId();
+        peer.pendingOfferId = offerId;
+        this.send(id, { description: peer.pc.localDescription, offerId });
+      } catch (e) {
+        if (this.peers.get(id) === peer) this.onError(e);
+      } finally {
+        peer.makingOffer = false;
+      }
+    });
+  }
+
   ensure(id) {
     const existing = this.peers.get(id);
     if (existing) return existing;
@@ -485,6 +656,10 @@ export class MeshCall {
       polite: this.me > id,
       makingOffer: false,
       ignoring: false,
+      pendingOfferId: null,
+      remoteSession: null,
+      retiredSessions: new Set(),
+      seenOffers: new Set(),
       connected: false,
       watch: null,
       recoveries: 0,
@@ -510,36 +685,41 @@ export class MeshCall {
     this.peers.set(id, peer);
     this.watch(id, peer);
 
-    // m-lines are laid down up front in a fixed order (audio, camera, screen, screen audio) so later changes are track swaps, not renegotiations.
-    const [mic] = this.stream?.getAudioTracks() || [];
-    peer.transceiver = mic
-      ? pc.addTransceiver(mic, { direction: 'sendrecv', streams: [this.stream] })
-      : pc.addTransceiver('audio', { direction: 'recvonly' });
+    // Only the designated offerer preallocates SDP media sections. The
+    // answerer binds Chromium's transceivers once it receives the offer.
+    if (!peer.polite) {
+      const [mic] = this.stream?.getAudioTracks() || [];
+      peer.transceiver = mic
+        ? pc.addTransceiver(mic, { direction: 'sendrecv', streams: [this.stream] })
+        : pc.addTransceiver('audio', { direction: 'recvonly' });
 
-    const [face] = this.camera?.getVideoTracks() || [];
-    peer.camera = face
-      ? pc.addTransceiver(face, { direction: 'sendrecv', streams: [this.camera] })
-      : pc.addTransceiver('video', { direction: 'recvonly' });
+      const [face] = this.camera?.getVideoTracks() || [];
+      peer.camera = face
+        ? pc.addTransceiver(face, { direction: 'sendrecv', streams: [this.camera] })
+        : pc.addTransceiver('video', { direction: 'recvonly' });
 
-    const [display] = this.screen?.getVideoTracks() || [];
-    peer.screen = display
-      ? pc.addTransceiver(display, { direction: 'sendrecv', streams: [this.screen] })
-      : pc.addTransceiver('video', { direction: 'recvonly' });
-    // H.264 on Windows reaches the hardware-video path.
-    preferScreenCodec(peer.screen);
+      const [display] = this.screen?.getVideoTracks() || [];
+      peer.screen = display
+        ? pc.addTransceiver(display, { direction: 'sendrecv', streams: [this.screen] })
+        : pc.addTransceiver('video', { direction: 'recvonly' });
+      preferScreenCodec(peer.screen);
 
-    const [screenAudio] = this.screen?.getAudioTracks() || [];
-    peer.screenAudio = screenAudio
-      ? pc.addTransceiver(screenAudio, { direction: 'sendrecv', streams: [this.screen] })
-      : pc.addTransceiver('audio', { direction: 'recvonly' });
+      const [screenAudio] = this.screen?.getAudioTracks() || [];
+      peer.screenAudio = screenAudio
+        ? pc.addTransceiver(screenAudio, { direction: 'sendrecv', streams: [this.screen] })
+        : pc.addTransceiver('audio', { direction: 'recvonly' });
+    }
 
-    pc.onnegotiationneeded = async () => {
-      try {
-        peer.makingOffer = true;
-        await pc.setLocalDescription();
-        this.send(id, { description: pc.localDescription });
-      } catch (e) { this.onError(e); }
-      finally { peer.makingOffer = false; }
+    pc.onnegotiationneeded = () => {
+      // Avoid initial glare entirely: only one side may send the first offer.
+      // With an upgraded peer, all later renegotiations use the same offerer.
+      // Untagged legacy peers retain the old perfect-negotiation fallback.
+      if (peer.polite && !peer.remoteSession && !pc.remoteDescription) return;
+      if (peer.polite && peer.remoteSession) {
+        this.send(id, { negotiate: true, iceRestart: true });
+        return;
+      }
+      this.offer(peer, id);
     };
     pc.onicecandidate = ({ candidate }) => {
       if (candidate) this.send(id, { candidate });
@@ -564,6 +744,9 @@ export class MeshCall {
       }
     };
     pc.ontrack = ({ track, streams, transceiver }) => {
+      if (!peer.transceiver && pc.getTransceivers().length >= 4) {
+        this.bindRemoteTransceivers(peer);
+      }
       // Never play our own published media back (screenshare feedback loop).
       const localTracks = [
         ...(this.stream?.getTracks?.() || []),
@@ -606,7 +789,13 @@ export class MeshCall {
     setPlaybackMuted(peer[graphSlot], el, this.deafened);
     if (analyse) this.attachAnalyser(id, stream);
     Promise.resolve(el.play()).catch((e) => {
-      // Autoplay policy rejection would otherwise be silent.
+      // Changing srcObject while play() is pending is a normal AbortError.
+      if (!this.live || this.peers.get(id) !== peer || el.srcObject !== stream
+        || e?.name === 'AbortError') return;
+      if (e?.name === 'NotAllowedError') {
+        this.onAudioBlocked(true);
+        return;
+      }
       this.onError(new Error(`${id} cannot be played back: ${e.message}`));
     });
   }
@@ -667,6 +856,7 @@ export class MeshCall {
       try {
         if (peer.pc.signalingState === 'have-local-offer') {
           await peer.pc.setLocalDescription({ type: 'rollback' });
+          peer.pendingOfferId = null;
         }
         peer.pc.restartIce();
       } catch { /* closed under us, or mid-change: the next turn tries again */ }

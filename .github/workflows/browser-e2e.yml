@@ -92,7 +92,10 @@ jobs:
           done
           cat /tmp/telium-web.log
           exit 1
-      - run: bunx playwright test e2e/smoke.spec.js
+      # Exercise real WebRTC offer/answer and ICE restart behavior alongside
+      # the existing onboarding smoke test. Unit fake PCs do not catch m-line
+      # ordering errors from Chromium's SDP implementation.
+      - run: bunx playwright test e2e/smoke.spec.js e2e/mesh-negotiation.spec.js
         working-directory: web
       - if: failure()
         run: |
