@@ -82,7 +82,7 @@ export async function discover(server, {
   allowInsecureHttp, expectServerName, timeoutMs,
   // Optional transport injection for test harnesses; production always uses
   // DNS-pinned, TLS-verified, size-capped reads with redirect refusal.
-  txtGetText = safeGetText, txtGetJson = safeGetJson,
+  txtGetText = safeGetText, txtGetJson = safeGetJson, directGetJson = safeGetJson,
 } = {}) {
   const allowInsecure = insecureHttpAllowed(allowInsecureHttp);
   const explicit = /^[a-z][a-z0-9+.-]*:\/\//i.test(server);
@@ -115,14 +115,16 @@ export async function discover(server, {
     let doc;
     let tryTxt = false;
     try {
-      doc = await request(seed, 'GET', '/.well-known/telium/server', { timeoutMs });
+      doc = seed.startsWith('https://')
+        ? await directGetJson(seed + '/.well-known/telium/server')
+        : await request(seed, 'GET', '/.well-known/telium/server', { timeoutMs });
       // Some websites respond with HTML or unrelated JSON at every path.
       if (!doc || typeof doc.server_name !== 'string') tryTxt = true;
     } catch (error) {
       lastError = error;
       // A network failure means the account domain itself is down. Do not
       // fan out more requests; only a real missing document permits fallback.
-      tryTxt = error?.status === 404;
+      tryTxt = error?.status === 404 || error instanceof SyntaxError;
     }
     if (tryTxt && seed.startsWith('https://')) {
       try {
