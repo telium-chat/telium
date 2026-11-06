@@ -42,10 +42,68 @@ export async function request(base, method, path, { token, body, query } = {}) {
   return payload;
 }
 
-// An account domain may publish a one-line pointer to its server at /telium.txt.
-// The second request gets *live* metadata from the server, not a stale website copy.
+// Discovery happens before authentication. Bound unauthenticated responses
+// before decoding them, stop redirects, and do not block indefinitely.
+const DISCOVERY_LIMIT = 256 * 1024;
+const POINTER_LIMIT = 512;
+const DISCOVERY_TIMEOUT_MS = 8000;
+
+async function readDiscoveryBytes(response, limit) {
+  const declared = response.headers.get('content-length');
+  if (declared !== null && Number(declared) > limit) {
+    await response.body?.cancel();
+    throw new Error('Telium discovery response exceeded its size limit');
+  }
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > limit) throw new Error('Telium discovery response exceeded its size limit');
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } finally {
+    reader.releaseLock();
+    if (total > limit) await response.body.cancel().catch(() => {});
+  }
+}
+
+async function discoveryGet(url, limit, accept) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DISCOVERY_TIMEOUT_MS);
+  try {
+    const response = await teliumFetch(url, {
+      method: 'GET',
+      redirect: 'error',
+      signal: controller.signal,
+      headers: { Accept: accept },
+    }, { purpose: 'Account discovery' });
+    if (!response.ok) throw new HttpError(response.status, null);
+    return await readDiscoveryBytes(response, limit);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function discoveryJson(base) {
+  const raw = await discoveryGet(base + '/.well-known/telium/server', DISCOVERY_LIMIT, 'application/json');
+  return JSON.parse(raw);
+}
+
+// The website only gives a pointer. Load the full live document from the backend.
 function readTxtPointer(text, accountHost) {
-  if (typeof text !== 'string' || text.length > 512) {
+  if (typeof text !== 'string' || new TextEncoder().encode(text).byteLength > POINTER_LIMIT) {
     throw new Error('telium.txt must contain one short line');
   }
   const line = text.trim();
@@ -55,7 +113,7 @@ function readTxtPointer(text, accountHost) {
   const host = accountHost.toLowerCase();
   const delegated = target.hostname.toLowerCase();
   if (target.protocol !== 'https:' || target.username || target.password
-    || target.pathname !== '/' || target.search || target.hash
+    || target.pathname !== '/' || target.search || target.hash || target.port
     || !(delegated === host || delegated.endsWith('.' + host))) {
     throw new Error('telium.txt must point to an HTTPS server on this domain or its subdomain');
   }
@@ -63,11 +121,9 @@ function readTxtPointer(text, accountHost) {
 }
 
 async function txtDiscovery(base) {
-  const response = await teliumFetch(base + '/telium.txt', { method: 'GET' }, { purpose: 'Account discovery' });
-  if (!response.ok || response.headers.get('content-type')?.includes('text/html')) return null;
-  const text = await response.text();
+  const text = await discoveryGet(base + '/telium.txt', POINTER_LIMIT, 'text/plain');
   const target = readTxtPointer(text, new URL(base).hostname);
-  const live = await request(target, 'GET', '/.well-known/telium/server');
+  const live = await discoveryJson(target);
   const expected = new URL(base).hostname.toLowerCase();
   if (!live || live.server_name?.toLowerCase() !== expected) {
     throw new Error('The Telium server at ' + target + ' does not identify itself as ' + expected);
@@ -90,7 +146,7 @@ export async function discover(domain) {
     try {
       let doc = null;
       try {
-        doc = await request(base, 'GET', '/.well-known/telium/server');
+        doc = await discoveryJson(base);
       } catch (err) {
         lastError = err;
       }
