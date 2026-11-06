@@ -49,6 +49,17 @@ const POINTER_LIMIT = 512;
 const DISCOVERY_TIMEOUT_MS = 8000;
 
 async function readDiscoveryBytes(response, limit) {
+  // Lightweight test transports sometimes return only { ok, status, json() }.
+  // A real Fetch Response always provides Headers. Keep tests compatible,
+  // while checking the encoded size even in this synthetic-response path.
+  if (!response.headers || typeof response.headers.get !== 'function') {
+    const value = await response.json();
+    const raw = JSON.stringify(value);
+    if (new TextEncoder().encode(raw).byteLength > limit) {
+      throw new Error('Telium discovery response exceeded its size limit');
+    }
+    return raw;
+  }
   const declared = response.headers.get('content-length');
   if (declared !== null && Number(declared) > limit) {
     await response.body?.cancel();
@@ -154,12 +165,18 @@ export async function discover(domain) {
   for (const base of bases) {
     try {
       let doc = null;
+      let checkTextPointer = false;
       try {
         doc = await discoveryJson(base);
+        // Some website hosts return generic JSON at missing .well-known paths.
+        checkTextPointer = !doc || typeof doc !== 'object' || typeof doc.server_name !== 'string';
       } catch (err) {
         lastError = err;
+        // A missing or non-JSON discovery document allows text delegation.
+        // Network failures must not cause another request to a dead host.
+        checkTextPointer = typeof err?.status === 'number' || err instanceof SyntaxError;
       }
-      if (!doc || typeof doc !== 'object' || typeof doc.server_name !== 'string') {
+      if (checkTextPointer) {
         doc = await txtDiscovery(base);
       }
       if (!doc) continue;
