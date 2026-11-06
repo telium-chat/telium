@@ -426,8 +426,9 @@ describe('media that will not open', () => {
     for (const reason of [CryptorErrorReason.MissingKey, CryptorErrorReason.InvalidKey]) {
       const said = unopenedMedia({ reason, message: 'missing key at index 241' }, BOB);
       expect(said).toContain(BOB);
-      expect(said).toContain('will not open under any key this device holds');
-      expect(said).toContain('commit ahead');
+      expect(said).toContain("cannot be decrypted with this device's current keys");
+      expect(said).toContain('checking for missed key updates');
+      expect(said).toContain('try rejoining the call');
       expect(said).not.toContain('241');
     }
   });
@@ -436,7 +437,7 @@ describe('media that will not open', () => {
     const said = unopenedMedia(
       new Error(`MissingKey: missing key at index 3 for participant ${BOB}`), BOB,
     );
-    expect(said).toContain('will not open under any key this device holds');
+    expect(said).toContain("cannot be decrypted with this device's current keys");
     expect(said).not.toContain('MissingKey');
     expect(said).not.toContain('index 3');
   });
