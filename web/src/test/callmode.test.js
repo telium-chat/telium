@@ -328,7 +328,7 @@ describe('media that has not opened yet', () => {
     for (clock.t = 0; clock.t <= 6000; clock.t += 1000) trouble.note(BOB, fromWorker(3));
     expect(said).toHaveLength(1);
     expect(said[0]).toContain(BOB);
-    expect(said[0]).toContain('will not open under any key this device holds');
+    expect(said[0]).toContain('cannot be decrypted with this device');
     expect(said[0]).not.toContain('index 3');
     trouble.keyArrived();
     for (clock.t = 10_000; clock.t <= 15_000; clock.t += 1000) trouble.note(BOB, fromWorker(4));
