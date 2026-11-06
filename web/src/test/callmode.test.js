@@ -4,6 +4,7 @@ import {
   dialable, effectivePosture, icePolicy, noteHello, openHello, rank, refusalCode, sealHello,
   strictest, wantsSfu,
 } from '../lib/callmode.js';
+import { KeyRepair, KEY_REPAIR_DELAY_MS } from '../lib/voice-keys.js';
 import {
   encodedTransform, isWebKitGTK, keyFailure, keySlot, KeyTrouble, mediaKeyBehind, MlsKeyProvider,
   unopenedMedia,
@@ -327,10 +328,15 @@ describe('media that has not opened yet', () => {
     for (clock.t = 0; clock.t <= 6000; clock.t += 1000) trouble.note(BOB, fromWorker(3));
     expect(said).toHaveLength(1);
     expect(said[0]).toContain(BOB);
-    expect(said[0]).toContain('will not open under any key this device holds');
+    expect(said[0]).toContain('cannot be decrypted with this device');
     expect(said[0]).not.toContain('index 3');
     trouble.keyArrived();
     for (clock.t = 10_000; clock.t <= 15_000; clock.t += 1000) trouble.note(BOB, fromWorker(4));
+    // Installing a key is not proof that decrypt succeeded. Don't spam a
+    // second toast for the same peer while the failed frames still arrive.
+    expect(said).toHaveLength(1);
+    expect(trouble.recent(BOB)).toBe(true);
+    for (clock.t = 130_000; clock.t <= 134_000; clock.t += 1000) trouble.note(BOB, fromWorker(4));
     expect(said).toHaveLength(2);
   });
 
@@ -420,8 +426,9 @@ describe('media that will not open', () => {
     for (const reason of [CryptorErrorReason.MissingKey, CryptorErrorReason.InvalidKey]) {
       const said = unopenedMedia({ reason, message: 'missing key at index 241' }, BOB);
       expect(said).toContain(BOB);
-      expect(said).toContain('will not open under any key this device holds');
-      expect(said).toContain('commit ahead');
+      expect(said).toContain("cannot be decrypted with this device's current keys");
+      expect(said).toContain('checking for missed key updates');
+      expect(said).toContain('try rejoining the call');
       expect(said).not.toContain('241');
     }
   });
@@ -430,7 +437,7 @@ describe('media that will not open', () => {
     const said = unopenedMedia(
       new Error(`MissingKey: missing key at index 3 for participant ${BOB}`), BOB,
     );
-    expect(said).toContain('will not open under any key this device holds');
+    expect(said).toContain("cannot be decrypted with this device's current keys");
     expect(said).not.toContain('MissingKey');
     expect(said).not.toContain('index 3');
   });
@@ -446,5 +453,82 @@ describe('media that will not open', () => {
     );
     expect(said).toContain('worker died');
     expect(said).not.toContain('commit ahead');
+  });
+});
+
+
+describe('sustained guild media key repair', () => {
+  it('checks the MLS state and attempts exactly one guarded reset for continuing failures', async () => {
+    vi.useFakeTimers();
+    try {
+      const check = vi.fn(async () => {});
+      const reset = vi.fn(async () => {});
+      const repair = new KeyRepair({
+        check, reset, active: () => true, recent: () => true,
+        delay: KEY_REPAIR_DELAY_MS,
+      });
+      repair.note('@bob:h');
+      await Promise.resolve();
+      expect(check).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(KEY_REPAIR_DELAY_MS);
+      expect(check).toHaveBeenCalledTimes(2);
+      expect(reset).toHaveBeenCalledTimes(1);
+      repair.note('@bob:h');
+      await vi.advanceTimersByTimeAsync(KEY_REPAIR_DELAY_MS * 2);
+      expect(reset).toHaveBeenCalledTimes(1);
+      repair.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not reset a quiet or replaced call, or one that stopped', async () => {
+    vi.useFakeTimers();
+    try {
+      const reset = vi.fn(async () => {});
+      let failing = true;
+      let active = true;
+      const repair = new KeyRepair({
+        check: async () => {}, reset,
+        active: () => active, recent: () => failing,
+        delay: KEY_REPAIR_DELAY_MS,
+      });
+      repair.note('@bob:h');
+      failing = false;
+      await vi.advanceTimersByTimeAsync(KEY_REPAIR_DELAY_MS);
+      expect(reset).not.toHaveBeenCalled();
+
+      failing = true;
+      active = false;
+      repair.note('@bob:h');
+      await vi.advanceTimersByTimeAsync(KEY_REPAIR_DELAY_MS);
+      expect(reset).not.toHaveBeenCalled();
+
+      active = true;
+      repair.note('@bob:h');
+      repair.stop();
+      await vi.advanceTimersByTimeAsync(KEY_REPAIR_DELAY_MS);
+      expect(reset).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('will not reset when catch-up fails or the current group changes', async () => {
+    vi.useFakeTimers();
+    try {
+      const reset = vi.fn(async () => {});
+      const repair = new KeyRepair({
+        check: async () => { throw new Error('offline'); },
+        reset, active: () => true, recent: () => true,
+        delay: KEY_REPAIR_DELAY_MS,
+      });
+      repair.note('@bob:h');
+      await vi.advanceTimersByTimeAsync(KEY_REPAIR_DELAY_MS);
+      expect(reset).not.toHaveBeenCalled();
+      repair.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
