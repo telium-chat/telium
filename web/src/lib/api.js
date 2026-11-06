@@ -79,9 +79,12 @@ async function txtDiscovery(base) {
 }
 
 export async function discover(domain) {
+  // Do not silently downgrade account discovery to HTTP: the identity domain
+  // chooses the API that will later receive credentials. Local development can
+  // still opt in explicitly by entering http://localhost:PORT.
   const bases = domain.startsWith('http')
     ? [domain]
-    : [`https://${domain}`, `http://${domain}`];
+    : [`https://${domain}`];
   let lastError = null;
   for (const base of bases) {
     try {
