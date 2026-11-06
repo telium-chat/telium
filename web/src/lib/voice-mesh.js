@@ -460,6 +460,16 @@ export class MeshCall {
       return;
     }
     try {
+      if (payload.negotiate) {
+        // The smaller identity is the stable offerer. A request for an ICE
+        // restart must cause an ICE-restarting offer, not a surprise restart
+        // only in the answer (which Chromium rejects).
+        if (!peer.polite) {
+          if (payload.iceRestart) peer.pc.restartIce();
+          else this.offer(peer, from);
+        }
+        return;
+      }
       if (payload.description) {
         const offer = payload.description.type === 'offer';
         if (!offer && payload.description.type !== 'answer') return;
@@ -597,6 +607,27 @@ export class MeshCall {
     show();
   }
 
+  // Create one local offer at a time, on the same queue as remote SDP and
+  // recovery. Reentrant onnegotiationneeded events cannot send stale offers.
+  offer(peer, id) {
+    peer.inbox = peer.inbox.then(async () => {
+      if (!this.live || this.peers.get(id) !== peer
+        || peer.pc.signalingState !== 'stable') return;
+      try {
+        peer.makingOffer = true;
+        await peer.pc.setLocalDescription();
+        if (peer.pc.localDescription?.type !== 'offer') return;
+        const offerId = meshId();
+        peer.pendingOfferId = offerId;
+        this.send(id, { description: peer.pc.localDescription, offerId });
+      } catch (e) {
+        if (this.peers.get(id) === peer) this.onError(e);
+      } finally {
+        peer.makingOffer = false;
+      }
+    });
+  }
+
   ensure(id) {
     const existing = this.peers.get(id);
     if (existing) return existing;
@@ -661,23 +692,15 @@ export class MeshCall {
       : pc.addTransceiver('audio', { direction: 'recvonly' });
 
     pc.onnegotiationneeded = () => {
-      // Both sides of offer/answer, and recovery rollbacks, share one queue.
-      // Serializing only incoming signals leaves a race with local offers.
-      peer.inbox = peer.inbox.then(async () => {
-        if (!this.live || this.peers.get(id) !== peer || pc.signalingState !== 'stable') return;
-        try {
-          peer.makingOffer = true;
-          await pc.setLocalDescription();
-          if (pc.localDescription?.type !== 'offer') return;
-          const offerId = meshId();
-          peer.pendingOfferId = offerId;
-          this.send(id, { description: pc.localDescription, offerId });
-        } catch (e) {
-          if (this.peers.get(id) === peer) this.onError(e);
-        } finally {
-          peer.makingOffer = false;
-        }
-      });
+      // Avoid initial glare entirely: only one side may send the first offer.
+      // With an upgraded peer, all later renegotiations use the same offerer.
+      // Untagged legacy peers retain the old perfect-negotiation fallback.
+      if (peer.polite && !peer.remoteSession && !pc.remoteDescription) return;
+      if (peer.polite && peer.remoteSession) {
+        this.send(id, { negotiate: true, iceRestart: true });
+        return;
+      }
+      this.offer(peer, id);
     };
     pc.onicecandidate = ({ candidate }) => {
       if (candidate) this.send(id, { candidate });
