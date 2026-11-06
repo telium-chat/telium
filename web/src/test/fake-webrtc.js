@@ -66,6 +66,12 @@ export class FakePC {
 
   async addIceCandidate(candidate) {
     if (!this.remoteDescription) throw new Error('the remote description was null');
+    const remoteUfrags = [...String(this.remoteDescription.sdp || '')
+      .matchAll(/(?:^|\r?\n)a=ice-ufrag:([^\r\n]+)/g)].map((match) => match[1]);
+    if (candidate?.usernameFragment && remoteUfrags.length
+      && !remoteUfrags.includes(candidate.usernameFragment)) {
+      throw Object.assign(new Error('Unknown ufrag'), { name: 'OperationError' });
+    }
     this.candidates.push(candidate);
   }
 
