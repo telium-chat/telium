@@ -4,6 +4,7 @@ import { useModal } from './useModal.jsx';
 import { reportError, toast } from './useToast.jsx';
 import { callE2EE, MeshCall, mediaKeyBehind, SfuCall } from '../lib/voice.js';
 import { GuildCallKeys } from '../lib/guild-call-keys.js';
+import { KeyRepair } from '../lib/voice-keys.js';
 import {
   effectivePosture, icePolicy, MEDIA_LABEL, noteHello, openHello, rank, refusalCode, sealHello,
   SIGNAL_LABEL, wantsSfu,
@@ -500,12 +501,33 @@ export function VoiceProvider({ children }) {
             })
             .catch(() => { /* the room is gone either way; the roster settles it */ });
         },
-        onKeyTrouble: () => {
-          // This device is opening nobody's media: it is probably a commit
-          // behind. Ask the group where it stands now, not at the next roster
-          // move.
-          if (conversationCall(targetChannelId)) return;
-          guildKeysRef.current?.check?.().catch?.(() => {});
+        onKeyTrouble: (who) => {
+          if (conversationCall(targetChannelId) || callRef.current !== call) return;
+          const keys = guildKeysRef.current;
+          if (!keys) return;
+          if (!call.keyRepair) {
+            // A missed commit is recovered by check(). If the same participant
+            // still fails to decrypt for another 16s, a quiet group may be
+            // genuinely split even at the *same* epoch. Reset it only once,
+            // guarded by the server's recent-commit refusal.
+            const groupId = keys.groupId;
+            const epoch = keys.epoch;
+            call.keyRepair = new KeyRepair({
+              check: () => keys.check(),
+              reset: () => store.voiceApi(targetChannelId).voiceE2eeReset(targetChannelId),
+              recent: (id) => call.unopened.recent(id),
+              active: () => callRef.current === call
+                && channelRef.current === targetChannelId && call.live
+                && guildKeysRef.current === keys
+                && keys.groupId === groupId && keys.epoch === epoch,
+              onFailure: (error) => {
+                if (error?.status !== 409) {
+                  console.warn('Persistent call encryption repair could not reset the group:', error);
+                }
+              },
+            });
+          }
+          call.keyRepair.note(who);
         },
         endpoint,
         joinToken: voiceServer.token,
