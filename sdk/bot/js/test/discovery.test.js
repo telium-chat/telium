@@ -28,6 +28,7 @@ async function withFetch(routes, fn) {
 }
 
 const WELL_KNOWN = '/.well-known/telium/server';
+const TXT = '/telium.txt';
 
 test('discovery resolves a bare domain over https', async () => {
   await withFetch({
@@ -46,6 +47,50 @@ test('discovery resolves a bare domain over https', async () => {
   });
 });
 
+test('a one-line telium.txt points to a subdomain with live discovery metadata', async () => {
+  await withFetch({
+    ['https://home.example' + TXT]: () => new Response('chat.home.example\n', {
+      headers: { 'content-type': 'text/plain' },
+    }),
+    ['https://chat.home.example' + WELL_KNOWN]: {
+      server_name: 'home.example',
+      api: 'https://chat.home.example',
+      gateway: 'wss://chat.home.example/gateway/v1',
+      protocol: { capabilities: ['sync.sealed'] },
+    },
+  }, async (seen) => {
+    const info = await discover('home.example');
+    assert.equal(info.api, 'https://chat.home.example');
+    assert.equal(info.serverName, 'home.example');
+    assert.deepEqual(seen.map(s => s.url), [
+      'https://home.example' + WELL_KNOWN,
+      'https://home.example' + TXT,
+      'https://chat.home.example' + WELL_KNOWN,
+    ]);
+  });
+});
+
+test('telium.txt refuses an unrelated target and a backend identity mismatch', async () => {
+  await withFetch({
+    ['https://home.example' + TXT]: () => new Response('https://attacker.com', {
+      headers: { 'content-type': 'text/plain' },
+    }),
+  }, async () => {
+    await assert.rejects(discover('https://home.example'), /must point to an HTTPS server/);
+  });
+  await withFetch({
+    ['https://home.example' + TXT]: () => new Response('chat.home.example', {
+      headers: { 'content-type': 'text/plain' },
+    }),
+    ['https://chat.home.example' + WELL_KNOWN]: {
+      server_name: 'victim.example',
+      api: 'https://chat.home.example',
+    },
+  }, async () => {
+    await assert.rejects(discover('https://home.example'), /does not claim the account domain/);
+  });
+});
+
 test('discovery never falls back to plaintext http when https fails', async () => {
   await withFetch({
     [`http://home.example${WELL_KNOWN}`]: {
@@ -56,7 +101,7 @@ test('discovery never falls back to plaintext http when https fails', async () =
     await assert.rejects(discover('home.example'));
     assert.deepEqual(
       seen.map((s) => s.url),
-      [`https://home.example${WELL_KNOWN}`],
+      [`https://home.example${WELL_KNOWN}`, `https://home.example${TXT}`],
       'an http:// seed must never be dialled without an explicit opt-in',
     );
   });
