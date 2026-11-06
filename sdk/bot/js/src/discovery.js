@@ -1,4 +1,5 @@
 import { request } from './http.js';
+import { getJson as safeGetJson, getText as safeGetText, parseTxtPointer } from './secure-discovery.js';
 
 // Deliberately long so it is visible in `ps`, Dockerfiles and unit files.
 export const INSECURE_HTTP_ENV = 'TELIUM_BOT_INSECURE_ALLOW_PLAINTEXT_HTTP';
@@ -63,30 +64,10 @@ export function requireGatewayUrl(value, dialled, { allowInsecureHttp } = {}) {
 
 // Callers that know their domain must pass `expectServerName`: `server_name` is self-reported.
 
-function txtTarget(text, dialled) {
-  if (typeof text !== 'string' || text.length > 512) throw new Error('telium.txt is too long');
-  const line = text.trim();
-  if (!line || line.includes('\n') || line.includes('\r')) throw new Error('telium.txt must be one line');
-  const url = parseUrl(/^[a-z]+:\/\//i.test(line) ? line : 'https://' + line);
-  if (!url || url.protocol !== 'https:' || url.username || url.password
-    || url.pathname !== '/' || url.search || url.hash
-    || !withinDelegation(url.hostname, dialled)) {
-    throw new Error('telium.txt must point to an HTTPS server on this account domain or its subdomain');
-  }
-  return url.origin;
-}
-
-async function tryTxtDiscovery(seed, dialled, expectServerName, timeoutMs) {
-  const url = seed + '/telium.txt';
-  // The initial pointer never receives credentials. Redirects are refused.
-  const response = await fetch(url, {
-    method: 'GET',
-    redirect: 'error',
-    ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
-  });
-  if (!response.ok || response.headers.get('content-type')?.includes('text/html')) return null;
-  const target = txtTarget(await response.text(), dialled);
-  const doc = await request(target, 'GET', '/.well-known/telium/server', { timeoutMs });
+async function tryTxtDiscovery(seed, dialled, expectServerName, getText, getJson) {
+  // Never transmit bearer credentials to either discovery endpoint.
+  const target = parseTxtPointer(await getText(seed + '/telium.txt'), dialled);
+  const doc = await getJson(target + '/.well-known/telium/server');
   const expected = expectServerName || dialled;
   if (doc?.server_name?.toLowerCase() !== expected.toLowerCase()) {
     throw new Error(target + ' does not claim the account domain ' + expected);
@@ -97,7 +78,12 @@ async function tryTxtDiscovery(seed, dialled, expectServerName, timeoutMs) {
   return doc;
 }
 
-export async function discover(server, { allowInsecureHttp, expectServerName, timeoutMs } = {}) {
+export async function discover(server, {
+  allowInsecureHttp, expectServerName, timeoutMs,
+  // Optional transport injection for test harnesses; production always uses
+  // DNS-pinned, TLS-verified, size-capped reads with redirect refusal.
+  txtGetText = safeGetText, txtGetJson = safeGetJson,
+} = {}) {
   const allowInsecure = insecureHttpAllowed(allowInsecureHttp);
   const explicit = /^[a-z][a-z0-9+.-]*:\/\//i.test(server);
 
@@ -127,14 +113,20 @@ export async function discover(server, { allowInsecureHttp, expectServerName, ti
   let lastError;
   for (const seed of seeds) {
     let doc;
+    let tryTxt = false;
     try {
       doc = await request(seed, 'GET', '/.well-known/telium/server', { timeoutMs });
+      // Some websites respond with HTML or unrelated JSON at every path.
+      if (!doc || typeof doc.server_name !== 'string') tryTxt = true;
     } catch (error) {
       lastError = error;
+      // A network failure means the account domain itself is down. Do not
+      // fan out more requests; only a real missing document permits fallback.
+      tryTxt = error?.status === 404;
     }
-    if (!doc || typeof doc.server_name !== 'string') {
+    if (tryTxt && seed.startsWith('https://')) {
       try {
-        doc = await tryTxtDiscovery(seed, dialled, expectServerName, timeoutMs);
+        doc = await tryTxtDiscovery(seed, dialled, expectServerName, txtGetText, txtGetJson);
       } catch (error) {
         lastError = error;
         continue;
