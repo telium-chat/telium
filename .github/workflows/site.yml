@@ -78,6 +78,9 @@ jobs:
       - name: Test registry issue submission automation
         run: npm run test:registry-issue
 
+      - name: Test safe TXT discovery and destination validation
+        run: node --test scripts/secure-discovery.test.mjs
+
       - name: Test account-home recommendation rules and signatures
         run: npm run test:recommendations
 
