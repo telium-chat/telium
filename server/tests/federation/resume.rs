@@ -357,6 +357,7 @@ async fn a_stopped_migration_is_not_started_again_beside_a_live_one() {
 #[tokio::test]
 async fn an_older_destination_saying_conflict_is_still_saying_wait() {
     let old = a_destination_that_refuses_the_push(
+        "old.test",
         "409 Conflict",
         "{\"error\":\"conflict\",\"message\":\"a push with that migration id is arriving here \
          right now; wait for it to finish rather than sending it twice\"}",
@@ -396,6 +397,7 @@ async fn an_older_destination_saying_conflict_is_still_saying_wait() {
 #[tokio::test]
 async fn a_receipt_for_a_different_subject_is_not_turned_into_a_forwarding_address() {
     let muddled = a_destination_answering(
+        "muddled.test",
         "200 OK",
         "{\"kind\":\"migration_ack\",\"migration_id\":\"m-ack\",\"subject_type\":\"guild\",\
           \"old_id\":\"some-other-guild\",\"new_id\":\"g-landed\",\
@@ -454,6 +456,7 @@ async fn a_receipt_made_out_to_something_else_is_not_a_receipt_for_this() {
         ),
     ] {
         let muddled = a_destination_answering(
+            "muddled.test",
             "200 OK",
             ack,
             "500 Internal Server Error",

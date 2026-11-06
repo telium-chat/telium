@@ -95,6 +95,7 @@ export class BotClient {
     allowInsecureHttp,
     requestTimeoutMs,
     authRetryLimit = AUTH_RETRY_LIMIT,
+    discoveryTransport = null,
   }) {
     if (!home || !token) throw new Error('home and token are required');
     this.home = home;
@@ -102,6 +103,7 @@ export class BotClient {
     this.intents = intents;
     this.allowInsecureHttp = allowInsecureHttp;
     this.requestTimeoutMs = requestTimeoutMs;
+    this.discoveryTransport = discoveryTransport;
     this.authRetryLimit = Math.max(1, Number(authRetryLimit) || AUTH_RETRY_LIMIT);
     this.installationRefreshMs = installationRefreshMs === false
       ? 0
@@ -128,6 +130,7 @@ export class BotClient {
       allowInsecureHttp: this.allowInsecureHttp,
       timeoutMs: this.requestTimeoutMs,
       ...(expectServerName ? { expectServerName } : {}),
+      ...(this.discoveryTransport || {}),
     };
   }
 

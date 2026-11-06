@@ -532,10 +532,11 @@ async fn landed_guild(server: &Server, id: &str, owner: &str) {
 }
 
 async fn a_destination_that_refuses_the_push(
+    origin: &'static str,
     status: &'static str,
     body: &'static str,
 ) -> String {
-    a_destination_answering("", a_destination_that_refuses_the_push_receipt(), status, body).await
+    a_destination_answering(origin, "", a_destination_that_refuses_the_push_receipt(), status, body).await
 }
 
 fn a_destination_that_refuses_the_push_receipt() -> &'static str {
@@ -543,6 +544,7 @@ fn a_destination_that_refuses_the_push_receipt() -> &'static str {
 }
 
 async fn a_destination_answering(
+    origin: &'static str,
     receipt_status: &'static str,
     receipt: &'static str,
     status: &'static str,
@@ -577,7 +579,7 @@ async fn a_destination_answering(
                 }
                 let asked = String::from_utf8_lossy(&asked).into_owned();
                 let (line, said) = if asked.contains("/.well-known/") {
-                    ("200 OK", format!("{{\"api_base\":\"http://{addr}\"}}"))
+                    ("200 OK", format!("{{\"server_name\":\"{origin}\",\"api\":\"http://{addr}\"}}"))
                 } else if asked.contains("/migrate/receipt") {
                     let line =
                         if receipt_status.is_empty() { "404 Not Found" } else { receipt_status };

@@ -1,3 +1,4 @@
+import { discoveryTransport } from './mock-discovery.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BotClient } from '../src/index.js';
@@ -59,14 +60,14 @@ test('the long-lived bot token is sent to the bot home and to nobody else', asyn
   });
   globalThis.fetch = fetch;
 
-  const bot = new BotClient({
+  const bot = new BotClient({ discoveryTransport,
     home: 'home.example',
     token: LONG_LIVED,
     installationRefreshMs: false,
   });
 
   try {
-    bot.homeInfo = await (await import('../src/discovery.js')).discover('home.example');
+    bot.homeInfo = await (await import('../src/discovery.js')).discover('home.example', discoveryTransport);
     const fresh = await bot.freshSession('guild.example');
     assert.equal(fresh.token, 'short-lived-session');
 
@@ -105,7 +106,7 @@ test('sendMessage carries the short-lived session bearer, never the bot token', 
   });
   globalThis.fetch = fetch;
 
-  const bot = new BotClient({
+  const bot = new BotClient({ discoveryTransport,
     home: 'home.example',
     token: LONG_LIVED,
     installationRefreshMs: false,
@@ -139,7 +140,7 @@ test('the assertion audience comes from the home index, not the peer self-descri
   });
   globalThis.fetch = fetch;
 
-  const bot = new BotClient({
+  const bot = new BotClient({ discoveryTransport,
     home: 'home.example',
     token: LONG_LIVED,
     installationRefreshMs: false,
@@ -174,7 +175,7 @@ test('the audience is the dialled domain even when the peer names itself honestl
   });
   globalThis.fetch = fetch;
 
-  const bot = new BotClient({
+  const bot = new BotClient({ discoveryTransport,
     home: 'home.example',
     token: LONG_LIVED,
     installationRefreshMs: false,
@@ -206,7 +207,7 @@ test('a session response may not redirect the gateway to another origin', async 
   });
   globalThis.fetch = fetch;
 
-  const bot = new BotClient({
+  const bot = new BotClient({ discoveryTransport,
     home: 'home.example',
     token: LONG_LIVED,
     installationRefreshMs: false,
@@ -228,7 +229,7 @@ test('the installation index request carries the bot token to the home only', as
   });
   globalThis.fetch = fetch;
 
-  const bot = new BotClient({
+  const bot = new BotClient({ discoveryTransport,
     home: 'home.example',
     token: LONG_LIVED,
     installationRefreshMs: false,

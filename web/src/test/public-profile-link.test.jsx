@@ -285,14 +285,21 @@ describe('what a stranger opening the link is made to fetch', () => {
         const avatar = await teliumMediaSrc(`${HOME}/_telium/v1/media/ava-hash`, { purpose: 'profile picture' });
         expect(banner.src).toBeNull();
         expect(avatar.src).toBeNull();
+
+        // Protected mode can refuse the discovery request itself, which
+        // correctly leaves the public profile unavailable. In either case
+        // the DOM and network must never load images directly.
+        const { container } = await landing(BOB);
+        expect(mediaUrls(container)).toEqual([]);
+        expect(container.querySelector('.pc__banner img')).toBeNull();
+        expect(container.querySelector('.avatar img')).toBeNull();
+        expect(
+          container.querySelector('.pc__banner') || screen.queryByRole('heading', { name: 'Profile unavailable' }),
+        ).toBeTruthy();
+        expect(fetched.filter((url) => url.includes('/_telium/v1/media/'))).toEqual([]);
       } finally {
         globalThis.fetch = realFetch;
       }
-      expect(fetched.filter((url) => url.includes('/_telium/v1/media/'))).toEqual([]);
-
-      const { container } = await landing(BOB);
-      expect(container.querySelector('.pc__banner')?.children).toHaveLength(0);
-      expect(container.querySelector('.avatar')?.textContent).toBe('BO');
     } finally {
       forgetOrigin('home.example');
       configureTransport({

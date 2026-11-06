@@ -6,7 +6,8 @@
  * does have is two unauthenticated endpoints on every deployment, and between
  * them they carry almost everything the directory wants to show:
  *
- *   GET /.well-known/telium/server  → server_name, api, gateway,
+ *   GET /.well-known/telium/server (or /telium.txt -> live server discovery)
+ *                                     → server_name, api, gateway,
  *                                     protocol_version, moved_to, sunset,
  *                                     onboarding.recommendations
  *   GET <api>/_telium/v1/capabilities → roles, registration_open, features,
@@ -24,6 +25,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { recommendationEligibility } from './recommendations-lib.mjs'
+import { getJson, getText, parseTxtPointer } from './secure-discovery.mjs'
 
 const root = new URL('../', import.meta.url)
 const REGISTRY = new URL('registry/servers.json', root)
@@ -44,22 +46,10 @@ const readJson = async (url, fallback) => {
   }
 }
 
-/** fetch with a hard deadline; a hung server must not hold the whole run open. */
-const getJson = async (url) => {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      redirect: 'follow',
-      headers: { accept: 'application/json', 'user-agent': 'telium-directory-probe/1.0' },
-    })
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    return await response.json()
-  } finally {
-    clearTimeout(timer)
-  }
-}
+// A website only needs one plain /telium.txt line; live metadata is read
+// from its pinned public backend rather than trusting stale website JSON.
+const getTxtTarget = async (domain) =>
+  parseTxtPointer(await getText('https://' + domain + '/telium.txt'), domain)
 
 /* `api` in .well-known may be a bare host, a host:port, or a full origin — the
  * point of the delegation is that `home.example` can hand off to
@@ -105,7 +95,21 @@ const probe = async (entry) => {
   }
 
   try {
-    const wellKnown = await getJson(`https://${entry.domain}/.well-known/telium/server`)
+    let wellKnown
+    try {
+      wellKnown = await getJson('https://' + entry.domain + '/.well-known/telium/server')
+      if (wellKnown.server_name?.toLowerCase() !== entry.domain.toLowerCase()) {
+        throw new Error('not a Telium account-domain discovery document')
+      }
+    } catch {
+      const api = await getTxtTarget(entry.domain)
+      // Fetch the full document from the real server, not a stale website copy.
+      wellKnown = await getJson(api + '/.well-known/telium/server')
+      if (wellKnown.server_name?.toLowerCase() !== entry.domain.toLowerCase()
+        || toOrigin(wellKnown.api, entry.domain) !== api) {
+        throw new Error('delegated server identity/API did not match telium.txt')
+      }
+    }
     result.server_name = typeof wellKnown.server_name === 'string' ? wellKnown.server_name : null
     result.protocol_version = wellKnown.protocol_version ?? null
     result.moved_to = wellKnown.moved_to ?? null

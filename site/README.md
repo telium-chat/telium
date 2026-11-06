@@ -53,7 +53,7 @@ Open a pull request against `registry/servers.json` — see
 
 Telium has no server directory of its own. No route, table or config key anywhere in the
 reference server enumerates peers. What every deployment does answer, unauthenticated, is
-`/.well-known/telium/server` and `/_telium/v1/capabilities`, and between them they carry
+`/.well-known/telium/server` (directly or via the new `/telium.txt` pointer) and `/_telium/v1/capabilities`, and between them they carry
 most of what the table shows. So each column has a different and stated provenance:
 
 | Column | Where it comes from |

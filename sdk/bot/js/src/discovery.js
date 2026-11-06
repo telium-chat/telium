@@ -1,4 +1,5 @@
 import { request } from './http.js';
+import { getJson as safeGetJson, getText as safeGetText, parseTxtPointer } from './secure-discovery.js';
 
 // Deliberately long so it is visible in `ps`, Dockerfiles and unit files.
 export const INSECURE_HTTP_ENV = 'TELIUM_BOT_INSECURE_ALLOW_PLAINTEXT_HTTP';
@@ -62,7 +63,27 @@ export function requireGatewayUrl(value, dialled, { allowInsecureHttp } = {}) {
 }
 
 // Callers that know their domain must pass `expectServerName`: `server_name` is self-reported.
-export async function discover(server, { allowInsecureHttp, expectServerName, timeoutMs } = {}) {
+
+async function tryTxtDiscovery(seed, dialled, expectServerName, getText, getJson) {
+  // Never transmit bearer credentials to either discovery endpoint.
+  const target = parseTxtPointer(await getText(seed + '/telium.txt'), dialled);
+  const doc = await getJson(target + '/.well-known/telium/server');
+  const expected = expectServerName || dialled;
+  if (doc?.server_name?.toLowerCase() !== expected.toLowerCase()) {
+    throw new Error(target + ' does not claim the account domain ' + expected);
+  }
+  if (!doc.api || parseUrl(doc.api)?.origin !== target) {
+    throw new Error(target + ' advertised a different API origin');
+  }
+  return doc;
+}
+
+export async function discover(server, {
+  allowInsecureHttp, expectServerName, timeoutMs,
+  // Optional transport injection for test harnesses; production always uses
+  // DNS-pinned, TLS-verified, size-capped reads with redirect refusal.
+  txtGetText = safeGetText, txtGetJson = safeGetJson, directGetJson = safeGetJson,
+} = {}) {
   const allowInsecure = insecureHttpAllowed(allowInsecureHttp);
   const explicit = /^[a-z][a-z0-9+.-]*:\/\//i.test(server);
 
@@ -92,12 +113,29 @@ export async function discover(server, { allowInsecureHttp, expectServerName, ti
   let lastError;
   for (const seed of seeds) {
     let doc;
+    let tryTxt = false;
     try {
-      doc = await request(seed, 'GET', '/.well-known/telium/server', { timeoutMs });
+      doc = seed.startsWith('https://')
+        ? await directGetJson(seed + '/.well-known/telium/server')
+        : await request(seed, 'GET', '/.well-known/telium/server', { timeoutMs });
+      // Some websites respond with HTML or unrelated JSON at every path.
+      if (!doc || typeof doc.server_name !== 'string') tryTxt = true;
     } catch (error) {
       lastError = error;
-      continue;
+      // A network failure means the account domain itself is down. Do not
+      // fan out more requests; only a real missing document permits fallback.
+      tryTxt = error?.status === 404 || error instanceof SyntaxError;
     }
+    if (tryTxt && seed.startsWith('https://')) {
+      try {
+        doc = await tryTxtDiscovery(seed, dialled, expectServerName, txtGetText, txtGetJson);
+      } catch (error) {
+        // Invalid pointers and identity mismatches fail closed. In particular,
+        // never retry over HTTP after a rejected HTTPS delegation.
+        throw error;
+      }
+    }
+    if (!doc) continue;
 
     // `server_name` is self-reported; the assertion audience comes from the home's indexed domain, never from here.
     const expected = expectServerName ?? (explicit ? null : dialled);

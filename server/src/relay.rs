@@ -180,6 +180,22 @@ async fn discovery(
     })
 }
 
+/// Discovery is unauthenticated and may come from a hostile peer. Never
+/// buffer a whole HTTP response before applying its upper bound.
+async fn capped_body(mut response: reqwest::Response, limit: usize) -> Option<Vec<u8>> {
+    if response.content_length().is_some_and(|bytes| bytes > limit as u64) {
+        return None;
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.ok()? {
+        if body.len().saturating_add(chunk.len()) > limit {
+            return None;
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Some(body)
+}
+
 async fn fetch_discovery(server_name: &str) -> Option<HashSet<(String, u16)>> {
     let addr = resolve_public(server_name, 443).await.ok()?;
     let client = reqwest::Client::builder()
@@ -190,15 +206,46 @@ async fn fetch_discovery(server_name: &str) -> Option<HashSet<(String, u16)>> {
         .build()
         .ok()?;
     let url = format!("https://{server_name}/.well-known/telium/server");
-    let resp = client.get(&url).send().await.ok()?;
-    if !resp.status().is_success() {
-        return None;
-    }
-    let body = resp.bytes().await.ok()?;
-    if body.len() > DISCOVERY_LIMIT {
-        return None;
-    }
-    let doc: Value = serde_json::from_slice(&body).ok()?;
+    let direct = match client.get(&url).send().await {
+        Ok(resp) if resp.status().is_success() => capped_body(resp, DISCOVERY_LIMIT).await
+            .and_then(|body| serde_json::from_slice::<Value>(&body).ok()),
+        _ => None,
+    };
+
+    let doc: Value = match direct {
+        Some(doc) => doc,
+        None => {
+            // Text-only websites delegate to their live server. Keep the same
+            // no-redirect, public-address and DNS-pinning rules as above.
+            let txt = client.get(format!("https://{server_name}/telium.txt"))
+                .send().await.ok()?;
+            if !txt.status().is_success() { return None; }
+            let bytes = capped_body(txt, 512).await?;
+            let pointer = std::str::from_utf8(&bytes).ok()?;
+            let target = crate::federation::txt::parse_pointer(pointer, server_name, false)?;
+            let parsed = url::Url::parse(&target).ok()?;
+            let host = parsed.host_str()?;
+            let port = parsed.port_or_known_default()?;
+            let target_addr = resolve_public(host, port).await.ok()?;
+            let live_client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(8))
+                .redirect(reqwest::redirect::Policy::none())
+                .resolve(host, target_addr)
+                .user_agent("telium-server")
+                .build().ok()?;
+            let resp = live_client
+                .get(format!("{target}/.well-known/telium/server"))
+                .send().await.ok()?;
+            if !resp.status().is_success() { return None; }
+            let body = capped_body(resp, DISCOVERY_LIMIT).await?;
+            let document: Value = serde_json::from_slice(&body).ok()?;
+            if document.get("api").and_then(Value::as_str)
+                .map(|api| api.trim_end_matches('/')) != Some(target.as_str()) {
+                return None;
+            }
+            document
+        }
+    };
 
     if doc.get("server_name").and_then(|v| v.as_str()).map(str::to_ascii_lowercase).as_deref()
         != Some(server_name)

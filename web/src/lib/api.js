@@ -42,14 +42,144 @@ export async function request(base, method, path, { token, body, query } = {}) {
   return payload;
 }
 
+// Discovery happens before authentication. Bound unauthenticated responses
+// before decoding them, stop redirects, and do not block indefinitely.
+const DISCOVERY_LIMIT = 256 * 1024;
+const POINTER_LIMIT = 512;
+const DISCOVERY_TIMEOUT_MS = 8000;
+
+async function readDiscoveryBytes(response, limit) {
+  // Lightweight test transports sometimes return only { ok, status, json() }.
+  // A real Fetch Response always provides Headers. Keep tests compatible,
+  // while checking the encoded size even in this synthetic-response path.
+  if (!response.headers || typeof response.headers.get !== 'function') {
+    const value = await response.json();
+    const raw = JSON.stringify(value);
+    if (new TextEncoder().encode(raw).byteLength > limit) {
+      throw new Error('Telium discovery response exceeded its size limit');
+    }
+    return raw;
+  }
+  const declared = response.headers.get('content-length');
+  if (declared !== null && Number(declared) > limit) {
+    await response.body?.cancel();
+    throw new Error('Telium discovery response exceeded its size limit');
+  }
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > limit) throw new Error('Telium discovery response exceeded its size limit');
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } finally {
+    reader.releaseLock();
+    if (total > limit) await response.body.cancel().catch(() => {});
+  }
+}
+
+async function discoveryGet(url, limit, accept) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DISCOVERY_TIMEOUT_MS);
+  try {
+    const response = await teliumFetch(url, {
+      method: 'GET',
+      redirect: 'error',
+      signal: controller.signal,
+      headers: { Accept: accept },
+    }, { purpose: 'Account discovery' });
+    if (!response.ok) throw new HttpError(response.status, null);
+    return await readDiscoveryBytes(response, limit);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function discoveryJson(base) {
+  const raw = await discoveryGet(base + '/.well-known/telium/server', DISCOVERY_LIMIT, 'application/json');
+  return JSON.parse(raw);
+}
+
+// Invalid delegation must fail closed with a useful error, rather than being
+// presented as an ordinary network outage.
+class DiscoveryValidationError extends Error {}
+
+// The website only gives a pointer. Load the full live document from the backend.
+function readTxtPointer(text, accountHost) {
+  if (typeof text !== 'string' || new TextEncoder().encode(text).byteLength > POINTER_LIMIT) {
+    throw new DiscoveryValidationError('telium.txt must contain one short line');
+  }
+  const line = text.trim();
+  if (/[\r\n]/.test(line)) throw new DiscoveryValidationError('telium.txt must contain only one line');
+  if (!line) throw new DiscoveryValidationError('telium.txt is empty');
+  let target;
+  try {
+    target = new URL(/^[a-z]+:\/\//i.test(line) ? line : 'https://' + line);
+  } catch {
+    throw new DiscoveryValidationError('telium.txt contains an invalid hostname');
+  }
+  const host = accountHost.toLowerCase();
+  const delegated = target.hostname.toLowerCase();
+  if (target.protocol !== 'https:' || target.username || target.password
+    || target.pathname !== '/' || target.search || target.hash || target.port
+    || !(delegated === host || delegated.endsWith('.' + host))) {
+    throw new DiscoveryValidationError('telium.txt must point to an HTTPS server on this domain or its subdomain');
+  }
+  return target.origin;
+}
+
+async function txtDiscovery(base) {
+  const text = await discoveryGet(base + '/telium.txt', POINTER_LIMIT, 'text/plain');
+  const target = readTxtPointer(text, new URL(base).hostname);
+  const live = await discoveryJson(target);
+  const expected = new URL(base).hostname.toLowerCase();
+  if (!live || live.server_name?.toLowerCase() !== expected) {
+    throw new DiscoveryValidationError('The Telium server at ' + target + ' does not identify itself as ' + expected);
+  }
+  if (!live.api || new URL(live.api).origin !== target) {
+    throw new DiscoveryValidationError('The Telium server at ' + target + ' advertises a different API address');
+  }
+  return live;
+}
+
 export async function discover(domain) {
+  // Do not silently downgrade account discovery to HTTP: the identity domain
+  // chooses the API that will later receive credentials. Local development can
+  // still opt in explicitly by entering http://localhost:PORT.
   const bases = domain.startsWith('http')
     ? [domain]
-    : [`https://${domain}`, `http://${domain}`];
+    : [`https://${domain}`];
   let lastError = null;
   for (const base of bases) {
     try {
-      const doc = await request(base, 'GET', '/.well-known/telium/server');
+      let doc = null;
+      let checkTextPointer = false;
+      try {
+        doc = await discoveryJson(base);
+        // Some website hosts return generic JSON at missing .well-known paths.
+        checkTextPointer = !doc || typeof doc !== 'object' || typeof doc.server_name !== 'string';
+      } catch (err) {
+        lastError = err;
+        // A missing or non-JSON discovery document allows text delegation.
+        // Network failures must not cause another request to a dead host.
+        checkTextPointer = typeof err?.status === 'number' || err instanceof SyntaxError;
+      }
+      if (checkTextPointer) {
+        doc = await txtDiscovery(base);
+      }
+      if (!doc) continue;
       return {
         server_name: doc.server_name,
         api: doc.api || base,
@@ -83,6 +213,7 @@ export async function discover(domain) {
       };
     } catch (e) { lastError = e; }
   }
+  if (lastError instanceof DiscoveryValidationError) throw lastError;
   // A status means the server answered; otherwise name the address that failed.
   if (lastError && typeof lastError.status === 'number') throw lastError;
   const unreachable = new Error(`could not reach ${domain}`);
