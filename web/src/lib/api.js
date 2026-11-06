@@ -45,10 +45,11 @@ export async function request(base, method, path, { token, body, query } = {}) {
 // An account domain may publish a one-line pointer to its server at /telium.txt.
 // The second request gets *live* metadata from the server, not a stale website copy.
 function readTxtPointer(text, accountHost) {
-  if (typeof text !== 'string' || text.length > 512 || /[\r\n]/.test(text)) {
+  if (typeof text !== 'string' || text.length > 512) {
     throw new Error('telium.txt must contain one short line');
   }
   const line = text.trim();
+  if (/[\r\n]/.test(line)) throw new Error('telium.txt must contain only one line');
   if (!line) throw new Error('telium.txt is empty');
   const target = new URL(/^[a-z]+:\/\//i.test(line) ? line : 'https://' + line);
   const host = accountHost.toLowerCase();
