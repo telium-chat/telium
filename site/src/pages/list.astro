@@ -598,7 +598,7 @@ const regionCodes = [
       const identity = check!.identity
       if (checkedMode === 'server') {
         let discovery = await fetchJson('https://' + identity + '/.well-known/telium/server')
-        if (discovery.kind !== 'ok') {
+        if (discovery.kind !== 'ok' || discovery.body?.server_name !== identity) {
           const viaTxt = await fetchTxtDelegation(identity)
           if (viaTxt.kind === 'ok') discovery = viaTxt
         }
