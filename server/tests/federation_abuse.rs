@@ -219,7 +219,10 @@ async fn unsigned_requests_naming_unknown_keys_are_rationed_outbound_fetches() {
         let _ = purge(format!("never-seen-{n}")).await;
     }
     let dialled = target.requests.load(Ordering::SeqCst);
-    assert!(dialled <= 12, "forty unsigned requests became {dialled} outbound ones");
+    // Each permitted discovery attempt can now read two fixed endpoints:
+    // the legacy .well-known document and the telium.txt fallback.
+    // Retain the original budget of at most 12 *attempts*, not 12 HTTP GETs.
+    assert!(dialled <= 2 * 12, "forty unsigned requests became {dialled} outbound ones");
 }
 
 #[tokio::test]
