@@ -407,6 +407,7 @@ export function VoiceProvider({ children }) {
       onCamera: via(setCamera),
       onScreenEnd: via(settleStreamOff),
       onCameraEnd: via(settleVideoOff),
+      onAudioBlocked: via(setAudioBlocked),
       onError,
       noiseMode: normalizeNoiseMode(store.prefs.micNoise),
       onNoiseFallback: via(noteNoiseFallback),
