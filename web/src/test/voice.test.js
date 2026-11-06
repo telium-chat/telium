@@ -41,6 +41,33 @@ describe('Windows screen codec', () => {
 describe('MeshCall', () => {
   beforeEach(() => { FakePC.all = []; vi.unstubAllGlobals(); });
 
+
+  it('lets the answerer bind the offer-created transceivers instead of preallocating duplicates', async () => {
+    const { tracks } = stubCall();
+    const call = new MeshCall({
+      me: '@z:h',
+      signal: vi.fn(async () => {}),
+    });
+    await call.start([]);
+    call.sync(['@a:h']);
+    const peer = call.peers.get('@a:h');
+    expect(peer.pc.getTransceivers()).toHaveLength(0);
+    expect(peer.transceiver).toBeNull();
+
+    await call.accept({ from: '@a:h', payload: {
+      session: 'offerer-session', offerId: 'first',
+      description: { type: 'offer', sdp: 'four-media-sections' },
+    } });
+    expect(peer.pc.getTransceivers()).toHaveLength(4);
+    expect(peer.transceiver).toBe(peer.pc.getTransceivers()[0]);
+    expect(peer.camera).toBe(peer.pc.getTransceivers()[1]);
+    expect(peer.screen).toBe(peer.pc.getTransceivers()[2]);
+    expect(peer.screenAudio).toBe(peer.pc.getTransceivers()[3]);
+    expect(peer.transceiver.sender.track).toBe(tracks[0]);
+    expect(peer.pc.signalingState).toBe('stable');
+    call.stop();
+  });
+
   it('holds one connection per other participant and closes the ones that leave', async () => {
     stubCall();
     const call = new MeshCall({ me: '@a:h', signal: vi.fn(async () => {}) });
