@@ -180,6 +180,22 @@ async fn discovery(
     })
 }
 
+/// Discovery is unauthenticated and may come from a hostile peer. Never
+/// buffer a whole HTTP response before applying its upper bound.
+async fn capped_body(mut response: reqwest::Response, limit: usize) -> Option<Vec<u8>> {
+    if response.content_length().is_some_and(|bytes| bytes > limit as u64) {
+        return None;
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.ok()? {
+        if body.len().saturating_add(chunk.len()) > limit {
+            return None;
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Some(body)
+}
+
 async fn fetch_discovery(server_name: &str) -> Option<HashSet<(String, u16)>> {
     let addr = resolve_public(server_name, 443).await.ok()?;
     let client = reqwest::Client::builder()
@@ -191,8 +207,7 @@ async fn fetch_discovery(server_name: &str) -> Option<HashSet<(String, u16)>> {
         .ok()?;
     let url = format!("https://{server_name}/.well-known/telium/server");
     let direct = match client.get(&url).send().await {
-        Ok(resp) if resp.status().is_success() => resp.bytes().await.ok()
-            .filter(|body| body.len() <= DISCOVERY_LIMIT)
+        Ok(resp) if resp.status().is_success() => capped_body(resp, DISCOVERY_LIMIT).await
             .and_then(|body| serde_json::from_slice::<Value>(&body).ok()),
         _ => None,
     };
@@ -205,8 +220,7 @@ async fn fetch_discovery(server_name: &str) -> Option<HashSet<(String, u16)>> {
             let txt = client.get(format!("https://{server_name}/telium.txt"))
                 .send().await.ok()?;
             if !txt.status().is_success() { return None; }
-            let bytes = txt.bytes().await.ok()?;
-            if bytes.len() > 512 { return None; }
+            let bytes = capped_body(txt, 512).await?;
             let pointer = std::str::from_utf8(&bytes).ok()?;
             let target = crate::federation::txt::parse_pointer(pointer, server_name, false)?;
             let parsed = url::Url::parse(&target).ok()?;
@@ -223,8 +237,7 @@ async fn fetch_discovery(server_name: &str) -> Option<HashSet<(String, u16)>> {
                 .get(format!("{target}/.well-known/telium/server"))
                 .send().await.ok()?;
             if !resp.status().is_success() { return None; }
-            let body = resp.bytes().await.ok()?;
-            if body.len() > DISCOVERY_LIMIT { return None; }
+            let body = capped_body(resp, DISCOVERY_LIMIT).await?;
             let document: Value = serde_json::from_slice(&body).ok()?;
             if document.get("api").and_then(Value::as_str)
                 .map(|api| api.trim_end_matches('/')) != Some(target.as_str()) {
