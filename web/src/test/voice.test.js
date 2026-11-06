@@ -668,11 +668,11 @@ describe('mesh signaling generations', () => {
     stubCall();
     const errors = [];
     const call = new MeshCall({
-      me: '@z:h', signal: vi.fn(async () => {}), onError: (e) => errors.push(e),
+      me: '@a:h', signal: vi.fn(async () => {}), onError: (e) => errors.push(e),
     });
     await call.start([]);
-    call.sync(['@a:h']);
-    const peer = call.peers.get('@a:h');
+    call.sync(['@z:h']);
+    const peer = call.peers.get('@z:h');
     const original = peer.pc.setLocalDescription.bind(peer.pc);
     let release;
     const gate = new Promise((resolve) => { release = resolve; });
@@ -684,14 +684,16 @@ describe('mesh signaling generations', () => {
     await settle();
     expect(peer.makingOffer).toBe(true);
     const incoming = call.accept({
-      from: '@a:h',
+      from: '@z:h',
       payload: { session: 'remote-one', description: { type: 'offer', sdp: 'offer' } },
     });
     expect(peer.pc.remoteDescription).toBeNull();
     release();
     await incoming;
-    expect(peer.pc.remoteDescription.type).toBe('offer');
-    expect(peer.pc.signalingState).toBe('stable');
+    // The designated offerer must reject glare after its local offer
+    // resolves, not install the remote offer over the new local SDP.
+    expect(peer.pc.remoteDescription).toBeNull();
+    expect(peer.pc.signalingState).toBe('have-local-offer');
     expect(errors).toEqual([]);
     call.stop();
   });
