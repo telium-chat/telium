@@ -25,6 +25,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { recommendationEligibility } from './recommendations-lib.mjs'
+import { getJson, getText, parseTxtPointer } from './secure-discovery.mjs'
 
 const root = new URL('../', import.meta.url)
 const REGISTRY = new URL('registry/servers.json', root)
@@ -45,52 +46,10 @@ const readJson = async (url, fallback) => {
   }
 }
 
-/** fetch with a hard deadline; a hung server must not hold the whole run open. */
-const getJson = async (url) => {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      redirect: 'follow',
-      headers: { accept: 'application/json', 'user-agent': 'telium-directory-probe/1.0' },
-    })
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    return await response.json()
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-
-/** A website may publish /telium.txt instead of full discovery JSON. */
-const getTxtTarget = async (domain) => {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
-  try {
-    const response = await fetch('https://' + domain + '/telium.txt', {
-      signal: controller.signal,
-      redirect: 'error',
-      headers: { 'user-agent': 'telium-directory-probe/1.0' },
-    })
-    if (!response.ok) throw new Error('no text discovery pointer')
-    if (response.headers.get('content-type')?.includes('text/html')) throw new Error('website returned HTML')
-    if (Number(response.headers.get('content-length')) > 512) throw new Error('text pointer is too large')
-    const body = await response.text()
-    const line = body.trim()
-    if (!line || line.length > 512 || /[\r\n]/.test(line)) throw new Error('invalid text pointer')
-    const url = new URL(/^[a-z]+:\/\//i.test(line) ? line : 'https://' + line)
-    if (url.protocol !== 'https:' || url.username || url.password
-      || url.pathname !== '/' || url.search || url.hash
-      || !(url.hostname.toLowerCase() === domain.toLowerCase()
-        || url.hostname.toLowerCase().endsWith('.' + domain.toLowerCase()))) {
-      throw new Error('unsafe text pointer destination')
-    }
-    return url.origin
-  } finally {
-    clearTimeout(timer)
-  }
-}
+// A website only needs one plain /telium.txt line; live metadata is read
+// from its pinned public backend rather than trusting stale website JSON.
+const getTxtTarget = async (domain) =>
+  parseTxtPointer(await getText('https://' + domain + '/telium.txt'), domain)
 
 /* `api` in .well-known may be a bare host, a host:port, or a full origin — the
  * point of the delegation is that `home.example` can hand off to
