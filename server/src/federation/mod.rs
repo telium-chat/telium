@@ -10,6 +10,7 @@ mod extract;
 mod homes;
 mod maintenance;
 mod negotiation;
+mod txt;
 
 pub use extract::{BigBodies, BigBodyGuard, Fed, FedOrigin, Gate, Anyone, Pace, CONCURRENT_BIG_BODIES};
 pub use homes::{apply_verdict, check_home, learn_tombstone, resolve_id, revalidate_sessions, Verdict};
@@ -201,15 +202,25 @@ pub async fn discover(state: &AppState, origin: &str) -> ApiResult<Peer> {
     }
 
     let seed = seed_base(state, &origin)?;
-    let fetched = state
+    // Existing deployments keep their full .well-known document. A website
+    // without one may instead publish a one-line /telium.txt pointer. Resolve
+    // the full *live* discovery document on the delegated API before caching.
+    let direct = state
         .http
         .get(format!("{seed}/.well-known/telium/server"))
         .send()
         .await
         .ok()
         .filter(|r| r.status().is_success());
-
-    let Some(resp) = fetched else {
+    let direct_doc = match direct {
+        Some(resp) => json_capped(resp, FED_JSON_MAX_BYTES, &origin).await.ok(),
+        None => None,
+    };
+    let discovered = match direct_doc {
+        Some(doc) if doc.is_object() => Some(doc),
+        _ => txt::discover_through_txt(state, &seed, &origin).await,
+    };
+    let Some(doc) = discovered else {
         if let Ok(Some(peer)) = promoted_fallback(state, &origin).await {
             return Ok(peer);
         }
@@ -218,27 +229,10 @@ pub async fn discover(state: &AppState, origin: &str) -> ApiResult<Peer> {
                 .bind(&origin)
                 .execute(&state.pool)
                 .await?;
-            return Ok(Peer {
-                origin,
-                api_base,
-                gateway,
-                moved_to,
-            });
+            return Ok(Peer { origin, api_base, gateway, moved_to });
         }
-        return Err(undiscoverable(
-            &origin,
-            "no usable answer at the seed address",
-        ));
+        return Err(undiscoverable(&origin, "no usable .well-known document or telium.txt pointer"));
     };
-
-    let doc: Value = json_capped(resp, FED_JSON_MAX_BYTES, &origin)
-        .await
-        .map_err(|_| {
-            undiscoverable(
-                &origin,
-                "the seed address answered but not with discovery json that fits",
-            )
-        })?;
     let api_base = doc
         .get("api")
         .and_then(Value::as_str)
