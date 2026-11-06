@@ -101,21 +101,30 @@ async function discoveryJson(base) {
   return JSON.parse(raw);
 }
 
+// Invalid delegation must fail closed with a useful error, rather than being
+// presented as an ordinary network outage.
+class DiscoveryValidationError extends Error {}
+
 // The website only gives a pointer. Load the full live document from the backend.
 function readTxtPointer(text, accountHost) {
   if (typeof text !== 'string' || new TextEncoder().encode(text).byteLength > POINTER_LIMIT) {
-    throw new Error('telium.txt must contain one short line');
+    throw new DiscoveryValidationError('telium.txt must contain one short line');
   }
   const line = text.trim();
-  if (/[\r\n]/.test(line)) throw new Error('telium.txt must contain only one line');
-  if (!line) throw new Error('telium.txt is empty');
-  const target = new URL(/^[a-z]+:\/\//i.test(line) ? line : 'https://' + line);
+  if (/[\r\n]/.test(line)) throw new DiscoveryValidationError('telium.txt must contain only one line');
+  if (!line) throw new DiscoveryValidationError('telium.txt is empty');
+  let target;
+  try {
+    target = new URL(/^[a-z]+:\/\//i.test(line) ? line : 'https://' + line);
+  } catch {
+    throw new DiscoveryValidationError('telium.txt contains an invalid hostname');
+  }
   const host = accountHost.toLowerCase();
   const delegated = target.hostname.toLowerCase();
   if (target.protocol !== 'https:' || target.username || target.password
     || target.pathname !== '/' || target.search || target.hash || target.port
     || !(delegated === host || delegated.endsWith('.' + host))) {
-    throw new Error('telium.txt must point to an HTTPS server on this domain or its subdomain');
+    throw new DiscoveryValidationError('telium.txt must point to an HTTPS server on this domain or its subdomain');
   }
   return target.origin;
 }
@@ -126,10 +135,10 @@ async function txtDiscovery(base) {
   const live = await discoveryJson(target);
   const expected = new URL(base).hostname.toLowerCase();
   if (!live || live.server_name?.toLowerCase() !== expected) {
-    throw new Error('The Telium server at ' + target + ' does not identify itself as ' + expected);
+    throw new DiscoveryValidationError('The Telium server at ' + target + ' does not identify itself as ' + expected);
   }
   if (!live.api || new URL(live.api).origin !== target) {
-    throw new Error('The Telium server at ' + target + ' advertises a different API address');
+    throw new DiscoveryValidationError('The Telium server at ' + target + ' advertises a different API address');
   }
   return live;
 }
@@ -187,6 +196,7 @@ export async function discover(domain) {
       };
     } catch (e) { lastError = e; }
   }
+  if (lastError instanceof DiscoveryValidationError) throw lastError;
   // A status means the server answered; otherwise name the address that failed.
   if (lastError && typeof lastError.status === 'number') throw lastError;
   const unreachable = new Error(`could not reach ${domain}`);
