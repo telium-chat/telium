@@ -446,7 +446,10 @@ export class MeshCall {
         const next = this.ensure(from);
         next.retiredSessions = retired;
         next.pending = waiting;
-        await this.apply(from, next, payload);
+        // The first offer on the replacement must own its inbox before
+        // later candidates arrive, or they can overtake setRemoteDescription.
+        next.inbox = next.inbox.then(() => this.apply(from, next, payload));
+        await next.inbox;
       }
       return;
     }
