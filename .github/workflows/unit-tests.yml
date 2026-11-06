@@ -109,7 +109,7 @@ jobs:
           # this workflow itself deliberately exercises both branches so edits
           # to the gate are validated by the gate.
           grep -qE '^(server|sfu|telium-protocol)/' <<<"$changed" && rust=true
-          grep -qE '^web/'                          <<<"$changed" && web=true
+          grep -qE '^(web/|sdk/bot/js/)'            <<<"$changed" && web=true
           grep -qxF '.github/workflows/unit-tests.yml' <<<"$changed" && { rust=true; web=true; }
 
           echo "rust=$rust" >> "$GITHUB_OUTPUT"
@@ -261,6 +261,9 @@ jobs:
       - name: Unit suite
         working-directory: web
         run: bunx vitest run --maxWorkers=4
+
+      - name: Bot SDK suite
+        run: node --test sdk/bot/js/test/*.test.js
 
   # Keep this job name stable: this is the check branch/ruleset protection
   # should require.
