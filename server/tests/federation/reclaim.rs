@@ -277,6 +277,7 @@ async fn two_operators_reclaiming_the_same_history_do_not_both_get_a_yes() {
 #[tokio::test]
 async fn a_person_asking_for_their_own_move_is_not_put_to_the_back_of_the_queue() {
     let never_answers = a_destination_answering(
+        "dead.test",
         "503 Service Unavailable",
         "{\"error\":\"down\"}",
         "503 Service Unavailable",
@@ -284,7 +285,7 @@ async fn a_person_asking_for_their_own_move_is_not_put_to_the_back_of_the_queue(
     )
     .await;
     let will_not_take_it =
-        a_destination_that_refuses_the_push("503 Service Unavailable", "{\"error\":\"down\"}").await;
+        a_destination_that_refuses_the_push("dead.test", "503 Service Unavailable", "{\"error\":\"down\"}").await;
     for dead in [never_answers, will_not_take_it] {
         let (a, _b) = pair_tuned(0, &|cfg| {
             cfg.federation.peers.insert("dead.test".into(), dead.clone());
@@ -417,6 +418,7 @@ async fn a_sweep_that_is_out_of_time_leaves_the_rest_for_the_next_tick() {
 #[tokio::test]
 async fn a_destination_that_is_down_does_not_get_the_whole_sweep_forever() {
     let never_answers = a_destination_answering(
+        "dead.test",
         "503 Service Unavailable",
         "{\"error\":\"down\"}",
         "503 Service Unavailable",
@@ -424,7 +426,7 @@ async fn a_destination_that_is_down_does_not_get_the_whole_sweep_forever() {
     )
     .await;
     let will_not_take_it =
-        a_destination_that_refuses_the_push("503 Service Unavailable", "{\"error\":\"down\"}").await;
+        a_destination_that_refuses_the_push("dead.test", "503 Service Unavailable", "{\"error\":\"down\"}").await;
     for dead in [never_answers, will_not_take_it] {
         let (a, _b) = pair_tuned(0, &|cfg| {
             cfg.federation.peers.insert("dead.test".into(), dead.clone());
@@ -515,6 +517,7 @@ async fn a_guild_that_moved_is_not_deleted_out_from_under_its_forwarding_address
 #[tokio::test]
 async fn a_bundle_refused_for_its_size_is_not_uploaded_again_every_tick() {
     let strict = a_destination_that_refuses_the_push(
+        "strict.test",
         "413 Payload Too Large",
         "{\"error\":\"too_large\",\"message\":\"federation body is too large\"}",
     )
@@ -553,18 +556,22 @@ async fn a_bundle_refused_for_its_size_is_not_uploaded_again_every_tick() {
 #[tokio::test]
 async fn a_home_that_cannot_answer_is_a_gateway_failure_not_a_refusal() {
     let failing = a_destination_answering(
+        "failing.test",
         "", "", "500 Internal Server Error", "{\"error\":\"internal\",\"message\":\"internal error\"}",
     )
     .await;
     let unavailable = a_destination_answering(
+        "unavailable.test",
         "", "", "503 Service Unavailable", "{\"error\":\"down\",\"message\":\"down for upgrade\"}",
     )
     .await;
     let timing_out = a_destination_answering(
+        "slow.test",
         "", "", "504 Gateway Timeout", "{\"error\":\"gateway_timeout\",\"message\":\"slow\"}",
     )
     .await;
     let refusing = a_destination_answering(
+        "refusing.test",
         "", "", "403 Forbidden", "{\"error\":\"forbidden\",\"message\":\"not for you\"}",
     )
     .await;
