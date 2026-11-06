@@ -6,6 +6,30 @@ use crate::state::AppState;
 use serde_json::Value;
 use std::time::Duration;
 
+// Match the hardened URL fetchers used for embeds/relay: no DNS rebinding to
+// private networks, and the vetted address stays pinned for the actual GET.
+async fn safe_client(state: &AppState, raw: &str) -> Option<reqwest::Client> {
+    if state.cfg.federation.allow_http {
+        return Some(state.http_no_redirect.clone());
+    }
+    let url = reqwest::Url::parse(raw).ok()?;
+    if url.scheme() != "https" { return None; }
+    let host = url.host_str()?;
+    let port = url.port_or_known_default()?;
+    let addresses: Vec<_> = tokio::net::lookup_host((host, port)).await.ok()?.collect();
+    if addresses.is_empty()
+        || addresses.iter().any(|a| crate::federation::embed::is_internal(a.ip())) {
+        return None;
+    }
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .connect_timeout(Duration::from_secs(8))
+        .redirect(reqwest::redirect::Policy::none())
+        .resolve(host, addresses[0])
+        .build().ok()
+}
+
+
 const POINTER_LIMIT: usize = 512;
 
 /// Accept only an HTTPS origin on the identity domain or one of its subdomains.
@@ -57,13 +81,10 @@ pub(crate) async fn discover_through_txt(
     seed: &str,
     identity: &str,
 ) -> Option<Value> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(8))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .ok()?;
-    let mut response = client
-        .get(format!("{seed}/telium.txt"))
+    let pointer_url = format!("{seed}/telium.txt");
+    let pointer_client = safe_client(state, &pointer_url).await?;
+    let mut response = pointer_client
+        .get(&pointer_url)
         .send().await.ok()?;
     if !response.status().is_success() {
         return None;
@@ -83,8 +104,10 @@ pub(crate) async fn discover_through_txt(
         None => parsed.host_str()?.to_string(),
     };
     dialable_server_name(state, &authority).ok()?;
+    let live_url = format!("{target}/.well-known/telium/server");
+    let client = safe_client(state, &live_url).await?;
     let response = client
-        .get(format!("{target}/.well-known/telium/server"))
+        .get(&live_url)
         .send().await.ok()?;
     if !response.status().is_success() {
         return None;
