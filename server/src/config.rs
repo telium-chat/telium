@@ -2258,10 +2258,16 @@ impl Config {
                 target: crate::logcat::STARTUP,
                 "voice: voice.turn_secret is set but no TURN address is configured, so there is                  nothing to hand clients. Set voice.turn to the relay's host:port."
             ),
-            // STUN only: no direct path on symmetric NAT or strict firewalls.
+            // A signed public relay directory is subscribed by default.
+            // Missing self-hosted TURN is not a setup problem in that mode,
+            // though calls explicitly left on mesh can still hit NAT failures.
+            (false, false) if self.voice.directory.is_subscribed() => tracing::info!(
+                target: crate::logcat::STARTUP,
+                "voice: no local TURN relay; the signed public SFU directory is subscribed.                  Guild owners can select a public relay. Mesh-only calls may still fail                  between strict NATs if no relay is selected."
+            ),
             (false, false) => tracing::warn!(
                 target: crate::logcat::STARTUP,
-                "voice: enabled with no TURN relay configured — the connection plan is STUN                  only. Calls between participants whose networks have no direct path will fail                  to connect. To fix, run a TURN relay reachable from the public internet on                  UDP and set voice.turn = \"host:port\" and voice.turn_secret to its shared                  secret. Note a TURN relay needs its own public UDP ports and cannot be                  reached through an HTTP-only ingress such as a Cloudflare Tunnel."
+                "voice: enabled without a TURN relay or a subscribed SFU directory;                  mesh calls use STUN only and may fail across strict NATs. Configure                  [voice.directory] to use signed public relays, or run a local TURN relay."
             ),
         }
 
@@ -2283,11 +2289,19 @@ impl Config {
         }
 
         if self.voice.addressed_regions().next().is_none() {
-            tracing::info!(
-                target: crate::logcat::STARTUP,
-                mesh_max_participants = self.voice.mesh_max_participants,
-                "voice: no SFU regions configured; calls run peer-to-peer in mesh mode"
-            );
+            if self.voice.directory.is_subscribed() {
+                tracing::info!(
+                    target: crate::logcat::STARTUP,
+                    mesh_max_participants = self.voice.mesh_max_participants,
+                    "voice: no self-hosted SFU regions configured; public signed relay directory                      is subscribed and guilds may select relays from it; mesh remains the fallback"
+                );
+            } else {
+                tracing::info!(
+                    target: crate::logcat::STARTUP,
+                    mesh_max_participants = self.voice.mesh_max_participants,
+                    "voice: no SFU regions or subscribed directory; calls use peer-to-peer mesh"
+                );
+            }
         }
 
         // A subscribed directory that cannot be trusted is silent to the operator
