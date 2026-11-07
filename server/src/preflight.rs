@@ -450,20 +450,18 @@ pub fn audit(cfg: &Config, config_path: Option<&Path>) -> Audit {
         });
     }
 
-    if cfg.updates.check && cfg.updates.manifest_public_key.trim().is_empty() {
+    if cfg.updates.check && cfg.updates.manifest_verification_key().is_empty() {
         f.push(Finding {
             key: "updates.manifest_public_key".into(),
-            level: Level::Notice,
-            exposes: "update checks are on and no release signing key is pinned, so the manifest \
-                      is trusted because of where it was fetched from and nothing else. Whoever \
-                      can answer for `updates.manifest_url` -- the host, a proxy, anyone holding \
-                      a certificate for it -- can tell this server that a version it is missing \
-                      does not exist."
+            level: if prod { Level::Warn } else { Level::Notice },
+            exposes: "this build has no embedded release publisher key and no configured \
+                      verification key. Update metadata is therefore trusted only through its \
+                      transport: a substituted release list could hide security updates."
                 .into(),
-            remedy: "pin the project's release signing key in `updates.manifest_public_key` once \
-                     one is published. There is no key to pin yet, so today the honest options \
-                     are to leave this as it is and read release announcements yourself, or set \
-                     `updates.check = false` and decide when to look."
+            remedy: "use an official Telium server release, which embeds the project's public \
+                     verification key, or pin a trusted Ed25519 key in \
+                     `updates.manifest_public_key` for your custom release feed. Do not disable \
+                     update checks to silence this notice."
                 .into(),
         });
     }
@@ -797,6 +795,19 @@ mod tests {
 
     fn has(audit: &Audit, key: &str) -> bool {
         audit.findings.iter().any(|f| f.key == key)
+    }
+
+    #[test]
+    fn update_audit_checks_the_effective_publisher_key() {
+        let mut cfg = production();
+        cfg.updates.check = true;
+        cfg.updates.manifest_public_key = "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ".into();
+        assert!(!has(&audit(&cfg, None), "updates.manifest_public_key"));
+        cfg.updates.manifest_public_key.clear();
+        assert_eq!(
+            has(&audit(&cfg, None), "updates.manifest_public_key"),
+            option_env!("TELIUM_RELEASE_PUBLIC_KEY").unwrap_or("").is_empty()
+        );
     }
 
     #[test]

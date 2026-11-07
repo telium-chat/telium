@@ -619,7 +619,8 @@ pub struct Updates {
     pub stale_after_days: i64,
     #[serde(deserialize_with = "de_days")]
     pub urgent_after_days: i64,
-    /// Ed25519 manifest-signing key, url-safe base64; empty means unchecked. Never compiled in.
+    /// Optional Ed25519 publisher-key override, url-safe base64.
+    /// Empty uses the public key embedded in official builds, when available.
     pub manifest_public_key: String,
     /// Where the detached signature lives. Empty means `manifest_url` + `.sig`.
     pub manifest_signature_url: String,
@@ -639,6 +640,22 @@ impl Default for Updates {
             manifest_public_key: String::new(),
             manifest_signature_url: String::new(),
         }
+    }
+}
+
+impl Updates {
+    /// Even a legacy config with an explicit empty pin must not disable
+    /// signature verification in an official binary with the publisher key.
+    pub fn manifest_verification_key(&self) -> &str {
+        Self::select_manifest_verification_key(
+            &self.manifest_public_key,
+            option_env!("TELIUM_RELEASE_PUBLIC_KEY").unwrap_or(""),
+        )
+    }
+
+    fn select_manifest_verification_key<'a>(configured: &'a str, embedded: &'a str) -> &'a str {
+        let configured = configured.trim();
+        if configured.is_empty() { embedded.trim() } else { configured }
     }
 }
 
@@ -2023,16 +2040,17 @@ impl Config {
         }
 
         // Malformed key would make every signature check look like a bad project signature.
-        if !self.updates.manifest_public_key.is_empty() {
+        if !self.updates.manifest_verification_key().is_empty() {
             // Decoded with the verifier's own function so we can't accept a key it rejects.
-            let decoded = telium_protocol::unb64(self.updates.manifest_public_key.trim())
+            let decoded = telium_protocol::unb64(self.updates.manifest_verification_key())
                 .ok_or_else(|| {
                     anyhow::anyhow!(
                         "updates.manifest_public_key is set but is not url-safe unpadded \
                          base64, which is the form the project publishes its release key in. \
                          If what you pasted ends in `=` or contains `+` or `/`, it is the other \
                          base64 alphabet and this server will never decode it. Leave the key \
-                         empty to check release metadata against nothing but its transport."
+                         empty to use the release publisher key embedded in official builds, or pin \
+                          a trusted key for a custom release feed."
                     )
                 })?;
             if decoded.len() != 32 {
@@ -2317,7 +2335,19 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+    use super::{Config, Updates};
+
+    #[test]
+    fn embedded_release_key_survives_an_explicitly_empty_legacy_config() {
+        const PUBLISHER: &str = "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ";
+        const CUSTOM: &str = "q5M19W4np1LWuuCgHh1Fsl8A3HSoF_r7b17zK1z-Fas";
+        assert_eq!(Updates::select_manifest_verification_key("", PUBLISHER), PUBLISHER);
+        assert_eq!(Updates::select_manifest_verification_key("  ", PUBLISHER), PUBLISHER);
+        assert_eq!(Updates::select_manifest_verification_key(CUSTOM, PUBLISHER), CUSTOM);
+        assert_eq!(Updates::select_manifest_verification_key("", ""), "");
+        let old: Updates = toml::from_str(r#"manifest_public_key = """#).unwrap();
+        assert_eq!(old.manifest_verification_key(), option_env!("TELIUM_RELEASE_PUBLIC_KEY").unwrap_or(""));
+    }
 
     #[test]
     fn sizes_take_human_strings() {
