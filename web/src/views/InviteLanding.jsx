@@ -535,11 +535,11 @@ export function InviteLanding({
 
             {mode === 'register' ? (
               <TextInput
-                label="Registration code (for private homeservers)"
+                label={t('auth.password.registrationCodeLabel')}
                 autoComplete="off"
                 value={registrationCode}
-                placeholder="Paste a registration code if required"
-                hint="Private homeservers issue admission codes. Leave empty for public signup."
+                placeholder={t('auth.password.registrationCodePlaceholder')}
+                hint={t('auth.password.registrationCodeHint')}
                 onChange={(e) => setRegistrationCode(e.target.value)}
               />
             ) : null}

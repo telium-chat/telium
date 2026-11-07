@@ -1266,11 +1266,11 @@ export function LoginView({
           />
           {registering ? (
             <TextInput
-              label="Registration code (private homeservers only)"
+              label={t('auth.password.registrationCodeLabel')}
               autoComplete="off"
               value={registrationCode}
-              placeholder="Paste your registration code"
-              hint="Public homeservers do not require a code. The server owner provides a code when signup is private."
+              placeholder={t('auth.password.registrationCodePlaceholder')}
+              hint={t('auth.password.registrationCodeHint')}
               onChange={(e) => setRegistrationCode(e.target.value)}
             />
           ) : null}
