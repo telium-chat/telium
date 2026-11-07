@@ -274,19 +274,40 @@ pub fn audit(cfg: &Config, config_path: Option<&Path>) -> Audit {
         });
     }
 
-    if prod && cfg.registration.open && cfg.registration.admins.is_empty() {
+    if prod && cfg.registration.open && cfg.registration.first_account_is_admin {
         f.push(Finding {
             key: "registration.open".into(),
             level: Level::Danger,
-            exposes: "registration is open and no administrator localparts are named, so the \
-                      first account anybody creates on this server becomes its administrator. \
-                      Between this process binding and the operator signing up, that is a race \
-                      a stranger can win, and the winner can read, moderate and delete \
-                      everything."
+            exposes: "public registration will automatically promote the first signup to \
+                      administrator, so a stranger can seize server control before its operator \
+                      registers. Named administrator usernames do not prevent that race."
                 .into(),
-            remedy: "name the administrators up front -- `registration.admins = [\"you\"]` -- or \
-                     close registration (`registration.open = false`), create your account, and \
-                     reopen it."
+            remedy: "set `registration.first_account_is_admin = false`, then grant the server \
+                     owner administrator access locally with `telium-server admin recover` \
+                     after they create an account. The native installer does this automatically."
+                .into(),
+        });
+    } else if prod && cfg.registration.open && !cfg.registration.admins.is_empty() {
+        f.push(Finding {
+            key: "registration.admins".into(),
+            level: Level::Danger,
+            exposes: "anyone who registers a listed administrator username becomes an admin, \
+                      without proving that they are the person operating this machine."
+                .into(),
+            remedy: "remove the names from `registration.admins` and grant admin access \
+                     locally with `telium-server admin recover` after account creation."
+                .into(),
+        });
+    } else if prod && cfg.registration.open {
+        f.push(Finding {
+            key: "registration.open".into(),
+            level: Level::Warn,
+            exposes: "any visitor can create an account, consuming storage and bandwidth. \
+                      This is an intentional choice for a public homeserver; no account \
+                      automatically becomes an administrator."
+                .into(),
+            remedy: "leave `registration.open = true` for public signup, or set it false to \
+                     stop new registrations. Private invite-code signup is not implemented yet."
                 .into(),
         });
     }
@@ -450,20 +471,18 @@ pub fn audit(cfg: &Config, config_path: Option<&Path>) -> Audit {
         });
     }
 
-    if cfg.updates.check && cfg.updates.manifest_public_key.trim().is_empty() {
+    if cfg.updates.check && cfg.updates.manifest_verification_key().is_empty() {
         f.push(Finding {
             key: "updates.manifest_public_key".into(),
-            level: Level::Notice,
-            exposes: "update checks are on and no release signing key is pinned, so the manifest \
-                      is trusted because of where it was fetched from and nothing else. Whoever \
-                      can answer for `updates.manifest_url` -- the host, a proxy, anyone holding \
-                      a certificate for it -- can tell this server that a version it is missing \
-                      does not exist."
+            level: if prod { Level::Warn } else { Level::Notice },
+            exposes: "this build has no embedded release publisher key and no configured \
+                      verification key. Update metadata is therefore trusted only through its \
+                      transport: a substituted release list could hide security updates."
                 .into(),
-            remedy: "pin the project's release signing key in `updates.manifest_public_key` once \
-                     one is published. There is no key to pin yet, so today the honest options \
-                     are to leave this as it is and read release announcements yourself, or set \
-                     `updates.check = false` and decide when to look."
+            remedy: "use an official Telium server release, which embeds the project's public \
+                     verification key, or pin a trusted Ed25519 key in \
+                     `updates.manifest_public_key` for your custom release feed. Do not disable \
+                     update checks to silence this notice."
                 .into(),
         });
     }
@@ -789,7 +808,8 @@ mod tests {
             bind: "127.0.0.1:8448".into(),
             ..Default::default()
         };
-        cfg.registration.admins = vec!["operator".into()];
+        cfg.registration.first_account_is_admin = false;
+        cfg.registration.admins.clear();
         (cfg.backup.remote.enabled, cfg.backup.remote.bucket) = (true, "b".into());
         cfg.web.client_url = Some("https://telium.example".into());
         cfg
@@ -797,6 +817,37 @@ mod tests {
 
     fn has(audit: &Audit, key: &str) -> bool {
         audit.findings.iter().any(|f| f.key == key)
+    }
+
+    #[test]
+    fn public_registration_is_only_a_warning_when_first_signup_is_not_admin() {
+        let mut cfg = production();
+        let findings = audit(&cfg, None);
+        assert!(findings.findings.iter().any(|f| f.key == "registration.open" && f.level == Level::Warn));
+        assert_eq!(findings.dangers(), 0);
+
+        cfg.registration.first_account_is_admin = true;
+        assert!(audit(&cfg, None).findings.iter().any(|f| f.key == "registration.open" && f.level == Level::Danger));
+        cfg.registration.first_account_is_admin = false;
+        cfg.registration.admins.push("operator".into());
+        assert!(audit(&cfg, None).findings.iter().any(|f| f.key == "registration.admins" && f.level == Level::Danger));
+
+        cfg.registration.admins.clear();
+        cfg.registration.open = false;
+        assert!(!has(&audit(&cfg, None), "registration.open"));
+    }
+
+    #[test]
+    fn update_audit_checks_the_effective_publisher_key() {
+        let mut cfg = production();
+        cfg.updates.check = true;
+        cfg.updates.manifest_public_key = "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ".into();
+        assert!(!has(&audit(&cfg, None), "updates.manifest_public_key"));
+        cfg.updates.manifest_public_key.clear();
+        assert_eq!(
+            has(&audit(&cfg, None), "updates.manifest_public_key"),
+            option_env!("TELIUM_RELEASE_PUBLIC_KEY").unwrap_or("").is_empty()
+        );
     }
 
     #[test]
@@ -830,7 +881,7 @@ mod tests {
     fn each_rule_fires_and_its_fix_clears_it() {
         type Tweak = fn(&mut Config);
         let cases: &[(&str, Tweak, Option<Tweak>)] = &[
-            ("registration.open", |c| { c.registration.open = true; c.registration.admins.clear() }, Some(|c| c.registration.admins = vec!["op".into()])),
+            ("registration.open", |c| { c.registration.open = true; c.registration.admins.clear() }, Some(|c| c.registration.open = false)),
             ("push.fcm.base_url", |c| c.push.fcm.base_url = Some("https://fcm.staging.example".into()), Some(|c| c.push.fcm.base_url = None)),
             ("public_base_url", |c| c.public_base_url = "http://telium.example".into(), None),
             ("server_name", |c| c.server_name = "localhost".into(), None),

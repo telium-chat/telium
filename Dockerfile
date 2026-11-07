@@ -64,9 +64,12 @@ COPY server/ server/
 ARG TELIUM_BUILD_COMMIT=""
 ARG TELIUM_BUILD_COMMIT_TIME=""
 ARG TELIUM_BUILD_TIME=""
+# Public verification key only; the release signing secret is never copied.
+ARG TELIUM_RELEASE_PUBLIC_KEY=""
 ENV TELIUM_BUILD_COMMIT=$TELIUM_BUILD_COMMIT \
     TELIUM_BUILD_COMMIT_TIME=$TELIUM_BUILD_COMMIT_TIME \
-    TELIUM_BUILD_TIME=$TELIUM_BUILD_TIME
+    TELIUM_BUILD_TIME=$TELIUM_BUILD_TIME \
+    TELIUM_RELEASE_PUBLIC_KEY=$TELIUM_RELEASE_PUBLIC_KEY
 
 # The target directory and the crate registry are cache mounts rather than
 # image layers. A layer cache is keyed on the COPY above, so touching one file

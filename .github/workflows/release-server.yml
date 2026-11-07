@@ -148,6 +148,29 @@ jobs:
         with:
           node-version: 22
 
+      # Verify the release signer before building or publishing anything.
+      # Keep the private seed out of the binary, image and command line.
+      - name: Require a valid release signing key
+        env:
+          TELIUM_RELEASE_SIGNING_KEY: ${{ secrets.TELIUM_RELEASE_SIGNING_KEY }}
+          TELIUM_RELEASE_PUBLIC_KEY: ${{ vars.TELIUM_RELEASE_PUBLIC_KEY }}
+          TELIUM_RELEASE_KEY_ID: ${{ vars.TELIUM_RELEASE_KEY_ID }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { assertPublicKeyMatchesSeed } from './scripts/sign-release-manifest.mjs'
+          const seed = process.env.TELIUM_RELEASE_SIGNING_KEY
+          const key = process.env.TELIUM_RELEASE_PUBLIC_KEY
+          const id = process.env.TELIUM_RELEASE_KEY_ID
+          if (!seed || !key || !id) {
+            throw new Error('Server releases require signing seed, public key and key ID in GitHub Actions')
+          }
+          assertPublicKeyMatchesSeed(seed, key)
+          if (id !== 'ed25519:release-manifest:' + key.slice(0, 10)) {
+            throw new Error('Release key ID does not match the public signing key')
+          }
+          NODE
+
       # The publisher is ordinary code in this repository, so it gets the same
       # treatment as any other: its decisions are tested, and the test runs here
       # because this workflow is the thing that runs it. A version compared as a
@@ -447,6 +470,7 @@ jobs:
             TELIUM_BUILD_COMMIT=${{ needs.validate.outputs.commit }}
             TELIUM_BUILD_COMMIT_TIME=${{ needs.validate.outputs.commit_time }}
             TELIUM_BUILD_TIME=${{ steps.build-id.outputs.build_time }}
+            TELIUM_RELEASE_PUBLIC_KEY=${{ vars.TELIUM_RELEASE_PUBLIC_KEY }}
           # The Rust dependency tree is the expensive half of this build and it
           # changes only when a lockfile does.
           cache-from: type=gha
@@ -671,6 +695,7 @@ jobs:
         env:
           COMMIT: ${{ needs.validate.outputs.commit }}
           COMMIT_TIME: ${{ needs.validate.outputs.commit_time }}
+          RELEASE_PUBLIC_KEY: ${{ vars.TELIUM_RELEASE_PUBLIC_KEY }}
           ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
@@ -690,6 +715,7 @@ jobs:
             -e TELIUM_BUILD_COMMIT="$COMMIT" \
             -e TELIUM_BUILD_COMMIT_TIME="$COMMIT_TIME" \
             -e TELIUM_BUILD_TIME="$BUILD_TIME" \
+            -e TELIUM_RELEASE_PUBLIC_KEY="$RELEASE_PUBLIC_KEY" \
             -e NATIVE_ARCH="$ARCH" \
             -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
             -e CARGO_TARGET_DIR=/target \
@@ -1183,7 +1209,7 @@ jobs:
       # It signs after the manifest is written and before it is committed, so
       # the signature covers the bytes that actually land on `main`.
       - name: Sign the release manifest
-        if: steps.record.outputs.changed == 'true' && vars.RELEASE_SIGNING_ENABLED == 'true'
+        if: steps.record.outputs.changed == 'true'
         env:
           # The seed never reaches a command line -- argv is readable by every
           # other process on the machine. It goes into the environment of one
@@ -1193,21 +1219,14 @@ jobs:
           TELIUM_RELEASE_KEY_ID: ${{ vars.TELIUM_RELEASE_KEY_ID }}
         run: node scripts/sign-release-manifest.mjs sign deploy/releases.json
 
-      # A signature covers the exact bytes of the manifest. If signing is off and
-      # the manifest changed, the `.sig` committed with the previous release now
-      # covers different bytes -- and a server that pinned the public key would
-      # refuse the new manifest as `unverified`, which is fail-closed but stops
-      # every pinned box from updating. Committing no signature is honest;
-      # committing a stale one is a lie the verifier will catch. So the stale
-      # file is removed here, and the commit step stages the deletion.
-      - name: Drop a signature this change would invalidate
-        if: steps.record.outputs.changed == 'true' && vars.RELEASE_SIGNING_ENABLED != 'true'
+      # Verify even an existing signature during a re-dispatch. No unsigned or
+      # incorrectly signed release manifest can be committed to the channel.
+      - name: Verify the signed release manifest
+        if: inputs.dry_run != true
+        env:
+          TELIUM_RELEASE_PUBLIC_KEY: ${{ vars.TELIUM_RELEASE_PUBLIC_KEY }}
         run: |
-          set -euo pipefail
-          if [ -f deploy/releases.json.sig ]; then
-            rm -f deploy/releases.json.sig
-            echo "removed the stale deploy/releases.json.sig; this manifest is published unsigned"
-          fi
+          node scripts/sign-release-manifest.mjs verify deploy/releases.json deploy/releases.json.sig "$TELIUM_RELEASE_PUBLIC_KEY"
 
       - name: Commit the release record
         if: steps.record.outputs.changed == 'true'
@@ -1216,10 +1235,7 @@ jobs:
           COMMIT: ${{ needs.validate.outputs.commit }}
         run: |
           set -euo pipefail
-          # `-A` so a signature the step above removed is staged as a deletion.
-          # Each path is passed only when git knows about it, because `git add`
-          # on a path that is neither present nor tracked fails the step
-          # outright -- which is exactly the state signing-off leaves behind.
+          # Stage only the manifest and its signature, never build artifacts.
           paths=()
           for p in deploy/releases.json deploy/releases.json.sig; do
             if [ -e "$p" ] || git ls-files --error-unmatch -- "$p" >/dev/null 2>&1; then

@@ -348,19 +348,17 @@ pub const INVENTORY: &[SecretEntry] = &[
         protects: "the release manifest an operator checks for updates against",
         home: Home::Elsewhere("updates.manifest_public_key pins the public half; the private \
                                half is never held by a homeserver"),
-        if_lost: "no homeserver is affected. The project cannot sign a new manifest until a new \
-                  key is minted and published, and every operator who pinned the old one must \
-                  repin",
+        if_lost: "existing homeservers keep trusting their embedded key. The project cannot sign a \
+                  new release list until signing is restored; rotating it without a transition \
+                  would leave existing official binaries unable to verify updates",
         if_disclosed: "the holder can sign release metadata that pinned servers accept, telling \
                        them a compromised build is current or that a security release does not \
                        exist",
         rotation: Rotation::Outage,
-        how_to_rotate: "Not an operation a homeserver performs. An operator's part is to repin \
-                        `updates.manifest_public_key` when the project publishes a new key. Note \
-                        that the private half does not exist yet: minting it is a human \
-                        decision outside this repository, and until it is taken an empty pin is \
-                        the honest state rather than a downgrade -- `preflight` reports it as a \
-                        configuration state on every start so it is never a silent disable.",
+        how_to_rotate: "This is a project release operation, not a homeserver operation. \
+                        Official server builds embed the public verification key, so the \
+                        project must arrange a trusted key transition before switching the \
+                        release signer: older binaries otherwise reject the new manifest.",
     },
     SecretEntry {
         heading: "SFU LiveKit API key and secret",

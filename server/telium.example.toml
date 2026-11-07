@@ -299,14 +299,18 @@ key_file = "mfa.key"
 recovery_delay_secs = "1d"
 
 [registration]
-# Whether anybody may create an account. With `admins` empty, the first
-# account registered becomes the administrator; close registration once yours
-# exists.
+# Open registration is fine for public homeservers, but anyone can register
+# and consume resources. When false, ALL new signups are blocked; invite codes
+# for private servers are not implemented yet.
 open = true
+# Legacy first-account auto-admin behavior. DISABLE on public homeservers:
+# the first signup could belong to a stranger. The native installer sets false
+# and has the machine operator grant admin locally after registering.
+first_account_is_admin = true
 # Shortest password accepted.
 min_password_len = 8
-# Account localparts granted admin when they register. Empty means the first
-# account becomes the administrator.
+# Legacy admin localpart grants; unsafe with untrusted open registration because
+# outsiders could claim these usernames. Prefer local 'admin recover'.
 admins = []
 
 # Two questions about distributed account-home onboarding that look alike and
@@ -846,10 +850,12 @@ timeout_secs = "10s"
 # security-relevant has been missed, it is impossible to overlook.
 stale_after_days = "2w"
 urgent_after_days = "45d"
-# Ed25519 public key (url-safe base64) that must have signed the manifest;
-# empty means the manifest is trusted only as far as its transport. The key is
-# never compiled in, so verifying releases is always this server's own choice.
-# manifest_public_key = "base64-ed25519-public-key"
+# Official Telium releases embed the publisher's Ed25519 verification key:
+# update manifests are signature-checked automatically, without configuration.
+# Even an old config that sets this value to "" uses that embedded key.
+# Override only when you intentionally trust a different release publisher,
+# such as a custom release feed. Never paste the private signing key here.
+# manifest_public_key = "url-safe-base64-ed25519-public-key"
 # Where the detached signature lives; empty means manifest_url + ".sig".
 # manifest_signature_url = "https://example.com/releases.json.sig"
 

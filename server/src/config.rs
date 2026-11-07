@@ -619,7 +619,8 @@ pub struct Updates {
     pub stale_after_days: i64,
     #[serde(deserialize_with = "de_days")]
     pub urgent_after_days: i64,
-    /// Ed25519 manifest-signing key, url-safe base64; empty means unchecked. Never compiled in.
+    /// Optional Ed25519 publisher-key override, url-safe base64.
+    /// Empty uses the public key embedded in official builds, when available.
     pub manifest_public_key: String,
     /// Where the detached signature lives. Empty means `manifest_url` + `.sig`.
     pub manifest_signature_url: String,
@@ -639,6 +640,22 @@ impl Default for Updates {
             manifest_public_key: String::new(),
             manifest_signature_url: String::new(),
         }
+    }
+}
+
+impl Updates {
+    /// Even a legacy config with an explicit empty pin must not disable
+    /// signature verification in an official binary with the publisher key.
+    pub fn manifest_verification_key(&self) -> &str {
+        Self::select_manifest_verification_key(
+            &self.manifest_public_key,
+            option_env!("TELIUM_RELEASE_PUBLIC_KEY").unwrap_or(""),
+        )
+    }
+
+    fn select_manifest_verification_key<'a>(configured: &'a str, embedded: &'a str) -> &'a str {
+        let configured = configured.trim();
+        if configured.is_empty() { embedded.trim() } else { configured }
     }
 }
 
@@ -1118,10 +1135,21 @@ pub struct Sessions {
 pub struct Registration {
     pub open: bool,
     pub min_password_len: usize,
-    /// Localparts granted admin on registration; empty means the first account is admin.
+    /// Legacy first-account auto-admin; disable for public signup on native installs.
+    pub first_account_is_admin: bool,
+    /// Legacy localpart-based admin grants; avoid on untrusted public registration.
     pub admins: Vec<String>,
     /// Also needs the registry to opt this domain in.
     pub recommendations: RecommendationParticipation,
+}
+
+impl Registration {
+    /// Shared policy for OPAQUE and legacy registration. Native installs
+    /// disable auto-administration and grant server access locally instead.
+    pub fn grants_admin_on_signup(&self, localpart: &str, existing_accounts: i64) -> bool {
+        (self.first_account_is_admin && existing_accounts == 0)
+            || self.admins.iter().any(|a| a.eq_ignore_ascii_case(localpart))
+    }
 }
 
 /// Distributed account-home onboarding; the site generator clamps `referral_weight`.
@@ -1854,6 +1882,7 @@ impl Default for Registration {
         Self {
             open: true,
             min_password_len: 8,
+            first_account_is_admin: true, // legacy deployments keep their existing behavior
             admins: Vec::new(),
             recommendations: RecommendationParticipation::default(),
         }
@@ -2023,16 +2052,17 @@ impl Config {
         }
 
         // Malformed key would make every signature check look like a bad project signature.
-        if !self.updates.manifest_public_key.is_empty() {
+        if !self.updates.manifest_verification_key().is_empty() {
             // Decoded with the verifier's own function so we can't accept a key it rejects.
-            let decoded = telium_protocol::unb64(self.updates.manifest_public_key.trim())
+            let decoded = telium_protocol::unb64(self.updates.manifest_verification_key())
                 .ok_or_else(|| {
                     anyhow::anyhow!(
                         "updates.manifest_public_key is set but is not url-safe unpadded \
                          base64, which is the form the project publishes its release key in. \
                          If what you pasted ends in `=` or contains `+` or `/`, it is the other \
                          base64 alphabet and this server will never decode it. Leave the key \
-                         empty to check release metadata against nothing but its transport."
+                         empty to use the release publisher key embedded in official builds, or pin \
+                          a trusted key for a custom release feed."
                     )
                 })?;
             if decoded.len() != 32 {
@@ -2228,10 +2258,16 @@ impl Config {
                 target: crate::logcat::STARTUP,
                 "voice: voice.turn_secret is set but no TURN address is configured, so there is                  nothing to hand clients. Set voice.turn to the relay's host:port."
             ),
-            // STUN only: no direct path on symmetric NAT or strict firewalls.
+            // A signed public relay directory is subscribed by default.
+            // Missing self-hosted TURN is not a setup problem in that mode,
+            // though calls explicitly left on mesh can still hit NAT failures.
+            (false, false) if self.voice.directory.is_subscribed() => tracing::info!(
+                target: crate::logcat::STARTUP,
+                "voice: no local TURN relay; the signed public SFU directory is subscribed.                  Guild owners can select a public relay. Mesh-only calls may still fail                  between strict NATs if no relay is selected."
+            ),
             (false, false) => tracing::warn!(
                 target: crate::logcat::STARTUP,
-                "voice: enabled with no TURN relay configured — the connection plan is STUN                  only. Calls between participants whose networks have no direct path will fail                  to connect. To fix, run a TURN relay reachable from the public internet on                  UDP and set voice.turn = \"host:port\" and voice.turn_secret to its shared                  secret. Note a TURN relay needs its own public UDP ports and cannot be                  reached through an HTTP-only ingress such as a Cloudflare Tunnel."
+                "voice: enabled without a TURN relay or a subscribed SFU directory;                  mesh calls use STUN only and may fail across strict NATs. Configure                  [voice.directory] to use signed public relays, or run a local TURN relay."
             ),
         }
 
@@ -2253,11 +2289,19 @@ impl Config {
         }
 
         if self.voice.addressed_regions().next().is_none() {
-            tracing::info!(
-                target: crate::logcat::STARTUP,
-                mesh_max_participants = self.voice.mesh_max_participants,
-                "voice: no SFU regions configured; calls run peer-to-peer in mesh mode"
-            );
+            if self.voice.directory.is_subscribed() {
+                tracing::info!(
+                    target: crate::logcat::STARTUP,
+                    mesh_max_participants = self.voice.mesh_max_participants,
+                    "voice: no self-hosted SFU regions configured; public signed relay directory                      is subscribed and guilds may select relays from it; mesh remains the fallback"
+                );
+            } else {
+                tracing::info!(
+                    target: crate::logcat::STARTUP,
+                    mesh_max_participants = self.voice.mesh_max_participants,
+                    "voice: no SFU regions or subscribed directory; calls use peer-to-peer mesh"
+                );
+            }
         }
 
         // A subscribed directory that cannot be trusted is silent to the operator
@@ -2317,7 +2361,34 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+    use super::{Config, Updates};
+
+    #[test]
+    fn embedded_release_key_survives_an_explicitly_empty_legacy_config() {
+        const PUBLISHER: &str = "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ";
+        const CUSTOM: &str = "q5M19W4np1LWuuCgHh1Fsl8A3HSoF_r7b17zK1z-Fas";
+        assert_eq!(Updates::select_manifest_verification_key("", PUBLISHER), PUBLISHER);
+        assert_eq!(Updates::select_manifest_verification_key("  ", PUBLISHER), PUBLISHER);
+        assert_eq!(Updates::select_manifest_verification_key(CUSTOM, PUBLISHER), CUSTOM);
+        assert_eq!(Updates::select_manifest_verification_key("", ""), "");
+        let old: Updates = toml::from_str(r#"manifest_public_key = """#).unwrap();
+        assert_eq!(old.manifest_verification_key(), option_env!("TELIUM_RELEASE_PUBLIC_KEY").unwrap_or(""));
+    }
+
+    #[test]
+    fn native_install_signup_does_not_auto_assign_administrator_privileges() {
+        let mut registration = super::Registration::default();
+        assert!(registration.grants_admin_on_signup("stranger", 0), "legacy compatibility");
+        registration.first_account_is_admin = false;
+        assert!(!registration.grants_admin_on_signup("stranger", 0));
+        assert!(!registration.grants_admin_on_signup("stranger", 10));
+        registration.admins.push("operator".into());
+        assert!(!registration.grants_admin_on_signup("stranger", 0));
+        assert!(registration.grants_admin_on_signup("OPERATOR", 0));
+        let native: super::Registration =
+            toml::from_str("open = true\nfirst_account_is_admin = false\n").unwrap();
+        assert!(!native.grants_admin_on_signup("stranger", 0));
+    }
 
     #[test]
     fn sizes_take_human_strings() {

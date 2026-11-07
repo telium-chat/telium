@@ -33,6 +33,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=TELIUM_BUILD_COMMIT");
     println!("cargo:rerun-if-env-changed=TELIUM_BUILD_COMMIT_TIME");
     println!("cargo:rerun-if-env-changed=TELIUM_BUILD_TIME");
+    println!("cargo:rerun-if-env-changed=TELIUM_RELEASE_PUBLIC_KEY");
     for path in ["../.git/HEAD", "../.git/refs/heads/main"] {
         if std::path::Path::new(path).exists() {
             println!("cargo:rerun-if-changed={path}");
@@ -70,6 +71,9 @@ fn main() {
     println!("cargo:rustc-env=TELIUM_BUILD_COMMIT={commit}");
     println!("cargo:rustc-env=TELIUM_BUILD_COMMIT_TIME={commit_time}");
     println!("cargo:rustc-env=TELIUM_BUILD_TIME={build_time}");
+    // Official builds embed the public verification key, not the private signer.
+    let release_public_key = from_env("TELIUM_RELEASE_PUBLIC_KEY").unwrap_or_default();
+    println!("cargo:rustc-env=TELIUM_RELEASE_PUBLIC_KEY={release_public_key}");
 }
 
 /// An environment variable that is set but empty is the same as unset here: CI
