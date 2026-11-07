@@ -881,7 +881,7 @@ mod tests {
     fn each_rule_fires_and_its_fix_clears_it() {
         type Tweak = fn(&mut Config);
         let cases: &[(&str, Tweak, Option<Tweak>)] = &[
-            ("registration.open", |c| { c.registration.open = true; c.registration.admins.clear() }, Some(|c| c.registration.admins = vec!["op".into()])),
+            ("registration.open", |c| { c.registration.open = true; c.registration.admins.clear() }, Some(|c| c.registration.open = false)),
             ("push.fcm.base_url", |c| c.push.fcm.base_url = Some("https://fcm.staging.example".into()), Some(|c| c.push.fcm.base_url = None)),
             ("public_base_url", |c| c.public_base_url = "http://telium.example".into(), None),
             ("server_name", |c| c.server_name = "localhost".into(), None),
