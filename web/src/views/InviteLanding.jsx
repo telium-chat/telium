@@ -46,7 +46,7 @@ async function resolveHomeServer(raw, { registering, t }) {
       }).capabilities();
       const name = directCaps.server_name || prettyHost(typed);
       if (!directCaps.roles?.identity) throw homeRefusal(t, 'onboarding.invite.noIdentityRole', { name });
-      if (registering && !directCaps.registration_open) {
+      if (registering && !directCaps.registration_open && !directCaps.registration_codes_supported) {
         throw homeRefusal(t, 'onboarding.invite.registrationClosed', { name });
       }
       return { api: directBase, server_name: name, caps: directCaps };
@@ -64,7 +64,7 @@ async function resolveHomeServer(raw, { registering, t }) {
   if (!caps.roles?.identity) {
     throw homeRefusal(t, 'onboarding.invite.noIdentityRole', { name });
   }
-  if (registering && !caps.registration_open) {
+  if (registering && !caps.registration_open && !caps.registration_codes_supported) {
     throw homeRefusal(t, 'onboarding.invite.registrationClosed', { name });
   }
   return { ...doc, api: apiBase, caps };
@@ -87,6 +87,7 @@ export function InviteLanding({
   const [displayName, setDisplayName] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [registrationCode, setRegistrationCode] = useState('');
   const [mfaCode, setMfaCode] = useState('');
   const [requiresMfa, setRequiresMfa] = useState(false);
   const [legacyAuth, setLegacyAuth] = useState(null);
@@ -251,6 +252,7 @@ export function InviteLanding({
       sessionStorage.setItem('telium.lastHome', home.api);
       const auth = await store.signIn(home.api, username.trim(), password, {
         register: registering,
+        registrationCode: registering ? registrationCode.trim() : null,
         mfaCode: requiresMfa ? mfaCode.trim() : null,
         allowLegacyAuth,
       });
@@ -530,6 +532,17 @@ export function InviteLanding({
                 setLegacyApproved(false);
               }}
             />
+
+            {mode === 'register' ? (
+              <TextInput
+                label="Registration code (for private homeservers)"
+                autoComplete="off"
+                value={registrationCode}
+                placeholder="Paste a registration code if required"
+                hint="Private homeservers issue admission codes. Leave empty for public signup."
+                onChange={(e) => setRegistrationCode(e.target.value)}
+              />
+            ) : null}
 
             <PasswordInput
               label={t('common.password')}

@@ -10,6 +10,7 @@ import { useStepUp } from './StepUp.jsx';
 import { OverviewPane } from './OverviewPane.jsx';
 import { StatisticsPane } from './StatisticsPane.jsx';
 import { AccountsPane } from './AccountsPane.jsx';
+import { RegistrationCodesPane } from './RegistrationCodesPane.jsx';
 import { GuildsPane } from './GuildsPane.jsx';
 import { ModerationPane } from './ModerationPane.jsx';
 import { FederationPane } from './FederationPane.jsx';
@@ -63,6 +64,14 @@ const PANES = {
     icon: MembersIcon,
     wide: true,
     keywords: ['users', 'people', 'suspend', 'reinstate', 'deactivated', 'admins', 'search'],
+  },
+  registrationCodes: {
+    label: 'Registration codes',
+    component: RegistrationCodesPane,
+    group: 'Who is here',
+    icon: ShieldIcon,
+    wide: true,
+    keywords: ['signups', 'private', 'invites', 'admission', 'codes', 'expiry', 'limits'],
   },
   guilds: {
     label: 'Guilds',

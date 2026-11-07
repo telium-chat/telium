@@ -26,7 +26,7 @@ export async function authCapabilities(base) {
   return request(base, 'GET', '/_telium/v1/capabilities');
 }
 
-export async function registerOpaque(base, localpart, password, deviceName) {
+export async function registerOpaque(base, localpart, password, deviceName, registrationCode = null) {
   const api = await client();
   const accountRecovery = generateAccountRecovery();
   const first = api.startRegistration({ password });
@@ -34,6 +34,7 @@ export async function registerOpaque(base, localpart, password, deviceName) {
     body: {
       localpart,
       registration_request: first.registrationRequest,
+      registration_code: registrationCode,
     },
   });
   const finished = api.finishRegistration({
@@ -45,6 +46,7 @@ export async function registerOpaque(base, localpart, password, deviceName) {
     body: {
       localpart,
       registration_record: finished.registrationRecord,
+      registration_code: registrationCode,
       recovery_public_key: accountRecovery.publicKey,
       device_name: deviceName,
     },

@@ -115,6 +115,7 @@ export const sessionMethods = {
     password,
     {
       register = false,
+      registrationCode = null,
       reactivate = false,
       mfaCode = null,
       allowLegacyAuth = false,
@@ -161,6 +162,7 @@ export const sessionMethods = {
           user,
           password,
           deviceName,
+          registrationCode,
         );
         resp = registered.session;
         recoveryWrapper = registered.recoveryWrapper;
@@ -214,7 +216,7 @@ export const sessionMethods = {
         );
       }
       resp = register
-        ? await Api.register(normalized, user, password, deviceName)
+        ? await Api.register(normalized, user, password, deviceName, registrationCode)
         : reactivate
           ? await Api.reactivate(normalized, user, password, deviceName, mfaCode)
           : await Api.login(normalized, user, password, deviceName, mfaCode);
