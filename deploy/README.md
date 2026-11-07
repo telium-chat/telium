@@ -543,7 +543,15 @@ registry again.
 
 ## First run
 
-`registration.open` is `true` in `telium.toml` and **the first account created
-on a fresh server becomes its admin**. The hostname is public the moment the
-tunnel connects. Make your account, then set it to `false` and
-`docker compose up -d server`.
+The container config still supports first-user administration for legacy
+installations, so do not make it reachable to strangers before the operator
+has an account. The native installer uses a safer, explicit owner setup:
+it disables automatic first-user admin rights and asks whether registration
+is public or private. Choosing private creates a one-time, 30-day setup
+code (printed once). Register using the central client and this code, then
+grant administrator rights with the local `telium-server admin recover`
+command. Future registration codes can be issued/revoked from the Control
+plane with customizable expiry and use limits.
+
+A private server accepts valid codes with `registration.open = false`, so
+operators do not need to temporarily enable public signup.

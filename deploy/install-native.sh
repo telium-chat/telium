@@ -220,7 +220,7 @@ open = $registration_bool
 admins = []
 EOF
   if [ "$registration" = closed ]; then
-    say "registration CLOSED: no new accounts can sign up until you reopen it; invite codes are not implemented yet"
+    say "registration PRIVATE: only people with a valid registration code can sign up"
   else
     say "registration OPEN: anyone can sign up, but no signup automatically becomes admin"
   fi

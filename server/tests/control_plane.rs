@@ -1011,3 +1011,29 @@ async fn private_codes_obey_use_limits_expiry_revocation_and_step_up() {
     assert_eq!(status, 403, "revoked code cannot admit a new account");
 }
 
+
+#[tokio::test]
+async fn one_use_code_is_atomic_under_concurrent_signup() {
+    let s = start_private().await;
+    let code = telium_server::registration_codes::create(
+        &s.state.pool, "operator", "race", 1, 3600,
+    ).await.unwrap();
+    let first = s.post("/_telium/v1/register", None, json!({
+        "localpart": "raceone", "password": "correct horse battery",
+        "registration_code": code.code,
+    }));
+    let second = s.post("/_telium/v1/register", None, json!({
+        "localpart": "racetwo", "password": "correct horse battery",
+        "registration_code": code.code,
+    }));
+    let ((left, lbody), (right, rbody)) = tokio::join!(first, second);
+    let statuses = [left, right];
+    assert_eq!(statuses.iter().filter(|s| **s == 200).count(), 1,
+        "one must succeed: {lbody}, {rbody}");
+    assert_eq!(statuses.iter().filter(|s| **s == 403).count(), 1,
+        "one must be refused: {lbody}, {rbody}");
+    let uses: i64 = sqlx::query_scalar("SELECT uses FROM registration_codes WHERE id = ?")
+        .bind(code.id).fetch_one(&s.state.pool).await.unwrap();
+    assert_eq!(uses, 1);
+}
+

@@ -1147,8 +1147,11 @@ impl Registration {
     /// Shared policy for OPAQUE and legacy registration. Native installs
     /// disable auto-administration and grant server access locally instead.
     pub fn grants_admin_on_signup(&self, localpart: &str, existing_accounts: i64) -> bool {
-        (self.first_account_is_admin && existing_accounts == 0)
-            || self.admins.iter().any(|a| a.eq_ignore_ascii_case(localpart))
+        // Possessing a private-registration code never proves server ownership.
+        // Implicit admin remains a legacy PUBLIC-signup-only behavior.
+        self.open
+            && ((self.first_account_is_admin && existing_accounts == 0)
+                || self.admins.iter().any(|a| a.eq_ignore_ascii_case(localpart)))
     }
 }
 
@@ -2385,6 +2388,8 @@ mod tests {
         registration.admins.push("operator".into());
         assert!(!registration.grants_admin_on_signup("stranger", 0));
         assert!(registration.grants_admin_on_signup("OPERATOR", 0));
+        registration.open = false;
+        assert!(!registration.grants_admin_on_signup("OPERATOR", 0));
         let native: super::Registration =
             toml::from_str("open = true\nfirst_account_is_admin = false\n").unwrap();
         assert!(!native.grants_admin_on_signup("stranger", 0));
