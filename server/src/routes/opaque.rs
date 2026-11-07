@@ -104,16 +104,15 @@ async fn cleanup(state: &AppState) {
 pub struct RegisterStart {
     pub localpart: String,
     pub registration_request: String,
+    #[serde(default)]
+    pub registration_code: Option<String>,
 }
 
 pub async fn register_start(
     State(state): State<AppState>,
     Json(req): Json<RegisterStart>,
 ) -> ApiResult<Json<Value>> {
-    if !crate::sunset::registration_open(&state).await {
-        return Err(ApiError::Forbidden("registration is closed on this server".into())
-            .with_code(errcodes::REGISTRATION_CLOSED));
-    }
+    crate::registration_codes::allow_start(&state, req.registration_code.as_deref()).await?;
     let localpart = req.localpart.to_ascii_lowercase();
     if !valid_localpart(&localpart) {
         return Err(ApiError::BadRequest(
@@ -160,6 +159,8 @@ pub struct RegisterFinish {
     pub localpart: String,
     pub registration_record: String,
     #[serde(default)]
+    pub registration_code: Option<String>,
+    #[serde(default)]
     pub recovery_public_key: Option<String>,
     #[serde(default)]
     pub device_name: Option<String>,
@@ -171,10 +172,7 @@ pub async fn register_finish(
     State(state): State<AppState>,
     Json(req): Json<RegisterFinish>,
 ) -> ApiResult<Json<Value>> {
-    if !crate::sunset::registration_open(&state).await {
-        return Err(ApiError::Forbidden("registration is closed on this server".into())
-            .with_code(errcodes::REGISTRATION_CLOSED));
-    }
+    crate::registration_codes::allow_start(&state, req.registration_code.as_deref()).await?;
     let localpart = req.localpart.to_ascii_lowercase();
     if !valid_localpart(&localpart) {
         return Err(ApiError::BadRequest(
@@ -199,7 +197,11 @@ pub async fn register_finish(
 
     let user_id = format!("@{}:{}", localpart, state.cfg.server_name);
     let now = now_ms();
-    let mut tx = state.pool.begin().await?;
+    // Acquire SQLite's write lock before consuming a one-time admission code.
+    let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+    crate::registration_codes::consume(
+        &mut *tx, req.registration_code.as_deref(), state.cfg.registration.open,
+    ).await?;
     let exists: Option<String> = sqlx::query_scalar(
         "SELECT subject_id FROM identity_localparts WHERE localpart = ? AND domain = ?",
     )

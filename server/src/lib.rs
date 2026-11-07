@@ -33,6 +33,7 @@ pub mod perms;
 pub mod preflight;
 pub mod promotion;
 pub mod pushproviders;
+pub mod registration_codes;
 pub mod relocation;
 pub mod revocation;
 pub mod sunset;

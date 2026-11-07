@@ -385,6 +385,8 @@ fn federation_routes() -> Router<AppState> {
         )
         .route("/_telium/v1/admin/audit", get(crate::admin::list_audit))
         .route("/_telium/v1/admin/health", get(crate::admin::health::get))
+        .route("/_telium/v1/admin/registration-codes", get(crate::registration_codes::list_api).post(crate::registration_codes::create_api))
+        .route("/_telium/v1/admin/registration-codes/{id}", delete(crate::registration_codes::revoke_api))
         .route("/_telium/v1/admin/accounts", get(crate::admin::accounts::list))
         .route("/_telium/v1/admin/accounts/{user_id}", get(crate::admin::accounts::detail))
         .route(

@@ -30,6 +30,8 @@ pub struct RegisterRequest {
     pub localpart: String,
     pub password: String,
     #[serde(default)]
+    pub registration_code: Option<String>,
+    #[serde(default)]
     pub device_name: Option<String>,
     #[serde(default)]
     pub device_pubkey: Option<String>,
@@ -54,10 +56,7 @@ pub async fn register(
     State(state): State<AppState>,
     Json(req): Json<RegisterRequest>,
 ) -> ApiResult<Json<LoginResponse>> {
-    if !crate::sunset::registration_open(&state).await {
-        return Err(ApiError::Forbidden("registration is closed on this server".into())
-            .with_code(errcodes::REGISTRATION_CLOSED));
-    }
+    crate::registration_codes::allow_start(&state, req.registration_code.as_deref()).await?;
     let localpart = req.localpart.to_ascii_lowercase();
     if !valid_localpart(&localpart) {
         return Err(ApiError::BadRequest(
@@ -95,6 +94,9 @@ pub async fn register(
     let now = now_ms();
     // Take the write lock before the count; a deferred read-then-write hits SQLITE_BUSY_SNAPSHOT.
     let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+    crate::registration_codes::consume(
+        &mut *tx, req.registration_code.as_deref(), state.cfg.registration.open,
+    ).await?;
     let accounts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
         .fetch_one(&mut *tx)
         .await?;
