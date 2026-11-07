@@ -274,19 +274,40 @@ pub fn audit(cfg: &Config, config_path: Option<&Path>) -> Audit {
         });
     }
 
-    if prod && cfg.registration.open && cfg.registration.admins.is_empty() {
+    if prod && cfg.registration.open && cfg.registration.first_account_is_admin {
         f.push(Finding {
             key: "registration.open".into(),
             level: Level::Danger,
-            exposes: "registration is open and no administrator localparts are named, so the \
-                      first account anybody creates on this server becomes its administrator. \
-                      Between this process binding and the operator signing up, that is a race \
-                      a stranger can win, and the winner can read, moderate and delete \
-                      everything."
+            exposes: "public registration will automatically promote the first signup to \
+                      administrator, so a stranger can seize server control before its operator \
+                      registers. Named administrator usernames do not prevent that race."
                 .into(),
-            remedy: "name the administrators up front -- `registration.admins = [\"you\"]` -- or \
-                     close registration (`registration.open = false`), create your account, and \
-                     reopen it."
+            remedy: "set `registration.first_account_is_admin = false`, then grant the server \
+                     owner administrator access locally with `telium-server admin recover` \
+                     after they create an account. The native installer does this automatically."
+                .into(),
+        });
+    } else if prod && cfg.registration.open && !cfg.registration.admins.is_empty() {
+        f.push(Finding {
+            key: "registration.admins".into(),
+            level: Level::Danger,
+            exposes: "anyone who registers a listed administrator username becomes an admin, \
+                      without proving that they are the person operating this machine."
+                .into(),
+            remedy: "remove the names from `registration.admins` and grant admin access \
+                     locally with `telium-server admin recover` after account creation."
+                .into(),
+        });
+    } else if prod && cfg.registration.open {
+        f.push(Finding {
+            key: "registration.open".into(),
+            level: Level::Warn,
+            exposes: "any visitor can create an account, consuming storage and bandwidth. \
+                      This is an intentional choice for a public homeserver; no account \
+                      automatically becomes an administrator."
+                .into(),
+            remedy: "leave `registration.open = true` for public signup, or set it false to \
+                     stop new registrations. Private invite-code signup is not implemented yet."
                 .into(),
         });
     }
@@ -787,7 +808,8 @@ mod tests {
             bind: "127.0.0.1:8448".into(),
             ..Default::default()
         };
-        cfg.registration.admins = vec!["operator".into()];
+        cfg.registration.first_account_is_admin = false;
+        cfg.registration.admins.clear();
         (cfg.backup.remote.enabled, cfg.backup.remote.bucket) = (true, "b".into());
         cfg.web.client_url = Some("https://telium.example".into());
         cfg
@@ -795,6 +817,24 @@ mod tests {
 
     fn has(audit: &Audit, key: &str) -> bool {
         audit.findings.iter().any(|f| f.key == key)
+    }
+
+    #[test]
+    fn public_registration_is_only_a_warning_when_first_signup_is_not_admin() {
+        let mut cfg = production();
+        let findings = audit(&cfg, None);
+        assert!(findings.findings.iter().any(|f| f.key == "registration.open" && f.level == Level::Warn));
+        assert_eq!(findings.dangers(), 0);
+
+        cfg.registration.first_account_is_admin = true;
+        assert!(audit(&cfg, None).findings.iter().any(|f| f.key == "registration.open" && f.level == Level::Danger));
+        cfg.registration.first_account_is_admin = false;
+        cfg.registration.admins.push("operator".into());
+        assert!(audit(&cfg, None).findings.iter().any(|f| f.key == "registration.admins" && f.level == Level::Danger));
+
+        cfg.registration.admins.clear();
+        cfg.registration.open = false;
+        assert!(!has(&audit(&cfg, None), "registration.open"));
     }
 
     #[test]

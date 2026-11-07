@@ -299,14 +299,18 @@ key_file = "mfa.key"
 recovery_delay_secs = "1d"
 
 [registration]
-# Whether anybody may create an account. With `admins` empty, the first
-# account registered becomes the administrator; close registration once yours
-# exists.
+# Open registration is fine for public homeservers, but anyone can register
+# and consume resources. When false, ALL new signups are blocked; invite codes
+# for private servers are not implemented yet.
 open = true
+# Legacy first-account auto-admin behavior. DISABLE on public homeservers:
+# the first signup could belong to a stranger. The native installer sets false
+# and has the machine operator grant admin locally after registering.
+first_account_is_admin = true
 # Shortest password accepted.
 min_password_len = 8
-# Account localparts granted admin when they register. Empty means the first
-# account becomes the administrator.
+# Legacy admin localpart grants; unsafe with untrusted open registration because
+# outsiders could claim these usernames. Prefer local 'admin recover'.
 admins = []
 
 # Two questions about distributed account-home onboarding that look alike and

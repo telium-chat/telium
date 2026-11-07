@@ -1135,10 +1135,21 @@ pub struct Sessions {
 pub struct Registration {
     pub open: bool,
     pub min_password_len: usize,
-    /// Localparts granted admin on registration; empty means the first account is admin.
+    /// Legacy first-account auto-admin; disable for public signup on native installs.
+    pub first_account_is_admin: bool,
+    /// Legacy localpart-based admin grants; avoid on untrusted public registration.
     pub admins: Vec<String>,
     /// Also needs the registry to opt this domain in.
     pub recommendations: RecommendationParticipation,
+}
+
+impl Registration {
+    /// Shared policy for OPAQUE and legacy registration. Native installs
+    /// disable auto-administration and grant server access locally instead.
+    pub fn grants_admin_on_signup(&self, localpart: &str, existing_accounts: i64) -> bool {
+        (self.first_account_is_admin && existing_accounts == 0)
+            || self.admins.iter().any(|a| a.eq_ignore_ascii_case(localpart))
+    }
 }
 
 /// Distributed account-home onboarding; the site generator clamps `referral_weight`.
@@ -1871,6 +1882,7 @@ impl Default for Registration {
         Self {
             open: true,
             min_password_len: 8,
+            first_account_is_admin: true, // legacy deployments keep their existing behavior
             admins: Vec::new(),
             recommendations: RecommendationParticipation::default(),
         }
@@ -2347,6 +2359,21 @@ mod tests {
         assert_eq!(Updates::select_manifest_verification_key("", ""), "");
         let old: Updates = toml::from_str(r#"manifest_public_key = """#).unwrap();
         assert_eq!(old.manifest_verification_key(), option_env!("TELIUM_RELEASE_PUBLIC_KEY").unwrap_or(""));
+    }
+
+    #[test]
+    fn native_install_signup_does_not_auto_assign_administrator_privileges() {
+        let mut registration = super::Registration::default();
+        assert!(registration.grants_admin_on_signup("stranger", 0), "legacy compatibility");
+        registration.first_account_is_admin = false;
+        assert!(!registration.grants_admin_on_signup("stranger", 0));
+        assert!(!registration.grants_admin_on_signup("stranger", 10));
+        registration.admins.push("operator".into());
+        assert!(!registration.grants_admin_on_signup("stranger", 0));
+        assert!(registration.grants_admin_on_signup("OPERATOR", 0));
+        let native: super::Registration =
+            toml::from_str("open = true\nfirst_account_is_admin = false\n").unwrap();
+        assert!(!native.grants_admin_on_signup("stranger", 0));
     }
 
     #[test]

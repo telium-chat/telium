@@ -17,10 +17,8 @@
 # with updates enabled, because a default that has to be turned on by a
 # command nobody runs is not a default.
 #
-# What is deliberately left to a person: DNS, TLS (the server binds loopback;
-# something has to front it), and registering the first account before
-# closing registration. They are printed at the end, because they cannot be
-# done from here and everything that can is done.
+# DNS and TLS are completed outside the installer. Registration uses the
+# centralized official client, and administrative access is granted locally.
 #
 # Safe to run twice. What is ours -- the binary, the units, the updater --
 # is replaced every time, which is how this machinery upgrades. What is
@@ -81,6 +79,7 @@ command -v curl      >/dev/null 2>&1 || die "curl is not installed"
 command -v tar       >/dev/null 2>&1 || die "tar is not installed"
 command -v sha256sum >/dev/null 2>&1 || die "sha256sum is not installed"
 command -v systemctl >/dev/null 2>&1 || die "this box does not use systemd; there is no native path without it"
+command -v runuser   >/dev/null 2>&1 || die "runuser is required to audit the config as the service user"
 
 machine="$(uname -m)"
 case "$machine" in
@@ -145,9 +144,9 @@ fi
 
 # --------------------------------------------------------------- the config
 #
-# Written once, from the domain. Re-runs never touch it: it is the operator's
-# from the moment it exists, and an installer that quietly reverted a hand
-# edit would undo the one file a person is expected to own.
+# Preserve all existing configuration on reruns. The one exception is
+# installer-generated configs missing [registration] from older releases:
+# they receive an appended safe registration section after the operator chooses.
 
 step "Configuration"
 
@@ -187,6 +186,48 @@ EOF
   say "$CONF written for $DOMAIN"
 fi
 
+# --------------------------------------------------------- registration setup
+#
+# The native server does not give the first signup administrator privileges.
+# Existing operator-specified [registration] settings are never overwritten.
+if ! grep -qE '^[[:space:]]*\[registration\][[:space:]]*(#.*)?$' "$CONF"; then
+  if ! grep -Fq "# Written by deploy/install-native.sh for " "$CONF"; then
+    die "$CONF is not an installer-generated config; configure [registration] before continuing"
+  fi
+  registration="${TELIUM_REGISTRATION:-}"
+  if [ -z "$registration" ] && [ -t 0 ]; then
+    printf '\nAllow anyone to create an account on this server? [Y/n] '
+    read -r answer || die "could not read the registration choice"
+    case "$answer" in
+      ""|y|Y|yes|YES) registration=open ;;
+      n|N|no|NO) registration=closed ;;
+      *) die "choose yes or no" ;;
+    esac
+  fi
+  registration="${registration:-open}"
+  case "$registration" in
+    open) registration_bool=true ;;
+    closed) registration_bool=false ;;
+    *) die "TELIUM_REGISTRATION must be open or closed" ;;
+  esac
+  cat >> "$CONF" <<EOF
+
+[registration]
+# New accounts never become server administrators simply by registering.
+# Grant the operator's account admin locally after signing up.
+first_account_is_admin = false
+open = $registration_bool
+admins = []
+EOF
+  if [ "$registration" = closed ]; then
+    say "registration CLOSED: no new accounts can sign up until you reopen it; invite codes are not implemented yet"
+  else
+    say "registration OPEN: anyone can sign up, but no signup automatically becomes admin"
+  fi
+else
+  say "existing [registration] policy retained"
+fi
+
 # ----------------------------------------------------------------- the units
 
 step "systemd"
@@ -222,8 +263,10 @@ say "units installed"
 
 step "Checking the configuration"
 
-if ! "$BIN" --config "$CONF" check --strict; then
-  echo "error: the configuration above did not pass; fix $CONF and run $0 $DOMAIN again" >&2
+# Installation requires root, but the service itself runs as User=telium.
+# Validate under that actual identity; warnings should not block setup.
+if ! runuser -u telium -- "$BIN" --config "$CONF" check; then
+  echo "error: the configuration did not pass as the telium service user; check $CONF and rerun $0 $DOMAIN" >&2
   exit 1
 fi
 
@@ -248,10 +291,8 @@ say "the server is up on 127.0.0.1:8448"
 
 # ------------------------------------------------------------ what is left
 #
-# Three things, none of which a script on the box can do: DNS is a panel
-# somewhere else, TLS is a choice of front (a tunnel, or a proxy with real
-# certificates), and the first account has to belong to a person before
-# registration closes.
+# DNS and TLS need external setup; the centralized client handles account
+# creation. Only a person with local machine access can grant server admin.
 
 step "Still to do, by hand"
 
@@ -261,9 +302,12 @@ say "     a Cloudflare Tunnel (no open ports):  docs.telium.chat/self-hosting/ex
 say "     or Caddy on this box (real certificates): docs.telium.chat/self-hosting/exposing/"
 say "   then verify:"
 say "     curl -fsS https://$DOMAIN/.well-known/telium/server"
-say "3. register your account (the first one becomes the admin), then close"
-say "   registration: set [registration] open = false in $CONF and restart:"
-say "     systemctl restart telium-server"
+say "3. register your account using the official Telium web or desktop client."
+say "4. grant the account administrator access, here on the server:"
+say "     runuser -u telium -- $BIN --config $CONF admin recover <username> --reason \"Initial server owner\""
+say "   Confirm the username; the holder of that account must still sign in."
+say "   To change signup later, edit [registration].open in $CONF"
+say "   and restart telium-server."
 say ""
 say "voice and video mesh up to 4 participants with no extra setup; a larger"
 say "server wants an SFU: docs.telium.chat/self-hosting/sfu/"
