@@ -287,7 +287,7 @@ server's operator otherwise chooses the HTML behind its own invite.
 `bun run build:portal` builds the client (`../web`) and the site and merges them into
 `dist-portal/`, which `wrangler deploy` publishes with `worker.ts`:
 
-- `/channels`, `/invite`, `/u` and `/login` (with their subpaths) answer with `app.html` —
+- `/channels`, `/invite`, `/u`, `/login` and `/receive-move` (with their subpaths) answer with `app.html` —
   the client's index.html under a name the site does not use, stamped with a
   `<meta name="telium-portal">` marker the client reads to know a bare invite code names
   no server.
