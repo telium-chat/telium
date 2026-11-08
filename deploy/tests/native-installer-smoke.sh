@@ -22,6 +22,10 @@ trap cleanup EXIT
 export MOCK_WORK="$work"
 export MOCK_STAGE=1
 mkdir -p "$work/bin" "$work/state" "$work/releases"
+# The real service user exercises these binaries; let it traverse the fixture
+# root and record mock CLI calls. Production secrets remain inside /var/lib.
+chmod 755 "$work"
+chmod 777 "$work/state"
 
 # Mock only the things not provided by the container: the release CDN and
 # systemd itself. Real runuser, file permissions, shell tools and installer
