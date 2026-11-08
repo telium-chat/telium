@@ -115,9 +115,12 @@ export function MigrationDestinationGate({ handoff, onSignIn, onCancel }) {
         </Button>
         {full ? <Notice tone="warn">{t('migration.handoff.accountLimit', { max: MAX_ACCOUNTS })}</Notice> : null}
         {chosen ? (
-          <Notice>
-            {t('migration.handoff.confirmTarget', { sourceId: handoff.source_id, target: chosen.user_id })}
-          </Notice>
+          <>
+            <Notice>
+              {t('migration.handoff.confirmTarget', { sourceId: handoff.source_id, target: chosen.user_id })}
+            </Notice>
+            <Notice tone="warn">{t('migration.handoff.targetWarning')}</Notice>
+          </>
         ) : null}
         {status ? <p role="status" className="text-sm text-danger">{status}</p> : null}
         {chosen ? (
