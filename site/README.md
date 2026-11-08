@@ -310,6 +310,12 @@ After this change deploys, verify that `/receive-move` loads the client and
 that the Cloudflare metrics show no Worker-script invocations from normal
 website traffic. Existing Worker analytics may still include older traffic.
 
+**Cloudflare build-watch paths:** This deployment combines source from both
+`site/` and `web/`. Do not configure Cloudflare to skip builds when only
+`web/` changes. Allow all repository changes to trigger deployments, or
+watch both `site/**` and `web/**`. The GitHub Site CI workflow also checks
+changes to either directory.
+
 To exercise the signup recommender locally without the production key,
 `node scripts/local-test-feed.mjs https://your-server.example "Name"` mints an
 ephemeral key, writes a signed feed naming that server into `public/.well-known/`
