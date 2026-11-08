@@ -1,0 +1,12 @@
+# Client entry points map to a static app shell without changing browser URL.
+# The migration handoff secret stays in the browser URL fragment.
+/channels /app.html 200
+/invite /app.html 200
+/u /app.html 200
+/login /app.html 200
+/receive-move /app.html 200
+/channels/* /app.html 200
+/invite/* /app.html 200
+/u/* /app.html 200
+/login/* /app.html 200
+/receive-move/* /app.html 200
