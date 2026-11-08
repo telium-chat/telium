@@ -821,13 +821,13 @@ pub struct Apns {
     pub base_url: Option<String>,
 }
 
-/// Serves the bundled web client; off unless a directory is set.
+/// The shared web client lives at telium.chat; homeservers normally host only the API.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Web {
-    /// Static files directory, relative to the working directory.
+    /// Legacy optional static hosting; not used by normal homeserver deployments.
     pub dir: Option<PathBuf>,
-    /// Where the web client lives if not `public_base_url`; published as `client` in discovery.
+    /// Client URL published in discovery for guided migration. Defaults to telium.chat.
     pub client_url: Option<String>,
     /// Where invite and vanity links point. Every link this server mints names this server
     /// inside a URL on the portal: `https://telium.chat/invite/{code}@{server_name}`. Whoever
@@ -846,7 +846,7 @@ impl Default for Web {
     fn default() -> Self {
         Self {
             dir: None,
-            client_url: None,
+            client_url: Some(default_invite_portal()),
             invite_portal: default_invite_portal(),
         }
     }
@@ -2376,6 +2376,27 @@ mod tests {
         assert_eq!(Updates::select_manifest_verification_key("", ""), "");
         let old: Updates = toml::from_str(r#"manifest_public_key = """#).unwrap();
         assert_eq!(old.manifest_verification_key(), option_env!("TELIUM_RELEASE_PUBLIC_KEY").unwrap_or(""));
+    }
+
+    #[test]
+    fn shared_web_client_is_the_default_for_all_homeservers() {
+        let no_web: Config = toml::from_str(
+            "server_name = \"home.example\"\npublic_base_url = \"https://home.example\"\n",
+        ).expect("minimal home config");
+        assert_eq!(no_web.web.client_url.as_deref(), Some("https://telium.chat"));
+        assert!(no_web.web.dir.is_none());
+
+        // Merely including a [web] section must not disable the shared client.
+        let partial: Config = toml::from_str(
+            "[web]\ninvite_portal = \"https://telium.chat\"\n",
+        ).expect("partial web config");
+        assert_eq!(partial.web.client_url.as_deref(), Some("https://telium.chat"));
+
+        // Explicit legacy/custom clients still work for existing installations.
+        let custom: Config = toml::from_str(
+            "[web]\nclient_url = \"https://custom.example\"\n",
+        ).expect("custom web config");
+        assert_eq!(custom.web.client_url.as_deref(), Some("https://custom.example"));
     }
 
     #[test]

@@ -27,15 +27,11 @@ bind = "0.0.0.0:8448"
 database_url = "sqlite:///var/lib/telium/telium.db?mode=rwc"
 media_dir = "/var/lib/telium/media"
 
-# The client the server serves itself, built into the image beside the binary.
-# Mounted as a fallback behind the API routes, so it cannot shadow /_telium.
-#
-# invite_portal defaults to the official portal, so invites mint here would already
-# point at telium.chat. It stays `self` until that portal actually serves the client;
-# flipping early turns every staging invite link into a 404.
+# The web client is hosted at telium.chat. The server publishes the shared
+# client for guided migration and invites; it serves no local client files.
 [web]
-dir = "/srv/telium/web"
-invite_portal = "self"
+client_url = "https://telium.chat"
+invite_portal = "https://telium.chat"
 
 [archive]
 dir = "/var/lib/telium/cold"

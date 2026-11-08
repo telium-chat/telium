@@ -671,24 +671,12 @@ environment = "production"
 # Test/staging override; overrides environment.
 # base_url = "https://apns.staging.example"
 
-# The bundled web client. Comment `dir` out to run headless: the API and the
-# gateway are unaffected either way, and any other client speaks the same
-# protocol. The path is relative to the process's working directory.
-#
-# This is the *built* client, not its source: run `bun run build` in `web/` and
-# point at the `dist` it produces.
+# The official web client lives at https://telium.chat; homeservers host the
+# API, not their own web application. The discovery document's `client` field
+# guides account migration to the official client.
 [web]
-# dir = "../web/dist"
-# Where people open this server's web client, if that is not `public_base_url`
-# (a client hosted on its own domain, or behind a different proxy). Published as
-# `client` in /.well-known/telium/server; with `dir` set and this left out, the
-# client is taken to be at `public_base_url`. Another server's client sends a
-# person here to receive an account move without copying a code by hand
-# (docs/migration.md, "The guided flow"), so leave it unset if there is no page.
-# client_url = "https://chat.example.com"
-# Where invite and vanity links this server mints are opened. The default sends
-# them to Telium's own page, which is safe for a server that serves no client
-# of its own; "self" restores links on this server's public_base_url.
+client_url = "https://telium.chat"
+# Invites and vanity links also open through the shared web client.
 invite_portal = "https://telium.chat"
 
 # Public browser-side GIF provider configuration. The API key is an

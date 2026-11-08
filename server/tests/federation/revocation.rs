@@ -11,7 +11,10 @@ async fn the_discovery_document_names_the_web_client() {
     let (_, doc) = b.get("/.well-known/telium/server", None).await;
     assert_eq!(doc["client"], "https://chat.b.example");
     let (_, doc) = a.get("/.well-known/telium/server", None).await;
-    assert!(doc["client"].is_null(), "a headless server offers no page to send anybody to: {doc}");
+    assert_eq!(
+        doc["client"], "https://telium.chat",
+        "a homeserver without local web assets must still advertise the shared client: {doc}"
+    );
 }
 
 async fn until_refused(server: &Server, session: &str) {
