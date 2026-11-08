@@ -120,8 +120,10 @@ if [ -e "$BIN" ]; then
     die "$BIN exists but is not a runnable regular file; refusing to overwrite it"
   if [ -f "$CONF" ]; then
     existing_install=1
-  elif [ "$service_was_active" -eq 1 ] || [ -e "$DATA/telium.db" ] || [ -e "$DATA/mfa.key" ]; then
-    die "$BIN exists without $CONF, but server state is present; restore the original config before continuing"
+  elif [ "$service_was_active" -eq 1 ] ||
+       { [ -d "$DATA" ] && [ -n "$(find "$DATA" -mindepth 1 -print -quit)" ]; } ||
+       { [ -d "$BACKUPS" ] && [ -n "$(find "$BACKUPS" -mindepth 1 -print -quit)" ]; }; then
+    die "$BIN exists without $CONF, but server data or backups remain; restore the original config before continuing"
   else
     say "recovering an interrupted first install (no existing config or database)"
   fi
@@ -343,6 +345,8 @@ TELIUM_UPDATES=automatic
 # TELIUM_PIN_REASON=     why a pin is there; a pin without a reason is reported on every run
 # TELIUM_UPDATE_WINDOW=  HH:MM-HH:MM; empty means any time
 # TELIUM_ARTIFACT=       server-linux-x86_64 or server-linux-aarch64; empty follows this CPU
+# TELIUM_HEALTH_URL=    local health URL if you changed the default 127.0.0.1:8448 bind
+# TELIUM_HEALTH_RETRIES=30  checks after restart before reporting a failure
 EOF
   say "$UPD_CONF written: updates are ON"
 fi
