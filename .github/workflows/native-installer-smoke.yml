@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'deploy/install-native.sh'
+      - 'deploy/bootstrap-native.sh'
       - 'deploy/update-native.sh'
       - 'deploy/tests/native-installer-smoke.sh'
       - '.github/workflows/native-installer-smoke.yml'
@@ -11,6 +12,7 @@ on:
     branches: [main]
     paths:
       - 'deploy/install-native.sh'
+      - 'deploy/bootstrap-native.sh'
       - 'deploy/update-native.sh'
       - 'deploy/tests/native-installer-smoke.sh'
       - '.github/workflows/native-installer-smoke.yml'
@@ -27,6 +29,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
       - name: Shell syntax
         run: |
+          bash -n deploy/bootstrap-native.sh
           bash -n deploy/install-native.sh
           bash -n deploy/update-native.sh
           bash -n deploy/tests/native-installer-smoke.sh
