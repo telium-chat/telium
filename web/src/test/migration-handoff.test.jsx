@@ -359,8 +359,10 @@ describe('migration handoffs on the centralized Telium website', () => {
       token: 'dest-session', user_id: '@target:new.example', device_id: 'dest-device' },
     servers: {},
   });
+  const createdStores = [];
   function sourceStore() {
     const store = new Store();
+    createdStores.push(store);
     store.session = sourceSession();
     return store;
   }
@@ -368,7 +370,10 @@ describe('migration handoffs on the centralized Telium website', () => {
     localStorage.setItem(SESSION_KEY, JSON.stringify(sourceSession()));
     sessionStorage.setItem('telium.pending-handoff.v1', JSON.stringify({ ...HANDOFF, at: Date.now() }));
   }
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    for (const store of createdStores.splice(0)) store.dispose();
+    vi.restoreAllMocks();
+  });
 
   it('intercepts handoff before booting the active source account', async () => {
     prepare();
