@@ -135,6 +135,14 @@ install -d -o telium -g telium -m 750 "$DATA"
 install -d -o telium -g telium -m 700 "$BACKUPS"
 install -d -m 755 "$ETC"
 
+# Run every CLI command from systemd's WorkingDirectory. Otherwise relative
+# secret paths (notably mfa.key) resolve against the installer's current
+# directory, which may be root-owned and unwritable by the service account.
+as_telium() (
+  cd "$DATA"
+  runuser -u telium -- "$BIN" --config "$CONF" "$@"
+)
+
 # The whole backup story is "the archives are not inside the data" -- on the
 # same filesystem that is a habit, on a different one it is a property. Say
 # which one this box got.
@@ -182,6 +190,11 @@ trusted_proxies = ["127.0.0.1"]
 # server logs that it minted one.
 dir = "$BACKUPS/archives"
 key_file = "$BACKUPS/backup.key"
+
+[mfa]
+# An absolute path also works for ad-hoc CLI commands run outside the
+# systemd working directory. Keep this key separate from database backups.
+key_file = "$DATA/mfa.key"
 EOF
   say "$CONF written for $DOMAIN"
 fi
@@ -265,7 +278,7 @@ step "Checking the configuration"
 
 # Installation requires root, but the service itself runs as User=telium.
 # Validate under that actual identity; warnings should not block setup.
-if ! runuser -u telium -- "$BIN" --config "$CONF" check; then
+if ! as_telium check; then
   echo "error: the configuration did not pass as the telium service user; check $CONF and rerun $0 $DOMAIN" >&2
   exit 1
 fi
@@ -293,7 +306,7 @@ say "the server is up on 127.0.0.1:8448"
 # The database exists now and is owned by telium, not root. The bootstrap
 # code is minted once, shown once, and never stored in plaintext.
 step "Registration"
-runuser -u telium -- "$BIN" --config "$CONF" registration-code bootstrap \
+as_telium registration-code bootstrap \
   || die "could not create the setup registration code"
 
 # ------------------------------------------------------------ what is left
@@ -312,11 +325,12 @@ say "     curl -fsS https://$DOMAIN/.well-known/telium/server"
 say "3. register your account using the official Telium web or desktop client."
 say "   For private registration, enter the one-time code shown above."
 say "4. grant the account administrator access, here on the server:"
-say "     runuser -u telium -- $BIN --config $CONF admin recover <username> --reason \"Initial server owner\""
+say "     ( cd $DATA && runuser -u telium -- $BIN --config $CONF admin recover USERNAME --reason \"Initial server owner\" )"
+say "   Replace USERNAME with the account localpart (or full @name:domain)."
 say "   Confirm the username; the holder of that account must still sign in."
 say "   Further registration codes: Control plane > Registration codes."
 say "   If your setup code was lost before admin setup, create a replacement:"
-say "     runuser -u telium -- $BIN --config $CONF registration-code create"
+say "     ( cd $DATA && runuser -u telium -- $BIN --config $CONF registration-code create )"
 say "   To change signup later, edit [registration].open in $CONF"
 say "   and restart telium-server."
 say ""
