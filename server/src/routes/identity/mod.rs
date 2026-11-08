@@ -98,8 +98,7 @@ pub async fn register(
     let accounts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
         .fetch_one(&mut *tx)
         .await?;
-    let admin =
-        accounts == 0 || state.cfg.registration.admins.iter().any(|a| a.eq_ignore_ascii_case(&localpart));
+    let admin = state.cfg.registration.grants_admin_on_signup(&localpart, accounts);
     sqlx::query(
         "INSERT INTO accounts (user_id, localpart, domain, password_hash, created_at, admin) \
          VALUES (?, ?, ?, ?, ?, ?)",

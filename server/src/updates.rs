@@ -685,7 +685,8 @@ pub async fn read_manifest(cfg: &Updates, allow_http: bool) -> Result<Manifest, 
     .await
     .map_err(|e: ApiError| (Unknown::Unreachable, e.to_string()))?;
 
-    if !cfg.manifest_public_key.is_empty() {
+    let verification_key = cfg.manifest_verification_key();
+    if !verification_key.is_empty() {
         let sig = crate::federation::feeds::fetch_bytes(
             allow_http,
             crate::federation::feeds::check_url_loose(&signature_url(cfg), allow_http)
@@ -701,7 +702,7 @@ pub async fn read_manifest(cfg: &Updates, allow_http: bool) -> Result<Manifest, 
                 format!("release signature could not be read: {e}"),
             )
         })?;
-        verify_manifest_signature(&bytes, &sig, &cfg.manifest_public_key)
+        verify_manifest_signature(&bytes, &sig, verification_key)
             .map_err(|e| (Unknown::Unverified, e))?;
     }
 
@@ -1111,9 +1112,9 @@ mod tests {
     }
 
     #[test]
-    fn the_signature_url_defaults_beside_the_manifest_and_no_key_is_pinned_by_default() {
+    fn the_signature_url_defaults_beside_the_manifest_and_uses_the_embedded_key() {
         let mut cfg = Updates::default();
-        assert!(cfg.manifest_public_key.is_empty());
+        assert_eq!(cfg.manifest_verification_key(), option_env!("TELIUM_RELEASE_PUBLIC_KEY").unwrap_or(""));
         assert_eq!(signature_url(&cfg), format!("{}.sig", cfg.manifest_url));
         cfg.manifest_signature_url = "https://mirror.example/sig".into();
         assert_eq!(signature_url(&cfg), "https://mirror.example/sig");
