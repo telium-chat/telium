@@ -234,12 +234,14 @@ From the repository root:
 
 ## Deploying
 
-**telium.chat is served by Cloudflare's git integration watching this directory.** There
+**telium.chat is served using Cloudflare Workers Static Assets, with no Worker script.** There
 is no deploy step in this repository's workflows and no credential in it: the Cloudflare
 dashboard holds the connection to this repo, runs the build, and deploys with the
 `wrangler.jsonc` beside this file, which attaches `telium.chat` as a custom domain — so
 the first deploy after that connection exists moves the hostname's DNS to the Worker,
-and whatever served the domain until then stops.
+and whatever served the domain until then stops. With no `main` script,
+`run_worker_first` or Worker asset binding, static website traffic consumes
+no Worker-script invocations. It still counts as static asset traffic.
 
 What the dashboard needs to build the portal rather than the marketing site alone:
 
@@ -285,19 +287,28 @@ instead of a page served by whatever server minted the link, which is the point 
 server's operator otherwise chooses the HTML behind its own invite.
 
 `bun run build:portal` builds the client (`../web`) and the site and merges them into
-`dist-portal/`, which `wrangler deploy` publishes with `worker.ts`:
+`dist-portal/`, which Cloudflare publishes without a Worker script:
 
-- `/channels`, `/invite`, `/u` and `/login` (with their subpaths) answer with `app.html` —
+- `/channels`, `/invite`, `/u`, `/login` and `/receive-move` (with their subpaths) answer with `app.html` using `public/_redirects` and static 200 rewrites —
   the client's index.html under a name the site does not use, stamped with a
   `<meta name="telium-portal">` marker the client reads to know a bare invite code names
   no server.
 - everything else serves the site as built; an unknown path gets the site's 404.
-- every response carries the client's security headers, mirrored from
-  `server/src/security_headers.rs`.
+- static responses carry the client's security headers from `public/_headers`,
+  mirrored from `server/src/security_headers.rs`.
 
 Locally, `bun run preview:portal` serves `dist-portal` with those same rules at
-http://localhost:8787 (`PORT` overrides), and `npx wrangler dev` runs the production
-worker against it.
+http://localhost:8787 (`PORT` overrides), and `npx wrangler dev` previews the
+production static asset behavior without any custom Worker script.
+
+**Critical deployment setting:** the Cloudflare build command must be
+`npm run build:production` (not plain `bun run build`), using the merged
+`dist-portal/` assets configured in `wrangler.jsonc`. The plain `dist/`
+site build does not include the web client or `/app.html`.
+
+After this change deploys, verify that `/receive-move` loads the client and
+that the Cloudflare metrics show no Worker-script invocations from normal
+website traffic. Existing Worker analytics may still include older traffic.
 
 To exercise the signup recommender locally without the production key,
 `node scripts/local-test-feed.mjs https://your-server.example "Name"` mints an

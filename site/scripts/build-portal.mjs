@@ -11,7 +11,7 @@
 //
 //   - web's index.html becomes app.html. The site's index.html must stay at
 //     `/`, and a static directory has one index.html, so the client's shell
-//     moves to a name of its own and the worker serves it for the app routes.
+//     moves to a name of its own and Cloudflare Static Assets serves it for the app routes.
 //     The client's asset paths are absolute from the site root, so the shell
 //     works from either name unchanged.
 //   - sw.js is rewritten to precache and fall back to /app.html. The client
@@ -24,8 +24,8 @@
 //     other's file. A difference is a branding bug to fix at the source, not
 //     something to resolve by precedence here.
 //
-// The routing contract this artifact implements lives in the worker
-// (`worker.ts`) and is documented in README.md, "The portal build".
+// Static routing and response security live in site/public/_redirects and
+// site/public/_headers; both are copied into the dist-portal artifact.
 
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -92,6 +92,15 @@ if (marked === shell) {
 writeFileSync(join(out, 'app.html'), marked);
 
 overlay(webDist, out);
+
+// A missing static rule file would silently break deep links or browser
+// security headers. Refuse to publish an incomplete portal bundle.
+for (const policy of ['_redirects', '_headers']) {
+  if (!existsSync(join(out, policy))) {
+    console.error('build-portal: missing ' + policy + ' in static bundle.');
+    process.exit(1);
+  }
+}
 
 // sw.js: the shell it precaches and falls back to is app.html here. Both the
 // placeholder the build replaced and the precache entry carry the quoted
