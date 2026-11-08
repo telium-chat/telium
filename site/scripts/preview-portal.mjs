@@ -18,7 +18,7 @@ const root = resolve(process.argv[2] ?? 'dist-portal');
 const port = Number(process.env.PORT ?? 8787);
 
 const APP_SHELL = '/app.html';
-const APP_ROUTES = ['/channels', '/invite', '/u', '/login'];
+const APP_ROUTES = ['/channels', '/invite', '/u', '/login', '/receive-move'];
 
 // Mirrors worker.ts, which mirrors server/src/security_headers.rs.
 const SECURITY_HEADERS = {
@@ -129,5 +129,5 @@ const server = createServer(async (req, res) => {
 
 server.listen(port, '127.0.0.1', () => {
   console.log(`preview-portal: serving ${root} at http://localhost:${port}`);
-  console.log('preview-portal: app routes (/channels, /invite, /u, /login) answer with the client shell.');
+  console.log('preview-portal: app routes (/channels, /invite, /u, /login, /receive-move) answer with the client shell.');
 });
