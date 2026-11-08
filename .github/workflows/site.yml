@@ -81,9 +81,6 @@ jobs:
       - name: Test safe TXT discovery and destination validation
         run: node --test scripts/secure-discovery.test.mjs
 
-      - name: Test portal app routes, including migration handoffs
-        run: npm run test:portal-routes
-
       - name: Test account-home recommendation rules and signatures
         run: npm run test:recommendations
 
@@ -124,8 +121,11 @@ jobs:
           TELIUM_SFU_DIRECTORY_KEY_ID: ${{ vars.TELIUM_SFU_DIRECTORY_KEY_ID }}
         run: npm run sfu-directory:write
 
-      - name: Build
-        run: bun run build
+      - name: Build merged static portal
+        run: npm run build:portal
+
+      - name: Test static portal routing and security
+        run: npm run test:portal-routes
 
       # The footer claims no analytics, no third-party fonts and no trackers.
       # This is that claim as a test: anything in the output that would make the
