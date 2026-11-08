@@ -42,6 +42,9 @@ for ((n=1; n<=$#; n++)); do
   fi
 done
 case "$url" in
+  https://raw.githubusercontent.com/telium-chat/telium/main/deploy/*)
+    cp "/repo/deploy/${url##*/}" "$out"
+    ;;
   http://127.0.0.1:8448/_telium/v1/health)
     test -f "$MOCK_WORK/state/active" || exit 1
     server="$(sed -nE 's/^[[:space:]]*server_name[[:space:]]*=[[:space:]]*"([^"]+)"[[:space:]]*(#.*)?$/\1/p' /etc/telium/telium.toml | head -1)"
@@ -231,7 +234,8 @@ test ! -e /usr/local/bin/telium-server || fail "unattended preflight installed a
 # Fresh install on an older compatible release: no --installation support
 # must not prevent startup or the one-time private signup code.
 export TELIUM_REGISTRATION=closed
-bash deploy/install-native.sh CHAT.TEST > "$work/fresh.log" 2>&1
+( cd / && bash /repo/deploy/bootstrap-native.sh CHAT.TEST ) > "$work/fresh.log" 2>&1
+assert_contains "$work/fresh.log" "Starting the Telium native installer"
 assert_contains "$work/fresh.log" "registration PRIVATE"
 assert_contains "$work/fresh.log" "setup uses root privileges"
 assert_contains "$work/fresh.log" "Initial private registration code"
