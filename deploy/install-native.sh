@@ -129,6 +129,13 @@ elif [ -e "$CONF" ]; then
   die "$CONF exists without the installed server binary; restore the binary through the recovery procedure before rerunning"
 fi
 
+# Do not leave a partially provisioned server just because unattended setup
+# forgot to supply its mandatory registration policy.
+if { [ ! -f "$CONF" ] || ! grep -qE '^[[:space:]]*\[registration\][[:space:]]*(#.*)?$' "$CONF"; } &&
+   [ -z "${TELIUM_REGISTRATION:-}" ] && [ ! -t 0 ]; then
+  die "unattended setup requires TELIUM_REGISTRATION=closed or TELIUM_REGISTRATION=open; refusing to guess"
+fi
+
 step "Installing for chat on $DOMAIN ($machine)"
 say "setup uses root privileges, but the server service runs as the unprivileged 'telium' account"
 if [ "${SUDO_USER:-root}" = root ]; then
