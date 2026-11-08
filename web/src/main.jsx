@@ -10,7 +10,7 @@ import { toast } from './hooks/useToast.jsx';
 import { t } from './lib/i18n/index.js';
 import { register, onNotificationNavigate } from './lib/serviceworker.js';
 import { bindRouting } from './lib/routing.js';
-import { captureHandoff } from './lib/handoff.js';
+import { captureHandoff, isHandoffPath } from './lib/handoff.js';
 import { installDesktopRichPresence } from './lib/rich-presence.js';
 import { installAndroidNotificationNavigation } from './lib/android-notification-navigation.js';
 import {
@@ -72,7 +72,9 @@ function boot() {
       prev.dispose();
       // The app's own front door, not `/`: the portal root is the marketing site, and a
       // server-served copy opens the same route either way.
-      window.history.replaceState(null, '', '/channels/@me');
+      if (!isHandoffPath(window.location.pathname)) {
+        window.history.replaceState(null, '', '/channels/@me');
+      }
       mount(new Store());
       publishProtectedHosts();
       render();
