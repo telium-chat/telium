@@ -1,6 +1,7 @@
 // `home` is the account server; `servers` maps guild hosts, each with its own token and socket. Methods are mixed in from lib/store/.
 
 import { rememberSession } from './accounts.js';
+import { HANDOFF_PATH, pendingHandoff } from './handoff.js';
 import { ConnectionManager, Status } from './gateway.js';
 import { KEYS, SyncStore } from './sync.js';
 import { debounce, Emitter, storage } from './util.js';
@@ -63,6 +64,11 @@ export class Store extends Emitter {
     if (typeof window !== 'undefined') {
       listen(window, 'storage', (event) => {
         if (event.key !== SESSION_KEY) return;
+        // A move receiver is an isolated, temporary page. The source tab is
+        // expected to keep refreshing its active session while the destination
+        // confirms receipt. Never treat those writes as a reason to restart
+        // this page or lose the handoff and its destination selection.
+        if (window.location.pathname === HANDOFF_PATH || pendingHandoff()) return;
         let incoming = null;
         try { incoming = JSON.parse(event.newValue)?.home?.user_id || null; } catch { /* unreadable */ }
         const current = this.session?.home?.user_id || null;

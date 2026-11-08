@@ -11,6 +11,7 @@ import { noteBootFault, noteBootHealthy } from './lib/local-state.js';
 import { RecoveryPanel } from './views/RecoveryScreen.jsx';
 import { BootLoader, Button, Notice } from './components/index.js';
 import { LoginView } from './views/LoginView.jsx';
+import { MigrationDestinationGate } from './views/MigrationDestinationGate.jsx';
 import { InviteLanding } from './views/InviteLanding.jsx';
 import { PublicProfileLanding } from './views/PublicProfileLanding.jsx';
 import { Shell } from './views/Shell.jsx';
@@ -29,6 +30,7 @@ import { errorMessage } from './lib/i18n/errors.js';
 import { useT } from './lib/i18n/react.jsx';
 import { applyScheme, resolveScheme } from './lib/scheme.js';
 import { showLocalNotification } from './lib/notifications.js';
+import { clearHandoff, pendingHandoff } from './lib/handoff.js';
 import { notificationPreview } from './lib/notification-preview.js';
 import { answerAndroidCallNotification } from './lib/android-call-notification.js';
 import { clipContent, toPlainText } from './lib/emoji.js';
@@ -174,9 +176,11 @@ function Phases({ covered = false, onSettled }) {
   useStoreEvent('route');
   const tr = useT();
   const pendingRecovery = recoveryKeyPending();
-  const [phase, setPhase] = useState(
-    store.signedIn && !pendingRecovery ? 'connecting' : 'login',
-  );
+  const [phase, setPhase] = useState(() => (
+    (pendingHandoff() || window.location.pathname === '/receive-move')
+      ? 'handoff'
+      : (store.signedIn && !pendingRecovery ? 'connecting' : 'login')
+  ));
   const [error, setError] = useState(null);
   // Public profile actions survive the auth funnel.
   const [profileAction, setProfileAction] = useState(null);
@@ -185,6 +189,15 @@ function Phases({ covered = false, onSettled }) {
   const [pastedInvite, setPastedInvite] = useState(null);
 
   const boot = useCallback(async () => {
+    // The receiver is an intentionally isolated, temporary flow. The page is
+    // on the same origin as the source tab: never boot its stored source session,
+    // call switchAccount(), or write the global active session from this tab.
+    // Handle BOTH signed-in and signed-out visitors before normal auth boot.
+    if (pendingHandoff() || window.location.pathname === '/receive-move') {
+      setError(null);
+      setPhase('handoff');
+      return;
+    }
     // Registration persists the session before the recovery-key interstitial, so a reload must return to it.
     if (!store.signedIn || recoveryKeyPending()) { setPhase('login'); return; }
     setPhase('connecting');
@@ -239,6 +252,27 @@ function Phases({ covered = false, onSettled }) {
     setProfileAction(null);
     setProfileAuth(false);
   }, [profileUserId]);
+
+  // A migration handoff always takes precedence over remembered invite/profile routes.
+  // Neither those routes nor normal auth may boot the source account here.
+  if (phase === 'handoff-login') return (
+    <LoginView onSignedIn={() => setPhase('handoff')} handoffReceiver />
+  );
+  if (phase === 'handoff') return (
+    <AuthCard>
+      <MigrationDestinationGate
+        handoff={pendingHandoff()}
+        onSignIn={() => setPhase('handoff-login')}
+        onCancel={() => { clearHandoff(); setPhase('handoff-closed'); }}
+      />
+    </AuthCard>
+  );
+  if (phase === 'handoff-closed') return (
+    <AuthCard>
+      <h1 className="pt-5 text-lg font-semibold">{tr('migration.handoff.closedTitle')}</h1>
+      <Notice>{tr('migration.handoff.closed')}</Notice>
+    </AuthCard>
+  );
 
   // A pasted invite holds whatever `phase` says: `hydrated` flipping phase to shell mid-join would unmount it.
   if (pastedInvite) {

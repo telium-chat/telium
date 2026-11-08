@@ -5,7 +5,7 @@ import { toast } from '../../hooks/useToast.jsx';
 import { copyToClipboard } from '../../lib/clipboard.js';
 import { discover } from '../../lib/api.js';
 import { handoffLink } from '../../lib/handoff.js';
-import { prettyHost } from '../../lib/homeserver.js';
+import { isPortalHost, prettyHost } from '../../lib/homeserver.js';
 import { b64url, unb64 } from '../../lib/util.js';
 import { t } from '../../lib/i18n/index.js';
 import { Trans, useT } from '../../lib/i18n/react.jsx';
@@ -312,7 +312,11 @@ function GuidedMove({
     setStatus(t('migration.guided.lookingUp', { destination: target }));
     try {
       const info = await discoverServer(target);
-      if (!info?.client) {
+      // Account domains point to the same central web client. A destination
+      // does not need to host or advertise its own web app to receive a move.
+      // On the official portal, keep the handoff on this trusted origin.
+      const client = isPortalHost() ? window.location.origin : info?.client;
+      if (!client) {
         setNoClient(true);
         setStatus('');
         return;
@@ -321,7 +325,7 @@ function GuidedMove({
       const opened = subject
         ? await store.home.openMigrationHandoff(named, subject)
         : await store.home.openMigrationHandoff(named);
-      const url = handoffLink(info.client, guild ? { ...opened, name: subjectName } : opened);
+      const url = handoffLink(client, guild ? { ...opened, name: subjectName } : opened);
       setHandoff(opened);
       setLink(url);
       setStatus('');

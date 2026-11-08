@@ -50,7 +50,7 @@ import { codeOf, errorMessage } from '../lib/i18n/errors.js';
 
 import { displayHomeserver, isPortalHost, normalizeHomeserver, prettyHost } from '../lib/homeserver.js';
 import { isTauriRuntime } from '../lib/platform.js';
-import { pendingHandoff } from '../lib/handoff.js';
+import { pendingHandoff, sameServer } from '../lib/handoff.js';
 import { AccountHomePicker, RecommendedHome } from './AccountHomePicker.jsx';
 import { AccountAddress, HomeChip, useAlternativeHomesOffered } from './AccountHome.jsx';
 import { downloadRecoveryKey, recoveryKeyNote } from './user-settings/RecoveryParts.jsx';
@@ -63,6 +63,7 @@ import {
 export function LoginView({
   onSignedIn,
   onInvite = null,
+  handoffReceiver = false,
   loadHomeRecommendations = loadAccountHomeRecommendations,
   homeRandom = secureRandom,
 }) {
@@ -240,8 +241,16 @@ export function LoginView({
     setStatus('');
     setNoAccount(null);
     const home = normalizeHomeserver(server) || server.trim();
-    const { api, serverName } = await resolveHome(home);
+    let api;
+    let serverName;
     try {
+      ({ api, serverName } = await resolveHome(home));
+      // The receiving handoff must never send credentials to a login page
+      // belonging to a different account domain, even if someone typed a
+      // full handle with another server into the form.
+      if (handoffReceiver && (!handoff || !sameServer(serverName, handoff.destination))) {
+        throw new Error(t('migration.handoff.wrongServer', { destination: handoff?.destination || '' }));
+      }
       rememberHome(home);
       const resp = await store.signIn(api, user.trim(), password, {
         home,
@@ -250,6 +259,8 @@ export function LoginView({
         reactivate: mode === 'reactivate',
         mfaCode: requiresMfa ? mfaCode.trim() : null,
         allowLegacyAuth,
+        handoffOnly: handoffReceiver,
+        handoffDestination: handoffReceiver ? handoff?.destination : null,
       });
       if (resp.device_secret) sessionStorage.setItem('telium.deviceSecretShown', '1');
       if (resp.user_id) {
@@ -1094,7 +1105,7 @@ export function LoginView({
         <div className="flex flex-col gap-2">
           <HomeChip
             host={host}
-            onClick={() => {
+            onClick={handoffReceiver ? undefined : () => {
               setStatus('');
               setServer(displayHomeserver(server));
               setStep('server');
@@ -1107,7 +1118,7 @@ export function LoginView({
             name={t('auth.start.register')}
             onClick={() => choose('register')}
           />
-          <p className="pt-1 text-center text-xs text-muted">
+          {!handoffReceiver ? <p className="pt-1 text-center text-xs text-muted">
             <Trans
               k="auth.start.lostPassword"
               components={{
@@ -1125,7 +1136,7 @@ export function LoginView({
                 ),
               }}
             />
-          </p>
+          </p> : null}
         </div>
       );
       break;
@@ -1340,7 +1351,7 @@ export function LoginView({
                 ? t('auth.password.submitReactivate')
                 : t('auth.password.submitLogin')}
           </Button>
-          {mode === 'login' ? (
+          {mode === 'login' && !handoffReceiver ? (
             <p className="text-center text-xs text-muted">
               <Trans
                 k="auth.password.forgot"
@@ -1511,7 +1522,7 @@ export function LoginView({
         {sub ? <p className="text-sm leading-[1.6] text-muted">{sub}</p> : null}
         {body}
       </Flow>
-      <BackToAccount />
+      {!handoffReceiver ? <BackToAccount /> : null}
     </AuthCard>
   );
 }

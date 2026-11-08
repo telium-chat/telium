@@ -3,15 +3,16 @@ name: Site
 on:
   push:
     branches: [main]
-    # The site is one directory of a monorepo whose other two are a Rust server
-    # and a web client. A commit that touches neither the site nor this file
-    # would produce an identical build, so it does not run one.
+    # The deployed portal merges site/dist and web/dist into dist-portal.
+    # A change in EITHER directory changes the deployed static website.
     paths:
       - 'site/**'
+      - 'web/**'
       - '.github/workflows/site.yml'
   pull_request:
     paths:
       - 'site/**'
+      - 'web/**'
       - '.github/workflows/site.yml'
   # Dispatched by probe.yml after it commits fresh directory data, and available
   # by hand when a build or a deploy needs repeating.

@@ -148,8 +148,39 @@ export const migration = {
 
   // ------------------------------------------------------- the guided move
 
-  // The default flow: name the destination, confirm on the destination's own
-  // page, come back and authorise here. Three screens, and the counter below
+  // The official browser client is shared across all homeservers. A move
+  // link may open while the browser is still signed in to the source; do
+  // not allow that session to receive the import accidentally.
+  'migration.handoff.title': 'Continue the move on {destination}',
+  'migration.handoff.explanation': 'This move comes from {source}. Telium uses one website for every server, so select or sign in to an account on {destination} without switching the old tab.',
+  'migration.handoff.notScheduled': 'No account move has been scheduled. The destination account must confirm receipt before the old account authorises the move.',
+  'migration.handoff.notScheduledGuild': 'No guild move has been scheduled. The destination owner must confirm receipt before the current guild owner authorises the move.',
+  'migration.handoff.useAccount': 'Continue as {account}',
+  'migration.handoff.signIn': 'Sign in or create an account on {destination}',
+  'migration.handoff.accountLimit': 'This browser already remembers {max, number} accounts. Use the normal Accounts screen in another tab to free a slot, then open a fresh handoff link.',
+  'migration.handoff.wrongServer': 'This is not {destination}. Choose an account on the destination server before continuing.',
+  'migration.handoff.confirmTarget': 'Receive {sourceId} into {target}? The destination will receive account data only after you authorize the move from the old tab.',
+  'migration.handoff.confirmGuildTarget': 'Receive guild {sourceId} under the ownership of {target}? The move only happens after its current owner authorises it.',
+  'migration.handoff.targetWarning': 'Use a new or empty destination account. Once you authorize and the transfer runs, imported profile, preferences and encrypted key-vault data may replace data already on this account.',
+  'migration.handoff.guildTargetWarning': 'Verify that this destination account should become the guild owner. Your chosen account will own the imported guild once the source authorises the move.',
+  'migration.handoff.receive': 'Receive this account',
+  'migration.handoff.receiveGuild': 'Receive this guild',
+  'migration.handoff.sending': 'Confirming destination…',
+  'migration.handoff.failed': 'Could not confirm the destination: {reason}',
+  'migration.handoff.unexpectedTarget': 'The destination reported a different target account. Do not authorize the move.',
+  'migration.handoff.doneTitle': 'Destination confirmed',
+  'migration.handoff.done': 'The destination accepted this handoff for {target}. Nothing has moved yet.',
+  'migration.handoff.returnToSource': 'Return to the original Telium tab on {source}. Verify the target account shown there before you authorize the move.',
+  'migration.handoff.close': 'Close this handoff',
+  'migration.handoff.closedTitle': 'Handoff closed',
+  'migration.handoff.closed': 'You can close this tab. The original account and its migration wizard remain open in the source tab.',
+  'migration.handoff.cannotSwitch': 'Could not select that account. Try again.',
+  'migration.handoff.expiredTitle': 'Move link expired',
+  'migration.handoff.expired': 'This move link is no longer available in this tab. Open a fresh one from the old account.',
+  'migration.handoff.back': 'Discard this link and close the handoff',
+
+  // The default flow: name the destination, confirm with an account on that
+  // server in the shared Telium client, then authorise from the source. Three screens, and the counter below
   // says which one you are on -- in a flow that deliberately sends somebody to
   // a second server and back, "how far along am I" is the question that stops
   // a forged middle step from passing unnoticed.
@@ -160,7 +191,7 @@ export const migration = {
   // splitting the difference across two entries would have to keep them in
   // step by hand. `guild` is the only branch tested; `other` covers the
   // account.
-  'migration.guided.intro': '{subject, select, guild {Name the server you are moving this guild to.} other {Name the server you are moving to.}} Confirm on its page, then come back here to authorise with your password.',
+  'migration.guided.intro': '{subject, select, guild {Name the server you are moving this guild to.} other {Name the server you are moving to.}} Confirm in Telium while signed in on that destination server, then come back here to authorise with your password.',
   'migration.guided.continue': 'Continue on the new server',
   'migration.guided.opening': 'Opening…',
   'migration.guided.useCode': 'Use an import code',
@@ -173,11 +204,11 @@ export const migration = {
   // other route rather than refusing.
   'migration.guided.noClient': '{destination} does not publish a web page for receiving a move. You can still move there with an import code created on that server.',
 
-  // Screen two: the destination's page is open in another window and this one
+  // Screen two: the shared client is open in another tab and this one
   // is waiting. `<b>` is the heading run; it names the server the reader
   // should now be looking at, because the whole risk of this step is
   // confirming on the wrong page.
-  'migration.guided.finishThere': '<b>Finish on {destination}.</b> A window has opened on {destination}’s own page. Sign in, or {subject, select, guild {create the account that will own the guild there} other {create the account you are moving to}}, and confirm there.',
+  'migration.guided.finishThere': '<b>Finish on {destination}.</b> A Telium tab has opened. Switch to an account on {destination}, sign in, or {subject, select, guild {create the account that will own the guild there} other {create the account you are moving to}}, then confirm there. Both servers use the same Telium web client.',
   // Read aloud by a live region as well as drawn, so it is a whole sentence.
   // "works once" and the expiry are both promises about the link's blast
   // radius and neither may be dropped.

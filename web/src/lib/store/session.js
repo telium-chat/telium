@@ -7,6 +7,7 @@ import {
 import { forgetDeviceSecrets, wipeDeviceSecrets } from '../device-secrets.js';
 import { forgetEmbeds } from '../embeds.js';
 import { normalizeHomeserver } from '../homeserver.js';
+import { sameServer } from '../handoff.js';
 import * as snapshot from '../snapshot.js';
 import { activeSunset } from '../sunset.js';
 import { shortName, storage } from '../util.js';
@@ -120,6 +121,8 @@ export const sessionMethods = {
       mfaCode = null,
       allowLegacyAuth = false,
       home = null,
+      handoffOnly = false,
+      handoffDestination = null,
     } = {},
   ) {
     await this.cryptoCleanup.catch(() => {});
@@ -194,7 +197,7 @@ export const sessionMethods = {
           const upgrading = new Api({
             base: normalized,
             token: resp.access_token,
-            domain: resp.server_name || new URL(normalized).host,
+            domain: resp.server_name || (handoffOnly ? handoffDestination : new URL(normalized).host),
           });
           const enrolled = await enrollOpaque(
             upgrading, password, resp.opaque_upgrade_token,
@@ -222,6 +225,19 @@ export const sessionMethods = {
           : await Api.login(normalized, user, password, deviceName, mfaCode);
     }
 
+    if (handoffOnly) {
+      // A receiver tab shares telium.chat's localStorage with the source tab.
+      // Never install this session into the browser-global active slot: doing
+      // so triggers the source tab's storage listener and discards its wizard.
+      // Verify the authenticated identity BEFORE remembering this account.
+      const accountHome = /^@[^:]+:(.+)$/.exec(resp?.user_id || '')?.[1];
+      if (!handoffDestination || !sameServer(accountHome, handoffDestination)
+        || (resp.server_name && !sameServer(resp.server_name, handoffDestination))) {
+        throw authError('handoff_wrong_server',
+          'That account is not on the destination server. No move was accepted.');
+      }
+    }
+
     this.authRecoveryWrapper = recoveryWrapper;
     this.accountRecoveryWrapper = accountRecoveryWrapper;
     this.opaqueAuth = supportsOpaque;
@@ -238,8 +254,14 @@ export const sessionMethods = {
       },
       servers: {},
     };
-    this.save();
-    rememberSession(this.session, { touch: true });
+    if (handoffOnly) {
+      // Save only to the multi-account registry. No SESSION_KEY write means
+      // neither source tab nor unrelated signed-in tabs are switched/reloaded.
+      rememberSession(this.session, { touch: true });
+    } else {
+      this.save();
+      rememberSession(this.session, { touch: true });
+    }
     if (recoveryKey && typeof sessionStorage !== 'undefined') {
       sessionStorage.setItem(PENDING_RECOVERY_KEY, recoveryKey);
     }
