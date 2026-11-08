@@ -367,31 +367,31 @@ else
   step "Still to do, by hand"
 
   say "1. point DNS: $DOMAIN -> this box's public address"
-say "2. put TLS in front, one of:"
-say "     a Cloudflare Tunnel (no open ports):  docs.telium.chat/self-hosting/exposing/"
-say "     or Caddy on this box (real certificates): docs.telium.chat/self-hosting/exposing/"
-say "   then verify:"
-say "     curl -fsS https://$DOMAIN/.well-known/telium/server"
-say "3. open https://telium.chat to register your account on this server."
-case "$registration_state" in
-  new_private)
-    say "   Enter the one-time registration code shown above; save it securely."
-    ;;
-  existing_private)
-    say "   Enter your saved private registration code."
-    say "   If it was lost or expired, generate another on this machine:"
-    say "     ( cd $DATA && runuser -u telium -- $BIN --config $CONF registration-code create )"
-    ;;
-  open)
-    say "   Registration is open; no invitation code is required."
-    ;;
-esac
-say "4. grant the account administrator access, here on the server:"
-say "     ( cd $DATA && runuser -u telium -- $BIN --config $CONF admin recover USERNAME --reason \"Initial server owner\" )"
-say "   Replace USERNAME with the account localpart (or full @name:domain)."
-say "   Confirm the username; the holder of that account must still sign in."
-if [ "$registration_state" != open ]; then
-  say "   Further registration codes: Control plane > Registration codes."
+  say "2. put TLS in front, one of:"
+  say "     a Cloudflare Tunnel (no open ports):  docs.telium.chat/self-hosting/exposing/"
+  say "     or Caddy on this box (real certificates): docs.telium.chat/self-hosting/exposing/"
+  say "   then verify:"
+  say "     curl -fsS https://$DOMAIN/.well-known/telium/server"
+  say "3. open https://telium.chat to register your account on this server."
+  case "$registration_state" in
+    new_private)
+      say "   Enter the one-time registration code shown above; save it securely."
+      ;;
+    existing_private)
+      say "   Enter your saved private registration code."
+      say "   If it was lost or expired, generate another on this machine:"
+      say "     ( cd $DATA && runuser -u telium -- $BIN --config $CONF registration-code create )"
+      ;;
+    open)
+      say "   Registration is open; no invitation code is required."
+      ;;
+  esac
+  say "4. grant the account administrator access, here on the server:"
+  say "     ( cd $DATA && runuser -u telium -- $BIN --config $CONF admin recover USERNAME --reason \"Initial server owner\" )"
+  say "   Replace USERNAME with the account localpart (or full @name:domain)."
+  say "   Confirm the username; the holder of that account must still sign in."
+  if [ "$registration_state" != open ]; then
+    say "   Further registration codes: Control plane > Registration codes."
 fi
 say "   To change signup later, edit [registration].open in $CONF"
 say "   and restart telium-server."
