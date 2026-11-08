@@ -286,6 +286,8 @@ assert_contains "$work/failed-backup.log" "pre-install backup produced no archiv
 assert_live_matches_binary
 [ "$(binary_commit)" = "$(printf '%040d' 2)" ] || fail "binary changed without a backup"
 
+unset MOCK_BACKUP_FAIL
+
 # Check the failure path when the executable is replaced but the new server
 # cannot prove healthy (mocked database health returns false).
 export MOCK_STAGE=3 MOCK_UNHEALTHY=1
