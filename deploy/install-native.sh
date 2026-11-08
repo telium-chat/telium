@@ -52,16 +52,26 @@ die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
 # written, than at ExecStartPre afterwards.
 [ $# -eq 1 ] || { echo "usage: sudo $0 <domain>   e.g. sudo $0 chat.example.com" >&2; exit 2; }
 
-DOMAIN="${1#*://}"          # tolerate a pasted URL
-DOMAIN="${DOMAIN%%/*}"      # drop any path
-DOMAIN="${DOMAIN%.}"        # drop a trailing dot
+# Accept an optional http(s) URL, but canonicalize and validate the *identity*.
+# DNS names become permanent account identifiers; never quietly accept typos.
+DOMAIN="${1,,}"
 case "$DOMAIN" in
-  *[!a-zA-Z0-9.-]*) die "'$DOMAIN' does not look like a domain name" ;;
+  http://*|https://*) DOMAIN="${DOMAIN#*://}" ;;
+  *://*) die "only http(s) URLs or bare DNS names are supported" ;;
 esac
-case "$DOMAIN" in
-  *.*) : ;;
-  *) die "refusing a dotless name ($DOMAIN); the startup audit would call it a danger" ;;
-esac
+DOMAIN="${DOMAIN%%/*}"
+DOMAIN="${DOMAIN%.}"
+[ "${#DOMAIN}" -le 253 ] || die "domain is too long (maximum 253 characters)"
+[[ "$DOMAIN" == *.* ]] || die "refusing a dotless name ($DOMAIN)"
+[[ "$DOMAIN" != *..* && "$DOMAIN" != .* && "$DOMAIN" != *. ]] ||
+  die "'$DOMAIN' contains an empty DNS label"
+[[ "$DOMAIN" =~ ^[a-z0-9.-]+$ ]] || die "'$DOMAIN' contains invalid DNS characters"
+IFS='.' read -r -a labels <<< "$DOMAIN"
+for label in "${labels[@]}"; do
+  [ "${#label}" -le 63 ] || die "DNS label '$label' is longer than 63 characters"
+  [[ "$label" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] ||
+    die "'$label' is not a valid DNS label (cannot begin or end with a hyphen)"
+done
 case "$DOMAIN" in
   localhost|localhost.*|example.com|example.org|example.net|change.me)
     die "refusing '$DOMAIN'; it is a placeholder, not a home" ;;
@@ -88,17 +98,42 @@ case "$machine" in
   *) die "$machine is not an architecture releases are published for (x86_64, aarch64)" ;;
 esac
 
-# A rerun must not replace the binary of an active service. Upgrades (including
-# database migrations) belong to update-native.sh, which takes a backup before
-# changing the executable and restarts the service in a controlled way.
+# Protect the existing server identity before writing or restarting anything.
+# A domain change requires Telium's explicit relocation protocol, not reinstall.
+if [ -e "$CONF" ]; then
+  [ -f "$CONF" ] || die "$CONF exists but is not a regular file"
+  existing_name="$(sed -nE 's/^[[:space:]]*server_name[[:space:]]*=[[:space:]]*"([^"]+)"[[:space:]]*(#.*)?$/\1/p' "$CONF" | head -n 1)"
+  [ -n "$existing_name" ] || die "cannot verify server_name in $CONF; do not reinstall a server with an unknown identity"
+  [ "${existing_name,,}" = "$DOMAIN" ] || die "this machine is configured as '$existing_name', not '$DOMAIN'; use the domain relocation procedure, not the installer"
+fi
+
+service_was_active=0
+if systemctl is-active --quiet telium-server.service 2>/dev/null; then
+  service_was_active=1
+fi
+
+# Recover an interrupted first install if the binary exists but no config
+# was ever committed and there is no database or running service to protect.
 existing_install=0
 if [ -e "$BIN" ]; then
-  [ -x "$BIN" ] || die "$BIN exists but is not executable; refusing to overwrite it"
-  [ -f "$CONF" ] || die "$BIN exists but $CONF does not; restore the original config before attempting an upgrade"
-  existing_install=1
+  [ -f "$BIN" ] && [ -x "$BIN" ] ||
+    die "$BIN exists but is not a runnable regular file; refusing to overwrite it"
+  if [ -f "$CONF" ]; then
+    existing_install=1
+  elif [ "$service_was_active" -eq 1 ] || [ -e "$DATA/telium.db" ] || [ -e "$DATA/mfa.key" ]; then
+    die "$BIN exists without $CONF, but server state is present; restore the original config before continuing"
+  else
+    say "recovering an interrupted first install (no existing config or database)"
+  fi
+elif [ -e "$CONF" ]; then
+  die "$CONF exists without the installed server binary; restore the binary through the recovery procedure before rerunning"
 fi
 
 step "Installing for chat on $DOMAIN ($machine)"
+say "setup uses root privileges, but the server service runs as the unprivileged 'telium' account"
+if [ "${SUDO_USER:-root}" = root ]; then
+  say "for routine administration, use sudo from a regular login; do not run the homeserver as root"
+fi
 
 # ---------------------------------------------------------------- the binary
 #
@@ -171,8 +206,11 @@ step "Configuration"
 if [ -e "$CONF" ]; then
   say "$CONF already exists; left alone"
 else
-  install -o telium -g telium -m 600 /dev/null "$CONF"
-  cat > "$CONF" <<EOF
+  # Write to a temporary file so interruption never leaves truncated TOML.
+  generated_conf="$(mktemp "$ETC/.telium.toml.XXXXXX")"
+  chown telium:telium "$generated_conf"
+  chmod 600 "$generated_conf"
+  cat > "$generated_conf" <<EOF
 # Written by deploy/install-native.sh for $DOMAIN. Every setting not listed
 # here keeps its compiled-in default; $EXAMPLE annotates all of them.
 
@@ -205,7 +243,13 @@ key_file = "$BACKUPS/backup.key"
 # An absolute path also works for ad-hoc CLI commands run outside the
 # systemd working directory. Keep this key separate from database backups.
 key_file = "$DATA/mfa.key"
+
+[web]
+# Every homeserver uses the centrally hosted Telium client.
+client_url = "https://telium.chat"
+invite_portal = "https://telium.chat"
 EOF
+  mv -f "$generated_conf" "$CONF"
   say "$CONF written for $DOMAIN"
 fi
 
@@ -218,22 +262,25 @@ if ! grep -qE '^[[:space:]]*\[registration\][[:space:]]*(#.*)?$' "$CONF"; then
     die "$CONF is not an installer-generated config; configure [registration] before continuing"
   fi
   registration="${TELIUM_REGISTRATION:-}"
-  if [ -z "$registration" ] && [ -t 0 ]; then
-    printf '\nAllow anyone to create an account on this server? [Y/n] '
+  if [ -z "$registration" ]; then
+    [ -t 0 ] || die "unattended setup requires TELIUM_REGISTRATION=closed or TELIUM_REGISTRATION=open; refusing to guess"
+    printf '\nAllow anyone to create an account on this server? [y/N] '
     read -r answer || die "could not read the registration choice"
     case "$answer" in
-      ""|y|Y|yes|YES) registration=open ;;
-      n|N|no|NO) registration=closed ;;
+      y|Y|yes|YES) registration=open ;;
+      ""|n|N|no|NO) registration=closed ;;
       *) die "choose yes or no" ;;
     esac
   fi
-  registration="${registration:-open}"
   case "$registration" in
     open) registration_bool=true ;;
     closed) registration_bool=false ;;
     *) die "TELIUM_REGISTRATION must be open or closed" ;;
   esac
-  cat >> "$CONF" <<EOF
+  # An interrupted append must not strand a partial [registration] section.
+  registration_conf="$(mktemp "$ETC/.telium-registration.XXXXXX")"
+  cat "$CONF" > "$registration_conf"
+  cat >> "$registration_conf" <<EOF
 
 [registration]
 # New accounts never become server administrators simply by registering.
@@ -242,6 +289,9 @@ first_account_is_admin = false
 open = $registration_bool
 admins = []
 EOF
+  chown telium:telium "$registration_conf"
+  chmod 600 "$registration_conf"
+  mv -f "$registration_conf" "$CONF"
   if [ "$registration" = closed ]; then
     say "registration PRIVATE: only people with a valid registration code can sign up"
   else
@@ -256,9 +306,24 @@ fi
 step "systemd"
 
 install -Dm755 "$here/update-native.sh" "$UPDATE_BIN"
-install -Dm644 "$here/telium-server.service"          /etc/systemd/system/telium-server.service
-install -Dm644 "$here/telium-update-native.service"   /etc/systemd/system/telium-update-native.service
-install -Dm644 "$here/telium-update-native.timer"     /etc/systemd/system/telium-update-native.timer
+
+# Preserve existing service units, including direct edits or symlinks. Custom
+# changes should normally live in systemd drop-ins (systemctl edit), but
+# silently replacing a hand-edited unit is never safe.
+install_unit() {
+  local source="$1" target="$2"
+  if [ -e "$target" ] || [ -L "$target" ]; then
+    if ! cmp -s "$source" "$target"; then
+      say "preserved existing $target (differs from the shipped unit)"
+      say "  review changes and prefer 'systemctl edit' drop-ins for overrides"
+    fi
+  else
+    install -Dm644 "$source" "$target"
+  fi
+}
+install_unit "$here/telium-server.service" /etc/systemd/system/telium-server.service
+install_unit "$here/telium-update-native.service" /etc/systemd/system/telium-update-native.service
+install_unit "$here/telium-update-native.timer" /etc/systemd/system/telium-update-native.timer
 
 if [ -e "$UPD_CONF" ]; then
   say "$UPD_CONF already exists; left alone"
@@ -307,13 +372,15 @@ step "Starting"
 systemctl enable --now telium-server.service telium-update-native.timer
 say "telium-server.service and telium-update-native.timer are enabled"
 
-if [ "$existing_install" -eq 1 ]; then
+if [ "$existing_install" -eq 1 ] && [ "$service_was_active" -eq 1 ]; then
   # The updater uses the signed release manifest, takes a verified local
   # backup, swaps atomically and restarts. Without --now it respects breaking
   # release holds, update windows and operator-selected manual mode.
   # It may stage an update rather than install one; that is intentional.
   step "Checking for server updates"
   "$UPDATE_BIN" || die "native updater failed; inspect its output and journalctl -u telium-server before retrying"
+elif [ "$existing_install" -eq 1 ]; then
+  say "existing service was stopped; started without attempting an upgrade"
 fi
 
 # The server binds loopback, so its own health endpoint answers as soon as
