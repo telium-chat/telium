@@ -80,6 +80,12 @@ function boot() {
     window.telium = store;
   };
 
+  // Strip the handoff secret from the address bar and keep it in this tab
+  // before installing a Store or its cross-tab session listener. Both source
+  // and destination are on telium.chat, so the source's normal active-session
+  // writes must never interrupt handoff startup.
+  captureHandoff();
+
   // Accessors, not copies: a cached mode would go stale and connections would obey the old answer.
   store = new Store();
   configureTransport({
@@ -88,9 +94,6 @@ function boot() {
     getHomeDomain: () => store.session?.home?.domain || null,
     onRefusal: (domain, refusal) => store.emit('network-refusal', { domain, refusal }),
   });
-
-  // A guided-move link carries a secret in its fragment; take it out of the address bar first.
-  captureHandoff();
 
   mount(store);
 
