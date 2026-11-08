@@ -1,12 +1,14 @@
-# Client entry points map to a static app shell without changing browser URL.
+# Client entry points internally proxy to the canonical /app/ directory index.
+# Never proxy to /app.html: Cloudflare auto-redirects HTML files to extensionless
+# /app, which loses the incoming /receive-move path and its handoff fragment.
 # The migration handoff secret stays in the browser URL fragment.
-/channels /app.html 200
-/invite /app.html 200
-/u /app.html 200
-/login /app.html 200
-/receive-move /app.html 200
-/channels/* /app.html 200
-/invite/* /app.html 200
-/u/* /app.html 200
-/login/* /app.html 200
-/receive-move/* /app.html 200
+/channels /app/ 200
+/invite /app/ 200
+/u /app/ 200
+/login /app/ 200
+/receive-move /app/ 200
+/channels/* /app/ 200
+/invite/* /app/ 200
+/u/* /app/ 200
+/login/* /app/ 200
+/receive-move/* /app/ 200
