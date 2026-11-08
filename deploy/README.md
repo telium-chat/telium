@@ -205,11 +205,28 @@ seeded file is this staging box's config, and its `server_name` and
 `public_base_url` are the two lines that cannot stay. An existing
 `telium.toml` is never touched, with or without the argument.
 
-The native (no Docker) counterpart is `install-native.sh`, which takes the
-domain the same way: `sudo ./install-native.sh chat.example.com` downloads
-the release binary, creates the `telium` user, writes `/etc/telium/telium.toml`
-from that domain, installs the unit and the native update timer, and starts
-the server.
+For a native (no Docker) server, use the standalone bootstrap instead of
+cloning the repository or relying on the current working directory:
+
+```sh
+curl -fsSLo /tmp/telium-native-setup.sh https://raw.githubusercontent.com/telium-chat/telium/main/deploy/bootstrap-native.sh
+bash /tmp/telium-native-setup.sh chat.example.com
+```
+
+The saved bootstrap invokes `sudo` for a non-root account when available,
+but runs directly in a root shell on minimal VPS images without `sudo`.
+On Debian/Ubuntu it installs missing packages (such as `curl`, `tar`,
+`sha256sum`, and user tools) before fetching the installer and its companion
+files. **Git is not required.** If `curl` is missing, fetch the bootstrap
+with `wget -qO /tmp/telium-native-setup.sh <URL>` (substitute the URL above).
+If neither downloader exists, install `curl` and `ca-certificates` with the
+distribution's package manager first. A non-root account with no `sudo`
+must switch to a root login (`su -`) or ask an administrator for access.
+
+The native installer downloads the release binary, creates the `telium` user,
+writes `/etc/telium/telium.toml`, installs the unit and native update timer,
+and starts the server. A complete checkout still supports
+`bash deploy/install-native.sh chat.example.com` from the repository root.
 
 That is the whole thing. It puts the files in `/opt/telium`, creates
 `/srv/telium-backups` owned by the container's uid, writes the systemd units
