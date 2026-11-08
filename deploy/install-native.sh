@@ -220,7 +220,7 @@ open = $registration_bool
 admins = []
 EOF
   if [ "$registration" = closed ]; then
-    say "registration CLOSED: no new accounts can sign up until you reopen it; invite codes are not implemented yet"
+    say "registration PRIVATE: only people with a valid registration code can sign up"
   else
     say "registration OPEN: anyone can sign up, but no signup automatically becomes admin"
   fi
@@ -289,6 +289,13 @@ done
 [ -n "$ok" ] || die "the health endpoint on 127.0.0.1:8448 did not answer; look at: journalctl -u telium-server -n 50"
 say "the server is up on 127.0.0.1:8448"
 
+# ------------------------------------------------------ private registration
+# The database exists now and is owned by telium, not root. The bootstrap
+# code is minted once, shown once, and never stored in plaintext.
+step "Registration"
+runuser -u telium -- "$BIN" --config "$CONF" registration-code bootstrap \
+  || die "could not create the setup registration code"
+
 # ------------------------------------------------------------ what is left
 #
 # DNS and TLS need external setup; the centralized client handles account
@@ -303,9 +310,13 @@ say "     or Caddy on this box (real certificates): docs.telium.chat/self-hostin
 say "   then verify:"
 say "     curl -fsS https://$DOMAIN/.well-known/telium/server"
 say "3. register your account using the official Telium web or desktop client."
+say "   For private registration, enter the one-time code shown above."
 say "4. grant the account administrator access, here on the server:"
 say "     runuser -u telium -- $BIN --config $CONF admin recover <username> --reason \"Initial server owner\""
 say "   Confirm the username; the holder of that account must still sign in."
+say "   Further registration codes: Control plane > Registration codes."
+say "   If your setup code was lost before admin setup, create a replacement:"
+say "     runuser -u telium -- $BIN --config $CONF registration-code create"
 say "   To change signup later, edit [registration].open in $CONF"
 say "   and restart telium-server."
 say ""

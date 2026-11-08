@@ -86,6 +86,7 @@ export function LoginView({
   const [user, setUser] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
+  const [registrationCode, setRegistrationCode] = useState('');
   const [mfaCode, setMfaCode] = useState('');
   const [requiresMfa, setRequiresMfa] = useState(false);
   const [legacyAuth, setLegacyAuth] = useState(null);
@@ -245,6 +246,7 @@ export function LoginView({
       const resp = await store.signIn(api, user.trim(), password, {
         home,
         register: registering,
+        registrationCode: registering ? registrationCode.trim() : null,
         reactivate: mode === 'reactivate',
         mfaCode: requiresMfa ? mfaCode.trim() : null,
         allowLegacyAuth,
@@ -1262,6 +1264,16 @@ export function LoginView({
             enterKeyHint={registering ? 'next' : 'go'}
             onChange={(e) => { setPassword(e.target.value); setNoAccount(null); resetLegacy(); }}
           />
+          {registering ? (
+            <TextInput
+              label={t('auth.password.registrationCodeLabel')}
+              autoComplete="off"
+              value={registrationCode}
+              placeholder={t('auth.password.registrationCodePlaceholder')}
+              hint={t('auth.password.registrationCodeHint')}
+              onChange={(e) => setRegistrationCode(e.target.value)}
+            />
+          ) : null}
           {registering ? (
             <PasswordInput
               label={t('auth.password.confirmLabel')}

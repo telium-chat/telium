@@ -19,6 +19,14 @@ impl Drop for Server {
 }
 
 async fn start() -> Server {
+    start_with_policy(true).await
+}
+
+async fn start_private() -> Server {
+    start_with_policy(false).await
+}
+
+async fn start_with_policy(registration_open: bool) -> Server {
     let n = COUNTER.fetch_add(1, Ordering::SeqCst);
     let dir = std::env::temp_dir().join(format!("telium-control-plane-{}-{n}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -35,6 +43,8 @@ async fn start() -> Server {
     };
     cfg.backup.enabled = false;
     cfg.archive.dir = dir.join("cold");
+    cfg.registration.open = registration_open;
+    cfg.registration.first_account_is_admin = registration_open;
 
     let state = telium_server::build_state(cfg).await.unwrap();
     let app = telium_server::routes::router(state.clone());
@@ -45,7 +55,9 @@ async fn start() -> Server {
     });
     let server =
         Server { base: format!("http://{addr}"), client: reqwest::Client::new(), dir, state };
-    server.user("founder").await;
+    if registration_open {
+        server.user("founder").await;
+    }
     server
 }
 
@@ -885,3 +897,143 @@ async fn the_status_page_answers_which_server_this_is_and_what_it_is_running() {
     assert_eq!(body["registration_open"], false, "{body}");
     assert!(s.audit().await.iter().any(|(_, action, _, _)| action == "sunset.announce"));
 }
+
+
+#[tokio::test]
+async fn private_bootstrap_code_is_one_time_and_never_grants_admin() {
+    let s = start_private().await;
+    let (status, caps) = s.get("/_telium/v1/capabilities", None).await;
+    assert_eq!(status, 200);
+    assert_eq!(caps["registration_open"], false);
+    assert_eq!(caps["registration_code_required"], true);
+    assert_eq!(caps["registration_codes_supported"], true);
+
+    let setup = telium_server::registration_codes::bootstrap(&s.state.pool, true)
+        .await.unwrap().unwrap();
+    assert!(telium_server::registration_codes::bootstrap(&s.state.pool, true)
+        .await.unwrap().is_none(), "rerunning native setup must not mint another code");
+
+    let url = "/_telium/v1/register";
+    let (without_status, _) = s.post(url, None, json!({
+        "localpart": "outsider", "password": "correct horse battery"
+    })).await;
+    assert_eq!(without_status, 403, "a closed homeserver requires a code");
+
+    let (status, payload) = s.post(url, None, json!({
+        "localpart": "owner", "password": "correct horse battery",
+        "registration_code": setup.code,
+    })).await;
+    assert_eq!(status, 200, "valid setup code should register: {payload}");
+    let admin: i64 = sqlx::query_scalar("SELECT admin FROM accounts WHERE user_id = '@owner:test.example'")
+        .fetch_one(&s.state.pool).await.unwrap();
+    assert_eq!(admin, 0, "a private registration code must never grant administrator rights");
+
+    let (reused, _) = s.post(url, None, json!({
+        "localpart": "second", "password": "correct horse battery",
+        "registration_code": setup.code,
+    })).await;
+    assert_eq!(reused, 403, "a consumed one-use setup code cannot be reused");
+    let uses: i64 = sqlx::query_scalar("SELECT uses FROM registration_codes WHERE id = ?")
+        .bind(setup.id).fetch_one(&s.state.pool).await.unwrap();
+    assert_eq!(uses, 1);
+}
+
+#[tokio::test]
+async fn private_codes_obey_use_limits_expiry_revocation_and_step_up() {
+    let s = start_private().await;
+    let issue = telium_server::registration_codes::create(
+        &s.state.pool, "operator", "two-person invite", 2, 3600,
+    ).await.unwrap();
+    for name in ["one", "two"] {
+        let (status, payload) = s.post("/_telium/v1/register", None, json!({
+            "localpart": name, "password": "correct horse battery",
+            "registration_code": issue.code,
+        })).await;
+        assert_eq!(status, 200, "{name}: {payload}");
+    }
+    let (status, _) = s.post("/_telium/v1/register", None, json!({
+        "localpart": "three", "password": "correct horse battery",
+        "registration_code": issue.code,
+    })).await;
+    assert_eq!(status, 403, "the third account must not exceed max_uses=2");
+
+    let expired = telium_server::registration_codes::create(
+        &s.state.pool, "operator", "expired", 1, 3600,
+    ).await.unwrap();
+    sqlx::query("UPDATE registration_codes SET expires_at = ? WHERE id = ?")
+        .bind(telium_server::util::now_ms() - 1)
+        .bind(expired.id)
+        .execute(&s.state.pool).await.unwrap();
+    let (status, _) = s.post("/_telium/v1/register", None, json!({
+        "localpart": "expired", "password": "correct horse battery",
+        "registration_code": expired.code,
+    })).await;
+    assert_eq!(status, 403, "expired code must be refused");
+
+    let admin_issue = telium_server::registration_codes::create(
+        &s.state.pool, "operator", "admin signup", 1, 3600,
+    ).await.unwrap();
+    let (status, body) = s.post("/_telium/v1/register", None, json!({
+        "localpart": "operator", "password": "correct horse battery",
+        "registration_code": admin_issue.code,
+    })).await;
+    assert_eq!(status, 200, "{body}");
+    let token = body["access_token"].as_str().unwrap();
+    sqlx::query("UPDATE accounts SET admin = 1 WHERE user_id = '@operator:test.example'")
+        .execute(&s.state.pool).await.unwrap();
+
+    let (before, _) = s.post("/_telium/v1/admin/registration-codes", Some(token), json!({
+        "max_uses": 1, "expires_in_hours": 24,
+    })).await;
+    assert_eq!(before, 403, "creating codes requires step-up");
+    s.elevate(token).await;
+
+    let (status, issued) = s.post("/_telium/v1/admin/registration-codes", Some(token), json!({
+        "max_uses": 3, "expires_in_hours": 24, "label": "invited family",
+    })).await;
+    assert_eq!(status, 200, "{issued}");
+    let code = issued["code"].as_str().unwrap().to_owned();
+    let id = issued["id"].as_str().unwrap().to_owned();
+    assert!(code.starts_with("treg_"));
+
+    let (status, list) = s.get("/_telium/v1/admin/registration-codes", Some(token)).await;
+    assert_eq!(status, 200);
+    assert!(list["codes"].as_array().unwrap().iter().any(|r| r["id"] == id));
+    assert!(!list.to_string().contains(&code), "list endpoints must never leak secrets");
+    let (status, _) = s.delete(
+        &format!("/_telium/v1/admin/registration-codes/{id}"), Some(token), json!({})
+    ).await;
+    assert_eq!(status, 200, "admin can revoke");
+    let (status, _) = s.post("/_telium/v1/register", None, json!({
+        "localpart": "revoked", "password": "correct horse battery",
+        "registration_code": code,
+    })).await;
+    assert_eq!(status, 403, "revoked code cannot admit a new account");
+}
+
+
+#[tokio::test]
+async fn one_use_code_is_atomic_under_concurrent_signup() {
+    let s = start_private().await;
+    let code = telium_server::registration_codes::create(
+        &s.state.pool, "operator", "race", 1, 3600,
+    ).await.unwrap();
+    let first = s.post("/_telium/v1/register", None, json!({
+        "localpart": "raceone", "password": "correct horse battery",
+        "registration_code": code.code,
+    }));
+    let second = s.post("/_telium/v1/register", None, json!({
+        "localpart": "racetwo", "password": "correct horse battery",
+        "registration_code": code.code,
+    }));
+    let ((left, lbody), (right, rbody)) = tokio::join!(first, second);
+    let statuses = [left, right];
+    assert_eq!(statuses.iter().filter(|s| **s == 200).count(), 1,
+        "one must succeed: {lbody}, {rbody}");
+    assert_eq!(statuses.iter().filter(|s| **s == 403).count(), 1,
+        "one must be refused: {lbody}, {rbody}");
+    let uses: i64 = sqlx::query_scalar("SELECT uses FROM registration_codes WHERE id = ?")
+        .bind(code.id).fetch_one(&s.state.pool).await.unwrap();
+    assert_eq!(uses, 1);
+}
+

@@ -307,7 +307,7 @@ pub fn audit(cfg: &Config, config_path: Option<&Path>) -> Audit {
                       automatically becomes an administrator."
                 .into(),
             remedy: "leave `registration.open = true` for public signup, or set it false to \
-                     stop new registrations. Private invite-code signup is not implemented yet."
+                     block public signup; people with valid admission codes can still register."
                 .into(),
         });
     }

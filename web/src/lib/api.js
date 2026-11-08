@@ -252,9 +252,9 @@ export class Api {
   patch(path, body) { return this.req('PATCH', path, { body }); }
   del(path, body) { return this.req('DELETE', path, { body }); }
 
-  static register(base, localpart, password, deviceName) {
+  static register(base, localpart, password, deviceName, registrationCode = null) {
     return request(base, 'POST', '/_telium/v1/register', {
-      body: { localpart, password, device_name: deviceName },
+      body: { localpart, password, device_name: deviceName, registration_code: registrationCode },
     });
   }
   static login(base, user, password, deviceName, mfaCode = null) {
@@ -684,6 +684,11 @@ export class Api {
   // Shape and status, never content.
 
   /// `status` is one of all, active, suspended, deleted, admins; `cursor` is the previous `next_cursor`.
+  adminRegistrationCodes() { return this.get('/_telium/v1/admin/registration-codes'); }
+  adminCreateRegistrationCode(body) { return this.post('/_telium/v1/admin/registration-codes', body); }
+  adminRevokeRegistrationCode(id) {
+    return this.del(`/_telium/v1/admin/registration-codes/${encodeURIComponent(id)}`);
+  }
   adminAccounts(query) { return this.get('/_telium/v1/admin/accounts', query); }
   adminAccount(userId) { return this.get(`/_telium/v1/admin/accounts/${encodeURIComponent(userId)}`); }
   /// `body` must carry a non-empty `reason`. Needs step-up; a 403 with `step_up_required` is the prompt.

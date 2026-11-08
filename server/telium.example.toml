@@ -300,8 +300,9 @@ recovery_delay_secs = "1d"
 
 [registration]
 # Open registration is fine for public homeservers, but anyone can register
-# and consume resources. When false, ALL new signups are blocked; invite codes
-# for private servers are not implemented yet.
+# and consume resources. When false, only people with a valid registration
+# code may create an account. A code never grants admin; the native installer
+# issues a one-time setup code, and admins issue/revoke more via Control plane.
 open = true
 # Legacy first-account auto-admin behavior. DISABLE on public homeservers:
 # the first signup could belong to a stranger. The native installer sets false
@@ -309,8 +310,9 @@ open = true
 first_account_is_admin = true
 # Shortest password accepted.
 min_password_len = 8
-# Legacy admin localpart grants; unsafe with untrusted open registration because
-# outsiders could claim these usernames. Prefer local 'admin recover'.
+# Legacy admin localpart grants; unsafe on PUBLIC registration because an
+# outsider could claim these usernames. Private codes never auto-grant admin.
+# Prefer the local 'admin recover' command.
 admins = []
 
 # Two questions about distributed account-home onboarding that look alike and

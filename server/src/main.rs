@@ -100,6 +100,9 @@ enum Command {
         #[arg(long, default_value_t = 20)]
         limit: i64,
     },
+    /// Admission codes for closed homeservers, issued locally without an admin account.
+    #[command(subcommand)]
+    RegistrationCode(RegistrationCodeCommand),
     /// Server-administrator ownership (docs/server-ownership.md).
     ///
     /// These run against the database directly, for the same reason the standby
@@ -285,6 +288,22 @@ enum MfaCommand {
         /// the server.
         #[arg(long)]
         yes: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum RegistrationCodeCommand {
+    /// Mint the one-time initial setup code; safe to rerun.
+    Bootstrap,
+    /// Create another code as the local machine operator.
+    Create {
+        #[arg(long, default_value_t = 1)]
+        max_uses: i64,
+        /// 0 means never; defaults to seven days.
+        #[arg(long, default_value_t = 168)]
+        expires_in_hours: i64,
+        #[arg(long, default_value = "Local operator")]
+        label: String,
     },
 }
 
@@ -493,6 +512,37 @@ async fn main() -> anyhow::Result<()> {
         Command::Mfa { command } => mfa_command(state, command, operator.as_deref()).await,
         Command::Rotations { entry, limit } => rotations(state, entry.as_deref(), limit).await,
         Command::Admin(cmd) => admin(state, cmd).await,
+        Command::RegistrationCode(command) => {
+            match command {
+                RegistrationCodeCommand::Bootstrap => {
+                    if state.cfg.registration.open {
+                        println!("registration is public; no setup code is needed");
+                    } else if let Some(issued) =
+                        telium_server::registration_codes::bootstrap(&state.pool, true).await?
+                    {
+                        println!("Initial private registration code (one use, expires in 30 days):");
+                        println!("{}", issued.code);
+                        println!("This secret cannot be displayed again. Save it now.");
+                    } else {
+                        println!(
+                            "the initial code was already created and cannot be displayed again.                              If lost or expired, use the local registration-code create command."
+                        );
+                    }
+                }
+                RegistrationCodeCommand::Create { max_uses, expires_in_hours, label } => {
+                    anyhow::ensure!((0..=8760).contains(&expires_in_hours),
+                        "expires-in-hours must be 0–8760");
+                    let issued = telium_server::registration_codes::create(
+                        &state.pool, "local-operator", &label, max_uses, expires_in_hours * 3600,
+                    ).await?;
+                    println!("New registration code (shown only once):");
+                    println!("{}", issued.code);
+                    println!("Uses: {}. Expiration: {:?} (Unix milliseconds, None means never).",
+                        issued.max_uses, issued.expires_at);
+                }
+            }
+            Ok(())
+        },
         Command::Standby(cmd) => standby(state, cmd).await,
         Command::Serve => serve(state, config_path).await,
     }

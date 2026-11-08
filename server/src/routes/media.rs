@@ -1876,6 +1876,8 @@ pub async fn capabilities(State(state): State<AppState>, headers: HeaderMap) -> 
             "e2ee": "mls-exporter",
         },
         "registration_open": crate::sunset::registration_open(&state).await,
+        "registration_codes_supported": true,
+        "registration_code_required": !state.cfg.registration.open,
         "registration_min_password_len": state.cfg.registration.min_password_len,
         "onboarding": {
             "recommendations": {

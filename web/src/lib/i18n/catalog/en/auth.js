@@ -209,6 +209,11 @@ export const auth = {
   // a language that puts the name first, "as" has nowhere to go.
   'auth.password.signingInAs': 'Signing in as <b>{user}</b>.',
   'auth.password.confirmLabel': 'Confirm password',
+  // Optional for public homeservers, required by private homeservers.
+  // Both normal signup and guild-invite account creation use the same copy.
+  'auth.password.registrationCodeLabel': 'Registration code',
+  'auth.password.registrationCodePlaceholder': 'Paste your registration code',
+  'auth.password.registrationCodeHint': 'Private homeservers require a code from the operator. Leave blank for public registration.',
   // Under the confirmation field while the two differ. "yet" is load-bearing:
   // it is shown while somebody is still typing the second copy, so it must read
   // as "keep going" and not as "you got it wrong". Shared with the password
