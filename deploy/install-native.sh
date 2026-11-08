@@ -8,7 +8,8 @@
 # skimmed, and the step that gets skipped is always the one at the bottom.
 # Here the sequence is one command with the domain as its argument:
 #
-#   sudo ./deploy/install-native.sh chat.example.com
+#   bash deploy/install-native.sh chat.example.com    # from a complete checkout
+#   # No checkout needed: see deploy/bootstrap-native.sh
 #
 # Everything the box needs is derived from that one piece of information a
 # human actually has. The config is written, not seeded-and-explained; the
@@ -83,13 +84,21 @@ esac
 # container path there is no registry credential tied to an account, so no
 # ordinary user has to own anything afterwards -- but running this as a login
 # root shell is still worth a word, not a refusal.
-[ "$(id -u)" -eq 0 ] || die "run this with sudo -- it writes to /usr/local, /etc and /var"
+[ "$(id -u)" -eq 0 ] || die "run as root (or with sudo); installation writes to /usr/local, /etc and /var"
 
-command -v curl      >/dev/null 2>&1 || die "curl is not installed"
+command -v curl      >/dev/null 2>&1 || die "curl is not installed; use bootstrap-native.sh to install prerequisites or install curl manually"
 command -v tar       >/dev/null 2>&1 || die "tar is not installed"
 command -v sha256sum >/dev/null 2>&1 || die "sha256sum is not installed"
 command -v systemctl >/dev/null 2>&1 || die "this box does not use systemd; there is no native path without it"
 command -v runuser   >/dev/null 2>&1 || die "runuser is required to audit the config as the service user"
+command -v useradd   >/dev/null 2>&1 || die "useradd is required to create the telium service user"
+
+# Catch incomplete, individually downloaded installers before modifying the host.
+# bootstrap-native.sh always fetches these files together.
+for required_file in update-native.sh telium-server.service telium-update-native.service telium-update-native.timer; do
+  [ -f "$here/$required_file" ] ||
+    die "missing $required_file beside install-native.sh; use bootstrap-native.sh or download the complete deploy directory"
+done
 
 machine="$(uname -m)"
 case "$machine" in
