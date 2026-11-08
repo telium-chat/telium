@@ -506,21 +506,6 @@ pub fn audit(cfg: &Config, config_path: Option<&Path>) -> Audit {
         );
     }
 
-    if prod && cfg.web.dir.is_none() && cfg.web.client_url.is_none() {
-        f.push(Finding {
-            key: "web.dir".into(),
-            level: Level::Warn,
-            exposes: "this server serves no web client and names none, so somebody who opens its \
-                      address in a browser gets a 404, and another server guiding an account \
-                      move here has no page to send the person to."
-                .into(),
-            remedy: "serve the built client from this process with `web.dir = \"/srv/telium/web\"` \
-                     (the container image already has it there), or point `web.client_url` at \
-                     wherever it is hosted."
-                .into(),
-        });
-    }
-
     if !cfg.updates.check {
         f.push(Finding {
             key: "updates.check".into(),
@@ -643,6 +628,27 @@ pub fn render(audit: &Audit) -> String {
         );
     } else {
         let _ = writeln!(out, "Nothing dangerous. The warnings above are worth reading anyway.");
+    }
+    out
+}
+
+/// The installer should show actionable warnings and dangers, not notices
+/// about intentional defaults. The full `check` command remains verbose.
+pub fn render_installation(audit: &Audit) -> String {
+    let mut out = String::new();
+    let findings = audit.findings.iter().filter(|f| f.level >= Level::Warn);
+    let mut any = false;
+    for finding in findings {
+        any = true;
+        let _ = writeln!(out, "{}: {}", finding.level.as_str(), finding.key);
+        let _ = writeln!(out, "  {}", wrap(&finding.exposes, 2));
+        let _ = writeln!(out, "  fix: {}", wrap(&finding.remedy, 7));
+        let _ = writeln!(out);
+    }
+    if !any {
+        out.push_str("Configuration check passed.\n");
+    } else if audit.dangers() == 0 {
+        out.push_str("Configuration valid; review the warnings above when practical.\n");
     }
     out
 }
@@ -848,6 +854,32 @@ mod tests {
             has(&audit(&cfg, None), "updates.manifest_public_key"),
             option_env!("TELIUM_RELEASE_PUBLIC_KEY").unwrap_or("").is_empty()
         );
+    }
+
+    #[test]
+    fn an_installed_homeserver_needs_no_local_web_client() {
+        let mut cfg = production();
+        cfg.web.client_url = None;
+        cfg.web.dir = None;
+        assert!(!has(&audit(&cfg, None), "web.dir"));
+    }
+
+    #[test]
+    fn installation_report_filters_optional_notices_but_keeps_real_warnings() {
+        let mut cfg = production();
+        cfg.backup.remote.enabled = false;
+        let audit = audit(&cfg, None);
+        assert!(render(&audit).contains("media_policy.quota_bytes"));
+        let display = render_installation(&audit);
+        assert!(display.contains("backup.remote.enabled"));
+        assert!(!display.contains("media_policy.quota_bytes"));
+        assert!(!display.contains("web.dir"));
+        assert!(display.contains("Configuration valid"));
+
+        let mut dangerous = cfg;
+        dangerous.public_base_url = "http://home.example".into();
+        let audit = audit(&dangerous, None);
+        assert!(render_installation(&audit).contains("DANGER: public_base_url"));
     }
 
     #[test]
