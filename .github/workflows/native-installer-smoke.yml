@@ -1,0 +1,37 @@
+name: Native installer smoke
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/install-native.sh'
+      - 'deploy/update-native.sh'
+      - 'deploy/tests/native-installer-smoke.sh'
+      - '.github/workflows/native-installer-smoke.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/install-native.sh'
+      - 'deploy/update-native.sh'
+      - 'deploy/tests/native-installer-smoke.sh'
+      - '.github/workflows/native-installer-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-installer-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+      - name: Shell syntax
+        run: |
+          bash -n deploy/install-native.sh
+          bash -n deploy/update-native.sh
+          bash -n deploy/tests/native-installer-smoke.sh
+      - name: Exercise fresh install and rerun on an isolated system
+        run: |
+          docker run --rm \
+            -v "$PWD:/repo" -w /repo ubuntu:24.04 \
+            bash -c 'set -e; export DEBIAN_FRONTEND=noninteractive; apt-get update -qq; apt-get install -y -qq util-linux passwd; bash deploy/tests/native-installer-smoke.sh'
