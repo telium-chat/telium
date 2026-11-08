@@ -47,6 +47,10 @@ enum Command {
         /// decided its deployments should be clean rather than merely safe.
         #[arg(long)]
         strict: bool,
+        /// Hide informational notices in the initial installer output; retain
+        /// genuine warnings and errors. Normal 'check' stays detailed.
+        #[arg(long)]
+        installation: bool,
     },
     /// Backups: take one, make a key, list what exists, verify an archive.
     ///
@@ -406,12 +410,16 @@ async fn main() -> anyhow::Result<()> {
     telium_server::secrets::check_at_startup(&cfg, Some(&cli.config))?;
 
     match cli.command {
-        Some(Command::Check { strict }) => {
+        Some(Command::Check { strict, installation }) => {
             let audit = telium_server::preflight::audit(
                 &cfg,
                 cli.config.exists().then_some(cli.config.as_path()),
             );
-            print!("{}", telium_server::preflight::render(&audit));
+            if installation {
+                print!("{}", telium_server::preflight::render_installation(&audit));
+            } else {
+                print!("{}", telium_server::preflight::render(&audit));
+            }
             let fail = match audit.worst() {
                 Some(telium_server::preflight::Level::Danger) => true,
                 Some(telium_server::preflight::Level::Warn) => strict,
