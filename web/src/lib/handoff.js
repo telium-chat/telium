@@ -1,6 +1,9 @@
 // The browser side of the guided account/guild move. The secret lives in the URL fragment and is taken out of the address bar at once.
 
 export const HANDOFF_PATH = '/receive-move';
+// Only the receiver landing route, optionally with its trailing slash.
+// Cloudflare and other static hosts can canonicalize the directory form.
+export const isHandoffPath = (pathname) => pathname === HANDOFF_PATH || pathname === `${HANDOFF_PATH}/`;
 const KEY = 'telium.pending-handoff.v1';
 const TTL_MS = 30 * 60 * 1000;
 
@@ -60,7 +63,7 @@ export function handoffLink(client, handoff) {
 }
 
 export function captureHandoff(win = window) {
-  if (win.location.pathname !== HANDOFF_PATH) return null;
+  if (!isHandoffPath(win.location.pathname)) return null;
   const handoff = parseHandoff(win.location.hash);
   // Keep the static client route (not the marketing homepage) so a reload
   // can resume the handoff from this tab's sessionStorage without exposing
