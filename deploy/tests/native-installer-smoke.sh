@@ -31,8 +31,8 @@ case "$url" in
     test -f "$MOCK_WORK/state/active"
     ;;
   *SHA256SUMS-server)
-    sha256sum "$MOCK_WORK/releases/v$MOCK_STAGE/telium-server-linux-x86_64.tar.gz" |
-      sed 's@.*/@  @' > "$out"
+    digest="$(sha256sum "$MOCK_WORK/releases/v$MOCK_STAGE/telium-server-linux-x86_64.tar.gz" | cut -d' ' -f1)"
+    printf '%s  %s\n' "$digest" 'telium-server-linux-x86_64.tar.gz' > "$out"
     ;;
   *telium-server-linux-x86_64.tar.gz|*server-linux-x86_64.tar.gz)
     cp "$MOCK_WORK/releases/v$MOCK_STAGE/telium-server-linux-x86_64.tar.gz" "$out"
