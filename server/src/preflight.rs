@@ -868,9 +868,9 @@ mod tests {
     fn installation_report_filters_optional_notices_but_keeps_real_warnings() {
         let mut cfg = production();
         cfg.backup.remote.enabled = false;
-        let audit = audit(&cfg, None);
-        assert!(render(&audit).contains("media_policy.quota_bytes"));
-        let display = render_installation(&audit);
+        let report = audit(&cfg, None);
+        assert!(render(&report).contains("media_policy.quota_bytes"));
+        let display = render_installation(&report);
         assert!(display.contains("backup.remote.enabled"));
         assert!(!display.contains("media_policy.quota_bytes"));
         assert!(!display.contains("web.dir"));
@@ -878,8 +878,8 @@ mod tests {
 
         let mut dangerous = cfg;
         dangerous.public_base_url = "http://home.example".into();
-        let audit = audit(&dangerous, None);
-        assert!(render_installation(&audit).contains("DANGER: public_base_url"));
+        let dangerous_report = audit(&dangerous, None);
+        assert!(render_installation(&dangerous_report).contains("DANGER: public_base_url"));
     }
 
     #[test]
