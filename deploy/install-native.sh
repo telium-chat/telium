@@ -140,15 +140,9 @@ install -d -m 755 "$ETC"
 # directory, which may be root-owned and unwritable by the service account.
 as_telium() (
   cd "$DATA"
-  runuser -u telium -- "$BIN" --config "$CONF" "$@"
+  # Normal daemon logging is unchanged; setup CLIs only need warnings/errors.
+  RUST_LOG="${RUST_LOG:-warn}" runuser -u telium -- "$BIN" --config "$CONF" "$@"
 )
-
-# The whole backup story is "the archives are not inside the data" -- on the
-# same filesystem that is a habit, on a different one it is a property. Say
-# which one this box got.
-if [ "$(stat -c %d "$DATA")" = "$(stat -c %d "$BACKUPS")" ]; then
-  say "note: $BACKUPS is on the same filesystem as $DATA; a different volume or mount would survive the disk"
-fi
 
 # --------------------------------------------------------------- the config
 #
@@ -277,8 +271,8 @@ say "units installed"
 step "Checking the configuration"
 
 # Installation requires root, but the service itself runs as User=telium.
-# Validate under that actual identity; warnings should not block setup.
-if ! as_telium check; then
+# Validate under that actual identity. Show actionable warnings, not default notices.
+if ! as_telium check --installation; then
   echo "error: the configuration did not pass as the telium service user; check $CONF and rerun $0 $DOMAIN" >&2
   exit 1
 fi
@@ -322,7 +316,7 @@ say "     a Cloudflare Tunnel (no open ports):  docs.telium.chat/self-hosting/ex
 say "     or Caddy on this box (real certificates): docs.telium.chat/self-hosting/exposing/"
 say "   then verify:"
 say "     curl -fsS https://$DOMAIN/.well-known/telium/server"
-say "3. register your account using the official Telium web or desktop client."
+say "3. open https://telium.chat to register your account on this server."
 say "   For private registration, enter the one-time code shown above."
 say "4. grant the account administrator access, here on the server:"
 say "     ( cd $DATA && runuser -u telium -- $BIN --config $CONF admin recover USERNAME --reason \"Initial server owner\" )"
