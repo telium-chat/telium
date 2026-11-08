@@ -1,7 +1,29 @@
 {
   "channel": "releases",
-  "generated_at": 1794102065353,
+  "generated_at": 1794111603372,
   "releases": [
+    {
+      "version": "0.3.1",
+      "commit": "048d32fd804ed387847338dca553c8442b8e2d64",
+      "released_at": 1794110467000,
+      "security": false,
+      "summary": "Update Cargo.toml",
+      "image": "sha256:75b753a669682a5049c7b69bd2e28e031d2c3be4e1045993d19acec0aa6ea794",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "server-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/server-v0.3.1/telium-server-linux-x86_64.tar.gz",
+          "sha256": "36dd9b22c6b3cf40f6dc28099193dacd8a1f5bf7cfb685ff3f9058c79cdaa574",
+          "size": 12940420
+        },
+        "server-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/server-v0.3.1/telium-server-linux-aarch64.tar.gz",
+          "sha256": "8a5e773e5f4a22eb66d566eaa8b0ea2470e7bee744ad0e0aecb256f8cda1c16a",
+          "size": 12386108
+        }
+      }
+    },
     {
       "version": "0.3.0",
       "commit": "8b51c33e697b31353e7659d46e287a938642bb53",
