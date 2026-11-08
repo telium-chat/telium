@@ -313,7 +313,7 @@ if [ "$existing_install" -eq 1 ]; then
   # release holds, update windows and operator-selected manual mode.
   # It may stage an update rather than install one; that is intentional.
   step "Checking for server updates"
-  "$UPDATE_BIN" || die "the existing server was left in place; inspect the native updater output above before upgrading"
+  "$UPDATE_BIN" || die "native updater failed; inspect its output and journalctl -u telium-server before retrying"
 fi
 
 # The server binds loopback, so its own health endpoint answers as soon as
@@ -349,9 +349,24 @@ esac
 # DNS and TLS need external setup; the centralized client handles account
 # creation. Only a person with local machine access can grant server admin.
 
-step "Still to do, by hand"
+if [ "$existing_install" -eq 1 ]; then
+  step "Existing server checked"
+  say "existing configuration and administrator access were preserved"
+  say "public discovery: curl -fsS https://$DOMAIN/.well-known/telium/server"
+  say "web client: https://telium.chat"
+  if [ "$registration_state" = existing_private ]; then
+    say "Enter your saved private registration code to add an account."
+    say "If lost or expired, mint a replacement on the server:"
+    say "  ( cd $DATA && runuser -u telium -- $BIN --config $CONF registration-code create )"
+  elif [ "$registration_state" = open ]; then
+    say "Registration remains open; no invitation code is required."
+  else
+    say "Save the initial private registration code printed above."
+  fi
+else
+  step "Still to do, by hand"
 
-say "1. point DNS: $DOMAIN -> this box's public address"
+  say "1. point DNS: $DOMAIN -> this box's public address"
 say "2. put TLS in front, one of:"
 say "     a Cloudflare Tunnel (no open ports):  docs.telium.chat/self-hosting/exposing/"
 say "     or Caddy on this box (real certificates): docs.telium.chat/self-hosting/exposing/"
@@ -381,5 +396,6 @@ fi
 say "   To change signup later, edit [registration].open in $CONF"
 say "   and restart telium-server."
 say ""
-say "voice uses the signed public SFU directory by default; hosting your own"
-say "voice relay is optional: docs.telium.chat/self-hosting/sfu/"
+  say "voice uses the signed public SFU directory by default; hosting your own"
+  say "voice relay is optional: docs.telium.chat/self-hosting/sfu/"
+fi
