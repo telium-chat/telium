@@ -7,7 +7,18 @@ command -v runuser >/dev/null
 command -v flock >/dev/null
 
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+cleanup() {
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    for log in "$work"/*.log; do
+      [ -f "$log" ] || continue
+      echo "--- $(basename "$log") (last 100 lines) ---" >&2
+      tail -n 100 "$log" >&2
+    done
+  fi
+  rm -rf "$work"
+}
+trap cleanup EXIT
 export MOCK_WORK="$work"
 export MOCK_STAGE=1
 mkdir -p "$work/bin" "$work/state" "$work/releases"
