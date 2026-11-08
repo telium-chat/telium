@@ -176,9 +176,11 @@ function Phases({ covered = false, onSettled }) {
   useStoreEvent('route');
   const tr = useT();
   const pendingRecovery = recoveryKeyPending();
-  const [phase, setPhase] = useState(
-    store.signedIn && !pendingRecovery ? 'connecting' : 'login',
-  );
+  const [phase, setPhase] = useState(() => (
+    (pendingHandoff() || window.location.pathname === '/receive-move')
+      ? 'handoff'
+      : (store.signedIn && !pendingRecovery ? 'connecting' : 'login')
+  ));
   const [error, setError] = useState(null);
   // Public profile actions survive the auth funnel.
   const [profileAction, setProfileAction] = useState(null);
@@ -251,6 +253,27 @@ function Phases({ covered = false, onSettled }) {
     setProfileAuth(false);
   }, [profileUserId]);
 
+  // A migration handoff always takes precedence over remembered invite/profile routes.
+  // Neither those routes nor normal auth may boot the source account here.
+  if (phase === 'handoff-login') return (
+    <LoginView onSignedIn={() => setPhase('handoff')} handoffReceiver />
+  );
+  if (phase === 'handoff') return (
+    <AuthCard>
+      <MigrationDestinationGate
+        handoff={pendingHandoff()}
+        onSignIn={() => setPhase('handoff-login')}
+        onCancel={() => { clearHandoff(); setPhase('handoff-closed'); }}
+      />
+    </AuthCard>
+  );
+  if (phase === 'handoff-closed') return (
+    <AuthCard>
+      <h1 className="pt-5 text-lg font-semibold">{tr('migration.handoff.closedTitle')}</h1>
+      <Notice>{tr('migration.handoff.closed')}</Notice>
+    </AuthCard>
+  );
+
   // A pasted invite holds whatever `phase` says: `hydrated` flipping phase to shell mid-join would unmount it.
   if (pastedInvite) {
     return (
@@ -309,24 +332,6 @@ function Phases({ covered = false, onSettled }) {
     );
   }
   if (phase === 'login') return <LoginView onSignedIn={boot} onInvite={setPastedInvite} />;
-  if (phase === 'handoff-login') return (
-    <LoginView onSignedIn={() => setPhase('handoff')} handoffReceiver />
-  );
-  if (phase === 'handoff') return (
-    <AuthCard>
-      <MigrationDestinationGate
-        handoff={pendingHandoff()}
-        onSignIn={() => setPhase('handoff-login')}
-        onCancel={() => { clearHandoff(); setPhase('handoff-closed'); }}
-      />
-    </AuthCard>
-  );
-  if (phase === 'handoff-closed') return (
-    <AuthCard>
-      <h1 className="pt-5 text-lg font-semibold">{tr('migration.handoff.closedTitle')}</h1>
-      <Notice>{tr('migration.handoff.closed')}</Notice>
-    </AuthCard>
-  );
   if (phase === 'connecting') return <Connecting label={connectingLabel} />;
   if (phase === 'unreachable') return <Unreachable error={error} onRetry={boot} />;
   if (inviteCode) {
