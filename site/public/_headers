@@ -1,0 +1,6 @@
+# Browser protections formerly set by site/worker.ts.
+/*
+  Content-Security-Policy: object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
