@@ -1,5 +1,7 @@
 // Maps the store's route to a path and back (`/channels/<guild>/<channel>`, `/channels/@me/<conversation>`, `/invite/<code>`, `/invite/<code>@<server>`, `/u/<user-id>`). Pure.
 
+import { HANDOFF_PATH } from './handoff.js';
+
 const DM = '@me';
 
 /// A route with nothing chosen: the shape the others are built from, not a destination.
@@ -61,6 +63,11 @@ export function routeFrom(pathname) {
 /// Store -> URL via `store.navigate` events; URL -> store via `popstate`, which matches the path so nothing is pushed.
 export function bindRouting(store, win = window) {
   const { history, location } = win;
+  // The migration receiver is intentionally not a chat route. Keep its path
+  // intact even after it consumes the handoff secret, because the source tab
+  // may keep updating the shared active-session key and the receiver must not
+  // be interpreted as ordinary chat or be restarted as another account.
+  if (location.pathname === HANDOFF_PATH) return () => {};
   const apply = () => store.navigate(routeFrom(location.pathname) || { ...HOME });
 
   apply();
