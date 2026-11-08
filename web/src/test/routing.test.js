@@ -80,6 +80,16 @@ describe('history binding', () => {
     expect(window.location.pathname).toBe('/receive-move');
   });
 
+  it('preserves the receiver path with its optional trailing slash', () => {
+    window.history.replaceState(null, '', '/receive-move/');
+    const before = store.route;
+    stop = bindRouting(store);
+    expect(window.location.pathname).toBe('/receive-move/');
+    expect(store.route).toEqual(before);
+    store.navigate({ view: 'dms', conversationId: null });
+    expect(window.location.pathname).toBe('/receive-move/');
+  });
+
   it('rewrites a path it does not recognise in place', () => {
     window.history.replaceState(null, '', '/rubbish');
     stop = bindRouting(store);
