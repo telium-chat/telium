@@ -31,21 +31,21 @@ test('confirm destination in a second tab without switching or restarting the so
   expect(source.domain).toBeTruthy();
   expect(source.userId).toBeTruthy();
 
-  // A destination account signed in earlier must be selectable without
-  // activating its session in the shared telium.session.v1 slot.
-  await page.evaluate(() => {
-    const key = 'telium.accounts.v1';
-    const registry = JSON.parse(localStorage.getItem(key) || '{"accounts":[]}');
-    registry.accounts.push({
-      user_id: '@target:new.example',
-      session: {
-        home: { base: 'https://new.example', domain: 'new.example',
-          token: 'test-destination-token', user_id: '@target:new.example', device_id: 'dest-device' },
-        servers: {},
+  // Reuse the production registry API to simulate a remembered destination
+  // account. Do not hand-roll credential persistence in the browser test:
+  // the helper owns the account format and all session storage behavior.
+  await page.evaluate(async () => {
+    const { rememberSession } = await import('/src/lib/accounts.js');
+    rememberSession({
+      home: {
+        base: 'https://new.example',
+        domain: 'new.example',
+        token: 'test-destination-token',
+        user_id: '@target:new.example',
+        device_id: 'dest-device',
       },
-      used_at: Date.now(),
-    });
-    localStorage.setItem(key, JSON.stringify(registry));
+      servers: {},
+    }, { touch: true });
   });
 
   const receivingTab = await context.newPage();
