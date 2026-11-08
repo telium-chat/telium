@@ -50,6 +50,90 @@ describe('plain text Telium account-domain delegation', () => {
     ]);
   });
 
+  it('follows a direct well-known redirect (apex to www) without requesting telium.txt', async () => {
+    const wellKnown = 'https://example.com/.well-known/telium/server';
+    const redirected = route({ server_name: 'example.com', api: 'https://chat.example.com' });
+    Object.defineProperty(redirected, 'url', {
+      value: 'https://www.example.com/.well-known/telium/server',
+    });
+    const seen = mockRoutes({ [wellKnown]: redirected });
+
+    const found = await discover('example.com');
+    expect(found.api).toBe('https://chat.example.com');
+    expect(seen).toEqual([wellKnown]);
+    expect(globalThis.fetch).toHaveBeenCalledWith(wellKnown, expect.objectContaining({
+      redirect: 'follow',
+    }));
+  });
+
+  it('tries telium.txt when a redirected website returns HTML instead of discovery JSON', async () => {
+    const wellKnown = 'https://example.com/.well-known/telium/server';
+    const landing = route('<html>website, not discovery</html>', 200, 'text/html');
+    Object.defineProperty(landing, 'url', { value: 'https://www.example.com/' });
+    const pointer = 'https://example.com/telium.txt';
+    const delegated = 'https://chat.example.com/.well-known/telium/server';
+    const seen = mockRoutes({
+      [wellKnown]: landing,
+      [pointer]: route('chat.example.com\\n', 200, 'text/plain'),
+      [delegated]: route({ server_name: 'example.com', api: 'https://chat.example.com' }),
+    });
+
+    const found = await discover('example.com');
+    expect(found.api).toBe('https://chat.example.com');
+    expect(seen).toEqual([wellKnown, pointer, delegated]);
+    expect(globalThis.fetch).toHaveBeenCalledWith(wellKnown, expect.objectContaining({
+      redirect: 'follow',
+    }));
+    expect(globalThis.fetch).toHaveBeenCalledWith(pointer, expect.objectContaining({
+      redirect: 'error',
+    }));
+    expect(globalThis.fetch).toHaveBeenCalledWith(delegated, expect.objectContaining({
+      redirect: 'error',
+    }));
+  });
+
+  it('tries telium.txt when a direct redirect cannot be followed because of CORS', async () => {
+    const wellKnown = 'https://example.com/.well-known/telium/server';
+    const pointer = 'https://example.com/telium.txt';
+    const delegated = 'https://chat.example.com/.well-known/telium/server';
+    const seen = mockRoutes({
+      [wellKnown]: new TypeError('CORS blocked a website redirect'),
+      [pointer]: route('chat.example.com', 200, 'text/plain'),
+      [delegated]: route({ server_name: 'example.com', api: 'https://chat.example.com' }),
+    });
+
+    const found = await discover('example.com');
+    expect(found.api).toBe('https://chat.example.com');
+    expect(seen).toEqual([wellKnown, pointer, delegated]);
+  });
+
+  it('refuses HTTPS to HTTP downgrades on redirected direct discovery', async () => {
+    const wellKnown = 'https://example.com/.well-known/telium/server';
+    const downgraded = route({ server_name: 'example.com', api: 'https://chat.example.com' });
+    Object.defineProperty(downgraded, 'url', {
+      value: 'http://www.example.com/.well-known/telium/server',
+    });
+    const seen = mockRoutes({ [wellKnown]: downgraded });
+
+    await expect(discover('example.com')).rejects.toThrow(/insecure HTTP/);
+    expect(seen).toEqual([wellKnown]);
+  });
+
+  it('does not follow redirects from the delegated backend', async () => {
+    const wellKnown = 'https://example.com/.well-known/telium/server';
+    const pointer = 'https://example.com/telium.txt';
+    const delegated = 'https://chat.example.com/.well-known/telium/server';
+    const seen = mockRoutes({
+      [pointer]: route('chat.example.com', 200, 'text/plain'),
+      [delegated]: new TypeError('Redirect blocked'),
+    });
+    await expect(discover('example.com')).rejects.toThrow();
+    expect(seen).toEqual([wellKnown, pointer, delegated]);
+    expect(globalThis.fetch).toHaveBeenCalledWith(delegated, expect.objectContaining({
+      redirect: 'error',
+    }));
+  });
+
   it('continues to support existing direct .well-known documents without an extra fetch', async () => {
     const seen = mockRoutes({
       'https://example.com/.well-known/telium/server': route({
