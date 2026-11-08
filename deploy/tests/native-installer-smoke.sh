@@ -114,7 +114,7 @@ export PATH="$work/bin:$PATH"
 
 # The fake binaries exercise the CLI contract, including multi-line backup
 # output and the difference between an old and a new 'check --help'.
-for version in 1 2 3 4; do
+for version in 1 2 3 4 5; do
   mkdir -p "$work/releases/v$version"
   cat > "$work/releases/v$version/telium-server" <<'MOCK_BINARY'
 #!/usr/bin/env bash
@@ -309,6 +309,14 @@ assert_contains "$work/restart-failed.log" "pre-upgrade backup:"
 assert_contains "$work/restart-failed.log" "do NOT swap the old executable"
 unset MOCK_RESTART_FAIL
 
+# A service that responds but still executes the *old* binary is not healthy.
+export MOCK_STAGE=5 MOCK_STALE_PROCESS=1
+if bash deploy/install-native.sh chat.test > "$work/stale-process.log" 2>&1; then
+  fail "updater accepted stale service executable"
+fi
+assert_contains "$work/stale-process.log" "the service process is stale"
+unset MOCK_STALE_PROCESS
+
 # The UI for open registration must not talk about invitation codes.
 rm -rf /etc/telium /var/lib/telium /var/backups/telium /var/lib/telium-update
 rm -f /usr/local/bin/telium-server /usr/local/bin/telium-server.previous
@@ -329,6 +337,14 @@ rm -f /usr/local/bin/telium-server /usr/local/bin/telium-server.previous
 rm -f "$work/state/"*
 install -m755 "$work/releases/v1/telium-server" /usr/local/bin/telium-server
 export MOCK_STAGE=1 TELIUM_REGISTRATION=closed
+mkdir -p /var/lib/telium
+echo "must not delete" > /var/lib/telium/orphaned-data
+if bash deploy/install-native.sh recovery.test > "$work/refuse-orphaned-data.log" 2>&1; then
+  fail "installer overwrote a partial install with server data present"
+fi
+assert_contains "$work/refuse-orphaned-data.log" "server data or backups remain"
+test -f /var/lib/telium/orphaned-data || fail "interrupted state was lost"
+rm -rf /var/lib/telium
 bash deploy/install-native.sh recovery.test > "$work/recovery.log" 2>&1
 assert_contains "$work/recovery.log" "recovering an interrupted first install"
 assert_contains "$work/recovery.log" "Initial private registration code"
