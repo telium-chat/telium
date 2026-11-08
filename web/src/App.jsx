@@ -30,7 +30,7 @@ import { errorMessage } from './lib/i18n/errors.js';
 import { useT } from './lib/i18n/react.jsx';
 import { applyScheme, resolveScheme } from './lib/scheme.js';
 import { showLocalNotification } from './lib/notifications.js';
-import { clearHandoff, pendingHandoff } from './lib/handoff.js';
+import { clearHandoff, isHandoffPath, pendingHandoff } from './lib/handoff.js';
 import { notificationPreview } from './lib/notification-preview.js';
 import { answerAndroidCallNotification } from './lib/android-call-notification.js';
 import { clipContent, toPlainText } from './lib/emoji.js';
@@ -177,7 +177,7 @@ function Phases({ covered = false, onSettled }) {
   const tr = useT();
   const pendingRecovery = recoveryKeyPending();
   const [phase, setPhase] = useState(() => (
-    (pendingHandoff() || window.location.pathname === '/receive-move')
+    (pendingHandoff() || isHandoffPath(window.location.pathname))
       ? 'handoff'
       : (store.signedIn && !pendingRecovery ? 'connecting' : 'login')
   ));
@@ -193,7 +193,7 @@ function Phases({ covered = false, onSettled }) {
     // on the same origin as the source tab: never boot its stored source session,
     // call switchAccount(), or write the global active session from this tab.
     // Handle BOTH signed-in and signed-out visitors before normal auth boot.
-    if (pendingHandoff() || window.location.pathname === '/receive-move') {
+    if (pendingHandoff() || isHandoffPath(window.location.pathname)) {
       setError(null);
       setPhase('handoff');
       return;
