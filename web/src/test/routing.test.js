@@ -68,6 +68,18 @@ describe('history binding', () => {
     expect(store.route).toMatchObject({ view: 'chat', guildId: 'G1', channelId: 'C1' });
   });
 
+  it('keeps the isolated migration receiver outside chat URL canonicalization', () => {
+    window.history.replaceState(null, '', '/receive-move');
+    const before = store.route;
+    stop = bindRouting(store);
+    expect(window.location.pathname).toBe('/receive-move');
+    expect(store.route).toEqual(before);
+    store.navigate({ view: 'chat', guildId: 'G2', channelId: 'C2' });
+    expect(window.location.pathname).toBe('/receive-move');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    expect(window.location.pathname).toBe('/receive-move');
+  });
+
   it('rewrites a path it does not recognise in place', () => {
     window.history.replaceState(null, '', '/rubbish');
     stop = bindRouting(store);
