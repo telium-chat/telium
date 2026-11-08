@@ -159,6 +159,7 @@ export const migration = {
   'migration.handoff.accountLimit': 'This browser already remembers {max, number} accounts. Use the normal Accounts screen in another tab to free a slot, then open a fresh handoff link.',
   'migration.handoff.wrongServer': 'This is not {destination}. Choose an account on the destination server before continuing.',
   'migration.handoff.confirmTarget': 'Receive {sourceId} into {target}? The destination will receive account data only after you authorize the move from the old tab.',
+  'migration.handoff.targetWarning': 'Use a new or empty destination account. Once you authorize and the transfer runs, imported profile, preferences and encrypted key-vault data may replace data already on this account.',
   'migration.handoff.receive': 'Receive this account',
   'migration.handoff.sending': 'Confirming destination…',
   'migration.handoff.failed': 'Could not confirm the destination: {reason}',
