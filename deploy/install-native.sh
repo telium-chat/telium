@@ -88,6 +88,16 @@ case "$machine" in
   *) die "$machine is not an architecture releases are published for (x86_64, aarch64)" ;;
 esac
 
+# A rerun must not replace the binary of an active service. Upgrades (including
+# database migrations) belong to update-native.sh, which takes a backup before
+# changing the executable and restarts the service in a controlled way.
+existing_install=0
+if [ -e "$BIN" ]; then
+  [ -x "$BIN" ] || die "$BIN exists but is not executable; refusing to overwrite it"
+  [ -f "$CONF" ] || die "$BIN exists but $CONF does not; restore the original config before attempting an upgrade"
+  existing_install=1
+fi
+
 step "Installing for chat on $DOMAIN ($machine)"
 
 # ---------------------------------------------------------------- the binary
@@ -99,32 +109,38 @@ step "Installing for chat on $DOMAIN ($machine)"
 # verified in the binary) takes over from the updater's first run, and every
 # run after that.
 
-step "Downloading the server"
+if [ "$existing_install" -eq 1 ]; then
+  step "Existing server"
+  say "keeping the installed binary; the signed updater handles backups and restarts"
+else
+  step "Downloading the server"
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  base="https://github.com/$REPO/releases/download/$ROLLING"
+  asset="telium-server-linux-$ARCH.tar.gz"
 
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
-base="https://github.com/$REPO/releases/download/$ROLLING"
-asset="telium-server-linux-$ARCH.tar.gz"
+  curl -fsSL --connect-timeout 15 --max-time 900 -o "$tmp/$asset" "$base/$asset" \
+    || die "the download from $base failed"
+  curl -fsSL --connect-timeout 15 --max-time 60 -o "$tmp/SHA256SUMS-server" "$base/SHA256SUMS-server" \
+    || die "could not fetch the SHA256SUMS the release publishes"
 
-curl -fsSL --connect-timeout 15 --max-time 900 -o "$tmp/$asset" "$base/$asset" \
-  || die "the download from $base failed"
-curl -fsSL --connect-timeout 15 --max-time 60 -o "$tmp/SHA256SUMS-server" "$base/SHA256SUMS-server" \
-  || die "could not fetch the SHA256SUMS the release publishes"
+  grep "  $asset\$" "$tmp/SHA256SUMS-server" | (cd "$tmp" && sha256sum --check --quiet -) \
+    || die "the downloaded archive does not match the sha256 the release published; it is deleted"
+  tar -xzf "$tmp/$asset" -C "$tmp" telium-server telium.example.toml \
+    || die "the downloaded archive is not the archive it claimed to be"
 
-grep "  $asset\$" "$tmp/SHA256SUMS-server" | (cd "$tmp" && sha256sum --check --quiet -) \
-  || die "the downloaded archive does not match the sha256 the release published; it is deleted"
-tar -xzf "$tmp/$asset" -C "$tmp" telium-server telium.example.toml \
-  || die "the downloaded archive is not the archive it claimed to be"
+  commit="$("$tmp/telium-server" version 2>/dev/null | sed -n 's/^commit=//p')"
+  [ -n "$commit" ] || die "the downloaded binary does not run here, or does not name a commit"
 
-# Asking the binary to name itself proves the bytes run on this kernel and
-# architecture, and that the build records a commit -- which the updater will
-# need to place this box in the release channel.
-commit="$("$tmp/telium-server" version 2>/dev/null | sed -n 's/^commit=//p')"
-[ -n "$commit" ] || die "the downloaded binary does not run here, or does not name a commit"
+  # Fail before modifying the machine if the released binary is too old to
+  # support private registration, which is part of this installer's contract.
+  "$tmp/telium-server" registration-code --help >/dev/null 2>&1 \
+    || die "the latest published server binary does not support registration codes yet; wait for a compatible release"
 
-install -Dm755 "$tmp/telium-server" "$BIN"
-install -Dm644 "$tmp/telium.example.toml" "$EXAMPLE"
-say "$BIN is release ${commit:0:12}; the annotated config is at $EXAMPLE"
+  install -Dm755 "$tmp/telium-server" "$BIN"
+  install -Dm644 "$tmp/telium.example.toml" "$EXAMPLE"
+  say "$BIN is release ${commit:0:12}; the annotated config is at $EXAMPLE"
+fi
 
 # ------------------------------------------------------------ user and paths
 
@@ -272,7 +288,14 @@ step "Checking the configuration"
 
 # Installation requires root, but the service itself runs as User=telium.
 # Validate under that actual identity. Show actionable warnings, not default notices.
-if ! as_telium check --installation; then
+# A newly checked-out installer may be newer than the published release.
+# Older binaries accept `check` but not the new `--installation` presentation.
+if "$BIN" check --help 2>/dev/null | grep -q -- '--installation'; then
+  check_args=(check --installation)
+else
+  check_args=(check)
+fi
+if ! as_telium "${check_args[@]}"; then
   echo "error: the configuration did not pass as the telium service user; check $CONF and rerun $0 $DOMAIN" >&2
   exit 1
 fi
@@ -283,6 +306,15 @@ step "Starting"
 
 systemctl enable --now telium-server.service telium-update-native.timer
 say "telium-server.service and telium-update-native.timer are enabled"
+
+if [ "$existing_install" -eq 1 ]; then
+  # The updater uses the signed release manifest, takes a verified local
+  # backup, swaps atomically and restarts. Without --now it respects breaking
+  # release holds, update windows and operator-selected manual mode.
+  # It may stage an update rather than install one; that is intentional.
+  step "Checking for server updates"
+  "$UPDATE_BIN" || die "the existing server was left in place; inspect the native updater output above before upgrading"
+fi
 
 # The server binds loopback, so its own health endpoint answers as soon as
 # the process is up, whatever DNS and TLS are doing.
@@ -300,8 +332,17 @@ say "the server is up on 127.0.0.1:8448"
 # The database exists now and is owned by telium, not root. The bootstrap
 # code is minted once, shown once, and never stored in plaintext.
 step "Registration"
-as_telium registration-code bootstrap \
+# Capture the CLI's own effective-policy result instead of guessing from
+# a hand-parsed TOML boolean. The code is still shown only once to stdout.
+registration_result="$(as_telium registration-code bootstrap)" \
   || die "could not create the setup registration code"
+printf '%s\n' "$registration_result"
+case "$registration_result" in
+  "registration is public;"*) registration_state=open ;;
+  "Initial private registration code"*) registration_state=new_private ;;
+  "the initial code was already created"*) registration_state=existing_private ;;
+  *) die "unexpected response from registration-code bootstrap; check the server version" ;;
+esac
 
 # ------------------------------------------------------------ what is left
 #
@@ -317,14 +358,26 @@ say "     or Caddy on this box (real certificates): docs.telium.chat/self-hostin
 say "   then verify:"
 say "     curl -fsS https://$DOMAIN/.well-known/telium/server"
 say "3. open https://telium.chat to register your account on this server."
-say "   For private registration, enter the one-time code shown above."
+case "$registration_state" in
+  new_private)
+    say "   Enter the one-time registration code shown above; save it securely."
+    ;;
+  existing_private)
+    say "   Enter your saved private registration code."
+    say "   If it was lost or expired, generate another on this machine:"
+    say "     ( cd $DATA && runuser -u telium -- $BIN --config $CONF registration-code create )"
+    ;;
+  open)
+    say "   Registration is open; no invitation code is required."
+    ;;
+esac
 say "4. grant the account administrator access, here on the server:"
 say "     ( cd $DATA && runuser -u telium -- $BIN --config $CONF admin recover USERNAME --reason \"Initial server owner\" )"
 say "   Replace USERNAME with the account localpart (or full @name:domain)."
 say "   Confirm the username; the holder of that account must still sign in."
-say "   Further registration codes: Control plane > Registration codes."
-say "   If your setup code was lost before admin setup, create a replacement:"
-say "     ( cd $DATA && runuser -u telium -- $BIN --config $CONF registration-code create )"
+if [ "$registration_state" != open ]; then
+  say "   Further registration codes: Control plane > Registration codes."
+fi
 say "   To change signup later, edit [registration].open in $CONF"
 say "   and restart telium-server."
 say ""
