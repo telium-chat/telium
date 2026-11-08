@@ -66,6 +66,9 @@ TELIUM_UNIT=telium-server.service
 TELIUM_SERVICE_USER=telium
 # Must match the service's WorkingDirectory for relative secret paths (MFA).
 TELIUM_WORKDIR=/var/lib/telium
+# Health is local to the server; override if the server uses a custom bind.
+TELIUM_HEALTH_URL=http://127.0.0.1:8448/_telium/v1/health
+TELIUM_HEALTH_RETRIES=30
 TELIUM_MANIFEST_URL=
 if [ -r "$CONF" ]; then
   # shellcheck source=/dev/null
@@ -448,6 +451,17 @@ fi
 
 echo "installed ${before} -> ${after_name}; restarting ${TELIUM_UNIT}"
 
+# The local backup was verified before replacing the executable. A failed
+# restart must never be hidden by set -e, or lose the recovery instructions.
+report_upgrade_failure() {
+  echo "ERROR: ${TELIUM_UNIT} did not restart into a healthy ${after_short} release." >&2
+  echo "ERROR: pre-upgrade backup: $backup_path" >&2
+  echo "ERROR: inspect: journalctl -u ${TELIUM_UNIT} -n 100 --no-pager" >&2
+  echo "ERROR: do NOT swap the old executable back over a migrated database." >&2
+  echo "ERROR: if recovery is needed, stop the unit and restore the backup with" >&2
+  echo "ERROR: ${TELIUM_SERVER_BIN} --config ${TELIUM_CONFIG} restore latest --yes" >&2
+}
+
 # The swap is done and nothing above it can be interrupted harmlessly, so this
 # is the moment to warn whoever is connected before the restart itself. Same
 # contract as the container path: SIGUSR1 makes the running server stand a
@@ -467,37 +481,49 @@ if [ "$FORCE_NOW" -eq 0 ] && [ "$notice_secs" -gt 0 ]; then
   sleep "$notice_secs"
 fi
 
-systemctl restart "$TELIUM_UNIT"
+if ! systemctl restart "$TELIUM_UNIT"; then
+  report_upgrade_failure
+  exit 1
+fi
 
-up=0
-for _ in $(seq 1 30); do
+# 'systemctl is-active' by itself can succeed for a process that has not
+# finished startup. Verify the live *process executable* matches the binary on
+# disk, then require Telium's DB-backed health response and correct identity.
+expected_server_name="$(sed -nE 's/^[[:space:]]*server_name[[:space:]]*=[[:space:]]*"([^"]+)"[[:space:]]*(#.*)?$/\1/p' "$TELIUM_CONFIG" | head -n 1)"
+if ! [[ "$TELIUM_HEALTH_RETRIES" =~ ^[1-9][0-9]*$ ]]; then
+  echo "WARNING: invalid TELIUM_HEALTH_RETRIES; using 30 attempts" >&2
+  TELIUM_HEALTH_RETRIES=30
+fi
+healthy=0
+for ((attempt=1; attempt<=TELIUM_HEALTH_RETRIES; attempt++)); do
   if systemctl is-active --quiet "$TELIUM_UNIT"; then
-    up=1
-    break
+    mainpid="$(systemctl show -p MainPID --value "$TELIUM_UNIT" 2>/dev/null || true)"
+    if [[ "$mainpid" =~ ^[1-9][0-9]*$ ]] && [ -e "/proc/$mainpid/exe" ]; then
+      running_inode="$(stat -Lc '%d:%i' "/proc/$mainpid/exe" 2>/dev/null || true)"
+      expected_inode="$(stat -Lc '%d:%i' "$TELIUM_SERVER_BIN" 2>/dev/null || true)"
+      if [ -n "$running_inode" ] && [ "$running_inode" = "$expected_inode" ]; then
+        health_response="$(curl -fsS --max-time 2 "$TELIUM_HEALTH_URL" 2>/dev/null || true)"
+        if printf '%s' "$health_response" | grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' &&
+           printf '%s' "$health_response" | grep -Eq '"server_name"[[:space:]]*:[[:space:]]*"[^"]+"' ; then
+          if [ -z "$expected_server_name" ] ||
+             printf '%s' "$health_response" | grep -Fq "\"server_name\":\"$expected_server_name\""; then
+            healthy=1
+            break
+          fi
+        fi
+      fi
+    fi
   fi
   sleep 1
 done
 
-if [ "$up" -eq 0 ]; then
-  # The one failure this script does not clean up after, and it is important
-  # to understand what NOT undoing it buys: if the new binary migrated the
-  # database before failing, the previous binary can no longer open that
-  # database at all, and "rolling back" the file would turn a diagnosable
-  # failure into a server that refuses to start twice. The backup above is
-  # the way back, and it is named here so the person paged at 3am does not
-  # have to go looking for it.
-  echo "ERROR: ${TELIUM_UNIT} did not come back up after the restart; the new binary is still installed." >&2
-  echo "ERROR: do NOT restore ${TELIUM_SERVER_BIN}.previous by hand before reading journalctl -u ${TELIUM_UNIT}:" >&2
-  echo "ERROR: if this release migrated the database, the old binary will refuse it." >&2
-  echo "ERROR: the way back is the backup taken before the swap: stop the unit, then" >&2
-  echo "ERROR: ${TELIUM_SERVER_BIN} --config ${TELIUM_CONFIG} restore latest --yes" >&2
+if [ "$healthy" -ne 1 ]; then
+  report_upgrade_failure
+  echo "ERROR: either the service process is stale or the local health endpoint failed." >&2
+  echo "ERROR: check TELIUM_HEALTH_URL in $CONF if you changed the server bind address." >&2
   exit 1
 fi
-
-running="$("$TELIUM_SERVER_BIN" version | sed -n 's/^commit=//p')"
-if [ "$running" != "$after" ]; then
-  echo "WARNING: the unit is active but the binary on disk names ${running:-<unknown>}; it will be running after the next restart." >&2
-fi
+echo "verified live process, database health and server identity"
 
 rm -rf "$STATE/staged"
 rm -f "$STATE/waiting-manual" "$STATE/waiting-window" "$STATE/waiting-breaking" \
