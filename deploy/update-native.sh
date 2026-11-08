@@ -64,6 +64,8 @@ TELIUM_SERVER_BIN=/usr/local/bin/telium-server
 TELIUM_CONFIG=/etc/telium/telium.toml
 TELIUM_UNIT=telium-server.service
 TELIUM_SERVICE_USER=telium
+# Must match the service's WorkingDirectory for relative secret paths (MFA).
+TELIUM_WORKDIR=/var/lib/telium
 TELIUM_MANIFEST_URL=
 if [ -r "$CONF" ]; then
   # shellcheck source=/dev/null
@@ -404,10 +406,104 @@ fi
 # through this: the backup is a consistent snapshot asked of SQLite, not a
 # shutdown.
 set +e
-backup_path="$(runuser -u "$TELIUM_SERVICE_USER" -- \
+backup_output="$(cd "$TELIUM_WORKDIR" && runuser -u "$TELIUM_SERVICE_USER" -- \
   "$TELIUM_SERVER_BIN" --config "$TELIUM_CONFIG" backup now)"
 backup_rc=$?
 set -e
+# The backup CLI prints the archive path on line 1, followed by its manifest
+# and optional remote upload result. The entire output is not a filename.
+backup_path="${backup_output%%
+  # The archive exists, which is the thing the rollback needs. A non-zero
+  # exit here means its upload to the remote failed, which is a real problem
+  # and exactly as urgent as it sounds -- but it does not un-write the local
+  # copy, and holding today's security fix hostage to a dead S3 bucket would
+  # be trading the incident in front of us for the one we are avoiding.
+  if [ "$backup_rc" -ne 0 ]; then
+    echo "WARNING: the pre-install backup was written but its upload failed (exit ${backup_rc}); the rollback copy is local only." >&2
+  fi
+  echo "backup: ${backup_path}"
+else
+  echo "ERROR: the pre-install backup produced no archive (exit ${backup_rc}); refusing to install. Free disk space and check [backup] in ${TELIUM_CONFIG}." >&2
+  exit 1
+fi
+
+install -m755 "$STATE/staged/telium-server" "$(dirname "$TELIUM_SERVER_BIN")/.telium-server.incoming"
+# One generation, kept for the ten-second kind of rollback: an operator who
+# realises mid-restart that this release is wrong can put it back by hand --
+# provided the database has not been migrated past it yet, which is a race
+# the backup above exists to lose gracefully.
+cp -a "$TELIUM_SERVER_BIN" "${TELIUM_SERVER_BIN}.previous"
+mv -f "$(dirname "$TELIUM_SERVER_BIN")/.telium-server.incoming" "$TELIUM_SERVER_BIN"
+
+# The reference config, never the live one. Every key the server reads has a
+# default compiled in, so a release cannot break a telium.toml by adding to
+# it -- which is exactly why this can be a diff an operator reads when they
+# feel like it rather than a merge they are made to do.
+example="$(dirname "$TELIUM_CONFIG")/telium.example.toml"
+if ! cmp -s "$STATE/staged/telium.example.toml" "$example"; then
+  install -m644 "$STATE/staged/telium.example.toml" "$example"
+  echo "telium.example.toml updated; diff it against telium.toml to see what this release added"
+fi
+
+echo "installed ${before} -> ${after_name}; restarting ${TELIUM_UNIT}"
+
+# The swap is done and nothing above it can be interrupted harmlessly, so this
+# is the moment to warn whoever is connected before the restart itself. Same
+# contract as the container path: SIGUSR1 makes the running server stand a
+# notice in front of every session and keep serving, this script sleeps the
+# notice out, and the server's own `shutdown.notice_secs` withdraws the notice
+# if this script dies mid-wait. `--now` signals nothing and waits for nothing.
+notice_secs="${TELIUM_RESTART_NOTICE_SECS:-300}"
+case "$notice_secs" in
+  ''|*[!0-9]*)
+    echo "WARNING: TELIUM_RESTART_NOTICE_SECS=${notice_secs} is not a number; restarting without a notice" >&2
+    notice_secs=0
+    ;;
+esac
+if [ "$FORCE_NOW" -eq 0 ] && [ "$notice_secs" -gt 0 ]; then
+  systemctl kill --signal=SIGUSR1 --kill-whom=main "$TELIUM_UNIT" 2>/dev/null || true
+  echo "restart notice sent; waiting ${notice_secs}s before restarting"
+  sleep "$notice_secs"
+fi
+
+systemctl restart "$TELIUM_UNIT"
+
+up=0
+for _ in $(seq 1 30); do
+  if systemctl is-active --quiet "$TELIUM_UNIT"; then
+    up=1
+    break
+  fi
+  sleep 1
+done
+
+if [ "$up" -eq 0 ]; then
+  # The one failure this script does not clean up after, and it is important
+  # to understand what NOT undoing it buys: if the new binary migrated the
+  # database before failing, the previous binary can no longer open that
+  # database at all, and "rolling back" the file would turn a diagnosable
+  # failure into a server that refuses to start twice. The backup above is
+  # the way back, and it is named here so the person paged at 3am does not
+  # have to go looking for it.
+  echo "ERROR: ${TELIUM_UNIT} did not come back up after the restart; the new binary is still installed." >&2
+  echo "ERROR: do NOT restore ${TELIUM_SERVER_BIN}.previous by hand before reading journalctl -u ${TELIUM_UNIT}:" >&2
+  echo "ERROR: if this release migrated the database, the old binary will refuse it." >&2
+  echo "ERROR: the way back is the backup taken before the swap: stop the unit, then" >&2
+  echo "ERROR: ${TELIUM_SERVER_BIN} --config ${TELIUM_CONFIG} restore latest --yes" >&2
+  exit 1
+fi
+
+running="$("$TELIUM_SERVER_BIN" version | sed -n 's/^commit=//p')"
+if [ "$running" != "$after" ]; then
+  echo "WARNING: the unit is active but the binary on disk names ${running:-<unknown>}; it will be running after the next restart." >&2
+fi
+
+rm -rf "$STATE/staged"
+rm -f "$STATE/waiting-manual" "$STATE/waiting-window" "$STATE/waiting-breaking" \
+  "$STATE/no-artifact" "$STATE/not-published" "$STATE/check-failed" "$STATE/downgrade"
+
+echo "deployed ${before} -> ${after_short}"
+\n'*}"
 if [ -n "$backup_path" ] && [ -f "$backup_path" ]; then
   # The archive exists, which is the thing the rollback needs. A non-zero
   # exit here means its upload to the remote failed, which is a real problem
