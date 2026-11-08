@@ -1,5 +1,5 @@
 // The worker in front of telium.chat's static assets. Two jobs, both of them
-// about the app routes (`/channels/*`, `/invite/*`, `/u/*`, `/login`) that the
+// about the app routes (`/channels/*`, `/invite/*`, `/u/*`, `/login`, `/receive-move`) that the
 // web client owns on this domain:
 //
 //   - they answer with the app shell (`app.html`, the client's own index.html
@@ -14,7 +14,7 @@
 
 const APP_SHELL = '/app.html';
 
-const APP_ROUTES = ['/channels', '/invite', '/u', '/login'];
+const APP_ROUTES = ['/channels', '/invite', '/u', '/login', '/receive-move'];
 
 // Mirrors server/src/security_headers.rs, CSP included. The CSP deliberately
 // has no connect-src: the client talks to whatever homeserver an account
