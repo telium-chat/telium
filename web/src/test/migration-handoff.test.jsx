@@ -469,6 +469,26 @@ describe('migration handoffs on the centralized Telium website', () => {
     expect(JSON.parse(localStorage.getItem(SESSION_KEY))).toEqual(sourceSession());
   });
 
+  it('confirms guild ownership without presenting account-vault migration copy', async () => {
+    prepare();
+    rememberSession(destSession());
+    const accepted = vi.spyOn(Api.prototype, 'acceptMigration').mockResolvedValue({
+      delivered: true, target_id: '@target:new.example',
+    });
+    mount(sourceStore(), <MigrationDestinationGate handoff={GUILD} onSignIn={() => {}} onCancel={() => {}} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Continue as @target:new.example' }));
+    expect(screen.getByText(/Receive guild/)).toBeTruthy();
+    expect(screen.queryByText(/encrypted key-vault data/)).toBe(null);
+    await user.click(screen.getByRole('button', { name: 'Receive this guild' }));
+    await waitFor(() => expect(screen.getByText(/Destination confirmed/)).toBeTruthy());
+    expect(accepted).toHaveBeenCalledWith({
+      subject_type: 'guild', source: GUILD.source, source_id: GUILD.source_id,
+      handoff: { id: GUILD.id, secret: GUILD.secret },
+    });
+    expect(JSON.parse(localStorage.getItem(SESSION_KEY))).toEqual(sourceSession());
+  });
+
   it('will not create a sixth remembered account', () => {
     const store = sourceStore();
     store.accounts = vi.fn(() => Array.from({ length: 5 }, (_, i) => ({
