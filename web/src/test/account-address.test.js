@@ -166,12 +166,15 @@ describe('findHome', () => {
     await expect(findHome('blog.example')).rejects.toMatchObject({ code: 'unreachable' });
   });
 
-  it('never retries a bare host over plain http', async () => {
+  it('tries the text pointer after a network error, but never downgrades a bare host to http', async () => {
     const fetch = vi.fn(async () => { throw new TypeError('Failed to fetch'); });
     vi.stubGlobal('fetch', fetch);
     await expect(findHome('atlas.example')).rejects.toMatchObject({ code: 'unreachable' });
-    expect(fetch.mock.calls.map(([url]) => url))
-      .toEqual(['https://atlas.example/.well-known/telium/server']);
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      'https://atlas.example/.well-known/telium/server',
+      'https://atlas.example/telium.txt',
+    ]);
+    expect(fetch.mock.calls.every(([url]) => url.startsWith('https://'))).toBe(true);
   });
 
   it('refuses an https document that points at an http API', async () => {

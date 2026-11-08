@@ -43,7 +43,8 @@ export async function request(base, method, path, { token, body, query } = {}) {
 }
 
 // Discovery happens before authentication. Bound unauthenticated responses
-// before decoding them, stop redirects, and do not block indefinitely.
+// before decoding them, and do not block indefinitely. Only the initial
+// well-known lookup may follow redirects; text delegation must never do so.
 const DISCOVERY_LIMIT = 256 * 1024;
 const POINTER_LIMIT = 512;
 const DISCOVERY_TIMEOUT_MS = 8000;
@@ -90,16 +91,22 @@ async function readDiscoveryBytes(response, limit) {
   }
 }
 
-async function discoveryGet(url, limit, accept) {
+async function discoveryGet(url, limit, accept, { followRedirects = false } = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DISCOVERY_TIMEOUT_MS);
   try {
     const response = await teliumFetch(url, {
       method: 'GET',
-      redirect: 'error',
+      redirect: followRedirects ? 'follow' : 'error',
       signal: controller.signal,
       headers: { Accept: accept },
     }, { purpose: 'Account discovery' });
+    // Following an HTTPS website redirect must never make an HTTP discovery
+    // document authoritative. In production Fetch responses expose the final URL.
+    if (followRedirects && new URL(url).protocol === 'https:' && response.url
+        && new URL(response.url).protocol !== 'https:') {
+      throw new DiscoveryValidationError('Account discovery redirected to an insecure HTTP URL');
+    }
     if (!response.ok) throw new HttpError(response.status, null);
     return await readDiscoveryBytes(response, limit);
   } finally {
@@ -107,8 +114,10 @@ async function discoveryGet(url, limit, accept) {
   }
 }
 
-async function discoveryJson(base) {
-  const raw = await discoveryGet(base + '/.well-known/telium/server', DISCOVERY_LIMIT, 'application/json');
+async function discoveryJson(base, { followRedirects = false } = {}) {
+  const raw = await discoveryGet(
+    base + '/.well-known/telium/server', DISCOVERY_LIMIT, 'application/json', { followRedirects },
+  );
   return JSON.parse(raw);
 }
 
@@ -167,14 +176,19 @@ export async function discover(domain) {
       let doc = null;
       let checkTextPointer = false;
       try {
-        doc = await discoveryJson(base);
+        // The original well-known document may legitimately redirect (e.g.
+        // apex -> www). This does not relax the strict delegated-backend lookup.
+        doc = await discoveryJson(base, { followRedirects: true });
         // Some website hosts return generic JSON at missing .well-known paths.
         checkTextPointer = !doc || typeof doc !== 'object' || typeof doc.server_name !== 'string';
       } catch (err) {
         lastError = err;
-        // A missing or non-JSON discovery document allows text delegation.
-        // Network failures must not cause another request to a dead host.
-        checkTextPointer = typeof err?.status === 'number' || err instanceof SyntaxError;
+        // A missing or non-JSON document allows text delegation. Browsers also
+        // report a redirect blocked by CORS as TypeError, indistinguishable from
+        // a network failure; trying the fixed same-origin pointer is safe.
+        // Do not retry aborted requests or deliberate privacy-policy refusals.
+        checkTextPointer = typeof err?.status === 'number'
+          || err instanceof SyntaxError || err instanceof TypeError;
       }
       if (checkTextPointer) {
         doc = await txtDiscovery(base);
