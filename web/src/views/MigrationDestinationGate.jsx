@@ -21,6 +21,7 @@ export function MigrationDestinationGate({ handoff, onSignIn, onCancel }) {
   const [status, setStatus] = useState('');
   const accounts = store.accounts();
   const destination = handoff?.destination || '';
+  const guild = handoff?.subject_type === 'guild';
   const targetAccounts = accounts.filter((account) => {
     const home = account.session?.home;
     const identityHome = /^@[^:]+:(.+)$/.exec(account.user_id)?.[1];
@@ -98,7 +99,7 @@ export function MigrationDestinationGate({ handoff, onSignIn, onCancel }) {
           destination,
         })}
       </p>
-      <Notice>{t('migration.handoff.notScheduled')}</Notice>
+      <Notice>{t(guild ? 'migration.handoff.notScheduledGuild' : 'migration.handoff.notScheduled')}</Notice>
       <div className="flex flex-col gap-2 pt-4">
         {targetAccounts.map((account) => (
           <Button
@@ -117,15 +118,15 @@ export function MigrationDestinationGate({ handoff, onSignIn, onCancel }) {
         {chosen ? (
           <>
             <Notice>
-              {t('migration.handoff.confirmTarget', { sourceId: handoff.source_id, target: chosen.user_id })}
+              {t(guild ? 'migration.handoff.confirmGuildTarget' : 'migration.handoff.confirmTarget', { sourceId: handoff.source_id, target: chosen.user_id })}
             </Notice>
-            <Notice tone="warn">{t('migration.handoff.targetWarning')}</Notice>
+            <Notice tone="warn">{t(guild ? 'migration.handoff.guildTargetWarning' : 'migration.handoff.targetWarning')}</Notice>
           </>
         ) : null}
         {status ? <p role="status" className="text-sm text-danger">{status}</p> : null}
         {chosen ? (
           <Button variant="primary" disabled={busy} onClick={confirm}>
-            {busy ? t('migration.handoff.sending') : t('migration.handoff.receive')}
+            {busy ? t('migration.handoff.sending') : t(guild ? 'migration.handoff.receiveGuild' : 'migration.handoff.receive')}
           </Button>
         ) : null}
         <Button variant="ghost" disabled={busy} onClick={onCancel}>
