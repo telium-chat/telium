@@ -92,7 +92,9 @@ jobs:
                   data = json.load(stream)
               for run in data.get('runs', []):
                   rules = {rule['id']: rule for rule in run.get('tool', {}).get('driver', {}).get('rules', [])}
-                  for finding in run.get('results', []):
+                  results = run.get('results', [])
+                  print('SARIF RESULTS:', len(results), 'rules:', len(rules))
+                  for finding in results[:150]:
                       rid = finding.get('ruleId', '')
                       rule = rules.get(rid, {})
                       props = rule.get('properties', {})
@@ -101,8 +103,6 @@ jobs:
                           important = float(severity) >= 7
                       except (ValueError, TypeError):
                           important = False
-                      if not important and finding.get('level') != 'error':
-                          continue
                       locations = []
                       for location in finding.get('locations', []):
                           loc = location.get('physicalLocation', {})
