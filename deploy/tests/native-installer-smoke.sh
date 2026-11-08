@@ -43,7 +43,13 @@ for ((n=1; n<=$#; n++)); do
 done
 case "$url" in
   http://127.0.0.1:8448/_telium/v1/health)
-    test -f "$MOCK_WORK/state/active"
+    test -f "$MOCK_WORK/state/active" || exit 1
+    server="$(sed -nE 's/^[[:space:]]*server_name[[:space:]]*=[[:space:]]*"([^"]+)"[[:space:]]*(#.*)?$/\1/p' /etc/telium/telium.toml | head -1)"
+    if [ "${MOCK_UNHEALTHY:-0}" = 1 ]; then
+      printf '{"ok":false,"server_name":"%s"}\n' "$server"
+    else
+      printf '{"ok":true,"server_name":"%s"}\n' "$server"
+    fi
     ;;
   *SHA256SUMS-server)
     digest="$(sha256sum "$MOCK_WORK/releases/v$MOCK_STAGE/telium-server-linux-x86_64.tar.gz" | cut -d' ' -f1)"
@@ -72,10 +78,12 @@ case "$1" in
     ;;
   restart)
     test "$2" = telium-server.service
+    [ "${MOCK_RESTART_FAIL:-0}" != 1 ] || { echo "mock restart failure" >&2; exit 1; }
     touch "$MOCK_WORK/state/active"
     /usr/local/bin/telium-server version | sed -n 's/^commit=//p' > "$MOCK_WORK/state/active_commit"
     echo restarted >> "$MOCK_WORK/state/restarts"
     ;;
+  show) echo 1 ;;
   is-active) test -f "$MOCK_WORK/state/active" ;;
   kill) ;;
   *)
@@ -84,12 +92,29 @@ case "$1" in
     ;;
 esac
 MOCK_SYSTEMCTL
+
+# The fake server binary is a shell script. Simulate the systemd process inode
+# with stat so live-executable checks can detect mismatches in this fixture.
+cat > "$work/bin/stat" <<'MOCK_STAT'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = -Lc ] && [ "${2:-}" = %d:%i ] &&
+   [[ "${3:-}" == /proc/*/exe ]]; then
+  if [ "${MOCK_STALE_PROCESS:-0}" = 1 ]; then
+    echo stale
+  else
+    /usr/bin/stat -Lc '%d:%i' /usr/local/bin/telium-server
+  fi
+else
+  exec /usr/bin/stat "$@"
+fi
+MOCK_STAT
 chmod +x "$work/bin/"*
 export PATH="$work/bin:$PATH"
 
 # The fake binaries exercise the CLI contract, including multi-line backup
 # output and the difference between an old and a new 'check --help'.
-for version in 1 2 3; do
+for version in 1 2 3 4; do
   mkdir -p "$work/releases/v$version"
   cat > "$work/releases/v$version/telium-server" <<'MOCK_BINARY'
 #!/usr/bin/env bash
@@ -188,12 +213,30 @@ assert_live_matches_binary() {
   [ "$(cat "$work/state/active_commit")" = "$(binary_commit)" ] || fail "active service does not run installed binary"
 }
 
+# Reject malformed domains before writing anything.
+for name in chat..test -chat.test chat-.test chat_test.test; do
+  if TELIUM_REGISTRATION=closed bash deploy/install-native.sh "$name" > "$work/bad-domain.log" 2>&1; then
+    fail "accepted invalid domain: $name"
+  fi
+done
+
+# An unattended installer without an explicit policy must fail *before* it
+# downloads a binary or creates a server configuration.
+if env -u TELIUM_REGISTRATION bash deploy/install-native.sh chat.test > "$work/no-policy.log" 2>&1; then
+  fail "unattended setup guessed a registration policy"
+fi
+assert_contains "$work/no-policy.log" "TELIUM_REGISTRATION=closed or"
+test ! -e /usr/local/bin/telium-server || fail "unattended preflight installed a binary"
+
 # Fresh install on an older compatible release: no --installation support
 # must not prevent startup or the one-time private signup code.
 export TELIUM_REGISTRATION=closed
-bash deploy/install-native.sh chat.test > "$work/fresh.log" 2>&1
+bash deploy/install-native.sh CHAT.TEST > "$work/fresh.log" 2>&1
 assert_contains "$work/fresh.log" "registration PRIVATE"
+assert_contains "$work/fresh.log" "setup uses root privileges"
 assert_contains "$work/fresh.log" "Initial private registration code"
+assert_contains /etc/telium/telium.toml 'server_name = "chat.test"'
+assert_contains /etc/telium/telium.toml 'client_url = "https://telium.chat"'
 assert_contains "$work/fresh.log" "Enter the one-time registration code shown above"
 assert_live_matches_binary
 [ ! -e "$work/state/restarts" ] || fail "fresh install should not restart"
@@ -203,7 +246,16 @@ assert_live_matches_binary
 # binary on its own. The native updater takes the snapshot and restarts.
 export MOCK_STAGE=2
 echo 'TELIUM_RESTART_NOTICE_SECS=0' >> /etc/telium/update.conf
+echo 'TELIUM_HEALTH_RETRIES=2' >> /etc/telium/update.conf
+# A unit modified directly by an operator must not be overwritten on reruns.
+echo '# operator-only hardening override' >> /etc/systemd/system/telium-server.service
+if bash deploy/install-native.sh other.test > "$work/wrong-domain.log" 2>&1; then
+  fail "installer accepted a different domain for an existing homeserver"
+fi
+assert_contains "$work/wrong-domain.log" "use the domain relocation procedure"
 bash deploy/install-native.sh chat.test > "$work/rerun.log" 2>&1
+assert_contains /etc/systemd/system/telium-server.service '# operator-only hardening override'
+assert_contains "$work/rerun.log" 'preserved existing /etc/systemd/system/telium-server.service'
 assert_contains "$work/rerun.log" "keeping the installed binary"
 assert_contains "$work/rerun.log" "backup: /var/backups/telium/archives/snapshot.test"
 assert_contains "$work/rerun.log" "deployed "
@@ -234,6 +286,27 @@ assert_contains "$work/failed-backup.log" "pre-install backup produced no archiv
 assert_live_matches_binary
 [ "$(binary_commit)" = "$(printf '%040d' 2)" ] || fail "binary changed without a backup"
 
+# Check the failure path when the executable is replaced but the new server
+# cannot prove healthy (mocked database health returns false).
+export MOCK_STAGE=3 MOCK_UNHEALTHY=1
+if bash deploy/install-native.sh chat.test > "$work/unhealthy.log" 2>&1; then
+  fail "updater accepted an unhealthy server"
+fi
+assert_contains "$work/unhealthy.log" "pre-upgrade backup:"
+assert_contains "$work/unhealthy.log" "inspect: journalctl -u"
+assert_contains "$work/unhealthy.log" "the local health endpoint failed"
+unset MOCK_UNHEALTHY
+
+# A failed systemd restart must print recovery instructions despite set -e.
+export MOCK_STAGE=4 MOCK_RESTART_FAIL=1
+if bash deploy/install-native.sh chat.test > "$work/restart-failed.log" 2>&1; then
+  fail "updater reported success after systemctl restart failed"
+fi
+assert_contains "$work/restart-failed.log" "mock restart failure"
+assert_contains "$work/restart-failed.log" "pre-upgrade backup:"
+assert_contains "$work/restart-failed.log" "do NOT swap the old executable"
+unset MOCK_RESTART_FAIL
+
 # The UI for open registration must not talk about invitation codes.
 rm -rf /etc/telium /var/lib/telium /var/backups/telium /var/lib/telium-update
 rm -f /usr/local/bin/telium-server /usr/local/bin/telium-server.previous
@@ -246,4 +319,17 @@ assert_absent "$work/open.log" "Further registration codes"
 assert_absent "$work/open.log" "If your setup code was lost"
 assert_live_matches_binary
 
-echo 'native installer smoke: fresh, active upgrade, breaking hold, backup failure and open registration passed'
+# A previously interrupted first install may have written the executable
+# without committing config. With no database and no running unit, retrying
+# should complete rather than demand restoration of a nonexistent config.
+rm -rf /etc/telium /var/lib/telium /var/backups/telium /var/lib/telium-update
+rm -f /usr/local/bin/telium-server /usr/local/bin/telium-server.previous
+rm -f "$work/state/"*
+install -m755 "$work/releases/v1/telium-server" /usr/local/bin/telium-server
+export MOCK_STAGE=1 TELIUM_REGISTRATION=closed
+bash deploy/install-native.sh recovery.test > "$work/recovery.log" 2>&1
+assert_contains "$work/recovery.log" "recovering an interrupted first install"
+assert_contains "$work/recovery.log" "Initial private registration code"
+assert_live_matches_binary
+
+echo 'native installer smoke: registration defaults, domain identity, interrupted setup, safe updates, live health, backup and restart failures passed'
