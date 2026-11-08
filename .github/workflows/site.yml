@@ -81,6 +81,9 @@ jobs:
       - name: Test safe TXT discovery and destination validation
         run: node --test scripts/secure-discovery.test.mjs
 
+      - name: Test portal app routes, including migration handoffs
+        run: npm run test:portal-routes
+
       - name: Test account-home recommendation rules and signatures
         run: npm run test:recommendations
 
