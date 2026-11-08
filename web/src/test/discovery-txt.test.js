@@ -74,7 +74,7 @@ describe('plain text Telium account-domain delegation', () => {
     const delegated = 'https://chat.example.com/.well-known/telium/server';
     const seen = mockRoutes({
       [wellKnown]: landing,
-      [pointer]: route('chat.example.com\\n', 200, 'text/plain'),
+      [pointer]: route('chat.example.com\n', 200, 'text/plain'),
       [delegated]: route({ server_name: 'example.com', api: 'https://chat.example.com' }),
     });
 
