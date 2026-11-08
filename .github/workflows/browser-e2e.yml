@@ -95,7 +95,7 @@ jobs:
       # Exercise real WebRTC offer/answer and ICE restart behavior alongside
       # the existing onboarding smoke test. Unit fake PCs do not catch m-line
       # ordering errors from Chromium's SDP implementation.
-      - run: bunx playwright test e2e/smoke.spec.js e2e/mesh-negotiation.spec.js
+      - run: bunx playwright test e2e/smoke.spec.js e2e/mesh-negotiation.spec.js e2e/migration-handoff.spec.js
         working-directory: web
       - if: failure()
         run: |

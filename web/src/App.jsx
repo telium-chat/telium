@@ -11,6 +11,7 @@ import { noteBootFault, noteBootHealthy } from './lib/local-state.js';
 import { RecoveryPanel } from './views/RecoveryScreen.jsx';
 import { BootLoader, Button, Notice } from './components/index.js';
 import { LoginView } from './views/LoginView.jsx';
+import { MigrationDestinationGate } from './views/MigrationDestinationGate.jsx';
 import { InviteLanding } from './views/InviteLanding.jsx';
 import { PublicProfileLanding } from './views/PublicProfileLanding.jsx';
 import { Shell } from './views/Shell.jsx';
@@ -29,6 +30,7 @@ import { errorMessage } from './lib/i18n/errors.js';
 import { useT } from './lib/i18n/react.jsx';
 import { applyScheme, resolveScheme } from './lib/scheme.js';
 import { showLocalNotification } from './lib/notifications.js';
+import { clearHandoff, pendingHandoff } from './lib/handoff.js';
 import { notificationPreview } from './lib/notification-preview.js';
 import { answerAndroidCallNotification } from './lib/android-call-notification.js';
 import { clipContent, toPlainText } from './lib/emoji.js';
@@ -185,6 +187,15 @@ function Phases({ covered = false, onSettled }) {
   const [pastedInvite, setPastedInvite] = useState(null);
 
   const boot = useCallback(async () => {
+    // The receiver is an intentionally isolated, temporary flow. The page is
+    // on the same origin as the source tab: never boot its stored source session,
+    // call switchAccount(), or write the global active session from this tab.
+    // Handle BOTH signed-in and signed-out visitors before normal auth boot.
+    if (pendingHandoff() || window.location.pathname === '/receive-move') {
+      setError(null);
+      setPhase('handoff');
+      return;
+    }
     // Registration persists the session before the recovery-key interstitial, so a reload must return to it.
     if (!store.signedIn || recoveryKeyPending()) { setPhase('login'); return; }
     setPhase('connecting');
@@ -298,6 +309,24 @@ function Phases({ covered = false, onSettled }) {
     );
   }
   if (phase === 'login') return <LoginView onSignedIn={boot} onInvite={setPastedInvite} />;
+  if (phase === 'handoff-login') return (
+    <LoginView onSignedIn={() => setPhase('handoff')} handoffReceiver />
+  );
+  if (phase === 'handoff') return (
+    <AuthCard>
+      <MigrationDestinationGate
+        handoff={pendingHandoff()}
+        onSignIn={() => setPhase('handoff-login')}
+        onCancel={() => { clearHandoff(); setPhase('handoff-closed'); }}
+      />
+    </AuthCard>
+  );
+  if (phase === 'handoff-closed') return (
+    <AuthCard>
+      <h1 className="pt-5 text-lg font-semibold">{tr('migration.handoff.closedTitle')}</h1>
+      <Notice>{tr('migration.handoff.closed')}</Notice>
+    </AuthCard>
+  );
   if (phase === 'connecting') return <Connecting label={connectingLabel} />;
   if (phase === 'unreachable') return <Unreachable error={error} onRetry={boot} />;
   if (inviteCode) {

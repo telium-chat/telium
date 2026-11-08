@@ -62,7 +62,10 @@ export function handoffLink(client, handoff) {
 export function captureHandoff(win = window) {
   if (win.location.pathname !== HANDOFF_PATH) return null;
   const handoff = parseHandoff(win.location.hash);
-  win.history.replaceState(null, '', '/');
+  // Keep the static client route (not the marketing homepage) so a reload
+  // can resume the handoff from this tab's sessionStorage without exposing
+  // the one-time secret in browser history.
+  win.history.replaceState(null, '', HANDOFF_PATH);
   if (handoff) {
     try { win.sessionStorage.setItem(KEY, JSON.stringify({ ...handoff, at: Date.now() })); } catch { /* private mode */ }
   }

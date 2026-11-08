@@ -2,15 +2,20 @@ import { useEffect, useRef } from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { App } from '../App.jsx';
 import { StoreProvider } from '../hooks/useStore.jsx';
 import { ModalHost, ModalProvider, useModal } from '../hooks/useModal.jsx';
 import { Store } from '../lib/store.js';
+import { Api } from '../lib/api.js';
+import { accountOf, rememberSession } from '../lib/accounts.js';
+import { SESSION_KEY } from '../lib/store/shared.js';
 import { b64url } from '../lib/util.js';
 import {
   captureHandoff, clearHandoff, handoffLink, parseHandoff, pendingHandoff,
 } from '../lib/handoff.js';
 import { MigrationDialog } from '../views/user-settings/MigrationDialog.jsx';
 import { ReceiveMigrationDialog } from '../views/user-settings/ReceiveMigrationDialog.jsx';
+import { MigrationDestinationGate } from '../views/MigrationDestinationGate.jsx';
 
 const HANDOFF = {
   id: '01JABCDEFGHJKMNPQRSTVWXYZ0',
@@ -99,7 +104,7 @@ describe('the guided-move link', () => {
       sessionStorage,
     };
     expect(captureHandoff(win)).toEqual(HANDOFF);
-    expect(win.history.replaceState).toHaveBeenCalledWith(null, '', '/');
+    expect(win.history.replaceState).toHaveBeenCalledWith(null, '', '/receive-move');
     expect(pendingHandoff()).toMatchObject(HANDOFF);
 
     clearHandoff();
@@ -305,6 +310,32 @@ describe('starting a guided move', () => {
     await waitFor(() => expect(screen.getByText(/The move is scheduled/)).toBeTruthy());
   });
 
+  it('uses the centralized portal when a homeserver does not advertise its own web client', async () => {
+    const marker = document.createElement('meta');
+    marker.name = 'telium-portal';
+    marker.content = '1';
+    document.head.append(marker);
+    try {
+      const store = sourceStore([{ state: 'waiting' }]);
+      const discoverServer = vi.fn(async () => ({ server_name: 'new.example', client: null }));
+      const openWindow = vi.fn();
+      mount(store, (
+        <MigrationDialog close={() => {}} discoverServer={discoverServer} openWindow={openWindow} pollMs={10} />
+      ));
+      const user = userEvent.setup();
+      await user.type(screen.getByPlaceholderText('newhome.example.org'), 'new.example');
+      await user.click(screen.getByRole('button', { name: 'Continue on the new server' }));
+
+      await waitFor(() => expect(openWindow).toHaveBeenCalledTimes(1));
+      const [url] = openWindow.mock.calls[0];
+      expect(new URL(url).origin).toBe(window.location.origin);
+      expect(parseHandoff(new URL(url).hash)).toEqual(HANDOFF);
+      expect(store.home.openMigrationHandoff).toHaveBeenCalledWith('new.example');
+    } finally {
+      marker.remove();
+    }
+  });
+
   it('keeps the code for guilds behind the guided move', async () => {
     const store = sourceStore([{ state: 'waiting' }]);
     const user = userEvent.setup();
@@ -314,5 +345,136 @@ describe('starting a guided move', () => {
     await user.click(screen.getByRole('button', { name: 'Use an import code' }));
     expect(screen.getByPlaceholderText('one-time code from the destination')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Use the guided move' })).toBeTruthy();
+  });
+});
+
+describe('migration handoffs on the centralized Telium website', () => {
+  const sourceSession = () => ({
+    home: { base: 'https://old.example', domain: 'old.example',
+      token: 'source-session', user_id: '@alice:old.example', device_id: 'source-device' },
+    servers: {},
+  });
+  const destSession = () => ({
+    home: { base: 'https://new.example', domain: 'new.example',
+      token: 'dest-session', user_id: '@target:new.example', device_id: 'dest-device' },
+    servers: {},
+  });
+  function sourceStore() {
+    const store = new Store();
+    store.session = sourceSession();
+    return store;
+  }
+  function prepare() {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(sourceSession()));
+    sessionStorage.setItem('telium.pending-handoff.v1', JSON.stringify({ ...HANDOFF, at: Date.now() }));
+  }
+  afterEach(() => vi.restoreAllMocks());
+
+  it('intercepts handoff before booting the active source account', async () => {
+    prepare();
+    const store = sourceStore();
+    store.start = vi.fn(async () => { throw new Error('source booted in receiver'); });
+    render(<App store={store} />);
+    expect(await screen.findByRole('heading', { name: 'Continue the move on new.example' })).toBeTruthy();
+    expect(screen.getByText(/This move comes from old.example/)).toBeTruthy();
+    expect(store.start).not.toHaveBeenCalled();
+    expect(pendingHandoff()).toMatchObject(HANDOFF);
+  });
+
+  it('confirms on destination token and never switches the browser-wide source session', async () => {
+    prepare();
+    rememberSession(destSession());
+    const store = sourceStore();
+    const switched = vi.spyOn(store, 'switchAccount');
+    const added = vi.spyOn(store, 'addAccount');
+    const accepted = vi.spyOn(Api.prototype, 'acceptMigration').mockResolvedValue({
+      delivered: true, target_id: '@target:new.example',
+    });
+    mount(store, <MigrationDestinationGate handoff={HANDOFF} onSignIn={() => {}} onCancel={() => {}} />);
+    expect(accepted).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Continue as @alice:old.example' })).toBe(null);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Continue as @target:new.example' }));
+    expect(accepted).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Receive this account' }));
+    await waitFor(() => expect(screen.getByText(/Destination confirmed/)).toBeTruthy());
+    expect(accepted).toHaveBeenCalledWith({
+      subject_type: 'user', source: 'old.example', source_id: '@alice:old.example',
+      handoff: { id: HANDOFF.id, secret: HANDOFF.secret },
+    });
+    expect(accepted.mock.instances[0].token).toBe('dest-session');
+    expect(accepted.mock.instances[0].base).toBe('https://new.example');
+    expect(JSON.parse(localStorage.getItem(SESSION_KEY))).toEqual(sourceSession());
+    expect(switched).not.toHaveBeenCalled();
+    expect(added).not.toHaveBeenCalled();
+    expect(pendingHandoff()).toBeNull();
+  });
+
+  it('refuses a receipt that names a different destination account', async () => {
+    prepare();
+    rememberSession(destSession());
+    const accepted = vi.spyOn(Api.prototype, 'acceptMigration').mockResolvedValue({
+      delivered: true, target_id: '@someone-else:new.example',
+    });
+    mount(sourceStore(), <MigrationDestinationGate handoff={HANDOFF} onSignIn={() => {}} onCancel={() => {}} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Continue as @target:new.example' }));
+    await user.click(screen.getByRole('button', { name: 'Receive this account' }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/different target account/));
+    expect(accepted).toHaveBeenCalledTimes(1);
+    expect(pendingHandoff()).toMatchObject(HANDOFF);
+    expect(JSON.parse(localStorage.getItem(SESSION_KEY))).toEqual(sourceSession());
+  });
+
+  it('offers sign-in without calling addAccount or switchAccount', async () => {
+    prepare();
+    const store = sourceStore();
+    const openLogin = vi.fn();
+    const added = vi.spyOn(store, 'addAccount');
+    const switched = vi.spyOn(store, 'switchAccount');
+    mount(store, <MigrationDestinationGate handoff={HANDOFF} onSignIn={openLogin} onCancel={() => {}} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Sign in or create an account on new.example' }));
+    expect(openLogin).toHaveBeenCalledOnce();
+    expect(added).not.toHaveBeenCalled();
+    expect(switched).not.toHaveBeenCalled();
+    expect(JSON.parse(localStorage.getItem(SESSION_KEY))).toEqual(sourceSession());
+  });
+
+  it('authenticates the destination without overwriting the source session', async () => {
+    prepare();
+    vi.spyOn(Api.prototype, 'capabilities').mockResolvedValue({ auth: { opaque: false } });
+    vi.spyOn(Api, 'login').mockResolvedValue({
+      server_name: 'new.example', user_id: '@target:new.example',
+      access_token: 'fresh-dest-token', device_id: 'device2',
+    });
+    const store = sourceStore();
+    await store.signIn('https://new.example', 'target', 'password', {
+      allowLegacyAuth: true, handoffOnly: true, handoffDestination: 'new.example',
+    });
+    expect(accountOf('@target:new.example').session.home.token).toBe('fresh-dest-token');
+    expect(JSON.parse(localStorage.getItem(SESSION_KEY))).toEqual(sourceSession());
+  });
+
+  it('rejects a login to the wrong destination without persisting it', async () => {
+    prepare();
+    vi.spyOn(Api.prototype, 'capabilities').mockResolvedValue({ auth: { opaque: false } });
+    vi.spyOn(Api, 'login').mockResolvedValue({
+      server_name: 'wrong.example', user_id: '@target:wrong.example',
+      access_token: 'wrong-token', device_id: 'device2',
+    });
+    await expect(sourceStore().signIn('https://wrong.example', 'target', 'password', {
+      allowLegacyAuth: true, handoffOnly: true, handoffDestination: 'new.example',
+    })).rejects.toThrow(/not on the destination/);
+    expect(accountOf('@target:wrong.example')).toBeNull();
+    expect(JSON.parse(localStorage.getItem(SESSION_KEY))).toEqual(sourceSession());
+  });
+
+  it('will not create a sixth remembered account', () => {
+    const store = sourceStore();
+    store.accounts = vi.fn(() => Array.from({ length: 5 }, (_, i) => ({
+      user_id: '@user' + i + ':old.example', session: sourceSession(),
+    })));
+    mount(store, <MigrationDestinationGate handoff={HANDOFF} onSignIn={() => {}} onCancel={() => {}} />);
+    expect(screen.getByRole('button', { name: 'Sign in or create an account on new.example' }).disabled).toBe(true);
   });
 });
