@@ -278,7 +278,11 @@ impl Default for LimitsConfig {
 
 impl LimitsConfig {
     pub fn admission_budget_bytes(&self) -> i64 {
-        self.transfer_budget_bytes.saturating_mul(self.transfer_stop_percent.clamp(1, 100) as i64) / 100
+        {
+            let percent = self.transfer_stop_percent.clamp(1, 100) as i64;
+            (self.transfer_budget_bytes / 100).saturating_mul(percent)
+                .saturating_add((self.transfer_budget_bytes % 100).saturating_mul(percent) / 100)
+        }
     }
 
     pub fn validate(&self) -> anyhow::Result<()> {
