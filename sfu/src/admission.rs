@@ -46,14 +46,14 @@ pub fn status(state: &AppState) -> Status {
     } else {
         0
     };
-    let near_budget = budgeted && used * 5 >= limits.transfer_budget_bytes * 4;
+    let near_budget = budgeted && used >= limits.admission_budget_bytes();
     let (accepting, reason) = if is_draining(state) {
         (false, "draining for update")
     } else if limits.max_rooms > 0 && rooms as u32 >= limits.max_rooms {
         (false, "room limit reached")
     } else if limits.max_participants > 0 && participants as u32 >= limits.max_participants {
         (false, "participant limit reached")
-    } else if budgeted && used >= limits.transfer_budget_bytes {
+    } else if budgeted && used >= limits.admission_budget_bytes() {
         (false, "transfer budget reached")
     } else {
         (true, "")
@@ -88,7 +88,7 @@ pub fn refuse(state: &AppState, origin: &str, room: &str, identity: &str) -> Opt
     let seats_full = !existing_seat && limits.max_participants > 0
         && state.sessions.join_count_all() as u32 >= limits.max_participants;
     let budget_full = !existing_room && limits.transfer_budget_bytes > 0
-        && state.usage.total_estimate(now_ms(), limits.transfer_period_days) >= limits.transfer_budget_bytes;
+        && state.usage.total_estimate(now_ms(), limits.transfer_period_days) >= limits.admission_budget_bytes();
     let reason = if draining {
         Some("draining for update")
     } else if rooms_full {
@@ -100,13 +100,18 @@ pub fn refuse(state: &AppState, origin: &str, room: &str, identity: &str) -> Opt
     } else {
         None
     };
-    reason.map(|reason| (
+    reason.map(full_error)
+}
+
+/// Structured refusal returned for races as well as ordinary admission checks.
+pub fn full_error(reason: &'static str) -> (axum::http::StatusCode, Value) {
+    (
         axum::http::StatusCode::SERVICE_UNAVAILABLE,
         json!({
             "error": format!("relay is not accepting new calls: {reason}"),
             "code": "relay_full",
         }),
-    ))
+    )
 }
 
 /// The `/health` body: what a guild server or the directory learns from one
@@ -134,6 +139,8 @@ pub fn health_body(state: &AppState, livekit_ok: bool) -> Value {
             },
             "budget_bytes": if limits.transfer_budget_bytes > 0 { Value::from(limits.transfer_budget_bytes) } else { Value::Null },
             "period_days": limits.transfer_period_days,
+            "stop_percent": limits.transfer_stop_percent,
+            "stop_at_bytes": if limits.transfer_budget_bytes > 0 { Value::from(limits.admission_budget_bytes()) } else { Value::Null },
             "near_budget": status.near_budget,
         },
     })
