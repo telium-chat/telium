@@ -5,8 +5,41 @@ use crate::gateway::hub::Hub;
 use serde_json::Value;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use std::sync::{Arc, Weak};
+use tokio::sync::{Mutex, RwLock, Semaphore, SemaphorePermit};
+
+/// Bounds concurrent federation outbox deliveries while serializing each destination.
+/// Weak references avoid retaining a lock for every remote server ever contacted.
+pub struct OutboxPump {
+    destinations: Mutex<HashMap<String, Weak<Mutex<()>>>>,
+    slots: Semaphore,
+}
+
+impl Default for OutboxPump {
+    fn default() -> Self {
+        Self {
+            destinations: Mutex::new(HashMap::new()),
+            slots: Semaphore::new(8),
+        }
+    }
+}
+
+impl OutboxPump {
+    pub async fn lock_for(&self, destination: &str) -> Arc<Mutex<()>> {
+        let mut locks = self.destinations.lock().await;
+        if let Some(lock) = locks.get(destination).and_then(Weak::upgrade) {
+            return lock;
+        }
+        locks.retain(|_, lock| lock.strong_count() > 0);
+        let lock = Arc::new(Mutex::new(()));
+        locks.insert(destination.to_owned(), Arc::downgrade(&lock));
+        lock
+    }
+
+    pub async fn permit(&self) -> SemaphorePermit<'_> {
+        self.slots.acquire().await.expect("outbox semaphore is never closed")
+    }
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -43,8 +76,8 @@ pub struct AppState {
     /// an account's parallel uploads cannot all read a stale total and land
     /// over its quota. The instance lease keeps this single-process.
     pub upload_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
-    pub dm_outbox_pump: Arc<Mutex<()>>,
-    pub friend_outbox_pump: Arc<Mutex<()>>,
+    pub dm_outbox_pump: Arc<OutboxPump>,
+    pub friend_outbox_pump: Arc<OutboxPump>,
     pub demoted: Arc<std::sync::atomic::AtomicBool>,
     pub shut_down: Arc<std::sync::atomic::AtomicBool>,
     pub updates: Arc<RwLock<crate::updates::Status>>,
