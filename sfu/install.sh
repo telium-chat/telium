@@ -105,6 +105,20 @@ cache_ttl_secs = 86400
 public = false
 origins = []
 
+# Limits for public SFU operators. Zero means UNLIMITED, not disabled.
+# Set transfer_budget_bytes to your VPS allowance (BYTES, not GB).
+# New rooms stop at 80% by default; existing calls finish naturally.
+# This is an estimate, not your provider's actual traffic meter.
+[limits]
+max_bitrate = 8000000
+enforce = true
+poll_interval_secs = 15
+max_rooms = 0
+max_participants = 0
+transfer_budget_bytes = 0
+transfer_period_days = 30
+transfer_stop_percent = 80
+
 [admin]
 enabled = true
 bind = "127.0.0.1:7891"
