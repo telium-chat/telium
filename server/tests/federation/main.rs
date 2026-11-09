@@ -290,6 +290,7 @@ mod basics;
 mod bundle_limits;
 mod calls;
 mod dm;
+mod dm_notifications;
 mod friends;
 mod outbox_concurrency;
 mod guild_handoff;
