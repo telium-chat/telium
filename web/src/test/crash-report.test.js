@@ -29,7 +29,7 @@ describe('render crash issue reports', () => {
   });
 
   it('still reports errors with no JavaScript stack frame', () => {
-    const body = new URL(crashReportUrl(new Error('unknown'), '')).searchParams.get('body');
+    const body = new URL(crashReportUrl({ message: 'unknown', stack: 'unknown' }, '')).searchParams.get('body');
     expect(body).not.toContain('### Crash location');
     expect(body).toContain('unknown');
   });
