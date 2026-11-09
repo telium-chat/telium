@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-electron/
+dist-desktop-sourcemaps/
 
 # Local build configuration: keys pinned into the bundle for a local run, e.g.
 # by site/scripts/local-test-feed.mjs. Production keys arrive from CI variables.
