@@ -1,3 +1,4 @@
+import { brandMarkUrl } from '../lib/brand-mark.js';
 import { useEffect, useMemo, useState } from 'react';
 import { Api, discover } from '../lib/api.js';
 import { copyToClipboard } from '../lib/clipboard.js';
@@ -338,7 +339,7 @@ export function PublicProfileLanding({
                   <div className="pc__dates">
                     <span className="pc__date">
                       <img
-                        src="/brand/telium-mark-gradient.svg"
+                        src={brandMarkUrl}
                         alt="Telium"
                         className="pc__date-mark"
                       />

@@ -1,3 +1,4 @@
+import { brandMarkUrl } from '../../lib/brand-mark.js';
 import { AnimatedImage } from '../../components/AnimatedImage.jsx';
 import {
   CheckIcon, ClockIcon, KeyIcon, LockIcon, MembersIcon, ShieldAlertIcon,
@@ -116,7 +117,7 @@ export function JoinDates({ store, guild, member, identity }) {
   const guildName = guild?.name || 'this guild';
 
   const teliumMark = (
-    <img src="/brand/telium-mark-gradient.svg" alt="Telium" className="pc__date-mark" />
+    <img src={brandMarkUrl} alt="Telium" className="pc__date-mark" />
   );
   const guildMark = guildIcon ? (
     <AnimatedImage src={guildIcon} alt={guild?.name || 'Guild'} animated className="pc__date-mark" />

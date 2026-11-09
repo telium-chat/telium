@@ -26,8 +26,9 @@ describe('crashReportUrl', () => {
     expect(params.get('title')).toContain('Render error: boom');
     const body = params.get('body');
     expect(headingsIn(body)).toEqual([
-      'What I was doing', 'Error', 'Component stack', 'Environment',
+      'What I was doing', 'Crash location', 'Environment', 'Error', 'Component stack',
     ]);
+    expect(body).toMatch(/### Crash location\n\n`[^\n]+`/);
     expect(body).toContain('boom');
     expect(body).toContain('at Component');
     expect(body).toContain('- Build: `');

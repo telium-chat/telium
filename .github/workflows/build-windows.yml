@@ -115,6 +115,9 @@ jobs:
             electron/updater.test.cjs \
             electron/tray-lifecycle.test.cjs
 
+      - name: Test desktop brand URL resolution
+        run: bun run test -- src/test/brand-mark.test.js
+
       # The tag is the version, for both files. `build-electron-renderer.mjs`
       # copies `web/package.json`'s version into `electron/package.json` (which
       # electron-builder stamps into the installer), and Vite bakes the same
@@ -143,6 +146,20 @@ jobs:
 
       - name: Stage Electron renderer
         run: node scripts/build-electron-renderer.mjs
+
+      - name: Verify renderer maps are retained outside the installer
+        run: |
+          test -n "$(find dist-desktop-sourcemaps/assets -maxdepth 1 -name '*.js.map' -print -quit)"
+          test -z "$(find electron/renderer -type f -name '*.map' -print -quit)"
+
+      - name: Retain Windows renderer source maps for crash triage
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/desktop-v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: telium-windows-renderer-sourcemaps
+          path: web/dist-desktop-sourcemaps/
+          if-no-files-found: error
+          retention-days: 90
 
       # electron-builder needs Wine to edit Windows executable resources and
       # compile NSIS when the host is Linux. Keep that dependency in a container

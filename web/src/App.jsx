@@ -1,3 +1,4 @@
+import { brandMarkUrl } from './lib/brand-mark.js';
 import { Component, useCallback, useEffect, useRef, useState } from 'react';
 import { StoreProvider, useStore, useStoreEvent } from './hooks/useStore.jsx';
 import { ModalHost, ModalProvider, useModal } from './hooks/useModal.jsx';
@@ -467,7 +468,7 @@ export function AuthCard({ aside, children }) {
       <div className="auth-card my-auto w-full max-w-[400px] bg-background py-2 sm:rounded-3xl sm:bg-surface sm:p-7">
         <div className="flex items-center gap-2.5 pb-1">
           <img
-            src="/brand/telium-mark-gradient.svg"
+            src={brandMarkUrl}
             alt=""
             width="28"
             height="28"

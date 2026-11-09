@@ -119,11 +119,27 @@ export function reportUrl({ kind, title, body }) {
 }
 
 /// No store is read and no request is made: the store may be what just threw.
+// Bundle basename + line/column identify the exact private release source map,
+// without making a maintainer hunt through a long truncated component stack.
+function crashLocation(error) {
+  const stack = String(error?.stack || '');
+  const match = /(?:^|[/\\])([^/\\\s()]+\.js):(\d+):(\d+)/m.exec(stack);
+  return match ? `${match[1]}:${match[2]}:${match[3]}` : null;
+}
+
 export function crashReportUrl(error, stack) {
+  const location = crashLocation(error);
+  // Put actionable metadata *before* verbose traces. GitHub has a practical
+  // URL length ceiling and reportUrl() truncates from the end if necessary.
   const body = [
     '### What I was doing',
     '',
     '<!-- Replace this line: what were you doing when the screen broke? -->',
+    '',
+    ...(location ? ['### Crash location', '', '`' + location + '`', ''] : []),
+    '### Environment',
+    '',
+    ...environmentLines(),
     '',
     '### Error',
     '',
@@ -136,11 +152,7 @@ export function crashReportUrl(error, stack) {
     '```',
     clip((stack || '').trim() || '(none captured)', 2400),
     '```',
-    '',
-    '### Environment',
-    '',
-    ...environmentLines(),
   ].join('\n');
   const title = `Render error: ${String(error?.message || error).slice(0, 110)}`;
-  return `${ISSUE_BASE}?labels=bug&title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`;
+  return reportUrl({ kind: 'bug', title, body });
 }

@@ -1,3 +1,4 @@
+import { brandMarkUrl } from '../lib/brand-mark.js';
 import { useEffect, useState } from 'react';
 import { Api, discover } from '../lib/api.js';
 import { shortName } from '../lib/util.js';
@@ -372,7 +373,7 @@ export function InviteLanding({
     return (
       <InviteFrame>
         <div className="flex flex-col items-center gap-3 py-14 text-center">
-          <img src="/brand/telium-mark-gradient.svg" alt="" className="size-10" />
+          <img src={brandMarkUrl} alt="" className="size-10" />
           <div className="text-base font-medium">{t('onboarding.invite.opening')}</div>
           <Hint>{t('onboarding.invite.openingHint')}</Hint>
         </div>
@@ -384,7 +385,7 @@ export function InviteLanding({
     return (
       <InviteFrame>
         <div className="flex flex-col items-center gap-3 py-12 text-center">
-          <img src="/brand/telium-mark-gradient.svg" alt="" className="size-10" />
+          <img src={brandMarkUrl} alt="" className="size-10" />
           <h1 className="text-2xl font-semibold tracking-tight">
             {t('onboarding.invite.incompleteTitle')}
           </h1>
@@ -410,7 +411,7 @@ export function InviteLanding({
     return (
       <InviteFrame>
         <div className="flex flex-col items-center gap-3 py-12 text-center">
-          <img src="/brand/telium-mark-gradient.svg" alt="" className="size-10" />
+          <img src={brandMarkUrl} alt="" className="size-10" />
           <h1 className="text-2xl font-semibold tracking-tight">
             {expired
               ? t('onboarding.invite.expiredTitle')
@@ -705,7 +706,7 @@ function InviteFrame({ children }) {
     <div className="flex h-full max-h-[100dvh] items-start justify-center overflow-y-auto bg-strip px-5 py-8 sm:py-12">
       <div className="my-auto w-full max-w-[470px]">
         <div className="mb-7 flex items-center justify-center gap-2 text-base font-semibold tracking-tight text-muted">
-          <img src="/brand/telium-mark-gradient.svg" alt="" className="size-6" />
+          <img src={brandMarkUrl} alt="" className="size-6" />
           Telium
         </div>
         <main className="rise-in rounded-2xl bg-surface p-6 sm:p-7">
