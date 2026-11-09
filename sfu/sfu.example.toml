@@ -112,14 +112,20 @@ max_bitrate = 8000000
 max_rooms = 0
 max_participants = 0
 
-# Estimated transfer budget over a rolling period, in bytes (0 = no budget).
-# The relay tallies what it forwards (an estimate that assumes every declared
-# video layer flows -- it errs high on purpose) and stops taking NEW calls as
-# it nears the budget, so traffic routes around it BEFORE anything breaks.
-# /health reports the estimate, the budget, and an 80% "near budget" flag;
-# the dashboard shows the same numbers per guild server.
+# Estimated outgoing traffic allowance over the trailing UTC calendar days.
+# All values are BYTES, not bits. 0 disables the transfer allowance.
+# This is an estimate from declared media layers, NOT measured socket egress:
+# TURN/TCP/UDP overhead and unexpected live traffic are NOT bounded by it.
+# A metered VPS should also monitor provider-reported traffic.
+# Set stop_percent below 100 to leave room for existing calls to finish.
+# New rooms stop at that percentage; established rooms and reconnects continue.
+# /health and the dashboard show usage, the threshold, and whether accepting.
+# Example: 1 TB (decimal) per 30 days; stop admitting new calls at 800 GB:
+# transfer_budget_bytes = 1000000000000
+# transfer_stop_percent = 80
 transfer_budget_bytes = 0
 transfer_period_days = 30
+transfer_stop_percent = 80
 
 # Guild servers this relay refuses, by server_name. Blocked at admission;
 # rooms already in progress finish naturally. Editable here or from the

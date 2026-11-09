@@ -8,7 +8,7 @@ import { micConstraints, normalizeNoiseMode } from './denoise.js';
 import {
   CAMERA_CAPTURE, clampPlaybackVolume, createPlaybackContext, displayMedia, micLive,
   openDenoiser, setPlaybackMuted, setPlaybackVolume, stopPlaybackGraph, userMedia, sameSet,
-  rttFromPc, MAX_BITRATE_ATTRIBUTE, WATCH_TOPIC, DRAIN_TOPIC, preferredScreenCodec,
+  rttFromPc, MAX_BITRATE_ATTRIBUTE, WATCH_TOPIC, DRAIN_TOPIC, MEDIA_LIMIT_TOPIC, preferredScreenCodec,
 } from './voice-media.js';
 import {
   KeyTrouble, keyFailure, unopenedMedia,
@@ -23,7 +23,7 @@ const RENEW_RETRY_MS = 30_000;
 export class SfuCall {
   constructor({
     me, onSpeaking, onPeers, onScreen, onCamera, onScreenEnd, onCameraEnd, onError,
-    onAudioBlocked, onNoiseFallback, onDropped, onRemoved, onKeyTrouble, onDrainNotice, endpoint, joinToken,
+    onAudioBlocked, onNoiseFallback, onDropped, onRemoved, onKeyTrouble, onDrainNotice, onMediaLimit, endpoint, joinToken,
     iceServers, maxBitrate, policy, e2ee, noiseMode, tokenTtl, renewToken,
   }) {
     this.me = me;
@@ -49,6 +49,13 @@ export class SfuCall {
     // The guild's ceiling; `budget` is settled from the smallest figure once connected.
     this.maxBitrate = Number(maxBitrate) > 0 ? Number(maxBitrate) : null;
     this.budget = null;
+    // Per-call emergency cap, used to republish the SAME video capture at a
+    // smaller ladder after LiveKit mutes an over-budget publication.
+    this.mediaLimitCap = null;
+    this.repairingTracks = new Set();
+    this.mediaRepairs = new Map();
+    this.screenSettings = { width: 1920, height: 1080, fps: 30 };
+    this.onMediaLimit = onMediaLimit || (() => {});
     this.onSpeaking = onSpeaking || (() => {});
     this.onPeers = onPeers || (() => {});
     this.onScreen = onScreen || (() => {});
@@ -106,7 +113,7 @@ export class SfuCall {
   /// Smallest positive ceiling of the SFU attribute, the `/session` response and the guild join response.
   settleBudget(session) {
     const attribute = Number(this.room?.localParticipant?.attributes?.[MAX_BITRATE_ATTRIBUTE]);
-    const caps = [attribute, Number(session?.max_bitrate), this.maxBitrate]
+    const caps = [attribute, Number(session?.max_bitrate), this.maxBitrate, this.mediaLimitCap]
       .filter((n) => Number.isFinite(n) && n > 0);
     this.budget = caps.length ? publishBudget(Math.min(...caps)) : null;
     return this.budget;
@@ -370,6 +377,9 @@ export class SfuCall {
       .on(RoomEvent.LocalTrackUnpublished, (pub) => {
         const source = pub?.source;
         if (source !== Track.Source.ScreenShare && source !== Track.Source.Camera) return;
+        // Intentional republish for a smaller SFU-approved ladder is not
+        // stopping a share or camera. Keep the guild's live state intact.
+        if (this.repairingTracks.has(source)) return;
         this.detach(this.me, source);
         if (this.live) {
           if (source === Track.Source.ScreenShare) this.onScreenEnd();
@@ -460,6 +470,30 @@ export class SfuCall {
       this.setWatchQuality(message.streamer, message.quality);
       return;
     }
+    if (topic === MEDIA_LIMIT_TOPIC) {
+      let message;
+      try { message = JSON.parse(new TextDecoder().decode(payload)); }
+      catch { return; }
+      if (!message || typeof message.track_sid !== 'string') return;
+      // The relay broadcasts a separate explanatory notice to viewers. Only
+      // display it for video they are actually receiving/watching, and never
+      // claim that a sender voluntarily stopped sharing.
+      if (typeof message.identity === 'string') {
+        if (message.identity === this.me) return;
+        const source = message.source === 'SCREEN_SHARE' ? Track.Source.ScreenShare
+          : message.source === 'CAMERA' ? Track.Source.Camera : null;
+        if (!source || (source === Track.Source.ScreenShare && !this.screenSubscriptions.has(message.identity))) return;
+        this.detach(message.identity, source);
+        this.onMediaLimit({ source: source === Track.Source.ScreenShare ? 'screen' : 'camera',
+          remote: true, recovered: false });
+        return;
+      }
+      if (!Number.isFinite(Number(message.max_bitrate))
+        || Number(message.max_bitrate) <= 0) return;
+      // A targeted reliable notice comes only from LiveKit/our SFU.
+      void this.recoverLimitedTrack(message);
+      return;
+    }
     // `telium.drain`: the relay is draining for an update, or going away now.
     // A courtesy notice, not a coordination step -- the drop ladder at
     // RoomEvent.Disconnected still owns what happens when the socket dies.
@@ -472,6 +506,60 @@ export class SfuCall {
       }
       if (!message || typeof message.phase !== 'string') return;
       this.onDrainNotice?.(message);
+    }
+  }
+
+  /// LiveKit mutes tracks that declare more video than the signed grant allows.
+  /// Republish the SAME capture (including screen capture) with a lower ladder;
+  /// never ask for display permission again, silently abandon a share, or
+  /// interrupt the microphone. An unrecoverable track is stopped visibly.
+  async recoverLimitedTrack(message) {
+    const source = message.source === 'SCREEN_SHARE' ? Track.Source.ScreenShare
+      : message.source === 'CAMERA' ? Track.Source.Camera : null;
+    if (!source || !this.live || !this.room || this.repairingTracks.has(source)) return;
+    const local = this.room.localParticipant;
+    const publication = [...(local.videoTrackPublications?.values() || [])].find((p) =>
+      p.source === source && (p.sid === message.track_sid || p.track?.sid === message.track_sid));
+    if (!publication?.track) return; // stale notice for a track already replaced
+
+    const label = source === Track.Source.ScreenShare ? 'screen' : 'camera';
+    const attempts = this.mediaRepairs.get(source) || 0;
+    this.repairingTracks.add(source);
+    const track = publication.track;
+    try {
+      if (attempts >= 2) throw new Error('the SFU rejected the smaller video ladder twice');
+      this.mediaRepairs.set(source, attempts + 1);
+      // Each retry conservatively lowers the ENTIRE participant allowance.
+      // The server's max_bitrate is authoritative, not a client preference.
+      const cap = Math.floor(Number(message.max_bitrate) * (attempts === 0 ? 0.65 : 0.35));
+      this.mediaLimitCap = Math.max(1, Math.min(this.mediaLimitCap ?? Infinity, cap));
+      this.settleBudget({ max_bitrate: Number(message.max_bitrate) });
+      const options = source === Track.Source.ScreenShare
+        ? this.videoPublishOptions('screen', this.screenSettings, this.screenSettings?.content)
+        : this.videoPublishOptions('camera', CAMERA_CAPTURE);
+      await local.unpublishTrack(track, false); // keep the capture and its encryption context
+      if (!this.live || !this.room) return;
+      const next = await local.publishTrack(track, { ...options, source });
+      if (!next) throw new Error('LiveKit did not publish the replacement track');
+      this.show(this.me, track, source);
+      this.onMediaLimit({ source: label, recovered: true });
+    } catch (error) {
+      console.warn('SFU media-limit recovery failed:', error);
+      // A video track that has been muted by the SFU is not an active share.
+      // End it explicitly so the UI and guild know, and explain how to retry.
+      try { await local.unpublishTrack(track); } catch { /* already unpublished */ }
+      try { track.stop?.(); } catch { /* already stopped */ }
+      if (source === Track.Source.ScreenShare) {
+        try { await local.setScreenShareEnabled(false); } catch { /* best effort */ }
+      }
+      this.detach(this.me, source);
+      if (this.live) {
+        if (source === Track.Source.ScreenShare) this.onScreenEnd();
+        else this.onCameraEnd();
+        this.onMediaLimit({ source: label, recovered: false });
+      }
+    } finally {
+      this.repairingTracks.delete(source);
     }
   }
 
@@ -710,6 +798,7 @@ export class SfuCall {
     );
     if (on && !publication) return false;
     if (on) {
+      this.mediaRepairs.delete(Track.Source.Camera); // a deliberate fresh attempt
       this.cameraFacing = facingMode;
       // Shown here, not via `LocalTrackPublished`: LiveKit mutes a camera off, so re-enabling yields a new track with no publish event. `show` dedupes.
       if (publication.track) this.show(this.me, publication.track, Track.Source.Camera);
@@ -747,6 +836,10 @@ export class SfuCall {
         : undefined,
     );
     if (on && !publication) return false;
+    if (on) {
+      this.screenSettings = { ...settings };
+      this.mediaRepairs.delete(Track.Source.ScreenShare); // a deliberate fresh attempt
+    }
     // LiveKit captured the track itself, so stamp the hint on the published track.
     if (on) applyContentHint(publication?.track?.mediaStreamTrack, settings?.content);
     // Also shown here, for parity with the camera; `show` drops the duplicate.

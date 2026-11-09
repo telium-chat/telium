@@ -133,6 +133,7 @@ async fn main() -> anyhow::Result<()> {
     if matches!(cli.command, Some(Command::Check)) {
         let cfg = SfuConfig::load(&cli.config)?;
         cfg.updates.validate()?;
+        cfg.limits.validate()?;
         println!("ok");
         return Ok(());
     }
@@ -150,6 +151,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     cfg.updates.validate()?;
+    cfg.limits.validate()?;
+    if cfg.trust.public && cfg.limits.transfer_budget_bytes == 0 {
+        tracing::warn!(
+            "public SFU transfer budget is UNLIMITED; set [limits].transfer_budget_bytes to your provider allowance if the uplink is metered"
+        );
+    }
 
     let trust = TrustedKeys::from_config(&cfg.trust);
     // Never fatal: static keys remain authoritative.
@@ -163,6 +170,11 @@ async fn main() -> anyhow::Result<()> {
     let livekit = LivekitManager::start(&cfg, shutdown_rx).await?;
 
     let usage = Arc::new(Usage::load(std::path::Path::new(&cfg.livekit.config_dir)));
+    if cfg.limits.transfer_budget_bytes > 0 {
+        // A metered operator should not discover after a restart that an
+        // unreadable ledger silently reset their transfer allowance to zero.
+        usage.verify_metered_storage()?;
+    }
     let state = Arc::new(AppState {
         cfg: cfg.clone(),
         trust: trust.clone(),
@@ -180,16 +192,12 @@ async fn main() -> anyhow::Result<()> {
 
     updates::log_build();
 
-    if cfg.limits.enforce {
-        tracing::info!(
-            max_bitrate = cfg.limits.max_bitrate,
-            every_secs = cfg.limits.poll_interval_secs,
-            "bitrate sweep enabled"
-        );
-        tokio::spawn(enforce::run(state.clone(), shutdown_tx.subscribe()));
-    } else {
-        tracing::warn!("bitrate sweep disabled ([limits].enforce = false); ceilings are client-side only");
+    // Accounting is never optional when a transfer budget is in use. Disabling
+    // media-enforcement must not silently switch off metering too.
+    if !cfg.limits.enforce {
+        tracing::warn!("video bitrate enforcement disabled; transfer accounting continues");
     }
+    tokio::spawn(enforce::run(state.clone(), shutdown_tx.subscribe()));
 
     // The check loop only reports; the apply is the updater script's job.
     updates::spawn(state.clone());

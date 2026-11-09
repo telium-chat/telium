@@ -6,6 +6,7 @@ import {
   SfuCall,
   WATCH_TOPIC,
 } from '../lib/voice.js';
+import { MEDIA_LIMIT_TOPIC } from '../lib/voice-media.js';
 import { fakeTrack, stubCall } from './fake-webrtc.js';
 
 describe('SfuCall media that will not open', () => {
@@ -1114,5 +1115,97 @@ describe('SfuCall token renewal', () => {
     expect(call.room.engine.token).toBe('lk-next');
     expect(warned).toHaveBeenCalledTimes(1);
     warned.mockRestore();
+  });
+});
+
+
+describe('SFU media limit repair', () => {
+  function cappedTrack(source = Track.Source.ScreenShare) {
+    const onMediaLimit = vi.fn();
+    const onScreenEnd = vi.fn();
+    const onCameraEnd = vi.fn();
+    const call = new SfuCall({
+      me: '@a:h', endpoint: 'https://sfu.example', joinToken: 'token',
+      maxBitrate: 2_000_000, onMediaLimit, onScreenEnd, onCameraEnd,
+    });
+    const track = { sid: 'TR_old', stop: vi.fn() };
+    const publication = { sid: 'TR_old', source, track };
+    const localParticipant = {
+      videoTrackPublications: new Map([['TR_old', publication]]),
+      attributes: { [MAX_BITRATE_ATTRIBUTE]: '2000000' },
+      unpublishTrack: vi.fn(async () => {}),
+      publishTrack: vi.fn(async () => ({ sid: 'TR_new', source, track })),
+      setScreenShareEnabled: vi.fn(async () => {}),
+    };
+    call.room = { localParticipant };
+    call.live = true;
+    call.show = vi.fn();
+    return { call, track, publication, localParticipant, onMediaLimit, onScreenEnd, onCameraEnd };
+  }
+
+  it('explains a relay-limited share only to the people watching it', () => {
+    const { call, onMediaLimit } = cappedTrack();
+    call.detach = vi.fn();
+    const notice = new TextEncoder().encode(JSON.stringify({
+      identity: '@b:h', track_sid: 'TR_foo', source: 'SCREEN_SHARE',
+    }));
+    call.onData(notice, null, MEDIA_LIMIT_TOPIC);
+    expect(onMediaLimit).not.toHaveBeenCalled();
+    call.screenSubscriptions.add('@b:h');
+    call.onData(notice, null, MEDIA_LIMIT_TOPIC);
+    expect(call.detach).toHaveBeenCalledWith('@b:h', Track.Source.ScreenShare);
+    expect(onMediaLimit).toHaveBeenCalledExactlyOnceWith({
+      source: 'screen', remote: true, recovered: false,
+    });
+  });
+
+  it('does not obey a forged or malformed data message', () => {
+    const { call } = cappedTrack();
+    const repair = vi.spyOn(call, 'recoverLimitedTrack').mockResolvedValue();
+    const data = new TextEncoder().encode(JSON.stringify({
+      track_sid: 'TR_old', source: 'SCREEN_SHARE', max_bitrate: 2_000_000,
+    }));
+    call.onData(data, { identity: 'attacker' }, MEDIA_LIMIT_TOPIC);
+    call.onData(new TextEncoder().encode('invalid-json'), null, MEDIA_LIMIT_TOPIC);
+    call.onData(new TextEncoder().encode(JSON.stringify({ track_sid: 'TR_old', max_bitrate: 0 })), null, MEDIA_LIMIT_TOPIC);
+    expect(repair).not.toHaveBeenCalled();
+    call.onData(data, null, MEDIA_LIMIT_TOPIC);
+    expect(repair).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses the same screen capture at a smaller bitrate without ending the share', async () => {
+    const { call, track, localParticipant, onMediaLimit, onScreenEnd } = cappedTrack();
+    await call.recoverLimitedTrack({ track_sid: 'TR_old', source: 'SCREEN_SHARE', max_bitrate: 2_000_000 });
+    expect(localParticipant.unpublishTrack).toHaveBeenCalledExactlyOnceWith(track, false);
+    expect(localParticipant.publishTrack).toHaveBeenCalledTimes(1);
+    const [republished, opts] = localParticipant.publishTrack.mock.calls[0];
+    expect(republished).toBe(track);
+    expect(opts.source).toBe(Track.Source.ScreenShare);
+    expect(opts.screenShareEncoding.maxBitrate).toBeLessThan(2_000_000);
+    expect(track.stop).not.toHaveBeenCalled();
+    expect(onScreenEnd).not.toHaveBeenCalled();
+    expect(onMediaLimit).toHaveBeenCalledExactlyOnceWith({ source: 'screen', recovered: true });
+    // Token renewal cannot raise the repaired encoder ceiling back up.
+    expect(call.settleBudget({ max_bitrate: 2_000_000 }).total).toBeLessThan(2_000_000);
+  });
+
+  it('ends a failed screen share visibly, preserving the call and microphone', async () => {
+    const { call, localParticipant, onMediaLimit, onScreenEnd } = cappedTrack();
+    localParticipant.publishTrack.mockRejectedValue(new Error('republish failed'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await call.recoverLimitedTrack({ track_sid: 'TR_old', source: 'SCREEN_SHARE', max_bitrate: 2_000_000 });
+    } finally { warn.mockRestore(); }
+    expect(call.live).toBe(true);
+    expect(onScreenEnd).toHaveBeenCalledTimes(1);
+    expect(localParticipant.setScreenShareEnabled).toHaveBeenCalledWith(false);
+    expect(onMediaLimit).toHaveBeenCalledExactlyOnceWith({ source: 'screen', recovered: false });
+  });
+
+  it('rejects stale notifications without touching a replacement camera', async () => {
+    const { call, localParticipant, onMediaLimit } = cappedTrack(Track.Source.Camera);
+    await call.recoverLimitedTrack({ track_sid: 'TR_stale', source: 'CAMERA', max_bitrate: 2_000_000 });
+    expect(localParticipant.unpublishTrack).not.toHaveBeenCalled();
+    expect(onMediaLimit).not.toHaveBeenCalled();
   });
 });

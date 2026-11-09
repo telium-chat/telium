@@ -62,6 +62,27 @@ impl Usage {
         Self { inner: Mutex::new(ledger), path }
     }
 
+    /// A metered relay must never silently start at zero after a corrupted
+    /// ledger or with a state directory that cannot persist usage.
+    pub fn verify_metered_storage(&self) -> anyhow::Result<()> {
+        match std::fs::read(&self.path) {
+            Ok(bytes) => {
+                serde_json::from_slice::<Ledger>(&bytes).map_err(|e| anyhow::anyhow!(
+                    "SFU transfer ledger at {} is corrupt: {e}; refusing to start metered relay",
+                    self.path.display()
+                ))?;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+            Err(e) => anyhow::bail!("SFU cannot read transfer ledger at {}: {e}", self.path.display()),
+        }
+        let probe = self.path.with_extension("meter-probe");
+        std::fs::write(&probe, b"ok").map_err(|e| anyhow::anyhow!(
+            "SFU cannot persist transfer usage beside {}: {e}", self.path.display()
+        ))?;
+        std::fs::remove_file(&probe)?;
+        Ok(())
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, Ledger> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -78,7 +99,8 @@ impl Usage {
             return;
         }
         let mut ledger = self.lock();
-        *ledger.by_origin.entry(origin.to_string()).or_default().entry(day_of(at_ms)).or_insert(0) += bytes;
+        let count = ledger.by_origin.entry(origin.to_string()).or_default().entry(day_of(at_ms)).or_insert(0);
+        *count = count.saturating_add(bytes);
         self.persist(&ledger);
     }
 
@@ -119,8 +141,10 @@ impl Usage {
         // Best effort: an unwritable state dir costs the estimate, never a call.
         if let Ok(bytes) = serde_json::to_vec(ledger) {
             let tmp = self.path.with_extension("json.tmp");
-            if std::fs::write(&tmp, bytes).is_ok() {
-                let _ = std::fs::rename(&tmp, &self.path);
+            match std::fs::write(&tmp, bytes).and_then(|_| std::fs::rename(&tmp, &self.path)) {
+                Ok(()) => {},
+                Err(e) => tracing::error!(path = %self.path.display(), error = %e,
+                    "SFU transfer ledger could not be persisted; operator must restore writable storage"),
             }
         }
     }
@@ -143,7 +167,7 @@ fn sum_window(ledger: &Ledger, origin: Option<&str>, now_ms: i64, days: u32) -> 
         .flat_map(|(_, days_map)| days_map.iter())
         .filter(|(day, _)| in_window(day))
         .map(|(_, bytes)| *bytes)
-        .sum()
+        .fold(0_i64, |sum, bytes| sum.saturating_add(bytes))
 }
 
 fn parse_day(day: &str) -> (i64, u32, u32) {
@@ -215,6 +239,18 @@ mod tests {
         assert_eq!(reloaded.total_estimate(now, 30), 10_500);
         let rows = reloaded.snapshot(now, 30);
         assert_eq!(rows.first().map(|(o, _)| o.as_str()), Some("guild.one"));
+    }
+
+    #[test]
+    fn metered_mode_refuses_corrupt_or_unwritable_ledgers() {
+        let dir = temp_dir();
+        let good = Usage::load(&dir);
+        good.verify_metered_storage().unwrap();
+        std::fs::write(dir.join("usage.json"), b"not json").unwrap();
+        let bad = Usage::load(&dir);
+        assert!(bad.verify_metered_storage().is_err());
+        let missing = Usage::load(&dir.join("does-not-exist"));
+        assert!(missing.verify_metered_storage().is_err());
     }
 
     #[test]

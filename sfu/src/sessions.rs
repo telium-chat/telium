@@ -40,6 +40,30 @@ impl SessionRegistry {
         );
     }
 
+    /// Reserve a seat and check room/participant caps under the SAME lock.
+    /// A separate check followed by record_join races when many clients dial at once.
+    pub fn try_record_join(
+        &self, room: &str, origin: &str, identity: &str, max_bitrate: i64,
+        max_rooms: u32, max_participants: u32,
+    ) -> Result<(), &'static str> {
+        let mut g = self.lock();
+        let key = (room.to_string(), identity.to_string());
+        if !g.joins.contains_key(&key) {
+            let exists = g.joins.keys().any(|(r, _)| r == room);
+            if !exists && max_rooms > 0 {
+                let rooms = g.joins.keys().map(|(r, _)| r).collect::<std::collections::HashSet<_>>();
+                if rooms.len() >= max_rooms as usize { return Err("room limit reached"); }
+            }
+            if max_participants > 0 && g.joins.len() >= max_participants as usize {
+                return Err("participant limit reached");
+            }
+        }
+        g.joins.insert(key, JoinRecord {
+            origin: origin.to_string(), max_bitrate, minted_at: Instant::now(),
+        });
+        Ok(())
+    }
+
     /// The origin any current join in `room` came from, for usage attribution.
     pub fn room_origin(&self, room: &str) -> Option<String> {
         self.lock().joins.iter().find(|((r, _), _)| r == room).map(|(_, rec)| rec.origin.clone())
@@ -112,6 +136,31 @@ impl SessionRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn simultaneous_joins_cannot_bypass_room_or_participant_limits() {
+        use std::sync::Arc;
+        let reg = Arc::new(SessionRegistry::new());
+        let gate = Arc::new(std::sync::Barrier::new(16));
+        let mut workers = Vec::new();
+        for i in 0..16 {
+            let reg = reg.clone();
+            let gate = gate.clone();
+            workers.push(std::thread::spawn(move || {
+                gate.wait();
+                reg.try_record_join(&format!("room-{i}"), "home", &format!("user-{i}"),
+                    1_000_000, 2, 2)
+            }));
+        }
+        let successes = workers.into_iter().map(|worker| worker.join().unwrap()).filter(Result::is_ok).count();
+        assert_eq!(successes, 2);
+        assert_eq!(reg.join_count_all(), 2);
+        assert_eq!(reg.rooms().len(), 2);
+        // Reconnecting an existing seat still works at the limit.
+        let room = reg.rooms()[0].clone();
+        let identity = room.replace("room-", "user-");
+        assert!(reg.try_record_join(&room, "home", &identity, 900_000, 2, 2).is_ok());
+    }
 
     #[test]
     fn join_records_are_scoped_by_room_and_identity() {

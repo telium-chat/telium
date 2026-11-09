@@ -499,7 +499,7 @@ impl LivekitManager {
             .await
     }
 
-    async fn send_data(&self, room: &str, identity: &str, topic: &str, payload: &Value) -> Result<()> {
+    pub(crate) async fn send_data(&self, room: &str, identity: &str, topic: &str, payload: &Value) -> Result<()> {
         self.twirp("SendData", &send_data_body(room, identity, topic, payload)).await
     }
 

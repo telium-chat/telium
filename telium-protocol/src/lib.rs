@@ -25,6 +25,8 @@ pub fn is_watch_quality(q: &str) -> bool {
 pub const MAX_BITRATE_ATTRIBUTE: &str = "telium.max_bitrate";
 
 pub const WATCH_TOPIC: &str = "telium.watch";
+/// Reliable SFU-to-publisher notice for a track muted by the relay bitrate cap.
+pub const MEDIA_LIMIT_TOPIC: &str = "telium.media-limit";
 
 /// Relay-to-participants notice that the relay is draining for an update (or
 /// about to restart now). Only the SFU may speak on it, like `WATCH_TOPIC`.

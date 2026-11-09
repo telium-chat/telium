@@ -1,6 +1,7 @@
 //! Backstop that mutes tracks whose declared layers exceed the participant ceiling.
 
 use std::sync::Arc;
+use serde_json::json;
 use std::time::Duration;
 
 use tokio::sync::watch;
@@ -15,7 +16,7 @@ pub fn assess(cap: i64, tracks: &[TrackInfo]) -> Vec<String> {
         .iter()
         .filter(|t| t.kind == TrackKind::Video && !t.muted && t.declared_bitrate > 0)
         .collect();
-    let mut total: i64 = candidates.iter().map(|t| t.declared_bitrate).sum();
+    let mut total: i64 = candidates.iter().fold(0_i64, |sum, t| sum.saturating_add(t.declared_bitrate));
     if total <= cap {
         return Vec::new();
     }
@@ -47,10 +48,23 @@ fn sender_rate(p: &ParticipantInfo) -> i64 {
         .tracks
         .iter()
         .filter(|t| t.kind == TrackKind::Video && !t.muted)
-        .map(|t| t.declared_bitrate.max(0))
-        .sum();
-    let audio = if p.tracks.iter().any(|t| t.kind == TrackKind::Audio && !t.muted) { 32_000 } else { 0 };
-    video + audio
+        .fold(0_i64, |sum, t| sum.saturating_add(t.declared_bitrate.max(0)));
+    // Opus can use ~48 kbps per track, and one user may publish both a mic
+    // and screenshare audio. Reserve 64 kbps per active track for overhead.
+    let audio_tracks = p.tracks.iter().filter(|t| t.kind == TrackKind::Audio && !t.muted).count() as i64;
+    let audio = audio_tracks.saturating_mul(64_000);
+    video.saturating_add(audio)
+}
+
+/// Declared-rate *estimate* of outgoing media, not LiveKit's measured socket bytes.
+/// Bitrate is in BITS/sec; the persistent ledger is in BYTES.
+fn estimated_egress_bytes(participants: &[ParticipantInfo], interval_secs: i64) -> i64 {
+    let n = participants.len() as i64;
+    if n <= 1 { return 0; }
+    let rate: i64 = participants.iter().fold(0_i64, |sum, p| sum.saturating_add(sender_rate(p)));
+    rate.saturating_mul(n - 1)
+        .saturating_mul(interval_secs.max(0))
+        .saturating_div(8)
 }
 
 pub async fn sweep_once(state: &AppState) -> usize {
@@ -70,17 +84,16 @@ pub async fn sweep_once(state: &AppState) -> usize {
         // to n-1 receivers, so egress ~ Sum(sender rate) x (n-1) x interval.
         // Declared layers over-estimate idle senders -- the conservative
         // direction for protecting a transfer-capped operator.
-        let n = participants.len() as i64;
-        if n > 1 {
-            let interval = state.cfg.limits.poll_interval_secs.max(1) as i64;
-            let rate: i64 = participants.iter().map(|p| sender_rate(p)).sum();
-            let bytes = rate.saturating_mul(n - 1).saturating_mul(interval);
-            if bytes > 0 {
-                if let Some(origin) = state.sessions.room_origin(&room) {
-                    state.usage.add(&origin, bytes);
-                }
+        let interval = state.cfg.limits.poll_interval_secs.max(1) as i64;
+        let bytes = estimated_egress_bytes(&participants, interval);
+        if bytes > 0 {
+            if let Some(origin) = state.sessions.room_origin(&room) {
+                state.usage.add(&origin, bytes);
             }
         }
+
+        // Disabling the video enforcement backstop does not disable metering.
+        if !state.cfg.limits.enforce { continue; }
 
         for p in &participants {
             let Some(cap) = cap_for(state, &room, p) else { continue };
@@ -92,6 +105,28 @@ pub async fn sweep_once(state: &AppState) -> usize {
                             room = %room, identity = %p.identity, track = %sid, cap,
                             "muted video track whose declared layers exceed the participant's ceiling"
                         );
+                        // A muted publication is not a silent mystery: the
+                        // publisher repackages the *same* capture at a smaller
+                        // ladder, or tells the person how to retry if it cannot.
+                        let source = p.tracks.iter().find(|t| t.sid == sid)
+                            .map(|t| t.source.as_str()).unwrap_or("VIDEO");
+                        if let Err(e) = state.livekit.send_data(
+                            &room, &p.identity, telium_protocol::MEDIA_LIMIT_TOPIC,
+                            &json!({ "track_sid": sid, "source": source, "max_bitrate": cap }),
+                        ).await {
+                            tracing::warn!(room = %room, identity = %p.identity, error = %e,
+                                "muted track but could not notify publisher of recovery steps");
+                        }
+                        // Everybody watching the muted track should know the
+                        // interruption is a relay limit, not the sender silently
+                        // stopping. The client only surfaces this to viewers.
+                        if let Err(e) = state.livekit.broadcast(
+                            &room, telium_protocol::MEDIA_LIMIT_TOPIC,
+                            &json!({ "identity": p.identity, "track_sid": sid, "source": source }),
+                        ).await {
+                            tracing::warn!(room = %room, error = %e,
+                                "muted track but could not notify viewers");
+                        }
                     }
                     Err(e) => tracing::warn!(
                         room = %room, identity = %p.identity, track = %sid, error = %e,
@@ -128,6 +163,20 @@ mod tests {
             muted,
             declared_bitrate: bitrate,
         }
+    }
+
+    #[test]
+    fn estimated_egress_converts_bits_to_bytes_and_respects_fanout() {
+        let speaker = ParticipantInfo {
+            identity: "a".into(), attributes: Default::default(),
+            tracks: vec![video("cam", 800_000, false)],
+        };
+        let listener = ParticipantInfo {
+            identity: "b".into(), attributes: Default::default(), tracks: vec![],
+        };
+        assert_eq!(estimated_egress_bytes(&[speaker.clone(), listener.clone()], 10), 1_000_000);
+        assert_eq!(estimated_egress_bytes(&[speaker, listener.clone(), listener], 10), 2_000_000);
+        assert_eq!(estimated_egress_bytes(&[], 10), 0);
     }
 
     #[test]

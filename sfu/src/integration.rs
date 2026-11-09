@@ -399,6 +399,11 @@ fn unique_usage_dir() -> std::path::PathBuf {
         assert_eq!(mutes[0]["identity"], "greedy");
         assert_eq!(mutes[0]["trackSid"], "TR_g_screen", "the largest declared ladder goes first");
         assert_eq!(mutes[0]["muted"], true);
+        let notices: Vec<&Value> = rec.iter().filter(|(m, _)| m == "SendData").map(|(_, b)| b).collect();
+        assert_eq!(notices.len(), 2, "both the publisher and viewers need an explanation");
+        assert!(notices.iter().all(|n| n["topic"] == proto::MEDIA_LIMIT_TOPIC));
+        assert!(notices.iter().any(|n| n["destinationIdentities"] == json!(["greedy"])));
+        assert!(notices.iter().any(|n| n.get("destinationIdentities").is_none()));
 
         assert_eq!(h.state.sessions.cap_for(room, "honest"), Some(1_000_000));
         assert_eq!(h.state.sessions.cap_for(room, "greedy"), Some(1_000_000));
@@ -572,6 +577,29 @@ fn unique_usage_dir() -> std::path::PathBuf {
     }
 
     #[tokio::test]
+    async fn turning_off_bitrate_enforcement_does_not_turn_off_traffic_accounting() {
+        let h = harness_with(|cfg| {
+            cfg.limits.enforce = false;
+            cfg.limits.poll_interval_secs = 10;
+            cfg.limits.transfer_budget_bytes = 1_000_000;
+        }).await;
+        let (status, _) = join(&h, "alice", 1_000_000).await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, _) = join(&h, "bob", 1_000_000).await;
+        assert_eq!(status, StatusCode::OK);
+        *h.roster.lock().await = json!([
+            { "identity": "alice", "tracks": [ { "sid": "mic", "type": "AUDIO", "source": "MICROPHONE" } ] },
+            { "identity": "bob", "tracks": [ { "sid": "cam", "type": "VIDEO", "source": "CAMERA", "layers": [{ "bitrate": 9000000 }] } ] },
+        ]);
+        h.record.lock().await.clear();
+        let muted = crate::enforce::sweep_once(&h.state).await;
+        assert_eq!(muted, 0);
+        let history = h.record.lock().await;
+        assert!(!history.iter().any(|(method, _)| method == "MutePublishedTrack"));
+        assert!(h.state.usage.total_estimate(crate::updates::now_ms(), 30) > 0);
+    }
+
+    #[tokio::test]
     async fn an_exhausted_transfer_budget_refuses_new_joins_and_flags_near_budget() {
         let h = harness_with(|cfg| {
             cfg.limits.transfer_budget_bytes = 1_000_000;
@@ -585,13 +613,20 @@ fn unique_usage_dir() -> std::path::PathBuf {
         assert_eq!(health["transfer"]["budget_bytes"], 1_000_000, "{health}");
         assert_eq!(health["transfer"]["estimate_bytes"], 0, "{health}");
 
-        // Cross 80%: near_budget flags, but the relay still accepts.
-        h.state.usage.add("home.example", 850_000);
+        // Below the 80% reserve: new calls are still allowed.
+        h.state.usage.add("home.example", 750_000);
+        let (_, health) = get_health(&h).await;
+        assert_eq!(health["transfer"]["near_budget"], false, "{health}");
+        assert_eq!(health["accepting"], true);
+
+        // Cross 80%: stop new calls *before* a metered relay exhausts its allowance.
+        h.state.usage.add("home.example", 100_000);
         let (_, health) = get_health(&h).await;
         assert_eq!(health["transfer"]["near_budget"], true, "{health}");
-        assert_eq!(health["accepting"], true, "near is not full");
+        assert_eq!(health["transfer"]["stop_at_bytes"], 800_000, "{health}");
+        assert_eq!(health["accepting"], false, "reserve must enforce admission");
 
-        // Cross 100%: new joins are refused.
+        // Reaching the raw allowance keeps refusing calls, with a truthful estimate.
         h.state.usage.add("home.example", 200_000);
         let (status, body) = join(&h, "alice", 1_000_000).await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");

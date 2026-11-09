@@ -316,11 +316,13 @@ async fn status_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) -
     let estimate = state.usage.total_estimate(now_ms(), period);
     let accepting = (current.limits.max_rooms == 0 || (rooms as u32) < current.limits.max_rooms)
         && (current.limits.max_participants == 0 || (participants as u32) < current.limits.max_participants)
-        && (current.limits.transfer_budget_bytes == 0 || estimate < current.limits.transfer_budget_bytes);
+        && (current.limits.transfer_budget_bytes == 0 || estimate < current.limits.admission_budget_bytes());
     let (transfer_line, budget_line) = if current.limits.transfer_budget_bytes > 0 {
         (
             format!("{} of {}", human_bytes(estimate), human_bytes(current.limits.transfer_budget_bytes)),
-            format!("{} over {} days", human_bytes(current.limits.transfer_budget_bytes), period),
+            format!("{} over {} days; new calls stop at {}% ({}) — existing calls continue",
+                human_bytes(current.limits.transfer_budget_bytes), period,
+                current.limits.transfer_stop_percent, human_bytes(current.limits.admission_budget_bytes())),
         )
     } else {
         ("not budgeted".to_string(), "none".to_string())
