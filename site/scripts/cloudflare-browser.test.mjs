@@ -10,7 +10,7 @@ try {
   const context = await browser.newContext({ serviceWorkers: 'block' });
   const page = await context.newPage();
   const pageErrors = [];
-  page.on('pageerror', (error) => pageErrors.push(error.message));
+  page.on('pageerror', (error) => pageErrors.push(error.stack || error.message));
 
   // A link without a handoff must never open normal chat or canonicalize away
   // the receiver URL; it is the user's exact production reproduction.
@@ -36,7 +36,7 @@ try {
   // Real guided moves open a NEW tab. Reusing the empty receiver page and
   // changing only its #fragment would not trigger a document navigation.
   const handoffPage = await context.newPage();
-  handoffPage.on('pageerror', (error) => pageErrors.push(error.message));
+  handoffPage.on('pageerror', (error) => pageErrors.push(error.stack || error.message));
   const response = await handoffPage.goto(origin + '/receive-move#' + fragment, {
     waitUntil: 'domcontentloaded',
   });
