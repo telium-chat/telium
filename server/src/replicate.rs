@@ -553,8 +553,8 @@ pub async fn open_replicas(host: &crate::AppState) -> anyhow::Result<Vec<Replica
                 )),
                 demoted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 lease: None,
-                dm_outbox_pump: std::sync::Arc::new(tokio::sync::Mutex::new(())),
-                friend_outbox_pump: std::sync::Arc::new(tokio::sync::Mutex::new(())),
+                dm_outbox_pump: std::sync::Arc::new(crate::state::OutboxPump::default()),
+                friend_outbox_pump: std::sync::Arc::new(crate::state::OutboxPump::default()),
                 ..host.clone()
             },
         });
