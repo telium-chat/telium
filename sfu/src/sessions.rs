@@ -138,6 +138,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn simultaneous_joins_cannot_bypass_room_or_participant_limits() {
+        use std::sync::Arc;
+        let reg = Arc::new(SessionRegistry::new());
+        let gate = Arc::new(std::sync::Barrier::new(16));
+        let mut workers = Vec::new();
+        for i in 0..16 {
+            let reg = reg.clone();
+            let gate = gate.clone();
+            workers.push(std::thread::spawn(move || {
+                gate.wait();
+                reg.try_record_join(&format!("room-{i}"), "home", &format!("user-{i}"),
+                    1_000_000, 2, 2)
+            }));
+        }
+        let successes = workers.into_iter().filter(|worker| worker.join().unwrap().is_ok()).count();
+        assert_eq!(successes, 2);
+        assert_eq!(reg.join_count_all(), 2);
+        assert_eq!(reg.rooms().len(), 2);
+        // Reconnecting an existing seat still works at the limit.
+        let room = reg.rooms()[0].clone();
+        let identity = room.replace("room-", "user-");
+        assert!(reg.try_record_join(&room, "home", &identity, 900_000, 2, 2).is_ok());
+    }
+
+    #[test]
     fn join_records_are_scoped_by_room_and_identity() {
         let reg = SessionRegistry::new();
         reg.record_join("r1", "guild.one", "alice", 1_000);
