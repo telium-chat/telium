@@ -32,6 +32,9 @@ pub struct LimitsConfig {
     /// taking NEW calls as it nears the budget rather than exceeding it.
     pub transfer_budget_bytes: i64,
     pub transfer_period_days: u32,
+    /// Percentage of the estimated transfer allowance at which new calls stop.
+    /// Keep headroom for calls already in progress (1..=100; default 80).
+    pub transfer_stop_percent: u32,
     /// Guild servers this relay refuses, by `server_name` (the origin a join
     /// token is signed by). Blocked at admission; rooms already in progress
     /// finish naturally.
@@ -267,8 +270,28 @@ impl Default for LimitsConfig {
             max_participants: 0,
             transfer_budget_bytes: 0,
             transfer_period_days: 30,
+            transfer_stop_percent: 80,
             blocked_origins: Vec::new(),
         }
+    }
+}
+
+impl LimitsConfig {
+    pub fn admission_budget_bytes(&self) -> i64 {
+        self.transfer_budget_bytes.saturating_mul(self.transfer_stop_percent.clamp(1, 100) as i64) / 100
+    }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if !(1..=100).contains(&self.transfer_stop_percent) {
+            anyhow::bail!("limits.transfer_stop_percent must be between 1 and 100");
+        }
+        if self.transfer_budget_bytes < 0 {
+            anyhow::bail!("limits.transfer_budget_bytes cannot be negative (0 disables the budget)");
+        }
+        if self.transfer_period_days == 0 {
+            anyhow::bail!("limits.transfer_period_days must be at least 1");
+        }
+        Ok(())
     }
 }
 
