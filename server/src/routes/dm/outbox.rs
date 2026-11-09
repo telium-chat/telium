@@ -21,8 +21,6 @@ pub async fn flush_outbox(state: &AppState) -> ApiResult<u64> {
     let outcomes = stream::iter(destinations.into_iter().map(|destination| async move {
         let lock = state.dm_outbox_pump.lock_for(&destination).await;
         let _destination_guard = lock.lock().await;
-        // Limit simultaneous network attempts across all concurrently invoked pumps.
-        let _slot = state.dm_outbox_pump.permit().await;
         // Read only after the lock: another pump may already have sent or retried the row.
         let due: Vec<(String, String, String, String, String, i64)> = sqlx::query_as(
             "SELECT id, conversation_id, destination, path, payload, attempts FROM dm_outbox \
@@ -36,7 +34,13 @@ pub async fn flush_outbox(state: &AppState) -> ApiResult<u64> {
         let mut sent = 0;
         for (id, conversation_id, destination, path, payload, attempts) in due {
             let body: Value = serde_json::from_str(&payload).unwrap_or(Value::Null);
-            match federation::post_signed(state, &destination, &path, &body).await {
+            // One permit per HTTP attempt, not per 50-row batch. Slow peers
+            // must yield network slots between retries for other destinations.
+            let outcome = {
+                let _slot = state.dm_outbox_pump.permit().await;
+                federation::post_signed(state, &destination, &path, &body).await
+            };
+            match outcome {
                 Ok(_) => {
                     sqlx::query("DELETE FROM dm_outbox WHERE id = ?")
                         .bind(&id)
@@ -93,7 +97,7 @@ pub async fn flush_outbox(state: &AppState) -> ApiResult<u64> {
         }
         Ok::<u64, crate::error::ApiError>(sent)
     }))
-    .buffer_unordered(8)
+    .buffer_unordered(50)
     // Complete every in-flight batch before propagating an error. Aborting a
     // successful HTTP send before its DELETE can cause an avoidable duplicate.
     .collect::<Vec<_>>()
