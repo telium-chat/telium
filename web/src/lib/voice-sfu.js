@@ -474,8 +474,21 @@ export class SfuCall {
       let message;
       try { message = JSON.parse(new TextDecoder().decode(payload)); }
       catch { return; }
-      if (!message || typeof message.track_sid !== 'string'
-        || !Number.isFinite(Number(message.max_bitrate))
+      if (!message || typeof message.track_sid !== 'string') return;
+      // The relay broadcasts a separate explanatory notice to viewers. Only
+      // display it for video they are actually receiving/watching, and never
+      // claim that a sender voluntarily stopped sharing.
+      if (typeof message.identity === 'string') {
+        if (message.identity === this.me) return;
+        const source = message.source === 'SCREEN_SHARE' ? Track.Source.ScreenShare
+          : message.source === 'CAMERA' ? Track.Source.Camera : null;
+        if (!source || (source === Track.Source.ScreenShare && !this.screenSubscriptions.has(message.identity))) return;
+        this.detach(message.identity, source);
+        this.onMediaLimit({ source: source === Track.Source.ScreenShare ? 'screen' : 'camera',
+          remote: true, recovered: false });
+        return;
+      }
+      if (!Number.isFinite(Number(message.max_bitrate))
         || Number(message.max_bitrate) <= 0) return;
       // A targeted reliable notice comes only from LiveKit/our SFU.
       void this.recoverLimitedTrack(message);
