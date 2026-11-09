@@ -133,6 +133,7 @@ async fn main() -> anyhow::Result<()> {
     if matches!(cli.command, Some(Command::Check)) {
         let cfg = SfuConfig::load(&cli.config)?;
         cfg.updates.validate()?;
+        cfg.limits.validate()?;
         println!("ok");
         return Ok(());
     }
@@ -150,6 +151,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     cfg.updates.validate()?;
+    cfg.limits.validate()?;
 
     let trust = TrustedKeys::from_config(&cfg.trust);
     // Never fatal: static keys remain authoritative.
@@ -180,16 +182,12 @@ async fn main() -> anyhow::Result<()> {
 
     updates::log_build();
 
-    if cfg.limits.enforce {
-        tracing::info!(
-            max_bitrate = cfg.limits.max_bitrate,
-            every_secs = cfg.limits.poll_interval_secs,
-            "bitrate sweep enabled"
-        );
-        tokio::spawn(enforce::run(state.clone(), shutdown_tx.subscribe()));
-    } else {
-        tracing::warn!("bitrate sweep disabled ([limits].enforce = false); ceilings are client-side only");
+    // Accounting is never optional when a transfer budget is in use. Disabling
+    // media-enforcement must not silently switch off metering too.
+    if !cfg.limits.enforce {
+        tracing::warn!("video bitrate enforcement disabled; transfer accounting continues");
     }
+    tokio::spawn(enforce::run(state.clone(), shutdown_tx.subscribe()));
 
     // The check loop only reports; the apply is the updater script's job.
     updates::spawn(state.clone());
