@@ -17,6 +17,15 @@ on:
   push:
     branches:
       - main
+  # A GITHUB_TOKEN push from the manual version-bump workflow will not trigger
+  # the normal push event. Explicit dispatch runs the same required gate for
+  # the exact version-bump commit instead.
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: 'Expected main commit (for automated version bumps)'
+        required: false
+        type: string
 
 # One run per pull request/ref. A newer commit makes an older queued/running
 # unit-test result obsolete, so cancel it instead of spending a runner on it.
@@ -45,6 +54,17 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+
+      - name: Require the expected dispatched commit
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "$EXPECTED_SHA" ] && [ "$GITHUB_SHA" != "$EXPECTED_SHA" ]; then
+            echo "::error::main moved: dispatched $GITHUB_SHA, expected $EXPECTED_SHA"
+            exit 1
+          fi
 
       - name: Decide which suites to run
         id: filter
