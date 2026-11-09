@@ -152,6 +152,11 @@ async fn main() -> anyhow::Result<()> {
 
     cfg.updates.validate()?;
     cfg.limits.validate()?;
+    if cfg.trust.public && cfg.limits.transfer_budget_bytes == 0 {
+        tracing::warn!(
+            "public SFU transfer budget is UNLIMITED; set [limits].transfer_budget_bytes to your provider allowance if the uplink is metered"
+        );
+    }
 
     let trust = TrustedKeys::from_config(&cfg.trust);
     // Never fatal: static keys remain authoritative.
