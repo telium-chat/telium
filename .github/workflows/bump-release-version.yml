@@ -1,0 +1,142 @@
+name: Bump release version
+
+# Bump only. Tag creation and release publication remain deliberate GitHub UI
+# steps so maintainers can use the native "Generate release notes" button.
+# One action supports the independent server and SFU release trains.
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        description: 'Which component to release?'
+        type: choice
+        required: true
+        options:
+          - server
+          - sfu
+      bump:
+        description: 'Semantic version bump'
+        type: choice
+        required: true
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  actions: write
+
+# Two manual runs must not calculate the same version from the same commit.
+concurrency:
+  group: bump-release-version-main
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Commit version bump to main
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require main
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Run this workflow on main, not $GITHUB_REF"
+            exit 1
+          fi
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Update Cargo versions and commit to main
+        id: bump
+        env:
+          COMPONENT: ${{ inputs.component }}
+          BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+
+          case "$COMPONENT" in
+            server|sfu) ;;
+            *) echo "::error::Invalid component"; exit 1 ;;
+          esac
+          case "$BUMP" in
+            patch|minor|major) ;;
+            *) echo "::error::Invalid version bump"; exit 1 ;;
+          esac
+
+          current="$(awk -F '"' '/^version = "/ { print $2; exit }' "$COMPONENT/Cargo.toml")"
+          if [[ ! "$current" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Expected a major.minor.patch version, got '$current'"
+            exit 1
+          fi
+          IFS='.' read -r major minor patch <<< "$current"
+          case "$BUMP" in
+            patch) patch=$((patch + 1)) ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+          esac
+          version="$major.$minor.$patch"
+          tag="$COMPONENT-v$version"
+
+          # Fail before touching main if that exact tag is already present.
+          git fetch --tags origin
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::error::The tag $tag already exists"
+            exit 1
+          fi
+
+          # Reuse the established scripts: they update both Cargo.toml and
+          # Cargo.lock, and validate the pair with cargo metadata --locked.
+          bash "scripts/bump-$COMPONENT-version.sh" "$version" --no-commit
+          git add "$COMPONENT/Cargo.toml" "$COMPONENT/Cargo.lock"
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo "::error::Version bump made no changes"
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Release $COMPONENT $version"
+
+          # Never force-push. A simultaneous update to main causes a clean
+          # failure rather than overwriting someone else's changes.
+          git push origin HEAD:refs/heads/main
+
+          sha="$(git rev-parse HEAD)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger required CI for the new commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.bump.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # GITHUB_TOKEN pushes do not fire push-triggered Actions workflows.
+          # workflow_dispatch is the documented exception; the exact SHA
+          # input makes a race with newer main commits fail closed.
+          gh workflow run unit-tests.yml --ref main --repo "$GITHUB_REPOSITORY" \
+            -f expected_sha="$SHA"
+
+      - name: Release instructions
+        env:
+          COMPONENT: ${{ inputs.component }}
+          TAG: ${{ steps.bump.outputs.tag }}
+          SHA: ${{ steps.bump.outputs.sha }}
+        run: |
+          {
+            echo "## Version bump committed"
+            echo
+            echo "- **Component:** $COMPONENT"
+            echo "- **New tag to create:** \`$TAG\`"
+            echo "- **Commit:** \`$SHA\`"
+            echo
+            echo "1. Wait for the [Unit tests](https://github.com/$GITHUB_REPOSITORY/actions/workflows/unit-tests.yml) check on this commit to pass."
+            echo "2. Open [Draft a new release](https://github.com/$GITHUB_REPOSITORY/releases/new)."
+            echo "3. Create tag \`$TAG\` targeting the commit above (which is on main)."
+            echo "4. Click **Generate release notes**, edit them, then **Publish release**."
+            echo "5. The existing $COMPONENT release workflow builds and attaches the binaries and Docker image, without replacing your release description."
+          } >> "$GITHUB_STEP_SUMMARY"
