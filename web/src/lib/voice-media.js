@@ -2,6 +2,8 @@
 export const MAX_BITRATE_ATTRIBUTE = 'telium.max_bitrate';
 /// Data topic the SFU uses to pick a viewer's layer (`telium_protocol::WATCH_TOPIC`).
 export const WATCH_TOPIC = 'telium.watch';
+/// SFU-to-publisher notice when a video track was muted by its bitrate ceiling.
+export const MEDIA_LIMIT_TOPIC = 'telium.media-limit';
 /// Data topic the SFU uses to warn a live call that the relay is draining for
 /// an update, or going away now (`telium_protocol::DRAIN_TOPIC`).
 export const DRAIN_TOPIC = 'telium.drain';
