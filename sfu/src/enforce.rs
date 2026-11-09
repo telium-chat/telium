@@ -48,9 +48,11 @@ fn sender_rate(p: &ParticipantInfo) -> i64 {
         .tracks
         .iter()
         .filter(|t| t.kind == TrackKind::Video && !t.muted)
-        .map(|t| t.declared_bitrate.max(0))
-        .sum();
-    let audio = if p.tracks.iter().any(|t| t.kind == TrackKind::Audio && !t.muted) { 32_000 } else { 0 };
+        .fold(0_i64, |sum, t| sum.saturating_add(t.declared_bitrate.max(0)));
+    // Opus can use ~48 kbps per track, and one user may publish both a mic
+    // and screenshare audio. Reserve 64 kbps per active track for overhead.
+    let audio_tracks = p.tracks.iter().filter(|t| t.kind == TrackKind::Audio && !t.muted).count() as i64;
+    let audio = audio_tracks.saturating_mul(64_000);
     video + audio
 }
 
@@ -59,7 +61,7 @@ fn sender_rate(p: &ParticipantInfo) -> i64 {
 fn estimated_egress_bytes(participants: &[ParticipantInfo], interval_secs: i64) -> i64 {
     let n = participants.len() as i64;
     if n <= 1 { return 0; }
-    let rate: i64 = participants.iter().map(sender_rate).sum();
+    let rate: i64 = participants.iter().fold(0_i64, |sum, p| sum.saturating_add(sender_rate(p)));
     rate.saturating_mul(n - 1)
         .saturating_mul(interval_secs.max(0))
         .saturating_div(8)
