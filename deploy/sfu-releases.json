@@ -1,7 +1,29 @@
 {
   "channel": "releases",
-  "generated_at": 1794101645718,
+  "generated_at": 1794196274971,
   "releases": [
+    {
+      "version": "0.1.1",
+      "commit": "52cbfba867d0c708e7cd407d63490a1976ddc09f",
+      "released_at": 1794195565000,
+      "security": false,
+      "summary": "Keep desktop crash source maps and preserve exact stack locations (#39)",
+      "image": "sha256:cc8cd8e6335f58d7ff9f54fdf28cdd6d2c8bafa072f460dacafe78501996706c",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "sfu-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/sfu-v0.1.1/telium-sfu-linux-x86_64.tar.gz",
+          "sha256": "6d9f3e58efc416a8537c8e60927c63b3cfa683f1d574f01d6ac03abf40727899",
+          "size": 4121411
+        },
+        "sfu-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/sfu-v0.1.1/telium-sfu-linux-aarch64.tar.gz",
+          "sha256": "057153ff6059383670ff7d1ad31b703053c8c0f0ed219d27f32dfe19b086cb73",
+          "size": 3983790
+        }
+      }
+    },
     {
       "version": "0.1.0",
       "commit": "8b51c33e697b31353e7659d46e287a938642bb53",
