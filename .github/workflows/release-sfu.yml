@@ -533,8 +533,8 @@ jobs:
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" .sfu-native/telium-sfu-linux-*.tar.gz .sfu-native/*.sha256 .sfu-native/SHA256SUMS-sfu \
               --clobber --repo "$GITHUB_REPOSITORY"
-            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
-              --title "Telium SFU $VERSION" --notes-file "$NOTES" --latest=false
+            # Preserve the title and notes chosen with GitHub's Generate release notes
+            # button (or edited by a human). Re-runs replace only the artifacts.
           else
             gh release create "$TAG" \
               .sfu-native/telium-sfu-linux-*.tar.gz .sfu-native/*.sha256 .sfu-native/SHA256SUMS-sfu \
