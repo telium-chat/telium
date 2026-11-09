@@ -378,7 +378,7 @@ pub async fn mutual(
             (domain, local, answer)
         }
     }))
-    .buffer_unordered(8)
+    .buffer_unordered(50)
     .collect::<Vec<_>>()
     .await;
 
@@ -683,8 +683,6 @@ pub async fn flush_outbox(state: &AppState) -> ApiResult<u64> {
     let outcomes = stream::iter(destinations.into_iter().map(|destination| async move {
         let lock = state.friend_outbox_pump.lock_for(&destination).await;
         let _destination_guard = lock.lock().await;
-        // Limit simultaneous network attempts across all concurrently invoked pumps.
-        let _slot = state.friend_outbox_pump.permit().await;
         // Read only after the lock: another pump may already have sent or retried the row.
         let due: Vec<(String, String, String, i64)> = sqlx::query_as(
             "SELECT id, destination, payload, attempts FROM friend_outbox \
@@ -698,8 +696,13 @@ pub async fn flush_outbox(state: &AppState) -> ApiResult<u64> {
         let mut sent = 0;
         for (id, destination, payload, attempts) in due {
             let body: Value = serde_json::from_str(&payload).unwrap_or(Value::Null);
-            match federation::post_signed(state, &destination, "/_telium/v1/friends/relay", &body).await
-            {
+            // One permit per HTTP attempt, not per 50-row batch. Slow peers
+            // must yield network slots between retries for other destinations.
+            let outcome = {
+                let _slot = state.friend_outbox_pump.permit().await;
+                federation::post_signed(state, &destination, "/_telium/v1/friends/relay", &body).await
+            };
+            match outcome {
                 Ok(_) => {
                     sqlx::query("DELETE FROM friend_outbox WHERE id = ?")
                         .bind(&id)
