@@ -18,8 +18,9 @@ try {
     const response = await page.goto(origin + path, { waitUntil: 'domcontentloaded' });
     assert.equal(response?.status(), 200, path + ': browser navigation must return HTTP 200');
     await page.getByRole('heading', { name: 'Move link expired' }).waitFor({ timeout: 20000 });
-    assert.equal(new URL(page.url()).pathname, path,
-      path + ': initial route must not become /channels/@me or /app');
+    // The client strips the optional slash to one canonical receiver URL.
+    assert.equal(new URL(page.url()).pathname, '/receive-move',
+      path + ': must remain on the receiver, never /channels/@me or /app');
   }
 
   // No real credentials or server required: the receiver should open before
