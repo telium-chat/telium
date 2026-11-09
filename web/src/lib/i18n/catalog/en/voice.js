@@ -836,6 +836,7 @@ export const voice = {
   // bound, since the restart lands whenever rooms empty inside it.
   'voice.sfuLimit.screen': 'Screen share',
   'voice.sfuLimit.camera': 'Camera',
+  'voice.sfuLimit.remote': 'A participant’s {source} was briefly paused by the voice relay to stay within its bitrate limit. Telium is asking their device to restore it at lower quality.',
   'voice.sfuLimit.recovered': '{source} was limited by the voice relay; Telium restored it at lower quality.',
   'voice.sfuLimit.failed': '{source} was paused by the voice relay bitrate limit. Turn it back on to retry with lower quality; your microphone and call are still connected.',
   'voice.drain.soonIn': 'The voice relay is scheduled to restart for an update within the next {count, plural, one {# minute} other {# minutes}}',
