@@ -53,7 +53,7 @@ fn sender_rate(p: &ParticipantInfo) -> i64 {
     // and screenshare audio. Reserve 64 kbps per active track for overhead.
     let audio_tracks = p.tracks.iter().filter(|t| t.kind == TrackKind::Audio && !t.muted).count() as i64;
     let audio = audio_tracks.saturating_mul(64_000);
-    video + audio
+    video.saturating_add(audio)
 }
 
 /// Declared-rate *estimate* of outgoing media, not LiveKit's measured socket bytes.
