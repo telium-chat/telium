@@ -152,7 +152,7 @@ mod tests {
                     1_000_000, 2, 2)
             }));
         }
-        let successes = workers.into_iter().filter(|worker| worker.join().unwrap().is_ok()).count();
+        let successes = workers.into_iter().map(|worker| worker.join().unwrap()).filter(Result::is_ok).count();
         assert_eq!(successes, 2);
         assert_eq!(reg.join_count_all(), 2);
         assert_eq!(reg.rooms().len(), 2);
