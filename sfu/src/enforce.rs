@@ -16,7 +16,7 @@ pub fn assess(cap: i64, tracks: &[TrackInfo]) -> Vec<String> {
         .iter()
         .filter(|t| t.kind == TrackKind::Video && !t.muted && t.declared_bitrate > 0)
         .collect();
-    let mut total: i64 = candidates.iter().map(|t| t.declared_bitrate).sum();
+    let mut total: i64 = candidates.iter().fold(0_i64, |sum, t| sum.saturating_add(t.declared_bitrate));
     if total <= cap {
         return Vec::new();
     }
