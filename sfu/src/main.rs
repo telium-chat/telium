@@ -165,6 +165,11 @@ async fn main() -> anyhow::Result<()> {
     let livekit = LivekitManager::start(&cfg, shutdown_rx).await?;
 
     let usage = Arc::new(Usage::load(std::path::Path::new(&cfg.livekit.config_dir)));
+    if cfg.limits.transfer_budget_bytes > 0 {
+        // A metered operator should not discover after a restart that an
+        // unreadable ledger silently reset their transfer allowance to zero.
+        usage.verify_metered_storage()?;
+    }
     let state = Arc::new(AppState {
         cfg: cfg.clone(),
         trust: trust.clone(),
