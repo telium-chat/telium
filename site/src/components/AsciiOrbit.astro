@@ -184,6 +184,19 @@
 
     const easeOutExpo = (p: number) => (p >= 1 ? 1 : 1 - Math.pow(2, -10 * p))
 
+    /* The rings spin in the screen plane the way the site teaser does: the
+     * outer three arcs turn clockwise every 8s, the inner two counter-clockwise
+     * every 10s. Timing stays linear and the angle does the breathing
+     * (theta = w*t + A*sin(2*pi*t/T), A = 6deg) so the speed swells and relaxes
+     * without ever hitching at the loop seam. */
+    const OUTER_TURN = 8
+    const INNER_TURN = 10
+    const BREATHE = (6 * Math.PI) / 180
+    const ringAngle = (t: number, turn: number) => {
+      const u = t / turn
+      return 2 * Math.PI * u + BREATHE * Math.sin(2 * Math.PI * u)
+    }
+
     const draw = (t: number, dt: number, progress: number) => {
       ctx.clearRect(0, 0, W, Hh)
       zbuf.fill(0)
@@ -191,18 +204,20 @@
       curX += (ptrX - curX) * 0.06
       curY += (ptrY - curY) * 0.06
 
-      const spin = t * 0.08
-      const tilt = 0.38 + curY
-      const yaw = Math.sin(t * 0.27) * 0.42 + curX
-      const cs = Math.cos(spin)
-      const sn = Math.sin(spin)
+      const tilt = -0.3 + curY
+      const yaw = -0.22 + curX
       const ct = Math.cos(tilt)
       const st = Math.sin(tilt)
       const cyaw = Math.cos(yaw)
       const syaw = Math.sin(yaw)
       const f = 2.8
 
-      for (const s of samples) {
+      for (let si = 0; si < samples.length; si++) {
+        const s = samples[si]!
+        const outer = si < 3
+        const spin = outer ? ringAngle(t, OUTER_TURN) : -ringAngle(t, INNER_TURN)
+        const cs = Math.cos(spin)
+        const sn = Math.sin(spin)
         const { arc, thSteps, uSteps } = s
         const { r, w, a0, a1 } = arc
         for (let i = 0; i <= thSteps; i++) {
