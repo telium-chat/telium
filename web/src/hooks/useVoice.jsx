@@ -465,6 +465,12 @@ export function VoiceProvider({ children }) {
       call = new SfuCall({
         ...callbacks,
         onAudioBlocked: via(setAudioBlocked),
+        onMediaLimit: ({ source, recovered }) => {
+          if (callRef.current !== call && gate.mode !== 'held') return;
+          const key = recovered ? 'voice.sfuLimit.recovered' : 'voice.sfuLimit.failed';
+          toast(t(key, { source: source === 'screen' ? t('voice.sfuLimit.screen') : t('voice.sfuLimit.camera') }),
+            recovered ? undefined : { error: true });
+        },
         onDrainNotice: (message) => {
           // A courtesy from the relay, best-effort delivered; one toast per
           // phase per call, then the banner carries it for the duration.
