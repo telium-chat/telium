@@ -399,6 +399,10 @@ fn unique_usage_dir() -> std::path::PathBuf {
         assert_eq!(mutes[0]["identity"], "greedy");
         assert_eq!(mutes[0]["trackSid"], "TR_g_screen", "the largest declared ladder goes first");
         assert_eq!(mutes[0]["muted"], true);
+        let notices: Vec<&Value> = rec.iter().filter(|(m, _)| m == "SendData").map(|(_, b)| b).collect();
+        assert_eq!(notices.len(), 1, "the publisher must be told why their share went away");
+        assert_eq!(notices[0]["topic"], proto::MEDIA_LIMIT_TOPIC);
+        assert_eq!(notices[0]["destinationIdentities"], json!(["greedy"]));
 
         assert_eq!(h.state.sessions.cap_for(room, "honest"), Some(1_000_000));
         assert_eq!(h.state.sessions.cap_for(room, "greedy"), Some(1_000_000));
@@ -585,13 +589,20 @@ fn unique_usage_dir() -> std::path::PathBuf {
         assert_eq!(health["transfer"]["budget_bytes"], 1_000_000, "{health}");
         assert_eq!(health["transfer"]["estimate_bytes"], 0, "{health}");
 
-        // Cross 80%: near_budget flags, but the relay still accepts.
-        h.state.usage.add("home.example", 850_000);
+        // Below the 80% reserve: new calls are still allowed.
+        h.state.usage.add("home.example", 750_000);
+        let (_, health) = get_health(&h).await;
+        assert_eq!(health["transfer"]["near_budget"], false, "{health}");
+        assert_eq!(health["accepting"], true);
+
+        // Cross 80%: stop new calls *before* a metered relay exhausts its allowance.
+        h.state.usage.add("home.example", 100_000);
         let (_, health) = get_health(&h).await;
         assert_eq!(health["transfer"]["near_budget"], true, "{health}");
-        assert_eq!(health["accepting"], true, "near is not full");
+        assert_eq!(health["transfer"]["stop_at_bytes"], 800_000, "{health}");
+        assert_eq!(health["accepting"], false, "reserve must enforce admission");
 
-        // Cross 100%: new joins are refused.
+        // Reaching the raw allowance keeps refusing calls, with a truthful estimate.
         h.state.usage.add("home.example", 200_000);
         let (status, body) = join(&h, "alice", 1_000_000).await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
