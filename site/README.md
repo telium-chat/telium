@@ -289,22 +289,25 @@ server's operator otherwise chooses the HTML behind its own invite.
 `bun run build:portal` builds the client (`../web`) and the site and merges them into
 `dist-portal/`, which Cloudflare publishes without a Worker script:
 
-- `/channels`, `/invite`, `/u`, `/login` and `/receive-move` (with their subpaths) answer with `app.html` using `public/_redirects` and static 200 rewrites —
-  the client's index.html under a name the site does not use, stamped with a
-  `<meta name="telium-portal">` marker the client reads to know a bare invite code names
-  no server.
+- `/channels`, `/invite`, `/u`, `/login` and `/receive-move` (with their subpaths) answer with the **canonical `/app/` directory index** using `public/_redirects` and static 200 rewrites. The client HTML carries a `<meta name="telium-portal">` marker.
+  **Do not** proxy to `/app.html`: Cloudflare's default HTML handling redirects
+  that target to `/app` with status 307, dropping the original deep-link path
+  (and potentially the migration handoff fragment) before React runs.
 - everything else serves the site as built; an unknown path gets the site's 404.
 - static responses carry the client's security headers from `public/_headers`,
   mirrored from `server/src/security_headers.rs`.
 
-Locally, `bun run preview:portal` serves `dist-portal` with those same rules at
-http://localhost:8787 (`PORT` overrides), and `npx wrangler dev` previews the
-production static asset behavior without any custom Worker script.
+Locally, `bun run preview:portal` serves `dist-portal` under its modeled rules at
+http://localhost:8787 (`PORT` overrides). GitHub Site CI additionally launches
+an **actual Wrangler Static Assets runtime** and verifies that `/receive-move`,
+`/channels/@me`, and other client routes return HTTP 200 without redirects,
+while `/download/` and `/servers/` still serve the marketing site. This catches
+Cloudflare canonicalization problems a custom local preview would miss.
 
 **Critical deployment setting:** the Cloudflare build command must be
 `npm run build:production` (not plain `bun run build`), using the merged
 `dist-portal/` assets configured in `wrangler.jsonc`. The plain `dist/`
-site build does not include the web client or `/app.html`.
+site build does not include the web client or `/app/`.
 
 After this change deploys, verify that `/receive-move` loads the client and
 that the Cloudflare metrics show no Worker-script invocations from normal
@@ -326,8 +329,9 @@ two files to return to the dormant recommender.
 
 The merge is byte-checked where both builds ship the same public file (brand marks,
 favicons): a difference fails the build rather than one build quietly serving the other's
-asset. The client's service worker is rewritten to precache and fall back to `app.html`,
-so an offline visitor at an app route gets the app and never the homepage.
+asset. The client's service worker is rewritten to precache and fall back to the
+canonical `/app/` shell and recognizes `/receive-move` as a client route, so an
+offline visitor at an app route gets the app and never the homepage.
 
 Homeservers mint portal-form links because `web.invite_portal` in the server config
 defaults to `https://telium.chat`; an operator can name a different portal — this build,

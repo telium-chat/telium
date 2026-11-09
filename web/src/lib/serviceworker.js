@@ -79,7 +79,10 @@ export async function unregisterAll() {
 }
 
 export function onNotificationNavigate(handler) {
-  if (!workerSupported) return () => {};
+  // The API can be advertised but unavailable in privacy-restricted browsers
+  // (including Playwright contexts with service workers disabled). A disabled
+  // SW must never throw during initial route capture or block a migration link.
+  if (!workerSupported || !navigator.serviceWorker?.addEventListener) return () => {};
   const listener = (event) => {
     if (event.data?.type === 'navigate') handler(event.data);
   };

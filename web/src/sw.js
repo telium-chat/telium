@@ -77,7 +77,7 @@ function isShellAsset(url) {
 // The paths the client routes itself. Offline navigation to one of them falls back to the
 // cached shell; the rest of the origin -- on the portal, the marketing site -- is
 // network-only, because the cached shell is the app, not that page.
-const APP_ROUTES = ['/channels', '/invite', '/u', '/login'];
+const APP_ROUTES = ['/channels', '/invite', '/u', '/login', '/receive-move'];
 
 function isAppRoute(pathname) {
   return APP_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));

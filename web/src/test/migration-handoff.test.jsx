@@ -108,6 +108,12 @@ describe('the guided-move link', () => {
     expect(pendingHandoff()).toMatchObject(HANDOFF);
 
     clearHandoff();
+    const slashed = { ...win, location: { pathname: '/receive-move/', hash: fragment() }, history: { replaceState: vi.fn() } };
+    expect(captureHandoff(slashed)).toEqual(HANDOFF);
+    expect(slashed.history.replaceState).toHaveBeenCalledWith(null, '', '/receive-move');
+    expect(pendingHandoff()).toMatchObject(HANDOFF);
+
+    clearHandoff();
     const elsewhere = { ...win, location: { pathname: '/channels/x', hash: fragment() }, history: { replaceState: vi.fn() } };
     expect(captureHandoff(elsewhere)).toBe(null);
     expect(elsewhere.history.replaceState).not.toHaveBeenCalled();

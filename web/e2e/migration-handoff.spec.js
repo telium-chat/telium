@@ -5,6 +5,15 @@ const APP = 'http://127.0.0.1:5173';
 const HOME = 'http://127.0.0.1:8448';
 const HANDOFF_SECRET = 'test-handoff-' + 'a'.repeat(20);
 
+test('empty migration receiver stays on its own URL instead of opening source chat', async ({ page }) => {
+  for (const route of ['/receive-move', '/receive-move/']) {
+    await page.goto(APP + route);
+    await expect(page.getByRole('heading', { name: 'Move link expired' })).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe('/receive-move');
+    await expect(page.getByTitle('Settings')).toHaveCount(0);
+  }
+});
+
 // A browser-scoped, two-tab regression. Both old and new account sessions
 // share telium.chat's origin. A mock destination API checks the correct token
 // and claim body, while the real old tab MUST remain attached to its source.

@@ -4,7 +4,8 @@
   // No main script, binding, or run_worker_first: all traffic is handled by
   // Workers Static Assets without invoking billed Worker JavaScript.
   // The files _redirects and _headers in dist-portal provide the SPA routing
-  // and browser security policy, respectively.
+  // and browser security policy. Redirect targets use /app/, an already-
+  // canonical directory URL, to avoid Cloudflare's /app.html -> /app 307.
   "workers_dev": false,
   "routes": [
     { "pattern": "telium.chat", "custom_domain": true }

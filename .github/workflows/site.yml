@@ -128,6 +128,25 @@ jobs:
       - name: Test static portal routing and security
         run: npm run test:portal-routes
 
+      # Browser E2E runs against Vite elsewhere; only this Chromium test
+      # verifies that Cloudflare routing actually reaches the React handoff.
+      - name: Install Chromium for Cloudflare portal browser check
+        run: bunx playwright install --with-deps chromium
+
+      # Unit tests of _redirects cannot detect Cloudflare HTML canonicalization.
+      # This is the actual local Workers Static Assets runtime, using the same
+      # wrangler.jsonc and finished dist-portal bundle as production.
+      - name: Test real Cloudflare static-asset routing (no 307 handoff redirects)
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.148.0 dev --local --ip 127.0.0.1 --port 8787 --config wrangler.jsonc > /tmp/telium-wrangler.log 2>&1 &
+          worker_pid=$!
+          trap 'kill "$worker_pid" 2>/dev/null || true' EXIT
+          if ! node scripts/cloudflare-routing.test.mjs || ! node scripts/cloudflare-browser.test.mjs; then
+            tail -100 /tmp/telium-wrangler.log || true
+            exit 1
+          fi
+
       # The footer claims no analytics, no third-party fonts and no trackers.
       # This is that claim as a test: anything in the output that would make the
       # browser reach a host we do not control fails the build.

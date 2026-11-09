@@ -10,7 +10,7 @@ const routes = lines(read('../public/_redirects')).map((line) => {
   assert.equal(fields.length, 3, 'bad redirect rule: ' + line);
   const [source, destination, status] = fields;
   assert.ok(source.startsWith('/'), source);
-  assert.equal(destination, '/app.html', line);
+  assert.equal(destination, '/app/', line);
   assert.equal(status, '200', line);
   return source;
 });
@@ -45,6 +45,9 @@ test('Cloudflare deploys static assets only, with no Worker script', () => {
   const config = read('../wrangler.jsonc');
   assert.match(config, /"directory"\s*:\s*"\.\/dist-portal"/);
   assert.match(config, /"not_found_handling"\s*:\s*"404-page"/);
+  // Do not disable HTML handling globally; Astro marketing pages rely on it.
+  // The SPA proxy target must instead be a canonical directory index.
+  assert.doesNotMatch(config, /"html_handling"\s*:\s*"none"/);
   assert.doesNotMatch(config, /^\s*"main"\s*:/m);
   assert.doesNotMatch(config, /^\s*"run_worker_first"\s*:/m);
   assert.doesNotMatch(config, /^\s*"binding"\s*:/m);
@@ -68,11 +71,15 @@ test('static _headers retains all four browser security protections', () => {
 
 test('the built static portal includes the SPA shell and deploy routing rules', () => {
   const out = new URL('../dist-portal/', import.meta.url);
-  for (const path of ['app.html', '_redirects', '_headers', 'index.html', '404.html']) {
+  for (const path of ['app.html', 'app/index.html', '_redirects', '_headers', 'index.html', '404.html']) {
     assert.ok(existsSync(new URL(path, out)), 'missing dist-portal/' + path);
   }
   assert.equal(readFileSync(new URL('_redirects', out), 'utf8'), read('../public/_redirects'));
   assert.equal(readFileSync(new URL('_headers', out), 'utf8'), read('../public/_headers'));
-  assert.match(readFileSync(new URL('app.html', out), 'utf8'),
-    /<meta name="telium-portal" content="1">/);
+  const shell = readFileSync(new URL('app/index.html', out), 'utf8');
+  assert.match(shell, /<meta name="telium-portal" content="1">/);
+  assert.equal(readFileSync(new URL('app.html', out), 'utf8'), shell);
+  const worker = readFileSync(new URL('sw.js', out), 'utf8');
+  assert.match(worker, /"\/app\/"/);
+  assert.doesNotMatch(worker, /"\/index\.html"/);
 });

@@ -1,6 +1,6 @@
 // Maps the store's route to a path and back (`/channels/<guild>/<channel>`, `/channels/@me/<conversation>`, `/invite/<code>`, `/invite/<code>@<server>`, `/u/<user-id>`). Pure.
 
-import { HANDOFF_PATH } from './handoff.js';
+import { isHandoffPath } from './handoff.js';
 
 const DM = '@me';
 
@@ -67,7 +67,7 @@ export function bindRouting(store, win = window) {
   // intact even after it consumes the handoff secret, because the source tab
   // may keep updating the shared active-session key and the receiver must not
   // be interpreted as ordinary chat or be restarted as another account.
-  if (location.pathname === HANDOFF_PATH) return () => {};
+  if (isHandoffPath(location.pathname)) return () => {};
   const apply = () => store.navigate(routeFrom(location.pathname) || { ...HOME });
 
   apply();

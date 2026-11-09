@@ -9,12 +9,13 @@
 //
 // What the overlay does, and why:
 //
-//   - web's index.html becomes app.html. The site's index.html must stay at
-//     `/`, and a static directory has one index.html, so the client's shell
-//     moves to a name of its own and Cloudflare Static Assets serves it for the app routes.
-//     The client's asset paths are absolute from the site root, so the shell
-//     works from either name unchanged.
-//   - sw.js is rewritten to precache and fall back to /app.html. The client
+//   - web's index.html becomes app/index.html (and an app.html compatibility
+//     alias). The site's index.html must stay at `/`. The directory index is
+//     critical: Cloudflare 307-redirects /app.html to /app under its default
+//     HTML handling. A 200 rewrite aimed at that .html URL therefore loses the
+//     ORIGINAL /receive-move URL and its secret-bearing fragment. Internally
+//     proxying to the canonical /app/ directory index preserves the URL.
+//   - sw.js is rewritten to precache and fall back to /app/. The client
 //     emitted it for a homeserver's copy, where the shell *is* index.html; on
 //     the portal that path is the marketing site, and an offline visitor at
 //     /channels/@me must get the app, not the homepage.
@@ -90,6 +91,8 @@ if (marked === shell) {
   process.exit(1);
 }
 writeFileSync(join(out, 'app.html'), marked);
+mkdirSync(join(out, 'app'), { recursive: true });
+writeFileSync(join(out, 'app', 'index.html'), marked);
 
 overlay(webDist, out);
 
@@ -102,12 +105,12 @@ for (const policy of ['_redirects', '_headers']) {
   }
 }
 
-// sw.js: the shell it precaches and falls back to is app.html here. Both the
-// placeholder the build replaced and the precache entry carry the quoted
-// literal, and both must move together.
+// sw.js: the shell it precaches and falls back to is canonical /app/ here.
+// Both the placeholder the build replaced and the precache entry carry the
+// quoted literal, and both must move together.
 const swPath = join(out, 'sw.js');
 const sw = readFileSync(swPath, 'utf8');
-const rewritten = sw.replaceAll('"/index.html"', '"/app.html"');
+const rewritten = sw.replaceAll('"/index.html"', '"/app/"');
 const moved = (sw.match(/"\/index\.html"/g) ?? []).length;
 if (!moved) {
   console.error('build-portal: the emitted sw.js does not name /index.html; the shell rewrite found nothing to do.');

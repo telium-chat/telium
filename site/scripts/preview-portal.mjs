@@ -1,5 +1,5 @@
-// Serves the merged portal build locally under the same rules `worker.ts`
-// applies in production: the site at its own paths, the client's app routes
+// Serves the merged portal build locally under the same rules Cloudflare
+// Workers Static Assets applies in production: the site at its own paths, the client's app routes
 // answered by app.html, the site's 404 for anything else, and the client's
 // security headers on everything.
 //
@@ -17,10 +17,10 @@ import { join, resolve, sep } from 'node:path';
 const root = resolve(process.argv[2] ?? 'dist-portal');
 const port = Number(process.env.PORT ?? 8787);
 
-const APP_SHELL = '/app.html';
+const APP_SHELL = '/app/index.html';
 const APP_ROUTES = ['/channels', '/invite', '/u', '/login', '/receive-move'];
 
-// Mirrors worker.ts, which mirrors server/src/security_headers.rs.
+// Mirrors the static _headers policy, which mirrors server/src/security_headers.rs.
 const SECURITY_HEADERS = {
   'content-security-policy': "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
   'x-content-type-options': 'nosniff',
