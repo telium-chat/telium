@@ -33,16 +33,20 @@ try {
     id: '@alice:old.example',
     to: 'new.example',
   });
-  const response = await page.goto(origin + '/receive-move#' + fragment, {
+  // Real guided moves open a NEW tab. Reusing the empty receiver page and
+  // changing only its #fragment would not trigger a document navigation.
+  const handoffPage = await context.newPage();
+  handoffPage.on('pageerror', (error) => pageErrors.push(error.message));
+  const response = await handoffPage.goto(origin + '/receive-move#' + fragment, {
     waitUntil: 'domcontentloaded',
   });
   assert.equal(response?.status(), 200, 'secret-bearing handoff must return HTTP 200');
-  await page.getByRole('heading', { name: 'Continue the move on new.example' })
+  await handoffPage.getByRole('heading', { name: 'Continue the move on new.example' })
     .waitFor({ timeout: 20000 });
-  const finalUrl = new URL(page.url());
+  const finalUrl = new URL(handoffPage.url());
   assert.equal(finalUrl.pathname, '/receive-move', 'client must retain the receiver URL');
   assert.equal(finalUrl.hash, '', 'handoff secret must be stripped from the address bar');
-  await page.getByRole('button', { name: 'Sign in or create an account on new.example' })
+  await handoffPage.getByRole('button', { name: 'Sign in or create an account on new.example' })
     .waitFor({ timeout: 10000 });
   assert.deepEqual(pageErrors, [], 'portal must boot without JavaScript errors');
   await context.close();
