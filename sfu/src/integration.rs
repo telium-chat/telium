@@ -576,6 +576,29 @@ fn unique_usage_dir() -> std::path::PathBuf {
     }
 
     #[tokio::test]
+    async fn turning_off_bitrate_enforcement_does_not_turn_off_traffic_accounting() {
+        let h = harness_with(|cfg| {
+            cfg.limits.enforce = false;
+            cfg.limits.poll_interval_secs = 10;
+            cfg.limits.transfer_budget_bytes = 1_000_000;
+        }).await;
+        let (status, _) = join(&h, "alice", 1_000_000).await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, _) = join(&h, "bob", 1_000_000).await;
+        assert_eq!(status, StatusCode::OK);
+        *h.roster.lock().await = json!([
+            { "identity": "alice", "tracks": [ { "sid": "mic", "type": "AUDIO", "source": "MICROPHONE" } ] },
+            { "identity": "bob", "tracks": [ { "sid": "cam", "type": "VIDEO", "source": "CAMERA", "layers": [{ "bitrate": 9000000 }] } ] },
+        ]);
+        h.record.lock().await.clear();
+        let muted = crate::enforce::sweep_once(&h.state).await;
+        assert_eq!(muted, 0);
+        let history = h.record.lock().await;
+        assert!(!history.iter().any(|(method, _)| method == "MutePublishedTrack"));
+        assert!(h.state.usage.total_estimate(crate::updates::now_ms(), 30) > 0);
+    }
+
+    #[tokio::test]
     async fn an_exhausted_transfer_budget_refuses_new_joins_and_flags_near_budget() {
         let h = harness_with(|cfg| {
             cfg.limits.transfer_budget_bytes = 1_000_000;
