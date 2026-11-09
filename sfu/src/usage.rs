@@ -238,6 +238,18 @@ mod tests {
     }
 
     #[test]
+    fn metered_mode_refuses_corrupt_or_unwritable_ledgers() {
+        let dir = temp_dir();
+        let good = Usage::load(&dir);
+        good.verify_metered_storage().unwrap();
+        std::fs::write(dir.join("usage.json"), b"not json").unwrap();
+        let bad = Usage::load(&dir);
+        assert!(bad.verify_metered_storage().is_err());
+        let missing = Usage::load(&dir.join("does-not-exist"));
+        assert!(missing.verify_metered_storage().is_err());
+    }
+
+    #[test]
     fn an_empty_or_corrupt_ledger_is_zero() {
         let dir = temp_dir();
         std::fs::write(dir.join("usage.json"), b"not json").unwrap();
