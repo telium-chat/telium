@@ -7,7 +7,9 @@ import { chromium } from 'playwright';
 const origin = process.env.TELIUM_ASSET_SMOKE_ORIGIN || 'http://127.0.0.1:8787';
 const browser = await chromium.launch({ headless: true });
 try {
-  const context = await browser.newContext({ serviceWorkers: 'block' });
+  // Match a real portal user: the client installs a service worker for push
+  // and shell caching. Previous synthetic runs disabled it entirely.
+  const context = await browser.newContext();
   const page = await context.newPage();
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.stack || error.message));
