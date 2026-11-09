@@ -1143,6 +1143,22 @@ describe('SFU media limit repair', () => {
     return { call, track, publication, localParticipant, onMediaLimit, onScreenEnd, onCameraEnd };
   }
 
+  it('explains a relay-limited share only to the people watching it', () => {
+    const { call, onMediaLimit } = cappedTrack();
+    call.detach = vi.fn();
+    const notice = new TextEncoder().encode(JSON.stringify({
+      identity: '@b:h', track_sid: 'TR_foo', source: 'SCREEN_SHARE',
+    }));
+    call.onData(notice, null, MEDIA_LIMIT_TOPIC);
+    expect(onMediaLimit).not.toHaveBeenCalled();
+    call.screenSubscriptions.add('@b:h');
+    call.onData(notice, null, MEDIA_LIMIT_TOPIC);
+    expect(call.detach).toHaveBeenCalledWith('@b:h', Track.Source.ScreenShare);
+    expect(onMediaLimit).toHaveBeenCalledExactlyOnceWith({
+      source: 'screen', remote: true, recovered: false,
+    });
+  });
+
   it('does not obey a forged or malformed data message', () => {
     const { call } = cappedTrack();
     const repair = vi.spyOn(call, 'recoverLimitedTrack').mockResolvedValue();
