@@ -83,43 +83,32 @@ const result = spawnSync(bun, ['run', 'build'], {
 if (result.error) throw result.error;
 if (result.status !== 0) process.exit(result.status ?? 1);
 
-// React inserts the Telium mark after routing has already initialised. In a
-// packaged file:// renderer, history changes can therefore make an otherwise
-// valid relative `./brand/...` URL resolve against the wrong filesystem path.
-// The mark is only ~1 KiB, so make it route-independent in the desktop build by
-// inlining the canonical public SVG into the generated JS. The normal web build
-// continues to use /brand/telium-mark-gradient.svg and remains cacheable.
-const markSvg = readFileSync(path.resolve('public/brand/telium-mark-gradient.svg'));
-const markDataUrl = `data:image/svg+xml;base64,${markSvg.toString('base64')}`;
+// Keep the source maps *outside* the Electron package. The renderer now
+// resolves its public brand SVG against import.meta.url, so no post-build JS
+// rewriting invalidates the generated line/column mappings. Every map must
+// correspond byte-for-byte to the shipped JS; store the original file names.
 const dist = path.resolve('dist');
-let markReferences = 0;
+const mapDir = path.resolve('dist-desktop-sourcemaps');
+rmSync(mapDir, { recursive: true, force: true });
+mkdirSync(path.join(mapDir, 'assets'), { recursive: true });
+let mapCount = 0;
 for (const name of readdirSync(path.join(dist, 'assets'))) {
-  if (!name.endsWith('.js') && !name.endsWith('.css')) continue;
-  const file = path.join(dist, 'assets', name);
-  const source = readFileSync(file, 'utf8');
-  let fixed = source;
-  for (const reference of [
-    '/brand/telium-mark-gradient.svg',
-    './brand/telium-mark-gradient.svg',
-  ]) {
-    const occurrences = fixed.split(reference).length - 1;
-    if (!occurrences) continue;
-    markReferences += occurrences;
-    fixed = fixed.replaceAll(reference, markDataUrl);
-  }
-  if (fixed !== source) writeFileSync(file, fixed);
+  if (!name.endsWith('.js.map')) continue;
+  cpSync(path.join(dist, 'assets', name), path.join(mapDir, 'assets', name));
+  mapCount += 1;
 }
-if (!markReferences) {
-  throw new Error('Electron build did not find the Telium mark reference to inline.');
-}
-console.log(`Inlined ${markReferences} Telium mark reference(s) for file:// rendering.`);
+if (!mapCount) throw new Error('Electron build did not generate any JS source maps.');
+console.log(`Retained ${mapCount} private renderer JS source map(s) in dist-desktop-sourcemaps/.`);
 
 const renderer = path.resolve('electron/renderer');
 const build = path.resolve('electron/build');
 rmSync(renderer, { recursive: true, force: true });
 mkdirSync(renderer, { recursive: true });
 mkdirSync(build, { recursive: true });
-cpSync(dist, renderer, { recursive: true });
+cpSync(dist, renderer, {
+  recursive: true,
+  filter: (source) => !source.endsWith('.map'),
+});
 writeFileSync(
   path.join(renderer, 'smoke.html'),
   '<!doctype html><html><head><meta charset="utf-8"><title>Telium desktop smoke</title></head><body></body></html>\n',
