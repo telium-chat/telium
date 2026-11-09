@@ -105,7 +105,15 @@ pub async fn session_handler(
             return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "mint failed" }))));
         }
     };
-    state.sessions.record_join(&room, origin, user_id, max_bitrate);
+    // The preceding admission check is an early answer, not a reservation.
+    // Reserve atomically so simultaneous joins cannot oversubscribe the relay.
+    if let Err(reason) = state.sessions.try_record_join(
+        &room, origin, user_id, max_bitrate,
+        state.cfg.limits.max_rooms, state.cfg.limits.max_participants,
+    ) {
+        let (code, body) = crate::admission::full_error(reason);
+        return Err((code, Json(body)));
+    }
 
     Ok(Json(SessionResponse {
         url: state.livekit.connect_url(),
