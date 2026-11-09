@@ -1,0 +1,134 @@
+---
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
+let source: string
+try {
+  source = readFileSync(
+    fileURLToPath(new URL('../../public/brand/telium-wordmark-light.svg', import.meta.url)),
+    'utf8'
+  )
+} catch {
+  source = readFileSync(`${process.cwd()}/public/brand/telium-wordmark-light.svg`, 'utf8')
+}
+const d = source.match(/<path[^>]*\sd="([^"]+)"/s)![1]!
+
+const BAYER8 = [
+  [0, 32, 8, 40, 2, 34, 10, 42],
+  [48, 16, 56, 24, 50, 18, 58, 26],
+  [12, 44, 4, 36, 14, 46, 6, 38],
+  [60, 28, 52, 20, 62, 30, 54, 22],
+  [3, 35, 11, 43, 1, 33, 9, 41],
+  [51, 19, 59, 27, 49, 17, 57, 25],
+  [15, 47, 7, 39, 13, 45, 5, 37],
+  [63, 31, 55, 23, 61, 29, 53, 21],
+]
+
+const smoothstep = (e0: number, e1: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)))
+  return t * t * (3 - 2 * t)
+}
+
+const dither = (rows: number) => {
+  let pixels = ''
+  for (let y = 0; y < rows; y++) {
+    const t = y / (rows - 1)
+    const level = 1 - smoothstep(0.08, 1, t) * 0.94
+    for (let x = 0; x < 8; x++) {
+      if (level > (BAYER8[y % 8]![x % 8]! + 0.5) / 64) {
+        pixels += `M${x} ${y}h1v1h-1z`
+      }
+    }
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 ${rows}" shape-rendering="crispEdges"><path fill="#000" d="${pixels}"/></svg>`
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`
+}
+
+const maskLg = dither(64)
+const maskSm = dither(32)
+const viewBox = '15.36 27.84 313.43 85.48'
+---
+
+<div class="footer-mark" aria-hidden="true" style={{ '--fm-mask-lg': maskLg, '--fm-mask-sm': maskSm }}>
+  <div class="fm-clip">
+    <svg
+      viewBox={viewBox}
+      preserveAspectRatio="xMidYMax meet"
+      class="fm-svg"
+      role="presentation"
+    >
+      <defs>
+        <linearGradient id="telium-footer-mark" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" style="stop-color: var(--fm-top)" />
+          <stop offset="1" style="stop-color: var(--fm-bottom)" />
+        </linearGradient>
+      </defs>
+      <path d={d} fill="url(#telium-footer-mark)" />
+    </svg>
+  </div>
+</div>
+
+<style>
+  .footer-mark {
+    --fm-top: var(--telium-amethyst);
+    --fm-bottom: #8b5fe8;
+    margin-top: clamp(3rem, 6vw, 5rem);
+    padding-inline: clamp(12px, 2vw, 32px);
+  }
+
+  :root[data-theme='dark'] .footer-mark {
+    --fm-top: #c9aeff;
+    --fm-bottom: #6740c7;
+  }
+
+  .fm-clip {
+    overflow: hidden;
+  }
+
+  .fm-svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    margin-bottom: -2.8%;
+    mask-image: var(--fm-mask-lg);
+    mask-size: auto 100%;
+    mask-repeat: repeat-x;
+    mask-position: left top;
+    -webkit-mask-image: var(--fm-mask-lg);
+    -webkit-mask-size: auto 100%;
+    -webkit-mask-repeat: repeat-x;
+    -webkit-mask-position: left top;
+  }
+
+  @media (max-width: 767px) {
+    .fm-svg {
+      mask-image: var(--fm-mask-sm);
+      -webkit-mask-image: var(--fm-mask-sm);
+    }
+  }
+
+  @supports (animation-timeline: view()) {
+    .fm-svg {
+      animation: fm-rise var(--ease-rise) both;
+      animation-timeline: view();
+      animation-range: entry 0% cover 35%;
+    }
+  }
+
+  @keyframes fm-rise {
+    from {
+      transform: translateY(18%);
+      opacity: 0.2;
+    }
+    to {
+      transform: none;
+      opacity: 1;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fm-svg {
+      animation: none;
+    }
+  }
+</style>
