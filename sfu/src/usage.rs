@@ -65,11 +65,15 @@ impl Usage {
     /// A metered relay must never silently start at zero after a corrupted
     /// ledger or with a state directory that cannot persist usage.
     pub fn verify_metered_storage(&self) -> anyhow::Result<()> {
-        if let Ok(bytes) = std::fs::read(&self.path) {
-            serde_json::from_slice::<Ledger>(&bytes).map_err(|e| anyhow::anyhow!(
-                "SFU transfer ledger at {} is corrupt: {e}; refusing to start metered relay",
-                self.path.display()
-            ))?;
+        match std::fs::read(&self.path) {
+            Ok(bytes) => {
+                serde_json::from_slice::<Ledger>(&bytes).map_err(|e| anyhow::anyhow!(
+                    "SFU transfer ledger at {} is corrupt: {e}; refusing to start metered relay",
+                    self.path.display()
+                ))?;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+            Err(e) => anyhow::bail!("SFU cannot read transfer ledger at {}: {e}", self.path.display()),
         }
         let probe = self.path.with_extension("meter-probe");
         std::fs::write(&probe, b"ok").map_err(|e| anyhow::anyhow!(
