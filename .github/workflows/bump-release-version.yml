@@ -116,10 +116,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # GitHub's release form creates a lightweight tag, so the release
-          # workflows read these trailers from the version-bump commit.
-          # A major bump is automatically marked breaking; other bumps can
-          # opt in when they need an operator to approve an update.
+          # Native GitHub UI releases use lightweight tags, so release metadata
+          # is carried in the commit message when no tag annotation is present.
           trailers=()
           if [ "$BUMP" = "major" ] || [ "$BREAKING" = "true" ]; then
             trailers+=(-m "Breaking-change: yes")
@@ -128,92 +126,6 @@ jobs:
             trailers+=(-m "Security-relevant: yes")
           fi
           if [ -n "$UPGRADE_NOTES" ]; then
-            if [[ "$UPGRADE_NOTES" == *
-          # Never force-push. A simultaneous update to main causes a clean
-          # failure rather than overwriting someone else's changes.
-          git push origin HEAD:refs/heads/main
-
-          sha="$(git rev-parse HEAD)"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-
-      - name: Trigger required CI for the new commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ steps.bump.outputs.sha }}
-        run: |
-          set -euo pipefail
-          # GITHUB_TOKEN pushes do not fire push-triggered Actions workflows.
-          # workflow_dispatch is the documented exception; the exact SHA
-          # input makes a race with newer main commits fail closed.
-          gh workflow run unit-tests.yml --ref main --repo "$GITHUB_REPOSITORY" \
-            -f expected_sha="$SHA"
-
-      - name: Release instructions
-        env:
-          COMPONENT: ${{ inputs.component }}
-          TAG: ${{ steps.bump.outputs.tag }}
-          SHA: ${{ steps.bump.outputs.sha }}
-        run: |
-          {
-            echo "## Version bump committed"
-            echo
-            echo "- **Component:** $COMPONENT"
-            echo "- **New tag to create:** \`$TAG\`"
-            echo "- **Commit:** \`$SHA\`"
-            echo
-            echo "1. Wait for the [Unit tests](https://github.com/$GITHUB_REPOSITORY/actions/workflows/unit-tests.yml) check on this commit to pass."
-            echo "2. Open [Draft a new release](https://github.com/$GITHUB_REPOSITORY/releases/new)."
-            echo "3. Create tag \`$TAG\` targeting the commit above (which is on main)."
-            echo "4. Click **Generate release notes**, edit them, then **Publish release**."
-            echo "5. The existing $COMPONENT release workflow builds and attaches the binaries and Docker image, without replacing your release description."
-          } >> "$GITHUB_STEP_SUMMARY"
-\\n'* || "$UPGRADE_NOTES" == *
-          # Never force-push. A simultaneous update to main causes a clean
-          # failure rather than overwriting someone else's changes.
-          git push origin HEAD:refs/heads/main
-
-          sha="$(git rev-parse HEAD)"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-
-      - name: Trigger required CI for the new commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ steps.bump.outputs.sha }}
-        run: |
-          set -euo pipefail
-          # GITHUB_TOKEN pushes do not fire push-triggered Actions workflows.
-          # workflow_dispatch is the documented exception; the exact SHA
-          # input makes a race with newer main commits fail closed.
-          gh workflow run unit-tests.yml --ref main --repo "$GITHUB_REPOSITORY" \
-            -f expected_sha="$SHA"
-
-      - name: Release instructions
-        env:
-          COMPONENT: ${{ inputs.component }}
-          TAG: ${{ steps.bump.outputs.tag }}
-          SHA: ${{ steps.bump.outputs.sha }}
-        run: |
-          {
-            echo "## Version bump committed"
-            echo
-            echo "- **Component:** $COMPONENT"
-            echo "- **New tag to create:** \`$TAG\`"
-            echo "- **Commit:** \`$SHA\`"
-            echo
-            echo "1. Wait for the [Unit tests](https://github.com/$GITHUB_REPOSITORY/actions/workflows/unit-tests.yml) check on this commit to pass."
-            echo "2. Open [Draft a new release](https://github.com/$GITHUB_REPOSITORY/releases/new)."
-            echo "3. Create tag \`$TAG\` targeting the commit above (which is on main)."
-            echo "4. Click **Generate release notes**, edit them, then **Publish release**."
-            echo "5. The existing $COMPONENT release workflow builds and attaches the binaries and Docker image, without replacing your release description."
-          } >> "$GITHUB_STEP_SUMMARY"
-\\r'* ]]; then
-              echo "::error::Upgrade notes must be a single line"
-              exit 1
-            fi
             trailers+=(-m "Upgrade-notes: $UPGRADE_NOTES")
           fi
           git commit -m "Release $COMPONENT $version" "${trailers[@]}"
