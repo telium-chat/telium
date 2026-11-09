@@ -141,6 +141,20 @@
   color-scheme: dark;
 }
 
+:root {
+  --header-h: 5.25rem;
+}
+
+:root[data-force-theme="dark"] {
+  --background: oklch(10.5% 0.012 290);
+  --background-secondary: oklch(13% 0.013 290);
+  --surface: oklch(16% 0.013 290);
+  --surface-secondary: oklch(20.5% 0.015 290);
+  --surface-tertiary: oklch(24% 0.016 290);
+  --separator: oklch(22% 0.018 292);
+  --muted: oklch(72% 0.012 290);
+}
+
 /* --- base ------------------------------------------------------------------
    The client sets its type in the 10.5–14px range because it is a dense
    interface where every pixel of chrome is a pixel not spent on a message. A
@@ -159,6 +173,7 @@
      full-page capture still renders. */
   html {
     scroll-behavior: smooth;
+    scroll-padding-top: var(--header-h);
     -webkit-text-size-adjust: 100%;
     overflow-x: clip;
   }
@@ -228,10 +243,10 @@
 }
 
 @utility h2 {
-  font-size: clamp(1.75rem, 1.35rem + 1.5vw, 2.125rem);
-  line-height: 1.18;
-  font-weight: 600;
-  letter-spacing: -0.022em;
+  font-size: clamp(2.1rem, 1.5rem + 2.2vw, 3.25rem);
+  line-height: 1.08;
+  font-weight: 400;
+  letter-spacing: -0.035em;
   text-wrap: balance;
 }
 
@@ -380,6 +395,50 @@
     height: 44px;
     padding-inline: 1.15rem;
     font-size: 14px;
+  }
+
+  .btn-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    height: 56px;
+    border: 0;
+    border-radius: 999px;
+    padding-inline: 28px;
+    font-size: 16px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    transition:
+      background-color var(--dur-2) var(--ease),
+      color var(--dur-2) var(--ease),
+      filter var(--dur-2) var(--ease);
+  }
+
+  a.btn-pill:focus-visible {
+    outline-offset: 2px;
+  }
+
+  .btn-pill-primary {
+    background: var(--telium-mist);
+    color: var(--telium-deep-purple);
+  }
+
+  .btn-pill-primary:hover {
+    filter: brightness(1.04);
+  }
+
+  .btn-pill-secondary {
+    background: transparent;
+    color: var(--color-foreground);
+    border: 1px solid color-mix(in oklab, var(--color-foreground) 16%, transparent);
+  }
+
+  .btn-pill-secondary:hover {
+    background: color-mix(in oklab, var(--color-foreground) 6%, transparent);
   }
 
   .btn:disabled,

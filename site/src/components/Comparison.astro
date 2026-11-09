@@ -98,8 +98,7 @@ const sources = [
   <div class="page">
     <div class="reveal grid gap-5 md:grid-cols-[minmax(0,.8fr)_minmax(0,1.2fr)] md:items-end">
       <div>
-        <p class="eyebrow">Compare</p>
-        <h2 class="h2 comparison-title mt-3 max-w-[18ch]">See what stays in your hands.</h2>
+        <h2 class="h2 comparison-title max-w-[18ch]">See what stays in your hands.</h2>
       </div>
       <p class="max-w-[60ch] text-[16px] leading-relaxed text-muted md:justify-self-end">
         A familiar set of chat features, with a different approach to server choice,
@@ -157,7 +156,7 @@ const sources = [
                       return (
                         <td
                           class:list={['status-cell', product.telium && 'telium-column']}
-                          title={value.detail ? `${value.label} — ${value.detail}` : value.label}
+                          title={value.detail ? `${value.label}: ${value.detail}` : value.label}
                         >
                           <span class:list={['status-glyph', `status-${value.state}`]} aria-hidden="true">
                             {value.state === 'yes' ? '✓' : value.state === 'neutral' ? '·' : ''}

@@ -124,7 +124,7 @@ const columns = [
                   class="tnum hidden py-3.5 pr-4 text-right text-[13.5px] text-muted lg:table-cell"
                   data-label="Capacity"
                 >
-                  <span title="Declared by the operator — the relay's own admission ceilings are set in its sfu.toml.">
+                  <span title="Declared by the operator. The relay's own admission ceilings are set in its sfu.toml.">
                     {BAND_LABEL[relay.capacity_band]}
                   </span>
                 </td>
@@ -134,7 +134,7 @@ const columns = [
                   data-label="Uptime"
                 >
                   {probe.uptime_30d === null ? (
-                    <span class="text-muted">—</span>
+                    <span class="text-muted">–</span>
                   ) : (
                     <span class:list={[probe.uptime_30d < 99 && 'text-warning']}>
                       {probe.uptime_30d.toFixed(1)}%
@@ -143,7 +143,7 @@ const columns = [
                 </td>
 
                 <td class="tnum py-3.5 text-right text-[13.5px]" data-label="Latency">
-                  <span data-latency class="text-muted">—</span>
+                  <span data-latency class="text-muted">–</span>
                 </td>
 
                 <td class="py-3.5 text-right">
@@ -181,7 +181,7 @@ const columns = [
                       </dd>
 
                       <dt class="text-muted">Capacity</dt>
-                      <dd class="tnum">{BAND_LABEL[relay.capacity_band]} — declared</dd>
+                      <dd class="tnum">{BAND_LABEL[relay.capacity_band]} (declared)</dd>
 
                       <dt class="text-muted">Listed</dt>
                       <dd class="tnum">{relay.added}</dd>
@@ -195,7 +195,7 @@ const columns = [
                       <dd class="tnum">{probe.samples}</dd>
 
                       <dt class="text-muted">First seen</dt>
-                      <dd class="tnum">{probe.first_probe_at ? probe.first_probe_at.slice(0, 10) : '—'}</dd>
+                      <dd class="tnum">{probe.first_probe_at ? probe.first_probe_at.slice(0, 10) : '–'}</dd>
                     </dl>
 
                     <div class="sm:col-span-2">
@@ -494,7 +494,7 @@ const columns = [
       const cell = root.querySelector<HTMLElement>(`[data-url="${CSS.escape(url)}"] [data-latency]`)
       if (!cell) return
       if (ms === undefined || ms === null) {
-        cell.textContent = '—'
+        cell.textContent = '–'
         cell.classList.add('text-muted')
         if (ms === null) cell.title = 'No response'
         else cell.removeAttribute('title')

@@ -115,7 +115,7 @@ const badgeClass = (type: string) =>
         <h1 class="h2 mt-3 max-w-[18ch]">Get Telium on your devices.</h1>
       </div>
       <p class="max-w-[58ch] text-[15.5px] leading-relaxed text-muted lg:justify-self-end">
-        The desktop app unlocks features the browser can’t reach — game and music rich presence,
+        The desktop app unlocks features the browser can’t reach: game and music rich presence,
         cleaner low-latency screen sharing with system audio, and native desktop notifications.
       </p>
     </div>
@@ -125,7 +125,7 @@ const badgeClass = (type: string) =>
   <section class="page pb-12">
     <div class="reveal mb-6 flex items-center justify-between">
       <div class="flex items-center gap-2.5">
-        <Icon name="monitor" size={18} class="text-accent" />
+        <Icon name="device-desktop" size={18} class="text-accent" />
         <h2 class="text-[17px] font-semibold tracking-[-0.01em]">Desktop Apps</h2>
       </div>
       <span class="text-[12.5px] text-muted">Windows, Linux, macOS</span>
@@ -157,7 +157,7 @@ const badgeClass = (type: string) =>
                   </svg>
                 )}
                 {platform.icon === 'macos' && (
-                  <Icon name="apple" size={24} />
+                  <Icon name="brand-apple" size={24} />
                 )}
               </div>
 
@@ -205,7 +205,7 @@ const badgeClass = (type: string) =>
   <section class="page pb-14">
     <div class="reveal mb-6 flex items-center justify-between">
       <div class="flex items-center gap-2.5">
-        <Icon name="smartphone" size={18} class="text-accent" />
+        <Icon name="device-mobile" size={18} class="text-accent" />
         <h2 class="text-[17px] font-semibold tracking-[-0.01em]">Mobile Apps</h2>
       </div>
       <span class="text-[12.5px] text-muted">Android, iOS</span>
@@ -232,7 +232,7 @@ const badgeClass = (type: string) =>
                   </svg>
                 )}
                 {platform.icon === 'ios' && (
-                  <Icon name="apple" size={24} />
+                  <Icon name="brand-apple" size={24} />
                 )}
               </div>
 
@@ -281,7 +281,7 @@ const badgeClass = (type: string) =>
                   class="obtainium-banner mt-3 flex w-full items-center gap-3 rounded-lg border border-border bg-surface-secondary p-3 text-left"
                 >
                   <span class="obtainium-icon shrink-0">
-                    <Icon name="refresh-cw" size={16} />
+                    <Icon name="refresh" size={16} />
                   </span>
                   <span class="min-w-0">
                     <span class="block text-[12.5px] font-medium text-foreground">
@@ -301,7 +301,7 @@ const badgeClass = (type: string) =>
                   notes either. */}
               {platform.note && (
                 <div class="mt-4 flex items-start gap-2 rounded-lg border border-warning/25 bg-warning/5 p-3 text-left">
-                  <Icon name="triangle-alert" size={14} class="mt-0.5 shrink-0 text-warning" />
+                  <Icon name="alert-triangle" size={14} class="mt-0.5 shrink-0 text-warning" />
                   <p class="text-[11.5px] leading-relaxed text-muted">{platform.note}</p>
                 </div>
               )}
@@ -318,7 +318,7 @@ const badgeClass = (type: string) =>
       <div class="grid gap-6 md:grid-cols-[1fr_auto] md:items-center">
         <div>
           <div class="flex items-center gap-2 text-accent font-medium text-[13px]">
-            <Icon name="globe" size={16} />
+            <Icon name="world" size={16} />
             <span>Browser-based web client</span>
           </div>
           <h3 class="text-[1.3rem] font-semibold mt-1.5 tracking-[-0.015em]">

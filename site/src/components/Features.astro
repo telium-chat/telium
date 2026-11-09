@@ -6,25 +6,25 @@ import Icon from './Icon.astro'
  * to use every day? Keep features grounded in the shipped client. */
 const features = [
   {
-    icon: 'music-2',
+    icon: 'music',
     title: 'Music presence, built in',
     body: "Show friends what you're listening to from supported desktop media players. Your choice to share.",
     note: 'Desktop app',
   },
   {
-    icon: 'gamepad-2',
+    icon: 'device-gamepad-2',
     title: 'Game rich presence',
     body: "Let friends see what you're playing, with richer game details where supported.",
     note: 'Desktop app',
   },
   {
-    icon: 'monitor-up',
+    icon: 'screen-share',
     title: 'Voice, video & screenshare',
     body: 'Hop into a call, share your screen and keep chatting without leaving your community.',
     note: 'Web & desktop',
   },
   {
-    icon: 'lock-keyhole',
+    icon: 'lock',
     title: 'Private conversations',
     body: 'Direct messages and group DMs use end-to-end encryption, not just encryption in transit.',
     note: 'End-to-end encrypted',
@@ -36,8 +36,7 @@ const features = [
   <div class="page">
     <div class="reveal grid gap-5 md:grid-cols-[minmax(0,.9fr)_minmax(0,1.1fr)] md:items-end">
       <div>
-        <p class="eyebrow">What you get</p>
-        <h2 class="h2 mt-3 max-w-[18ch]">The good stuff comes standard.</h2>
+        <h2 class="h2 max-w-[18ch]">The good stuff comes standard.</h2>
       </div>
       <p class="max-w-[56ch] text-[16px] leading-relaxed text-muted md:justify-self-end">
         From what you're playing to who you're calling, Telium has the
@@ -64,8 +63,7 @@ const features = [
 
     <div class="no-plus reveal mt-6 grid gap-5 py-8 sm:mt-8 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] sm:items-center sm:py-10">
       <div>
-        <p class="eyebrow">Included, not upsold</p>
-        <p class="no-plus-title mt-2">No Plus plan. Period.</p>
+        <p class="no-plus-title">No Plus plan. Period.</p>
       </div>
       <p class="max-w-[48ch] text-[15px] leading-relaxed text-muted">
         Telium doesn't have a premium subscription or a separate tier of app features.
@@ -92,9 +90,9 @@ const features = [
   }
   .feature-note {
     color: var(--color-accent);
-    font-family: var(--font-mono);
-    font-size: 11.5px;
-    letter-spacing: 0.015em;
+    font-size: 12.5px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
   }
   /* The absence of a paid tier deserves a plainspoken sign-off, not a
      glowing purple sales card or an "exclusive" badge. */

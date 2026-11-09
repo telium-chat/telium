@@ -13,7 +13,7 @@ import Icon from './Icon.astro'
   aria-label="Theme: system"
   title="Theme: system"
 >
-  <span data-theme-icon="system" class="contents"><Icon name="monitor" size={16} /></span>
+  <span data-theme-icon="system" class="contents"><Icon name="device-desktop" size={16} /></span>
   <span data-theme-icon="light" class="contents"><Icon name="sun" size={16} /></span>
   <span data-theme-icon="dark" class="contents"><Icon name="moon" size={16} /></span>
 </button>
@@ -49,6 +49,7 @@ import Icon from './Icon.astro'
   }
 
   const apply = (mode: Mode) => {
+    if (root.dataset.forceTheme) return
     root.dataset.themeMode = mode
     root.dataset.theme = mode === 'system' ? (media.matches ? 'dark' : 'light') : mode
     const button = document.getElementById('theme-toggle')

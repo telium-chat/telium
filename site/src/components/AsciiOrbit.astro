@@ -1,0 +1,397 @@
+<canvas class="ascii-orbit" aria-hidden="true"></canvas>
+
+<script>
+  const canvas = document.querySelector<HTMLCanvasElement>('canvas.ascii-orbit')
+  if (canvas) {
+    const ctx = canvas.getContext('2d')!
+    const C = 256
+    const NORM = 203
+
+    interface ArcDef {
+      r: number
+      w: number
+      a0: number
+      a1: number
+    }
+
+    const mkArc = (r: number, w: number, x0: number, y0: number, x1: number, y1: number): ArcDef => {
+      const a0 = Math.atan2(y0 - C, x0 - C)
+      let a1 = Math.atan2(y1 - C, x1 - C)
+      if (a1 < a0) a1 += Math.PI * 2
+      const cap = w / 2 / r
+      return { r, w, a0: a0 - cap, a1: a1 + cap }
+    }
+
+    const arcs: ArcDef[] = [
+      mkArc(179, 48, 83.099, 209.671, 302.329, 83.099),
+      mkArc(179, 48, 382.572, 129.428, 424.205, 317.222),
+      mkArc(179, 48, 389.023, 375.774, 85.761, 311.314),
+      mkArc(116, 24, 144.494, 224.026, 264.092, 140.283),
+      mkArc(116, 24, 351.022, 322.535, 268.125, 371.365),
+    ]
+
+    const RAMP = ' .·:-=+x*#%S8@'
+    const AMBIENT_CHARS = '+x=·'
+    const STOPS: [number, [number, number, number]][] = [
+      [0, [0xc9, 0xae, 0xff]],
+      [0.36, [0x8b, 0x5f, 0xe8]],
+      [0.72, [0x67, 0x40, 0xc7]],
+      [1, [0x3f, 0x21, 0x8d]],
+    ]
+    const MIST: [number, number, number] = [0xf4, 0xee, 0xff]
+
+    const grad = (g: number): [number, number, number] => {
+      const gg = Math.min(1, Math.max(0, g))
+      for (let i = 1; i < STOPS.length; i++) {
+        if (gg <= STOPS[i]![0]) {
+          const [p0, c0] = STOPS[i - 1]!
+          const [p1, c1] = STOPS[i]!
+          const t = (gg - p0) / (p1 - p0)
+          return [
+            c0[0] + (c1[0] - c0[0]) * t,
+            c0[1] + (c1[1] - c0[1]) * t,
+            c0[2] + (c1[2] - c0[2]) * t,
+          ]
+        }
+      }
+      return STOPS[STOPS.length - 1]![1]
+    }
+
+    const G_BUCKETS = 4
+    const B_BUCKETS = 6
+    const bucketColor = (gq: number, bq: number) => {
+      const [r, g, b] = grad((gq + 0.5) / G_BUCKETS)
+      const bqN = (bq + 0.5) / B_BUCKETS
+      const k = bqN * bqN * 0.7
+      const a = 0.35 + 0.65 * bqN
+      const rr = Math.round(r + (MIST[0] - r) * k)
+      const gg = Math.round(g + (MIST[1] - g) * k)
+      const bb = Math.round(b + (MIST[2] - b) * k)
+      return `rgba(${rr},${gg},${bb},${a.toFixed(3)})`
+    }
+
+    const L = (() => {
+      const l = Math.hypot(-0.3, -0.6, 0.75)
+      return [-0.3 / l, -0.6 / l, 0.75 / l] as const
+    })()
+    const H = (() => {
+      const hx = L[0]
+      const hy = L[1]
+      const hz = L[2] + 1
+      const l = Math.hypot(hx, hy, hz)
+      return [hx / l, hy / l, hz / l] as const
+    })()
+
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
+    const fine = matchMedia('(pointer: fine)').matches
+
+    let W = 0
+    let Hh = 0
+    let dpr = 1
+    let fs = 12
+    let cellW = 0
+    let cellH = 0
+    let cols = 0
+    let rows = 0
+    let R = 0
+    let cx = 0
+    let cy = 0
+    let zbuf = new Float32Array(0)
+    let bbuf = new Float32Array(0)
+    let gbuf = new Float32Array(0)
+    let seeds = new Float32Array(0)
+    let samples: { arc: ArcDef; thSteps: number; uSteps: number }[] = []
+    let atlas: HTMLCanvasElement | null = null
+
+    const buildAtlas = () => {
+      atlas = document.createElement('canvas')
+      atlas.width = Math.ceil(RAMP.length * cellW)
+      atlas.height = Math.ceil(G_BUCKETS * B_BUCKETS * cellH)
+      const actx = atlas.getContext('2d')!
+      actx.font = `500 ${fs}px "IBM Plex Mono", ui-monospace, monospace`
+      actx.textBaseline = 'top'
+      for (let gq = 0; gq < G_BUCKETS; gq++) {
+        for (let bq = 0; bq < B_BUCKETS; bq++) {
+          const bucket = gq * B_BUCKETS + bq
+          actx.fillStyle = bucketColor(gq, bq)
+          for (let ci = 0; ci < RAMP.length; ci++) {
+            actx.fillText(RAMP[ci]!, ci * cellW, bucket * cellH)
+          }
+        }
+      }
+    }
+
+    const resize = () => {
+      const rect = canvas.parentElement!.getBoundingClientRect()
+      W = Math.max(1, rect.width)
+      Hh = Math.max(1, rect.height)
+      dpr = Math.min(2, window.devicePixelRatio || 1)
+      canvas.width = Math.round(W * dpr)
+      canvas.height = Math.round(Hh * dpr)
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      const mobile = W < 768
+      fs = mobile ? 11 : 13
+      cellW = fs * 0.62
+      cellH = fs * 1.18
+      cols = Math.ceil(W / cellW)
+      rows = Math.ceil(Hh / cellH)
+      cx = W * 0.5
+      cy = Hh * (mobile ? 0.3 : 0.4)
+      R = mobile ? W * 0.4 : Math.min(W * 0.28, Hh * 0.27)
+      zbuf = new Float32Array(cols * rows)
+      bbuf = new Float32Array(cols * rows)
+      gbuf = new Float32Array(cols * rows)
+      seeds = new Float32Array(cols * rows)
+      for (let i = 0; i < seeds.length; i++) seeds[i] = Math.random()
+      samples = arcs.map((arc) => ({
+        arc,
+        thSteps: Math.max(8, Math.ceil((arc.a1 - arc.a0) / ((0.5 * cellW * NORM) / (R * arc.r)))),
+        uSteps: Math.max(3, Math.ceil(((arc.w / NORM) * R) / (0.5 * cellW))),
+      }))
+      buildAtlas()
+    }
+
+    interface Ambient {
+      x: number
+      y: number
+      char: string
+      alpha: number
+      phase: number
+      speed: number
+    }
+    let ambient: Ambient[] = []
+    const seedAmbient = () => {
+      ambient = Array.from({ length: 70 }, () => ({
+        x: Math.random() * W,
+        y: Math.random() * Hh,
+        char: AMBIENT_CHARS[Math.floor(Math.random() * AMBIENT_CHARS.length)]!,
+        alpha: 0.06 + Math.random() * 0.14,
+        phase: Math.random() * Math.PI * 2,
+        speed: 4 + Math.random() * 4,
+      }))
+    }
+
+    let ptrX = 0
+    let ptrY = 0
+    let curX = 0
+    let curY = 0
+    if (fine && !reduced) {
+      addEventListener('pointermove', (e) => {
+        ptrX = (e.clientX / innerWidth - 0.5) * 2 * 0.14
+        ptrY = (e.clientY / innerHeight - 0.5) * 2 * 0.14
+      })
+    }
+
+    const easeOutExpo = (p: number) => (p >= 1 ? 1 : 1 - Math.pow(2, -10 * p))
+
+    const draw = (t: number, dt: number, progress: number) => {
+      ctx.clearRect(0, 0, W, Hh)
+      zbuf.fill(0)
+
+      curX += (ptrX - curX) * 0.06
+      curY += (ptrY - curY) * 0.06
+
+      const spin = t * 0.08
+      const tilt = 0.38 + curY
+      const yaw = Math.sin(t * 0.27) * 0.42 + curX
+      const cs = Math.cos(spin)
+      const sn = Math.sin(spin)
+      const ct = Math.cos(tilt)
+      const st = Math.sin(tilt)
+      const cyaw = Math.cos(yaw)
+      const syaw = Math.sin(yaw)
+      const f = 2.8
+
+      for (const s of samples) {
+        const { arc, thSteps, uSteps } = s
+        const { r, w, a0, a1 } = arc
+        for (let i = 0; i <= thSteps; i++) {
+          const th = a0 + ((a1 - a0) * i) / thSteps
+          const cth = Math.cos(th)
+          const sth = Math.sin(th)
+          for (let j = 0; j <= uSteps; j++) {
+            const u = (j / uSteps - 0.5) * w
+            for (let k = 0; k < 3; k++) {
+              const v = (k - 1) * (w / 4)
+              const rr = r + u
+              let x = (rr * cth) / NORM
+              let y = (rr * sth) / NORM
+              let z = v / NORM
+              const g = (C + rr * sth) / 512
+
+              const un = u / (w / 2)
+              const vn = v / (w / 4)
+              let nx = cth * un
+              let ny = sth * un
+              let nz = vn
+              const nl = Math.hypot(nx, ny, nz)
+              if (nl < 1e-4) {
+                nx = 0
+                ny = 0
+                nz = 1
+              } else {
+                nx /= nl
+                ny /= nl
+                nz /= nl
+              }
+
+              let tx = x * cs - y * sn
+              let ty = x * sn + y * cs
+              x = tx
+              y = ty
+              tx = nx * cs - ny * sn
+              ty = nx * sn + ny * cs
+              nx = tx
+              ny = ty
+
+              ty = y * ct - z * st
+              z = y * st + z * ct
+              y = ty
+              ty = ny * ct - nz * st
+              nz = ny * st + nz * ct
+              ny = ty
+
+              tx = x * cyaw + z * syaw
+              z = -x * syaw + z * cyaw
+              x = tx
+              tx = nx * cyaw + nz * syaw
+              nz = -nx * syaw + nz * cyaw
+              nx = tx
+
+              const scale = f / (f + z)
+              const sx = cx + x * scale * R
+              const sy = cy + y * scale * R
+              const col = Math.floor(sx / cellW)
+              const row = Math.floor(sy / cellH)
+              if (col < 0 || col >= cols || row < 0 || row >= rows) continue
+              const idx = row * cols + col
+              if (scale <= zbuf[idx]) continue
+
+              const ndotl = nx * L[0] + ny * L[1] + nz * L[2]
+              const depthFade = 0.55 + 0.45 * (1 - (z + 1) / 2)
+              let b = (0.3 + 0.7 * Math.max(0, ndotl)) * depthFade
+              b = Math.pow(b, 0.75)
+              const ndoth = nx * H[0] + ny * H[1] + nz * H[2]
+              b = Math.min(1, b + 0.6 * Math.pow(Math.max(0, ndoth), 16))
+
+              zbuf[idx] = scale
+              bbuf[idx] = b
+              gbuf[idx] = g
+            }
+          }
+        }
+      }
+
+      const p = easeOutExpo(progress)
+      for (let row = 0; row < rows; row++) {
+        const base = row * cols
+        for (let col = 0; col < cols; col++) {
+          const idx = base + col
+          const sc = zbuf[idx]
+          if (sc <= 0) continue
+          if (seeds[idx]! > p) continue
+          const b = bbuf[idx]!
+          let ci = Math.min(RAMP.length - 1, Math.floor(b * RAMP.length))
+          if (Math.random() < 1 - p) {
+            ci = Math.floor(Math.random() * RAMP.length)
+          } else if (Math.random() < 0.015) {
+            ci = Math.max(0, Math.min(RAMP.length - 1, ci + Math.floor(Math.random() * 5) - 2))
+          }
+          const gq = Math.min(G_BUCKETS - 1, Math.floor(gbuf[idx]! * G_BUCKETS))
+          const bq = Math.min(B_BUCKETS - 1, Math.floor(b * B_BUCKETS))
+          ctx.drawImage(
+            atlas!,
+            ci * cellW,
+            (gq * B_BUCKETS + bq) * cellH,
+            cellW,
+            cellH,
+            col * cellW,
+            row * cellH,
+            cellW,
+            cellH
+          )
+        }
+      }
+
+      if (!reduced) {
+        ctx.font = `500 ${fs}px "IBM Plex Mono", ui-monospace, monospace`
+        ctx.textBaseline = 'top'
+        ctx.fillStyle = '#B68DF0'
+        for (const a of ambient) {
+          a.y -= a.speed * dt
+          if (a.y < -cellH) {
+            a.y = Hh + cellH
+            a.x = Math.random() * W
+          }
+          ctx.globalAlpha = a.alpha * (0.6 + 0.4 * Math.sin(t * 2 + a.phase))
+          ctx.fillText(a.char, a.x, a.y)
+        }
+        ctx.globalAlpha = 1
+      }
+
+    }
+
+    let visible = true
+    let rafId = 0
+    let last = 0
+    const start = performance.now()
+
+    const frame = (now: number) => {
+      rafId = 0
+      if (!visible || document.hidden) return
+      if (now - last < 31) {
+        rafId = requestAnimationFrame(frame)
+        return
+      }
+      const dt = Math.min(0.1, (now - last) / 1000)
+      last = now
+      draw(now / 1000, dt, Math.min(1, (now - start) / 1600))
+      rafId = requestAnimationFrame(frame)
+    }
+
+    const kick = () => {
+      if (!rafId && visible && !document.hidden) rafId = requestAnimationFrame(frame)
+    }
+
+    const boot = () => {
+      resize()
+      seedAmbient()
+      if (reduced) {
+        draw(2.2, 0, 1)
+        new ResizeObserver(() => {
+          resize()
+          draw(2.2, 0, 1)
+        }).observe(canvas.parentElement!)
+        return
+      }
+      new ResizeObserver(() => {
+        resize()
+      }).observe(canvas.parentElement!)
+      new IntersectionObserver((entries) => {
+        visible = entries[0]!.isIntersecting
+        if (visible) kick()
+      }).observe(canvas)
+      document.addEventListener('visibilitychange', kick)
+      kick()
+    }
+
+    if (document.fonts?.load) {
+      Promise.race([
+        document.fonts.load('500 12px "IBM Plex Mono"'),
+        new Promise((r) => setTimeout(r, 600)),
+      ]).then(boot)
+    } else {
+      boot()
+    }
+  }
+</script>
+
+<style>
+  .ascii-orbit {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+</style>

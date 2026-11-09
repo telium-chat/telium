@@ -96,7 +96,7 @@ const regionCodes = [
           </label>
 
           <label class="field-label sm:col-span-2">
-            <span>One sentence — who runs it and who it's for</span>
+            <span>One sentence: who runs it and who it's for</span>
             <textarea data-field-description maxlength="160" rows="2" class="field mt-1.5 w-full resize-none px-3 py-2.5 text-[13.5px]"></textarea>
             <span class="tnum mt-1 block text-right text-[12px] text-muted"><span data-desc-count>0</span>/160</span>
           </label>
@@ -140,7 +140,7 @@ const regionCodes = [
           <input type="checkbox" data-field-consent class="mt-0.5 size-3.5 accent-[var(--color-accent)]" />
           <span data-consent-label>
             Also suggest this server automatically to people picking their first server.
-            Optional — your listing stays either way.
+            Optional. Your listing stays either way.
           </span>
         </label>
 
@@ -154,23 +154,23 @@ const regionCodes = [
               <tr class="body-row align-middle">
                 <td class="py-3 pr-4">
                   <div class="flex items-center gap-2">
-                    <span class="font-medium" data-preview-name>—</span>
+                    <span class="font-medium" data-preview-name>–</span>
                     <span class="preview-badge" data-preview-badge hidden></span>
                   </div>
-                  <div class="mt-0.5 font-mono text-[12.5px] text-muted" data-preview-domain>—</div>
+                  <div class="mt-0.5 font-mono text-[12.5px] text-muted" data-preview-domain>–</div>
                 </td>
-                <td class="hidden py-3 pr-4 text-[13.5px] text-muted sm:table-cell" data-preview-region>—</td>
-                <td class="tnum hidden py-3 text-right text-[13.5px] text-muted md:table-cell" data-preview-band>—</td>
-                <td class="tnum py-3 text-right text-[13.5px] text-muted" title="Uptime starts at the first hourly probe after the merge">—</td>
+                <td class="hidden py-3 pr-4 text-[13.5px] text-muted sm:table-cell" data-preview-region>–</td>
+                <td class="tnum hidden py-3 text-right text-[13.5px] text-muted md:table-cell" data-preview-band>–</td>
+                <td class="tnum py-3 text-right text-[13.5px] text-muted" title="Uptime starts at the first hourly probe after the merge">–</td>
               </tr>
             </tbody>
           </table>
           <p class="mt-3 max-w-[62ch] text-[13px] leading-relaxed text-muted" data-preview-description></p>
           <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-5 gap-y-1.5 text-[13px]">
             <dt class="text-muted">Operator</dt>
-            <dd data-preview-operator>—</dd>
+            <dd data-preview-operator>–</dd>
             <dt class="text-muted">Version</dt>
-            <dd class="font-mono" data-preview-version>—</dd>
+            <dd class="font-mono" data-preview-version>–</dd>
           </dl>
         </div>
       </div>
@@ -386,14 +386,14 @@ const regionCodes = [
       inputLabel: 'Server domain',
       placeholder: 'chat.example.org',
       consent:
-        'Also suggest this server automatically to people picking their first server. Optional — your listing stays either way. Your server has to allow it too.',
+        'Also suggest this server automatically to people picking their first server. Optional. Your listing stays either way. Your server has to allow it too.',
       issueTemplate: 'list-server.yml',
     },
     sfu: {
       inputLabel: 'Relay HTTPS origin',
       placeholder: 'https://sfu.example.com',
       consent:
-        "Also let guilds in automatic mode route calls through this relay. Optional — your listing stays either way.",
+        "Also let guilds in automatic mode route calls through this relay. Optional. Your listing stays either way.",
       issueTemplate: 'list-sfu.yml',
     },
   }
@@ -604,11 +604,11 @@ const regionCodes = [
       const checkedMode = mode
       const raw = checkInput.value.trim().toLowerCase()
       if (mode === 'server') {
-        if (!DOMAIN.test(raw)) return gateFailure('Enter the domain as a bare lowercase hostname — like chat.example.org, no scheme or path.')
+        if (!DOMAIN.test(raw)) return gateFailure('Enter the domain as a bare lowercase hostname, like chat.example.org, with no scheme or path.')
         check = { identity: raw, wellknown: null, capabilities: null, discovery: { kind: 'dead' }, capabilitiesResult: null, health: null }
       } else {
         const url = normalizeSfuUrl(raw)
-        if (!url) return gateFailure('Enter the relay as a bare HTTPS origin — like https://sfu.example.com, no path or credentials.')
+        if (!url) return gateFailure('Enter the relay as a bare HTTPS origin, like https://sfu.example.com, with no path or credentials.')
         check = { identity: url, wellknown: null, capabilities: null, discovery: { kind: 'dead' }, capabilitiesResult: null, health: { kind: 'dead' } }
       }
 
@@ -708,8 +708,8 @@ const regionCodes = [
             : { state: 'warn', text: check.capabilitiesResult?.kind === 'http'
                 ? 'The API answered with something else'
                 : check.capabilitiesResult?.kind === 'dead'
-                  ? 'API did not respond — CI will check'
-                  : "Couldn't read the API response — CI will check" })
+                  ? 'API did not respond. CI will check'
+                  : "Couldn't read the API response. CI will check" })
           if (caps) {
             g.push(caps.registration_open === true
               ? { state: 'pass', text: 'Registration is open' }
@@ -845,7 +845,7 @@ const regionCodes = [
             })
           : [(() => {
               const li = document.createElement('li')
-              li.textContent = 'Everything the validators check passes — the request is ready to file.'
+              li.textContent = 'Everything the validators check passes. The request is ready to file.'
               li.dataset.state = 'pass'
               return li
             })()]
@@ -873,15 +873,15 @@ const regionCodes = [
       // half (badges, version) from the check that just ran.
       preview.hidden = current === null
       if (current) {
-        previewName.textContent = str(current.name) || '—'
+        previewName.textContent = str(current.name) || '–'
         previewDomain.textContent = check!.identity
-        previewRegion.textContent = str((current.region as any)?.label) || '—'
+        previewRegion.textContent = str((current.region as any)?.label) || '–'
         previewBand.textContent = mode === 'server'
-          ? (str(current.size_band) || '—')
-          : (str(current.capacity_band) || '—')
+          ? (str(current.size_band) || '–')
+          : (str(current.capacity_band) || '–')
         previewDescription.textContent = str(current.description)
-        previewOperator.textContent = str((current.operator as any)?.name) || '—'
-        previewVersion.textContent = str((mode === 'server' ? check!.capabilities?.server_version : undefined)) || '—'
+        previewOperator.textContent = str((current.operator as any)?.name) || '–'
+        previewVersion.textContent = str((mode === 'server' ? check!.capabilities?.server_version : undefined)) || '–'
         const badge = previewBadgeOf()
         previewBadge.hidden = !badge
         if (badge) {

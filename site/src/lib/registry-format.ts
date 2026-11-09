@@ -42,7 +42,7 @@ export const BAND_RANK: Record<CapacityBand, number> = {
 }
 
 export const formatBytes = (bytes: number | null): string => {
-  if (bytes === null || !Number.isFinite(bytes)) return '—'
+  if (bytes === null || !Number.isFinite(bytes)) return '–'
   const mb = bytes / 1024 / 1024
   return mb >= 1024 ? `${(mb / 1024).toFixed(mb % 1024 === 0 ? 0 : 1)} GB` : `${Math.round(mb)} MB`
 }

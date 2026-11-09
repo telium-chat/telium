@@ -32,7 +32,7 @@ const checked = generatedAt
       <p class="max-w-[60ch] text-[15.5px] leading-relaxed text-muted lg:justify-self-end">
         A relay is what a voice call routes through once it outgrows direct, person-to-person
         connection. Running one is real bandwidth with real limits, so this page shows who runs
-        each relay and what the hourly checks actually measured — never what the operator hopes.
+        each relay and what the hourly checks actually measured, never what the operator hopes.
       </p>
     </div>
   </section>
@@ -44,7 +44,7 @@ const checked = generatedAt
           <p class="text-[15px] font-medium">No relays are listed yet.</p>
           <p class="mx-auto mt-2 max-w-[56ch] text-[13.5px] leading-relaxed text-muted">
             The directory fills in as operators add theirs. The wizard checks your relay live
-            in the browser, builds the registry entry, and files the request for you — the
+            in the browser, builds the registry entry, and files the request for you. The
             entry itself still lands as a public pull request, and a person still merges it.
             Calls work without any of this; a relay is what lifts the participant cap.
           </p>
@@ -68,8 +68,8 @@ const checked = generatedAt
             <div class="prose-measure mt-3 space-y-3">
               <p>
                 Being listed and being suggested automatically are separate. A guild owner can always
-                add a listed relay by hand. For a relay to be <em>suggested</em> — picked for a guild in
-                automatic mode — its operator must opt in here with <code>feed: {'{ opt_in: true }'}</code>,
+                add a listed relay by hand. For a relay to be <em>suggested</em> (picked for a guild in
+                automatic mode), its operator must opt in here with <code>feed: {'{ opt_in: true }'}</code>,
                 and the relay must pass the published health and maturation rules. Eligibility is not an
                 endorsement by Telium.
               </p>
@@ -134,7 +134,7 @@ const checked = generatedAt
               </p>
               <p>
                 Uptime is our record of hourly checks over 30 days. Capacity is a band declared by the
-                operator — the relay's own admission ceilings and transfer budget are set on the relay
+                operator. The relay's own admission ceilings and transfer budget are set on the relay
                 itself, in its <span class="font-mono">sfu.toml</span>, and a full relay turns new calls
                 away regardless of anything on this page. Whether a relay is accepting right now is read
                 live by the servers themselves, not shown here. {checked && <>Last checked {checked} UTC.</>}
