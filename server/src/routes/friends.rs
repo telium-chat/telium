@@ -671,54 +671,76 @@ async fn relay(
 }
 
 pub async fn flush_outbox(state: &AppState) -> ApiResult<u64> {
-    let _pump = state.friend_outbox_pump.lock().await;
-    let due: Vec<(String, String, String, i64)> = sqlx::query_as(
-        "SELECT id, destination, payload, attempts FROM friend_outbox \
-         WHERE next_attempt_at <= ? ORDER BY created_at LIMIT 50",
+    // One batch per destination. A slow or offline peer must not block a healthy one.
+    let destinations: Vec<String> = sqlx::query_scalar(
+        "SELECT destination FROM friend_outbox WHERE next_attempt_at <= ? \
+         GROUP BY destination ORDER BY MIN(created_at), destination LIMIT 50",
     )
     .bind(now_ms())
     .fetch_all(&state.pool)
     .await?;
 
-    let mut sent = 0;
-    for (id, destination, payload, attempts) in due {
-        let body: Value = serde_json::from_str(&payload).unwrap_or(Value::Null);
-        match federation::post_signed(state, &destination, "/_telium/v1/friends/relay", &body).await
-        {
-            Ok(_) => {
-                sqlx::query("DELETE FROM friend_outbox WHERE id = ?")
-                    .bind(&id)
-                    .execute(&state.pool)
-                    .await?;
-                crate::metrics::Metrics::bump(&state.metrics.federation_deliveries, 1);
-                sent += 1;
-            }
-            Err(e) => {
-                crate::metrics::Metrics::bump(&state.metrics.federation_delivery_failures, 1);
-                let attempts = attempts + 1;
-                let backoff =
-                    state.cfg.federation.dm_retry_secs as i64 * 1000 * (1i64 << attempts.min(10));
-                if attempts > 40 {
-                    tracing::warn!(target: crate::logcat::SOCIAL, destination = %destination, "dropping an undeliverable friend relay");
+    let outcomes = stream::iter(destinations.into_iter().map(|destination| async move {
+        let lock = state.friend_outbox_pump.lock_for(&destination).await;
+        let _destination_guard = lock.lock().await;
+        // Limit simultaneous network attempts across all concurrently invoked pumps.
+        let _slot = state.friend_outbox_pump.permit().await;
+        // Read only after the lock: another pump may already have sent or retried the row.
+        let due: Vec<(String, String, String, i64)> = sqlx::query_as(
+            "SELECT id, destination, payload, attempts FROM friend_outbox \
+                 WHERE destination = ? AND next_attempt_at <= ? ORDER BY created_at, rowid LIMIT 50",
+        )
+        .bind(&destination)
+        .bind(now_ms())
+        .fetch_all(&state.pool)
+        .await?;
+
+        let mut sent = 0;
+        for (id, destination, payload, attempts) in due {
+            let body: Value = serde_json::from_str(&payload).unwrap_or(Value::Null);
+            match federation::post_signed(state, &destination, "/_telium/v1/friends/relay", &body).await
+            {
+                Ok(_) => {
                     sqlx::query("DELETE FROM friend_outbox WHERE id = ?")
                         .bind(&id)
                         .execute(&state.pool)
                         .await?;
-                    continue;
+                    crate::metrics::Metrics::bump(&state.metrics.federation_deliveries, 1);
+                    sent += 1;
                 }
-                sqlx::query(
-                    "UPDATE friend_outbox SET attempts = ?, next_attempt_at = ?, last_error = ? \
-                     WHERE id = ? AND attempts = ?",
-                )
-                .bind(attempts)
-                .bind(now_ms() + backoff)
-                .bind(e.to_string())
-                .bind(&id)
-                .bind(attempts - 1)
-                .execute(&state.pool)
-                .await?;
+                Err(e) => {
+                    crate::metrics::Metrics::bump(&state.metrics.federation_delivery_failures, 1);
+                    let attempts = attempts + 1;
+                    let backoff =
+                        state.cfg.federation.dm_retry_secs as i64 * 1000 * (1i64 << attempts.min(10));
+                    if attempts > 40 {
+                        tracing::warn!(target: crate::logcat::SOCIAL, destination = %destination, "dropping an undeliverable friend relay");
+                        sqlx::query("DELETE FROM friend_outbox WHERE id = ?")
+                            .bind(&id)
+                            .execute(&state.pool)
+                            .await?;
+                        continue;
+                    }
+                    sqlx::query(
+                        "UPDATE friend_outbox SET attempts = ?, next_attempt_at = ?, last_error = ? \
+                         WHERE id = ? AND attempts = ?",
+                    )
+                    .bind(attempts)
+                    .bind(now_ms() + backoff)
+                    .bind(e.to_string())
+                    .bind(&id)
+                    .bind(attempts - 1)
+                    .execute(&state.pool)
+                    .await?;
+                }
             }
         }
-    }
-    Ok(sent)
+        Ok::<u64, crate::error::ApiError>(sent)
+    }))
+    .buffer_unordered(8)
+    // Complete every in-flight batch before propagating an error. Aborting a
+    // successful HTTP send before its DELETE can cause an avoidable duplicate.
+    .collect::<Vec<_>>()
+    .await;
+    outcomes.into_iter().try_fold(0u64, |sum, result| result.map(|n| sum + n))
 }
