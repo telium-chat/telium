@@ -117,6 +117,16 @@ pub async fn sweep_once(state: &AppState) -> usize {
                             tracing::warn!(room = %room, identity = %p.identity, error = %e,
                                 "muted track but could not notify publisher of recovery steps");
                         }
+                        // Everybody watching the muted track should know the
+                        // interruption is a relay limit, not the sender silently
+                        // stopping. The client only surfaces this to viewers.
+                        if let Err(e) = state.livekit.broadcast(
+                            &room, telium_protocol::MEDIA_LIMIT_TOPIC,
+                            &json!({ "identity": p.identity, "track_sid": sid, "source": source }),
+                        ).await {
+                            tracing::warn!(room = %room, error = %e,
+                                "muted track but could not notify viewers");
+                        }
                     }
                     Err(e) => tracing::warn!(
                         room = %room, identity = %p.identity, track = %sid, error = %e,
