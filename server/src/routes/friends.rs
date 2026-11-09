@@ -671,6 +671,7 @@ async fn relay(
 }
 
 pub async fn flush_outbox(state: &AppState) -> ApiResult<u64> {
+    let _pump = state.friend_outbox_pump.lock().await;
     let due: Vec<(String, String, String, i64)> = sqlx::query_as(
         "SELECT id, destination, payload, attempts FROM friend_outbox \
          WHERE next_attempt_at <= ? ORDER BY created_at LIMIT 50",
@@ -707,12 +708,13 @@ pub async fn flush_outbox(state: &AppState) -> ApiResult<u64> {
                 }
                 sqlx::query(
                     "UPDATE friend_outbox SET attempts = ?, next_attempt_at = ?, last_error = ? \
-                     WHERE id = ?",
+                     WHERE id = ? AND attempts = ?",
                 )
                 .bind(attempts)
                 .bind(now_ms() + backoff)
                 .bind(e.to_string())
                 .bind(&id)
+                .bind(attempts - 1)
                 .execute(&state.pool)
                 .await?;
             }

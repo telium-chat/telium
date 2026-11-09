@@ -8,6 +8,7 @@ use super::*;
 const OUTBOX_MAX_SHIFT: i64 = 10;
 
 pub async fn flush_outbox(state: &AppState) -> ApiResult<u64> {
+    let _pump = state.dm_outbox_pump.lock().await;
     let due: Vec<(String, String, String, String, String, i64)> = sqlx::query_as(
         "SELECT id, conversation_id, destination, path, payload, attempts FROM dm_outbox \
          WHERE next_attempt_at <= ? ORDER BY created_at LIMIT 50",

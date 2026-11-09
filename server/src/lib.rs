@@ -166,6 +166,8 @@ pub async fn build_state_as(cfg: Config, role: Role) -> anyhow::Result<AppState>
         hash_lists,
         gofile_guest_token,
         upload_locks,
+        dm_outbox_pump: Arc::new(tokio::sync::Mutex::new(())),
+        friend_outbox_pump: Arc::new(tokio::sync::Mutex::new(())),
         demoted: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         shut_down,
         updates: Arc::new(tokio::sync::RwLock::new(if check {
