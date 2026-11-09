@@ -400,9 +400,10 @@ fn unique_usage_dir() -> std::path::PathBuf {
         assert_eq!(mutes[0]["trackSid"], "TR_g_screen", "the largest declared ladder goes first");
         assert_eq!(mutes[0]["muted"], true);
         let notices: Vec<&Value> = rec.iter().filter(|(m, _)| m == "SendData").map(|(_, b)| b).collect();
-        assert_eq!(notices.len(), 1, "the publisher must be told why their share went away");
-        assert_eq!(notices[0]["topic"], proto::MEDIA_LIMIT_TOPIC);
-        assert_eq!(notices[0]["destinationIdentities"], json!(["greedy"]));
+        assert_eq!(notices.len(), 2, "both the publisher and viewers need an explanation");
+        assert!(notices.iter().all(|n| n["topic"] == proto::MEDIA_LIMIT_TOPIC));
+        assert!(notices.iter().any(|n| n["destinationIdentities"] == json!(["greedy"])));
+        assert!(notices.iter().any(|n| n.get("destinationIdentities").is_none()));
 
         assert_eq!(h.state.sessions.cap_for(room, "honest"), Some(1_000_000));
         assert_eq!(h.state.sessions.cap_for(room, "greedy"), Some(1_000_000));
