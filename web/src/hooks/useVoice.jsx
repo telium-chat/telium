@@ -465,11 +465,12 @@ export function VoiceProvider({ children }) {
       call = new SfuCall({
         ...callbacks,
         onAudioBlocked: via(setAudioBlocked),
-        onMediaLimit: ({ source, recovered }) => {
+        onMediaLimit: ({ source, recovered, remote = false }) => {
           if (callRef.current !== call && gate.mode !== 'held') return;
-          const key = recovered ? 'voice.sfuLimit.recovered' : 'voice.sfuLimit.failed';
+          const key = remote ? 'voice.sfuLimit.remote'
+            : recovered ? 'voice.sfuLimit.recovered' : 'voice.sfuLimit.failed';
           toast(t(key, { source: source === 'screen' ? t('voice.sfuLimit.screen') : t('voice.sfuLimit.camera') }),
-            recovered ? undefined : { error: true });
+            !remote && !recovered ? { error: true } : undefined);
         },
         onDrainNotice: (message) => {
           // A courtesy from the relay, best-effort delivered; one toast per
