@@ -175,7 +175,16 @@ pub async fn inbound_deliver(
     .bind(id)
     .fetch_one(&state.pool)
     .await?;
-    store_frame(&state, id, msg).await?;
+    if !store_frame(&state, id, msg).await? {
+        // Retry after a lost HTTP response: the frame is already stored.
+        // Acknowledge it without repeating gateway events or push notifications.
+        sqlx::query("UPDATE conversations SET last_seq = MAX(last_seq, ?) WHERE id = ?")
+            .bind(seq)
+            .bind(id)
+            .execute(&state.pool)
+            .await?;
+        return Ok(Json(json!({ "ok": true })));
+    }
     if msg.get("kind").and_then(Value::as_str) == Some("application") {
         if let Some(notification_id) = msg.get("notification_id").and_then(Value::as_str) {
             validate_notification_id(notification_id)?;
@@ -310,7 +319,7 @@ pub(crate) fn not_sequencer(sequencer: &str) -> ApiError {
         .with_detail("sequencer", sequencer.to_string())
 }
 
-pub(super) async fn store_frame(state: &AppState, conversation_id: &str, msg: &Value) -> ApiResult<()> {
+pub(super) async fn store_frame(state: &AppState, conversation_id: &str, msg: &Value) -> ApiResult<bool> {
     let seq = msg.get("seq").and_then(Value::as_i64).unwrap_or(0);
     if seq <= 0 {
         return Err(ApiError::BadRequest("frame has no sequence number".into()));
@@ -318,7 +327,7 @@ pub(super) async fn store_frame(state: &AppState, conversation_id: &str, msg: &V
     // A second delivery can still be in flight while a mirrored duplicate
     // is torn down. Require the parent to exist *at insertion time* so the
     // late delivery cannot recreate an orphan message after the cleanup.
-    sqlx::query(
+    let inserted = sqlx::query(
         "INSERT INTO dm_messages (id, conversation_id, seq, epoch, kind, sender, \
          sender_device, ciphertext, notification_id, created_at, generation, notify) \
          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? \
@@ -341,7 +350,7 @@ pub(super) async fn store_frame(state: &AppState, conversation_id: &str, msg: &V
     .bind(conversation_id)
     .execute(&state.pool)
     .await?;
-    Ok(())
+    Ok(inserted.rows_affected() > 0)
 }
 
 pub(super) async fn first_hole(
