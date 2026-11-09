@@ -162,17 +162,14 @@ export default defineConfig({
     // The Rust server serves this directory with an index.html fallback, so the
     // asset paths have to be absolute from the site root in normal web builds.
     assetsDir: 'assets',
-    // Source maps for the bundle a homeserver serves, and only for that one.
+    // Source maps for the web client and for Electron diagnostics.
     //
-    // A self-hosted operator debugging a production build is the case this
-    // exists for, and there the maps are fetched on demand by a devtools
-    // window that somebody deliberately opened. In a packaged client they are
-    // dead weight: nothing loads them, and Tauri embeds the whole `dist`
-    // directory into the app's native library, so they ship to every phone
-    // and every desktop install. Measured on the Android release APK, turning
-    // them off takes it from 23.9 MB to 19.7 MB -- 4 MB of nobody's source,
-    // in a file people download over mobile data.
-    sourcemap: runtime === 'web',
+    // The public web client already emits maps for browser debugging. Electron
+    // needs *hidden* maps so errors in minified AppImages can be traced to a
+    // component, but build-electron-renderer.mjs removes them from the package
+    // and keeps them separately for CI. Android and Tauri builds keep them off
+    // to avoid bloating every install by several megabytes.
+    sourcemap: runtime === 'web' ? true : runtime === 'desktop' ? 'hidden' : false,
   },
   server: {
     host: '0.0.0.0',
