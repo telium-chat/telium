@@ -378,7 +378,7 @@ pub async fn mutual(
             (domain, local, answer)
         }
     }))
-    .buffer_unordered(50)
+    .buffer_unordered(8)
     .collect::<Vec<_>>()
     .await;
 
