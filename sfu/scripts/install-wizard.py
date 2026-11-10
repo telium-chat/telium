@@ -22,6 +22,8 @@ def validate_directory(value):
     """Restrict privileged installation to a dedicated /opt or /srv subtree."""
     if not re.fullmatch(r"/(?:opt|srv)/[A-Za-z0-9._/-]+", value):
         raise ValueError("Choose an absolute directory under /opt or /srv.")
+    if "//" in value:
+        raise ValueError("Directory paths cannot contain repeated slashes.")
     parts = Path(value).parts
     if len(parts) < 3 or any(part in (".", "..") for part in value.split("/")):
         raise ValueError("Choose a dedicated directory, without . or .. components.")
