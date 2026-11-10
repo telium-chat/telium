@@ -373,6 +373,7 @@ impl Default for AdminConfig {
             bind: "127.0.0.1:7891".into(),
             state_dir: "./state".into(),
             helper_path: "/usr/local/libexec/telium-sfu-admin-helper".into(),
+            install_mode: String::new(),
         }
     }
 }
