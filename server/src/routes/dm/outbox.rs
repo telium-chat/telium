@@ -9,27 +9,46 @@ use super::*;
 const OUTBOX_MAX_SHIFT: i64 = 10;
 
 pub async fn flush_outbox(state: &AppState) -> ApiResult<u64> {
-    // One batch per destination. A slow or offline peer must not block a healthy one.
-    let destinations: Vec<String> = sqlx::query_scalar(
-        "SELECT destination FROM dm_outbox WHERE next_attempt_at <= ? \
-         GROUP BY destination ORDER BY MIN(created_at), destination LIMIT 50",
+    // A flush still attempts at most 50 due rows, oldest first -- the same
+    // budget as a plain sequential pump. The rows are grouped per destination
+    // and the groups fan out, so a slow or offline peer cannot block a healthy
+    // one; the budget does not grow with the fan-out.
+    let due: Vec<(String, String, String, String, String, i64)> = sqlx::query_as(
+        "SELECT id, conversation_id, destination, path, payload, attempts FROM dm_outbox \
+         WHERE next_attempt_at <= ? ORDER BY created_at, rowid LIMIT 50",
     )
     .bind(now_ms())
     .fetch_all(&state.pool)
     .await?;
 
-    let outcomes = stream::iter(destinations.into_iter().map(|destination| async move {
+    // One group per destination, in first-touched (oldest) order.
+    let mut groups: Vec<(String, Vec<String>)> = Vec::new();
+    for (id, _, destination, _, _, _) in &due {
+        match groups.iter_mut().find(|(known, _)| known == destination) {
+            Some((_, ids)) => ids.push(id.clone()),
+            None => groups.push((destination.clone(), vec![id.clone()])),
+        }
+    }
+
+    let outcomes = stream::iter(groups.into_iter().map(|(destination, picked)| async move {
         let lock = state.dm_outbox_pump.lock_for(&destination).await;
         let _destination_guard = lock.lock().await;
-        // Read only after the lock: another pump may already have sent or retried the row.
-        let due: Vec<(String, String, String, String, String, i64)> = sqlx::query_as(
+        // Read only after the lock: another pump may already have sent or
+        // retried these rows. Only the rows this flush picked count against
+        // its budget, so re-read just those ids, still skipping rows that
+        // are no longer due.
+        let mut sql = format!(
             "SELECT id, conversation_id, destination, path, payload, attempts FROM dm_outbox \
-                 WHERE destination = ? AND next_attempt_at <= ? ORDER BY created_at, rowid LIMIT 50",
-        )
-        .bind(&destination)
-        .bind(now_ms())
-        .fetch_all(&state.pool)
-        .await?;
+             WHERE next_attempt_at <= ? AND id IN ({}) ORDER BY created_at, rowid",
+            std::iter::repeat("?").take(picked.len()).collect::<Vec<_>>().join(", ")
+        );
+        let mut requery =
+            sqlx::query_as::<_, (String, String, String, String, String, i64)>(&sql).bind(now_ms());
+        for id in &picked {
+            requery = requery.bind(id);
+        }
+        let due: Vec<(String, String, String, String, String, i64)> =
+            requery.fetch_all(&state.pool).await?;
 
         let mut sent = 0;
         for (id, conversation_id, destination, path, payload, attempts) in due {

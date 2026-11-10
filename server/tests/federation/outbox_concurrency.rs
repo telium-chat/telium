@@ -128,6 +128,33 @@ async fn a_slow_dm_destination_does_not_delay_healthy_destinations() {
 }
 
 #[tokio::test]
+async fn a_flush_attempts_at_most_fifty_rows_across_destinations() {
+    let (a, _b) = pair().await;
+    let (url, hits, serve) = fake_peer(Duration::ZERO, StatusCode::OK).await;
+    // Ten destinations on one healthy peer, ten due rows each: 100 due rows.
+    for destination in 0i64..10 {
+        let origin = format!("flood-{destination}.test");
+        cache_peer(&a.state, &origin, &url).await;
+        for row in 0i64..10 {
+            let id = format!("flood-{destination}-{row}");
+            queue_dm(&a.state, &id, &origin, destination * 10 + row + 1).await;
+        }
+    }
+
+    let sent = telium_server::routes::dm::flush_outbox(&a.state).await.unwrap();
+
+    assert_eq!(sent, 50, "a flush must attempt at most 50 rows");
+    assert_eq!(hits.load(Ordering::SeqCst), 50, "rows beyond the budget wait for the next flush");
+    let remaining: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM dm_outbox WHERE id LIKE 'flood-%'")
+            .fetch_one(&a.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(remaining, 50);
+    serve.abort();
+}
+
+#[tokio::test]
 async fn simultaneous_friend_pumps_increment_one_retry_and_preserve_backoff() {
     let (a, _b) = pair().await;
     let (url, hits, serve) = fake_peer(Duration::from_millis(250), StatusCode::SERVICE_UNAVAILABLE).await;
