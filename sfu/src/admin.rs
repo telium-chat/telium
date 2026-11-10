@@ -611,6 +611,11 @@ async fn apply_setup(
         "HTTPS is configured and the SFU is restarting with the new settings."
     };
 
+    let dashboard_url = if portable {
+        "http://localhost:7891/admin".to_string()
+    } else {
+        format!("https://{sfu_domain}/admin")
+    };
     page(
         "Telium SFU configured",
         &format!(
@@ -618,14 +623,13 @@ async fn apply_setup(
             <p>{result_note}</p>
             <p>SFU endpoint: <code>https://{}</code></p>
             <p>LiveKit signaling: <code>wss://{}</code></p>
-            <p>Dashboard: <a href="https://{}/admin">https://{}/admin</a></p>
+            <p>Dashboard: <a href="{dashboard_url}">{dashboard_url}</a></p>
             <p>You can now add <code>https://{}</code> as a Telium voice region.</p>"#,
             esc(&sfu_domain),
             esc(&livekit_domain),
             esc(&sfu_domain),
-            esc(&sfu_domain),
-            esc(&sfu_domain),
             result_note = result_note,
+            dashboard_url = esc(&dashboard_url),
         ),
     )
 }
