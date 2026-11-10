@@ -696,13 +696,9 @@ pub async fn flush_outbox(state: &AppState) -> ApiResult<u64> {
         let mut sent = 0;
         for (id, destination, payload, attempts) in due {
             let body: Value = serde_json::from_str(&payload).unwrap_or(Value::Null);
-            // One permit per HTTP attempt, not per 50-row batch. Slow peers
-            // must yield network slots between retries for other destinations.
-            let outcome = {
-                let _slot = state.friend_outbox_pump.permit().await;
-                federation::post_signed(state, &destination, "/_telium/v1/friends/relay", &body).await
-            };
-            match outcome {
+            match federation::post_signed(state, &destination, "/_telium/v1/friends/relay", &body)
+                .await
+            {
                 Ok(_) => {
                     sqlx::query("DELETE FROM friend_outbox WHERE id = ?")
                         .bind(&id)
@@ -725,6 +721,8 @@ pub async fn flush_outbox(state: &AppState) -> ApiResult<u64> {
                         continue;
                     }
                     sqlx::query(
+                        // A flush that read an older attempt count must not
+                        // clobber a newer retry state written meanwhile.
                         "UPDATE friend_outbox SET attempts = ?, next_attempt_at = ?, last_error = ? \
                          WHERE id = ? AND attempts = ?",
                     )

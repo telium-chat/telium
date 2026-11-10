@@ -34,13 +34,7 @@ pub async fn flush_outbox(state: &AppState) -> ApiResult<u64> {
         let mut sent = 0;
         for (id, conversation_id, destination, path, payload, attempts) in due {
             let body: Value = serde_json::from_str(&payload).unwrap_or(Value::Null);
-            // One permit per HTTP attempt, not per 50-row batch. Slow peers
-            // must yield network slots between retries for other destinations.
-            let outcome = {
-                let _slot = state.dm_outbox_pump.permit().await;
-                federation::post_signed(state, &destination, &path, &body).await
-            };
-            match outcome {
+            match federation::post_signed(state, &destination, &path, &body).await {
                 Ok(_) => {
                     sqlx::query("DELETE FROM dm_outbox WHERE id = ?")
                         .bind(&id)
@@ -79,9 +73,8 @@ pub async fn flush_outbox(state: &AppState) -> ApiResult<u64> {
                     let shift = if refused { OUTBOX_MAX_SHIFT } else { attempts.min(OUTBOX_MAX_SHIFT) };
                     let backoff = state.cfg.federation.dm_retry_secs as i64 * 1000 * (1i64 << shift);
                     sqlx::query(
-                        // A background delivery may have read an older attempt count
-                        // while another flush (or an operator) updated this row.
-                        // Never clobber a newer retry state with stale information.
+                        // A flush that read an older attempt count must not
+                        // clobber a newer retry state written meanwhile.
                         "UPDATE dm_outbox SET attempts = ?, next_attempt_at = ?, last_error = ? \
                          WHERE id = ? AND attempts = ?",
                     )
@@ -97,7 +90,7 @@ pub async fn flush_outbox(state: &AppState) -> ApiResult<u64> {
         }
         Ok::<u64, crate::error::ApiError>(sent)
     }))
-    .buffer_unordered(50)
+    .buffer_unordered(8)
     // Complete every in-flight batch before propagating an error. Aborting a
     // successful HTTP send before its DELETE can cause an avoidable duplicate.
     .collect::<Vec<_>>()

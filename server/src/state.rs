@@ -5,39 +5,24 @@ use crate::gateway::hub::Hub;
 use serde_json::Value;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
-use std::sync::{Arc, Weak};
-use tokio::sync::{Mutex, RwLock, Semaphore, SemaphorePermit};
+use std::sync::Arc;
+use tokio::sync::{Mutex, RwLock};
 
-/// Bounds concurrent federation outbox deliveries while serializing each destination.
-/// Weak references avoid retaining a lock for every remote server ever contacted.
+/// One lock per destination so overlapping outbox pumps cannot deliver the
+/// same due row twice. Kept for the process lifetime like `upload_locks`;
+/// an entry is only added per remote server the outbox actually queues to.
+#[derive(Default)]
 pub struct OutboxPump {
-    destinations: Mutex<HashMap<String, Weak<Mutex<()>>>>,
-    slots: Semaphore,
-}
-
-impl Default for OutboxPump {
-    fn default() -> Self {
-        Self {
-            destinations: Mutex::new(HashMap::new()),
-            slots: Semaphore::new(8),
-        }
-    }
+    destinations: Mutex<HashMap<String, Arc<Mutex<()>>>>,
 }
 
 impl OutboxPump {
     pub async fn lock_for(&self, destination: &str) -> Arc<Mutex<()>> {
         let mut locks = self.destinations.lock().await;
-        if let Some(lock) = locks.get(destination).and_then(Weak::upgrade) {
-            return lock;
-        }
-        locks.retain(|_, lock| lock.strong_count() > 0);
-        let lock = Arc::new(Mutex::new(()));
-        locks.insert(destination.to_owned(), Arc::downgrade(&lock));
-        lock
-    }
-
-    pub async fn permit(&self) -> SemaphorePermit<'_> {
-        self.slots.acquire().await.expect("outbox semaphore is never closed")
+        locks
+            .entry(destination.to_owned())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
     }
 }
 
