@@ -997,6 +997,24 @@ pub fn now_ms() -> i64 {
 fn write_config(path: &Path, cfg: &SfuConfig) -> anyhow::Result<()> {
     let text = toml::to_string_pretty(cfg)?;
     let tmp = path.with_extension("toml.tmp");
+    // The TOML contains the LiveKit API secret. Use restrictive permissions
+    // before writing any secret bytes; std::fs::write creates mode 0644 under
+    // a typical umask, which would leak credentials on a shared machine.
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .mode(0o600)
+            .open(&tmp)?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+    }
+    #[cfg(not(unix))]
     std::fs::write(&tmp, text)?;
     std::fs::rename(tmp, path)?;
     Ok(())
