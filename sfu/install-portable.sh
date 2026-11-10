@@ -77,6 +77,10 @@ if [[ ! -x "$PREFIX/bin/livekit-server" ]]; then
 fi
 
 CONFIG="$PREFIX/config/sfu.toml"
+[[ ! -L "$CONFIG" ]] || { echo "Refusing symlinked SFU config: $CONFIG" >&2; exit 1; }
+[[ ! -L "$PREFIX/updates/update-sfu.conf" ]] || {
+  echo "Refusing symlinked privileged update config" >&2; exit 1;
+}
 if [[ ! -e "$CONFIG" ]]; then
   cat > "$CONFIG" <<'SFU_CONFIG'
 bind = "127.0.0.1:7890"
