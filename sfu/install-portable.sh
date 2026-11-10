@@ -10,6 +10,9 @@ fi
 check="$PREFIX"
 while [[ "$check" != "/" ]]; do
   [[ ! -L "$check" ]] || { echo "Symlink in installation path: $check" >&2; exit 1; }
+  if [[ -e "$check" && "$(stat -c %u "$check")" != "0" ]]; then
+    echo "Non-root-owned installation path component: $check" >&2; exit 1
+  fi
   check="$(dirname "$check")"
 done
 for cmd in curl python3 tar sha256sum openssl systemctl useradd install sed flock; do
@@ -30,9 +33,14 @@ fi
 for subpath in bin config data updates; do
   [[ ! -L "$PREFIX/$subpath" ]] || { echo "Symlink at $PREFIX/$subpath; refusing" >&2; exit 1; }
 done
-install -d -m 0755 "$PREFIX" "$PREFIX/bin"
+for protected in bin updates; do
+  if [[ -e "$PREFIX/$protected" && "$(stat -c %u "$PREFIX/$protected")" != "0" ]]; then
+    echo "Root-owned directory required: $PREFIX/$protected" >&2; exit 1
+  fi
+done
+install -d -o root -g root -m 0755 "$PREFIX" "$PREFIX/bin"
 install -d -o telium-sfu -g telium-sfu -m 0750 "$PREFIX/config" "$PREFIX/data" "$PREFIX/data/state" "$PREFIX/data/livekit"
-install -d -m 0700 "$PREFIX/updates"
+install -d -o root -g root -m 0700 "$PREFIX/updates"
 case "$(uname -m)" in
   x86_64) arch=x86_64; lk_arch=amd64 ;;
   aarch64) arch=aarch64; lk_arch=arm64 ;;
