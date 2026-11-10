@@ -772,14 +772,27 @@ async fn restart(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Re
     if !authenticated(&state, &headers).await {
         return Redirect::to("/admin/login").into_response();
     }
-    if !native_admin_helper_available(&state.cfg.admin.helper_path) {
-        return error_page(
-            StatusCode::BAD_REQUEST,
-            "Restart this Compose deployment on the host using docker compose restart sfu.",
-        );
+    if state.cfg.admin.install_mode == "portable" {
+        schedule_portable_restart(Duration::from_millis(500));
+    } else {
+        if !native_admin_helper_available(&state.cfg.admin.helper_path) {
+            return error_page(
+                StatusCode::BAD_REQUEST,
+                "Restart this Compose deployment on the host using docker compose restart sfu.",
+            );
+        }
+        schedule_restart(Duration::from_millis(500));
     }
-    schedule_restart(Duration::from_millis(500));
     page("Restarting", "<h1>Restarting SFU…</h1><p>The service will be back in a moment.</p>")
+}
+
+/// Portable deployments use systemd Restart=always, so an unprivileged exit
+/// reloads the configuration without installing a privileged admin helper.
+fn schedule_portable_restart(delay: Duration) {
+    tokio::spawn(async move {
+        tokio::time::sleep(delay).await;
+        std::process::exit(0);
+    });
 }
 
 fn schedule_restart(delay: Duration) {
