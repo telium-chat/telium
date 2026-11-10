@@ -12,7 +12,7 @@ while [[ "$check" != "/" ]]; do
   [[ ! -L "$check" ]] || { echo "Symlink in installation path: $check" >&2; exit 1; }
   check="$(dirname "$check")"
 done
-for cmd in curl python3 tar sha256sum openssl systemctl useradd install sed; do
+for cmd in curl python3 tar sha256sum openssl systemctl useradd install sed flock; do
   command -v "$cmd" >/dev/null 2>&1 || {
     echo "Missing $cmd. Portable mode never modifies system packages." >&2; exit 1;
   }
@@ -27,6 +27,9 @@ DEPLOY="$(cd "$HERE/../deploy" && pwd)"
 if ! id telium-sfu >/dev/null 2>&1; then
   useradd --system --home "$PREFIX" --shell /usr/sbin/nologin --no-create-home telium-sfu
 fi
+for subpath in bin config data updates; do
+  [[ ! -L "$PREFIX/$subpath" ]] || { echo "Symlink at $PREFIX/$subpath; refusing" >&2; exit 1; }
+done
 install -d -m 0755 "$PREFIX" "$PREFIX/bin"
 install -d -o telium-sfu -g telium-sfu -m 0750 "$PREFIX/config" "$PREFIX/data" "$PREFIX/data/state" "$PREFIX/data/livekit"
 install -d -m 0700 "$PREFIX/updates"
@@ -129,11 +132,13 @@ SFU_CONFIG
 fi
 
 install -m 0755 "$DEPLOY/update-sfu-native.sh" "$PREFIX/bin/update-sfu"
-if [[ ! -e "$PREFIX/config/update-sfu.conf" ]]; then
+if [[ ! -e "$PREFIX/updates/update-sfu.conf" ]]; then
   sed -e "s|^TELIUM_SFU_BIN=.*|TELIUM_SFU_BIN=$PREFIX/bin/telium-sfu|" \
       -e "s|^TELIUM_SFU_CONFIG=.*|TELIUM_SFU_CONFIG=$CONFIG|" \
-      "$DEPLOY/update-sfu.conf" > "$PREFIX/config/update-sfu.conf"
-  chmod 0600 "$PREFIX/config/update-sfu.conf"
+      -e "s|^TELIUM_SFU_MANIFEST_URL=.*|TELIUM_SFU_MANIFEST_URL=|" \
+      "$DEPLOY/update-sfu.conf" > "$PREFIX/updates/update-sfu.conf"
+  printf '\nTELIUM_SFU_USAGE_LEDGER=%s/data/livekit/usage.json\n' "$PREFIX" >> "$PREFIX/updates/update-sfu.conf"
+  chmod 0600 "$PREFIX/updates/update-sfu.conf"
 fi
 cat > /etc/systemd/system/telium-sfu.service <<EOF
 [Unit]
@@ -163,7 +168,7 @@ After=network-online.target
 Wants=network-online.target
 [Service]
 Type=oneshot
-Environment=TELIUM_SFU_UPDATE_CONFIG=$PREFIX/config/update-sfu.conf
+Environment=TELIUM_SFU_UPDATE_CONFIG=$PREFIX/updates/update-sfu.conf
 Environment=TELIUM_SFU_UPDATE_STATE=$PREFIX/updates
 Environment=TELIUM_SFU_UPDATE_LOCK=$PREFIX/updates/.lock
 ExecStart=$PREFIX/bin/update-sfu
