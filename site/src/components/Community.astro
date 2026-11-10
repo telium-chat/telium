@@ -3,31 +3,61 @@ import Icon from './Icon.astro'
 import { URLS } from '../config'
 ---
 
-<section class="band" aria-labelledby="community-heading">
+<section class="band community-finale" aria-labelledby="community-heading">
   <div class="page">
-    <div class="reveal grid gap-7 md:grid-cols-[minmax(0,.9fr)_minmax(0,1.1fr)] md:items-center">
-      <div>
-        <p class="eyebrow">People behind the project</p>
-        <h2 id="community-heading" class="h2 mt-3 max-w-[18ch]">
-          Built with the community.
-        </h2>
-      </div>
-      <div>
-        <p class="max-w-[53ch] text-[16px] leading-relaxed text-muted">
-          Telium wouldn't be possible without the people contributing code, reporting bugs,
-          testing features and sharing ideas. This project belongs to the community building it.
-        </p>
-        <div class="mt-7 flex flex-wrap gap-3">
-          <a href={URLS.github} rel="noreferrer" class="btn btn-primary btn-lg">
-            View source code
-            <Icon name="arrow-up-right" size={16} />
-          </a>
-          <a href="/people" class="btn btn-secondary btn-lg">
-            Meet the contributors
-            <Icon name="arrow-right" size={16} />
-          </a>
-        </div>
+    <div class="reveal mx-auto max-w-[52ch] text-center">
+      <h2 id="community-heading" class="community-heading">
+        Built with the community.
+      </h2>
+      <p class="mx-auto mt-6 max-w-[52ch] text-[16px] leading-relaxed text-muted">
+        Telium wouldn't be possible without the people contributing code, reporting bugs,
+        testing features and sharing ideas. This project belongs to the community building it.
+      </p>
+      <div class="mt-9 flex flex-wrap justify-center gap-3">
+        <a href={URLS.github} rel="noreferrer" class="btn-pill btn-pill-primary">
+          View source code
+          <Icon name="arrow-up-right" size={16} />
+        </a>
+        <a href="/people" class="btn-pill btn-pill-secondary">
+          Meet the contributors
+          <Icon name="arrow-right" size={16} />
+        </a>
       </div>
     </div>
   </div>
 </section>
+
+<style>
+  .community-finale {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .community-finale::before {
+    content: '';
+    position: absolute;
+    left: 10%;
+    right: 10%;
+    bottom: -30%;
+    height: 60%;
+    background: radial-gradient(
+      ellipse at 50% 100%,
+      color-mix(in oklab, var(--telium-violet) 18%, transparent),
+      transparent 70%
+    );
+    pointer-events: none;
+  }
+
+  .community-finale > .page {
+    position: relative;
+  }
+
+  .community-heading {
+    font-size: clamp(2.5rem, 1.6rem + 3vw, 4.25rem);
+    font-weight: 300;
+    letter-spacing: -0.04em;
+    line-height: 1.05;
+    color: var(--color-foreground);
+    text-wrap: balance;
+  }
+</style>

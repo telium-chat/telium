@@ -162,7 +162,7 @@ const columns = [
                   class="tnum hidden py-3.5 pr-4 text-right text-[13.5px] text-muted lg:table-cell"
                   data-label="Accounts"
                 >
-                  <span title="Declared by the operator — Telium exposes no account count to verify it against.">
+                  <span title="Declared by the operator. Telium exposes no account count to verify it against.">
                     {SIZE_LABEL[server.size_band]}
                   </span>
                 </td>
@@ -172,7 +172,7 @@ const columns = [
                   data-label="Uptime"
                 >
                   {probe.uptime_30d === null ? (
-                    <span class="text-muted">—</span>
+                    <span class="text-muted">–</span>
                   ) : (
                     <span class:list={[probe.uptime_30d < 99 && 'text-warning']}>
                       {probe.uptime_30d.toFixed(1)}%
@@ -181,7 +181,7 @@ const columns = [
                 </td>
 
                 <td class="tnum py-3.5 text-right text-[13.5px]" data-label="Latency">
-                  <span data-latency class="text-muted">—</span>
+                  <span data-latency class="text-muted">–</span>
                 </td>
 
                 <td class="py-3.5 text-right">
@@ -219,7 +219,7 @@ const columns = [
                       </dd>
 
                       <dt class="text-muted">Roles</dt>
-                      <dd>{roles.length ? roles.join(', ') : '—'}</dd>
+                      <dd>{roles.length ? roles.join(', ') : '–'}</dd>
 
                       <dt class="text-muted">Max upload</dt>
                       <dd class="tnum">{formatBytes(probe.max_file_bytes)}</dd>
@@ -227,10 +227,10 @@ const columns = [
 
                     <dl class="grid grid-cols-[auto_1fr] gap-x-5 gap-y-1.5 text-[13px]">
                       <dt class="text-muted">Version</dt>
-                      <dd class="font-mono">{probe.server_version ?? '—'}</dd>
+                      <dd class="font-mono">{probe.server_version ?? '–'}</dd>
 
                       <dt class="text-muted">Protocol</dt>
-                      <dd class="font-mono">{probe.protocol_version ?? '—'}</dd>
+                      <dd class="font-mono">{probe.protocol_version ?? '–'}</dd>
 
                       <dt class="text-muted">Listed</dt>
                       <dd class="tnum">{server.added}</dd>
@@ -642,7 +642,7 @@ const columns = [
       const cell = root.querySelector<HTMLElement>(`[data-domain="${CSS.escape(domain)}"] [data-latency]`)
       if (!cell) return
       if (ms === undefined || ms === null) {
-        cell.textContent = '—'
+        cell.textContent = '–'
         cell.classList.add('text-muted')
         if (ms === null) cell.title = 'No response'
         else cell.removeAttribute('title')

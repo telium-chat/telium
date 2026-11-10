@@ -4,70 +4,74 @@ import Wordmark from './Wordmark.astro'
 import ThemeToggle from './ThemeToggle.astro'
 import Icon from './Icon.astro'
 
+interface Props {
+  showThemeToggle?: boolean
+}
+
+const { showThemeToggle = true } = Astro.props
+
 const path = Astro.url.pathname
 const nav = [
   { label: 'Download', href: '/download' },
   { label: 'Compare', href: '/#compare' },
-  { label: 'People', href: '/people' },
   { label: 'Homeservers', href: '/servers' },
-  { label: 'Relays', href: '/sfus' },
   { label: 'Docs', href: URLS.docs, external: true },
 ]
 ---
 
-<header id="site-header" class="sticky top-0 z-40">
-  <div
-    class="header-shell mx-auto flex h-14 max-w-[1120px] items-center justify-between px-5 sm:px-8"
-  >
-    <a href="/" class="flex h-full items-center rounded-lg leading-none" aria-label="Telium, home">
-      <Wordmark size={32} />
+<header id="site-header">
+  <div class="header-row">
+    <a href="/" class="hdr-pill logo-pill" aria-label="Telium, home">
+      <Wordmark size={30} />
     </a>
 
-    <nav class="flex items-center gap-1.5" aria-label="Main">
-      <ul class="mr-1 hidden items-center gap-0.5 sm:flex">
-        {
-          nav.map((item) => (
-            <li>
-              <a
-                href={item.href}
-                aria-current={path === item.href ? 'page' : undefined}
-                class="nav-row"
-                {...(item.external ? { rel: 'noreferrer' } : {})}
-              >
-                {item.label}
-              </a>
-            </li>
-          ))
-        }
-      </ul>
+    <nav class="hdr-pill nav-pill" aria-label="Main">
+      <span class="nav-indicator" aria-hidden="true"></span>
+      {
+        nav.map((item) => (
+          <a
+            href={item.href}
+            aria-current={path === item.href ? 'page' : undefined}
+            class="nav-item"
+            {...(item.external ? { rel: 'noreferrer' } : {})}
+          >
+            {item.label}
+          </a>
+        ))
+      }
+    </nav>
 
-      <a href={URLS.client} class="btn btn-primary hidden sm:inline-flex">
-        Open Telium
-        <Icon name="arrow-right" size={15} />
-      </a>
-      <a href={URLS.client} class="btn btn-primary size-9 !px-0 sm:hidden" aria-label="Open Telium">
+    <div class="header-side">
+      {
+        showThemeToggle && (
+          <div class="hdr-pill icon-pill theme-pill">
+            <ThemeToggle />
+          </div>
+        )
+      }
+
+      <a href={URLS.client} class="cta-pill" aria-label="Open Telium">
+        <span class="cta-label">Open Telium</span>
         <Icon name="arrow-right" size={16} />
       </a>
 
       <button
         id="mobile-nav-toggle"
         type="button"
-        class="icon-btn size-9 sm:hidden"
+        class="hdr-pill icon-pill"
         aria-label="Open menu"
         aria-haspopup="true"
         aria-expanded="false"
         aria-controls="mobile-nav-menu"
       >
-        <span data-menu-icon="closed" class="contents"><Icon name="menu" size={18} /></span>
+        <span data-menu-icon="closed" class="contents"><Icon name="menu-2" size={18} /></span>
         <span data-menu-icon="open" class="contents"><Icon name="x" size={18} /></span>
       </button>
-
-      <ThemeToggle />
-    </nav>
+    </div>
   </div>
 
-  <div id="mobile-nav-menu" class="mobile-nav-menu sm:hidden" role="menu" aria-label="Main" hidden>
-    <ul class="flex flex-col gap-0.5 p-2">
+  <div id="mobile-nav-menu" class="mobile-nav-menu" role="menu" aria-label="Main" hidden>
+    <ul>
       {
         nav.map((item) => (
           <li>
@@ -75,7 +79,7 @@ const nav = [
               href={item.href}
               role="menuitem"
               aria-current={path === item.href ? 'page' : undefined}
-              class="nav-row w-full !min-h-11 !text-[14.5px]"
+              class="mobile-nav-link"
               {...(item.external ? { rel: 'noreferrer' } : {})}
             >
               {item.label}
@@ -100,6 +104,56 @@ const nav = [
     }
     update()
     addEventListener('scroll', update, { passive: true })
+  }
+
+  const navPill = document.querySelector<HTMLElement>('.nav-pill')
+  const indicator = document.querySelector<HTMLElement>('.nav-indicator')
+  if (navPill && indicator) {
+    const items = [...navPill.querySelectorAll<HTMLElement>('.nav-item')]
+
+    const currentItem = () => navPill.querySelector<HTMLElement>('[aria-current]')
+
+    const rest = () => {
+      const el = currentItem()
+      if (!el) {
+        indicator.style.opacity = '0'
+        return
+      }
+      glide(el)
+    }
+
+    const glide = (el: HTMLElement) => {
+      indicator.style.opacity = '1'
+      indicator.style.width = `${el.offsetWidth}px`
+      indicator.style.transform = `translateX(${el.offsetLeft}px)`
+    }
+
+    items.forEach((item) => {
+      item.addEventListener('pointerenter', () => glide(item))
+      item.addEventListener('focusin', () => glide(item))
+    })
+    navPill.addEventListener('pointerleave', rest)
+    navPill.addEventListener('focusout', rest)
+
+    addEventListener('resize', rest)
+    document.fonts?.ready.then(rest)
+
+    const compare = document.getElementById('compare')
+    const compareItem = items.find((item) => item.getAttribute('href') === '/#compare')
+    if (compare && compareItem) {
+      new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (entry.isIntersecting) compareItem.setAttribute('aria-current', 'location')
+            else compareItem.removeAttribute('aria-current')
+          }
+          rest()
+        },
+        { rootMargin: '-40% 0px -55% 0px' }
+      ).observe(compare)
+    }
+
+    rest()
   }
 
   const toggle = document.getElementById('mobile-nav-toggle')
@@ -129,37 +183,162 @@ const nav = [
       }
     })
 
-    matchMedia('(min-width: 640px)').addEventListener('change', (event) => {
+    matchMedia('(min-width: 768px)').addEventListener('change', (event) => {
       if (event.matches) setOpen(false)
     })
   }
 </script>
 
 <style>
-  /* The bar is the page's chrome, and the client's chrome is flat: a full-width
-     band on the page's own ground with a separator under it, not a card. This
-     was a rounded 16px slab inset two pixels from the window, floating over the
-     content — a marketing-site device, and the one thing up there that
-     announced the page was not the product. It now sits flush, edge to edge,
-     and the only thing that happens on scroll is that the ground goes opaque
-     and the separator arrives, so the nav never sits on top of running text.
-
-     The fill is `--background` rather than `--surface`: the bar is not a panel
-     laid on the page, it *is* the page continued upward. The old bar faded in a
-     tinted border, a 34px drop shadow, an inset white hairline and a 16px
-     backdrop blur to say the same thing, on an element fixed to the viewport
-     and therefore repainting all four on every scroll. */
   #site-header {
-    background: transparent;
-    border-bottom: 1px solid transparent;
-    transition:
-      background-color var(--dur-3) var(--ease),
-      border-color var(--dur-3) var(--ease);
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    height: var(--header-h);
+    pointer-events: none;
   }
 
-  #site-header[data-scrolled] {
-    background: var(--color-background);
-    border-bottom-color: var(--color-separator);
+  .header-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding-top: 16px;
+    padding-inline: 12px;
+  }
+
+  .hdr-pill {
+    pointer-events: auto;
+    display: inline-flex;
+    align-items: center;
+    height: 52px;
+    border-radius: 14px;
+    background: color-mix(in oklab, var(--color-surface) 78%, transparent);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid color-mix(in oklab, var(--color-foreground) 9%, transparent);
+    box-shadow: 0 8px 24px -12px rgb(0 0 0 / 0.5);
+    transition: background-color var(--dur-3) var(--ease);
+  }
+
+  #site-header[data-scrolled] .hdr-pill {
+    background: color-mix(in oklab, var(--color-surface) 90%, transparent);
+  }
+
+  .header-side {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .logo-pill {
+    padding-inline: 16px;
+  }
+
+  .nav-pill {
+    position: relative;
+    padding: 6px;
+    gap: 2px;
+  }
+
+  .nav-item {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    height: 40px;
+    padding-inline: 16px;
+    border-radius: 9px;
+    font-size: 15px;
+    font-weight: 450;
+    line-height: 1;
+    color: var(--color-muted);
+    transition: color var(--dur-2) var(--ease);
+  }
+
+  .nav-item:hover,
+  .nav-item[aria-current] {
+    color: var(--color-foreground);
+  }
+
+  .nav-indicator {
+    position: absolute;
+    left: 0;
+    top: 6px;
+    height: 40px;
+    border-radius: 9px;
+    background: color-mix(in oklab, var(--color-foreground) 9%, transparent);
+    opacity: 0;
+    transition:
+      transform 280ms var(--ease-rise),
+      width 280ms var(--ease-rise),
+      opacity var(--dur-2) var(--ease);
+    will-change: transform;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .nav-indicator {
+      transition: opacity var(--dur-2) var(--ease);
+    }
+  }
+
+  .icon-pill {
+    width: 52px;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid color-mix(in oklab, var(--color-foreground) 9%, transparent);
+    color: var(--color-muted);
+    cursor: pointer;
+    transition:
+      background-color var(--dur-3) var(--ease),
+      color var(--dur-2) var(--ease);
+  }
+
+  .icon-pill:hover {
+    color: var(--color-foreground);
+  }
+
+  .theme-pill :global(#theme-toggle) {
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    color: inherit;
+  }
+
+  .theme-pill :global(#theme-toggle:hover) {
+    background: transparent;
+  }
+
+  .cta-pill {
+    pointer-events: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 52px;
+    border-radius: 14px;
+    padding-inline: 20px;
+    background: var(--telium-mist);
+    color: var(--telium-deep-purple);
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    transition: filter var(--dur-2) var(--ease);
+  }
+
+  .cta-pill:hover {
+    filter: brightness(1.04);
+  }
+
+  .hdr-pill:focus-visible,
+  .nav-item:focus-visible,
+  .cta-pill:focus-visible,
+  .mobile-nav-link:focus-visible {
+    outline-offset: 2px;
+  }
+
+  #mobile-nav-toggle {
+    display: none;
   }
 
   #mobile-nav-toggle [data-menu-icon] {
@@ -171,16 +350,71 @@ const nav = [
   }
 
   .mobile-nav-menu {
+    pointer-events: auto;
     position: absolute;
-    left: 0.75rem;
-    right: 0.75rem;
-    top: calc(100% + 0.5rem);
-    z-index: 30;
-    border-radius: var(--radius-card);
-    /* The one surface on the site that floats over arbitrary content rather
-       than sitting in the flow, so it takes the step *above* the bar it drops
-       from — an opaque one, because a translucent menu over a paragraph is
-       unreadable at any blur radius. */
+    left: 12px;
+    right: 12px;
+    top: calc(100% + 4px);
+    border-radius: 16px;
     background: var(--color-surface-secondary);
+    border: 1px solid color-mix(in oklab, var(--color-foreground) 9%, transparent);
+    box-shadow: 0 8px 24px -12px rgb(0 0 0 / 0.5);
+    padding: 6px;
+  }
+
+  .mobile-nav-link {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding-inline: 16px;
+    border-radius: 10px;
+    font-size: 15px;
+    color: var(--color-muted);
+    transition:
+      background-color var(--dur-1) var(--ease),
+      color var(--dur-1) var(--ease);
+  }
+
+  .mobile-nav-link:hover,
+  .mobile-nav-link[aria-current] {
+    background: var(--color-surface-tertiary);
+    color: var(--color-foreground);
+  }
+
+  @media (max-width: 767px) {
+    .header-row {
+      justify-content: space-between;
+    }
+
+    .nav-pill {
+      display: none;
+    }
+
+    .cta-pill {
+      padding-inline: 16px;
+      font-size: 14px;
+    }
+
+    #mobile-nav-toggle {
+      display: inline-flex;
+    }
+  }
+
+  @media (max-width: 359px) {
+    .cta-pill {
+      width: 52px;
+      padding-inline: 0;
+      justify-content: center;
+    }
+
+    .cta-label {
+      display: none;
+    }
+  }
+
+  @media (min-width: 768px) {
+    .mobile-nav-menu {
+      display: none;
+    }
   }
 </style>

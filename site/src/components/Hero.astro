@@ -1,99 +1,114 @@
 ---
 import Icon from './Icon.astro'
+import AsciiOrbit from './AsciiOrbit.astro'
 import { URLS } from '../config'
 ---
 
-<section class="hero page relative isolate overflow-hidden pt-20 pb-20 sm:pt-28 sm:pb-28 lg:pt-32 lg:pb-36">
-  <div class="hero-mark-wrap" aria-hidden="true">
-    <img src="/brand/telium-mark-gradient.svg" alt="" width="700" height="700" class="hero-mark" decoding="async" />
-  </div>
-  <div class="relative z-10 max-w-[900px]">
-    <h1 class="hero-headline display rise-in max-w-[18ch]">
+<section class="hero">
+  <div class="hero-glow" aria-hidden="true"></div>
+  <AsciiOrbit />
+  <div class="hero-scrim" aria-hidden="true"></div>
+
+  <div class="hero-text">
+    <h1 class="hero-headline rise-in">
       <span class="block">Choose your server.</span>
-      <span class="block gradient-text">Keep your people.</span>
+      <span class="block hero-headline-lilac">Keep your people.</span>
     </h1>
-    <p class="lead rise-in mt-7 max-w-[52ch]" style="animation-delay: 70ms">
+    <p class="rise-in mx-auto mt-6 max-w-[46ch] text-center text-[18px] leading-[1.6] text-muted" style="animation-delay: 70ms">
       Community chat, voice, video and encrypted private messages on a server you choose.
       Join communities across servers, and take your account with you if you move.
     </p>
-    <div class="rise-in mt-9 flex flex-wrap items-center gap-3" style="animation-delay: 120ms">
-      <a href={URLS.client} class="btn btn-primary btn-lg">
+    <div class="rise-in mt-9 flex flex-wrap items-center justify-center gap-3" style="animation-delay: 120ms">
+      <a href={URLS.client} class="btn-pill btn-pill-primary">
         Open Telium
         <Icon name="arrow-right" size={17} />
       </a>
-      <a href={URLS.download} class="btn btn-secondary btn-lg">Download the app</a>
+      <a href={URLS.download} class="btn-pill btn-pill-secondary">Download the app</a>
     </div>
-    <p class="hero-facts rise-in mt-8 text-[13px] text-muted" style="animation-delay: 170ms">
+    <p class="hero-facts rise-in mt-8 text-center text-[13px] text-muted" style="animation-delay: 170ms">
       Open source <span aria-hidden="true">·</span> Self-hostable <span aria-hidden="true">·</span> Federated
     </p>
   </div>
 </section>
 
 <style>
-  /* The display utility's tight 0.98 line height cropped the descender of
-     "your" in the background-clipped second line. Reserve painted space
-     inside that gradient span instead of changing every display heading. */
+  .hero {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    margin-top: calc(-1 * var(--header-h));
+    min-height: max(640px, 100svh);
+    display: grid;
+    align-content: end;
+    justify-items: center;
+    padding-top: var(--header-h);
+    padding-bottom: clamp(4rem, 10vh, 7rem);
+    padding-inline: 1.5rem;
+  }
+
+  .hero-glow {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(
+        ellipse 42% 34% at 50% 40%,
+        color-mix(in oklab, var(--telium-violet) 32%, transparent),
+        transparent 60%
+      ),
+      radial-gradient(
+        ellipse 75% 60% at 50% 40%,
+        color-mix(in oklab, var(--telium-violet) 9%, transparent),
+        transparent 65%
+      ),
+      linear-gradient(
+        to bottom,
+        transparent 75%,
+        var(--color-background)
+      );
+  }
+
+  .hero-scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background: radial-gradient(
+      ellipse 52% 30% at 50% 78%,
+      color-mix(in oklab, var(--color-background) 80%, transparent),
+      transparent 65%
+    );
+  }
+
+  .hero-text {
+    position: relative;
+    z-index: 2;
+    max-width: 980px;
+    text-align: center;
+  }
+
   .hero-headline {
-    line-height: 1.08;
-  }
-  .hero-headline .gradient-text {
-    padding-bottom: 0.11em;
-  }
-
-  /* A single, restrained patch of brand light behind the orbit replaces the
-     two fixed background bubbles that used to follow every section. */
-  .hero::before {
-    content: '';
-    position: absolute;
-    z-index: 0;
-    width: min(56vw, 40rem);
-    aspect-ratio: 1;
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    background: radial-gradient(
-      circle,
-      color-mix(in oklab, var(--telium-violet) 10%, transparent),
-      transparent 67%
-    );
-    pointer-events: none;
-  }
-  :root[data-theme='light'] .hero::before {
-    background: radial-gradient(
-      circle,
-      color-mix(in oklab, var(--telium-violet) 4%, transparent),
-      transparent 67%
-    );
+    font-weight: 300;
+    font-size: clamp(2.15rem, 1.1rem + 4.9vw, 6rem);
+    line-height: 1.02;
+    letter-spacing: -0.04em;
+    color: var(--color-foreground);
+    text-wrap: balance;
   }
 
-  /* Let the mark itself be the hero illustration, without invented UI chrome. */
-  .hero-mark-wrap {
-    position: absolute;
-    z-index: 0;
-    /* Keep the entire orbit inside the hero's painted bounds. Previously it
-       was deliberately shoved ~20rem to the right and clipped by the section. */
-    width: clamp(21rem, 40vw, 31rem);
-    aspect-ratio: 1;
-    right: max(2rem, 4vw);
-    top: 50%;
-    transform: translateY(-50%) rotate(-9deg);
-    pointer-events: none;
-    opacity: 0.19;
-    filter: saturate(0.85);
+  .hero-headline-lilac {
+    color: oklch(86% 0.06 300);
   }
-  .hero-mark { display: block; width: 100%; height: 100%; }
-  :root[data-theme='light'] .hero-mark-wrap { opacity: 0.095; }
-  .hero-facts span { margin-inline: 0.6rem; color: var(--color-accent); }
-  @media (max-width: 900px) {
-    .hero-mark-wrap { width: min(42vw, 22rem); right: 1.5rem; opacity: 0.12; }
-    :root[data-theme='light'] .hero-mark-wrap { opacity: 0.07; }
+
+  .hero-facts span {
+    margin-inline: 0.6rem;
+    color: var(--color-accent);
   }
+
   @media (max-width: 640px) {
-    .hero::before { width: min(90vw, 30rem); opacity: 0.55; }
-    /* Small screens use a quieter watermark behind the content, never a
-       cropped ring protruding off the right edge. */
-    .hero-mark-wrap { width: min(75vw, 21rem); right: 1rem; top: 61%; opacity: 0.065; }
-    :root[data-theme='light'] .hero-mark-wrap { opacity: 0.045; }
-    .hero-facts span { margin-inline: 0.3rem; }
+    .hero-facts span {
+      margin-inline: 0.3rem;
+    }
   }
 </style>

@@ -4,15 +4,15 @@ import CodeBlock from './CodeBlock.astro'
 import { URLS } from '../config'
 
 const commands = [
-  '# One program. Keeps everything in a file — nothing else to install.',
+  '# One program. Keeps everything in a file. Nothing else to install.',
   'telium-server init --config telium.toml',
   'telium-server --config telium.toml',
 ] as const
 
 const links = [
-  { href: URLS.github, label: 'Source and releases', icon: 'github' },
-  { href: URLS.mediaSpec, label: 'Media protocol', icon: 'hard-drive' },
-  { href: URLS.migrationSpec, label: 'Migration protocol', icon: 'arrow-left-right' },
+  { href: URLS.github, label: 'Source and releases', icon: 'brand-github' },
+  { href: URLS.mediaSpec, label: 'Media protocol', icon: 'database' },
+  { href: URLS.migrationSpec, label: 'Migration protocol', icon: 'arrows-left-right' },
 ] as const
 ---
 
@@ -24,7 +24,7 @@ const links = [
         <h2 class="h2 mt-3 max-w-[16ch]">Host it yourself in an afternoon.</h2>
 
         <p class="prose-measure mt-6 text-[15.5px] leading-relaxed text-muted">
-          One program, one config file, and no database to set up — it keeps everything in a single
+          One program, one config file, and no database to set up. It keeps everything in a single
           file on disk. A spare machine in a closet is enough to host accounts, communities and
           uploads for you and your friends. A big community can split those three jobs across
           separate machines later, running the same program, and nobody on the outside can tell.

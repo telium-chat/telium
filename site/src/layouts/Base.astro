@@ -24,16 +24,17 @@ interface Props {
   /* The landing page is the site's front door and wants no title prefix; every
      other page says where it is first. */
   bare?: boolean
+  forceTheme?: 'dark'
 }
 
-const { title, description = SITE.tagline, bare = false } = Astro.props
+const { title, description = SITE.tagline, bare = false, forceTheme } = Astro.props
 
-const pageTitle = title && !bare ? `${title} · ${SITE.name}` : (title ?? `${SITE.name} — ${SITE.tagline}`)
+const pageTitle = title && !bare ? `${title} · ${SITE.name}` : (title ?? `${SITE.name} · ${SITE.tagline}`)
 const canonical = new URL(Astro.url.pathname, Astro.site ?? `https://${SITE.domain}`)
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang="en" {...(forceTheme ? { 'data-theme': forceTheme, 'data-force-theme': forceTheme } : {})}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -53,8 +54,16 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? `https://${SITE.doma
 
     <!-- Both themes declared so the browser paints its own chrome correctly
          before our stylesheet has an opinion. -->
-    <meta name="theme-color" content="#eee8f5" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#1c1825" media="(prefers-color-scheme: dark)" />
+    {
+      forceTheme ? (
+        <meta name="theme-color" content="#040307" />
+      ) : (
+        <Fragment>
+          <meta name="theme-color" content="#eee8f5" media="(prefers-color-scheme: light)" />
+          <meta name="theme-color" content="#1c1825" media="(prefers-color-scheme: dark)" />
+        </Fragment>
+      )
+    }
 
     {/* Blocking, deliberately. Resolving the theme after first paint is how a
         dark-mode page flashes white at someone at two in the morning; four
@@ -64,6 +73,11 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? `https://${SITE.doma
     <script is:inline>
       (() => {
         try {
+          if (document.documentElement.dataset.forceTheme) {
+            document.documentElement.dataset.theme =
+              document.documentElement.dataset.forceTheme
+            return
+          }
           const stored = localStorage.getItem('telium-theme')
           const mode = stored === 'light' || stored === 'dark' ? stored : 'system'
           document.documentElement.dataset.themeMode = mode
@@ -87,7 +101,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? `https://${SITE.doma
       class="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-lg focus:bg-surface-secondary focus:px-3 focus:py-2 focus:text-sm"
       >Skip to content</a
     >
-    <Header />
+    <Header showThemeToggle={!forceTheme} />
     <main id="main">
       <slot />
     </main>

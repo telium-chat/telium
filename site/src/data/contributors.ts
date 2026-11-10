@@ -69,7 +69,7 @@ export const contributorGroups: ContributorGroup[] = [
         name: 'alp',
         handle: 'alpwrk',
         role: 'Ecosystem / client developer',
-        majorContribution: 'Rhein, a native Telium client for Linux — Rust and GPUI, with encrypted DMs and calls',
+        majorContribution: 'Rhein, a native Telium client for Linux, built with Rust and GPUI, with encrypted DMs and calls',
         href: 'https://github.com/alpwrk',
         avatarUrl: 'https://avatars.githubusercontent.com/u/200269902?v=4&s=160',
         initials: 'A',
