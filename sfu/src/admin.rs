@@ -1141,6 +1141,24 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn saved_sfu_config_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("telium-config-test-{}", random_token()));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("sfu.toml");
+        let mut cfg = SfuConfig::default();
+        cfg.admin.install_mode = "portable".into();
+        cfg.livekit.api_secret = "private-test-credential".into();
+        write_config(&path, &cfg).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        let loaded = SfuConfig::load(&path).unwrap();
+        assert_eq!(loaded.admin.install_mode, "portable");
+        assert_eq!(loaded.livekit.api_secret, "private-test-credential");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn login_gate_locks_out_boundedly_and_clears_on_success() {
         let (mut gate, now) = (LoginGate::default(), Instant::now());
