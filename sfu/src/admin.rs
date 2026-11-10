@@ -451,10 +451,11 @@ async fn setup_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) ->
     if !authenticated(&state, &headers).await {
         return Redirect::to("/admin/login").into_response();
     }
+    let portable = state.cfg.admin.install_mode == "portable";
     // Compose deployments do not have the native host-side sudo helper, and
     // their sfu.toml is intentionally read-only. Do not present a wizard
     // that will fail after asking for domains and certificates.
-    if !native_admin_helper_available(&state.cfg.admin.helper_path) {
+    if !portable && !native_admin_helper_available(&state.cfg.admin.helper_path) {
         return page(
             "Configure the Compose SFU",
             r#"<h1>Configure your Compose SFU on the host</h1>
@@ -476,11 +477,30 @@ async fn setup_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) ->
     let livekit_domain = public_host(&current.livekit.public_url);
     let checked = if current.trust.public { "checked" } else { "" };
     let origin = current.trust.origins.first();
+    let setup_description = if portable {
+        "Portable installation: Telium saves its config but does NOT manage nginx, Certbot, HTTPS certificates or firewall rules. Use your existing reverse proxy."
+    } else {
+        "Full installation: Telium configures nginx, HTTPS certificates, LiveKit signaling and recommended firewall ports."
+    };
+    let email_input = if portable {
+        r#"<input type="hidden" name="email" value="">"#
+    } else {
+        r#"<label>Let's Encrypt email<input type="email" name="email" placeholder="admin@example.com" required></label>"#
+    };
+    let setup_footer = if portable {
+        r#"<strong>Before continuing:</strong> Configure your existing proxy to send HTTPS requests
+        for the SFU domain to <code>127.0.0.1:7890</code>, and LiveKit HTTPS/WebSocket requests
+        to <code>127.0.0.1:7880</code>. Keep the admin dashboard private using an
+        SSH tunnel to <code>127.0.0.1:7891</code>. Allow the appropriate LiveKit media ports
+        through your firewall (UDP 3478 and 50000-60000, TCP 7881)."#
+    } else {
+        r#"<strong>Before continuing:</strong> create DNS A/AAAA records for both domains pointing at this machine. The installer handles nginx and Certbot after that."#
+    };
     let html = format!(
         r#"
         <nav><strong>Telium SFU</strong><span><a href="/admin/status">Status</a> · <a href="/admin/trust">Trusted servers</a> · <a href="/admin/setup">Configure</a></span></nav>
         <h1>Finish your SFU</h1>
-        <p>This configures Telium, nginx, HTTPS certificates, LiveKit's public signaling URL, and the recommended firewall ports.</p>
+        <p>{setup_description}</p>
         <form method="post" action="/admin/setup">
           <label>SFU domain
             <input name="sfu_domain" placeholder="sfu.example.com" value="{sfu_domain}" required>
@@ -490,9 +510,7 @@ async fn setup_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) ->
             <input name="livekit_domain" placeholder="livekit.example.com" value="{livekit_domain}" required>
             <small>Used for secure LiveKit WebSocket signaling.</small>
           </label>
-          <label>Let's Encrypt email
-            <input type="email" name="email" placeholder="admin@example.com" required>
-          </label>
+          {email_input}
           <label class="check"><input type="checkbox" name="public_sfu" {checked}> Make this a public SFU</label>
           <hr>
           <h2>Private SFU trust</h2>
@@ -505,13 +523,16 @@ async fn setup_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) ->
           </label>
           <button type="submit">Configure everything</button>
         </form>
-        <aside><strong>Before continuing:</strong> create DNS A/AAAA records for both domains pointing at this machine. The installer handles nginx and Certbot after that.</aside>
+        <aside>{setup_footer}</aside>
         "#,
         sfu_domain = esc(&sfu_domain),
         livekit_domain = esc(&livekit_domain),
         checked = checked,
         origin_name = esc(origin.map(|o| o.server_name.as_str()).unwrap_or("")),
         origin_url = esc(origin.and_then(|o| o.discovery_url.as_deref()).unwrap_or("")),
+        setup_description = setup_description,
+        email_input = email_input,
+        setup_footer = setup_footer,
     );
     page("Configure Telium SFU", &html)
 }
