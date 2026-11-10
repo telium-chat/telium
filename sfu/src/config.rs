@@ -141,6 +141,8 @@ pub struct AdminConfig {
     pub bind: String,
     pub state_dir: String,
     pub helper_path: String,
+    /// How installation integrates with this host: empty/full for legacy installs.
+    pub install_mode: String,
 }
 
 /// Self-update check: GET one public manifest (and its detached signature)
