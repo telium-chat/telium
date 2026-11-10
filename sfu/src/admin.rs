@@ -545,7 +545,8 @@ async fn apply_setup(
     if !authenticated(&state, &headers).await {
         return Redirect::to("/admin/login").into_response();
     }
-    if !native_admin_helper_available(&state.cfg.admin.helper_path) {
+    let portable = state.cfg.admin.install_mode == "portable";
+    if !portable && !native_admin_helper_available(&state.cfg.admin.helper_path) {
         return error_page(
             StatusCode::BAD_REQUEST,
             "The setup wizard requires the native host helper. Configure Compose on the host; see deploy/README.md.",
@@ -557,7 +558,7 @@ async fn apply_setup(
     if !valid_domain(&sfu_domain) || !valid_domain(&livekit_domain) {
         return error_page(StatusCode::BAD_REQUEST, "Enter valid DNS hostnames, not URLs or IP:port values.");
     }
-    if !form.email.contains('@') {
+    if !portable && !form.email.contains('@') {
         return error_page(StatusCode::BAD_REQUEST, "Enter a valid email address for Let's Encrypt.");
     }
 
@@ -586,24 +587,35 @@ async fn apply_setup(
         }
     }
 
-    if let Err(e) = apply_proxy(&sfu_domain, &livekit_domain, form.email.trim()).await {
-        return error_page(
-            StatusCode::BAD_GATEWAY,
-            &format!("nginx/Certbot setup failed: {e}. Check DNS, then submit this page again."),
-        );
+    if !portable {
+        if let Err(e) = apply_proxy(&sfu_domain, &livekit_domain, form.email.trim()).await {
+            return error_page(
+                StatusCode::BAD_GATEWAY,
+                &format!("nginx/Certbot setup failed: {e}. Check DNS, then submit this page again."),
+            );
+        }
     }
 
     if let Err(e) = write_config(&state.config_path, &cfg) {
         return error_page(StatusCode::INTERNAL_SERVER_ERROR, &format!("Could not save sfu.toml: {e}"));
     }
 
-    schedule_restart(Duration::from_millis(800));
+    if portable {
+        schedule_portable_restart(Duration::from_millis(800));
+    } else {
+        schedule_restart(Duration::from_millis(800));
+    }
+    let result_note = if portable {
+        "Configuration saved and the SFU is restarting. Configure your HTTPS/WebSocket reverse proxy separately; Telium has not changed it."
+    } else {
+        "HTTPS is configured and the SFU is restarting with the new settings."
+    };
 
     page(
         "Telium SFU configured",
         &format!(
             r#"<h1>You're done.</h1>
-            <p>HTTPS is configured and the SFU is restarting with the new settings.</p>
+            <p>{result_note}</p>
             <p>SFU endpoint: <code>https://{}</code></p>
             <p>LiveKit signaling: <code>wss://{}</code></p>
             <p>Dashboard: <a href="https://{}/admin">https://{}/admin</a></p>
@@ -613,6 +625,7 @@ async fn apply_setup(
             esc(&sfu_domain),
             esc(&sfu_domain),
             esc(&sfu_domain),
+            result_note = result_note,
         ),
     )
 }
