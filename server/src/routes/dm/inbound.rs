@@ -175,15 +175,18 @@ pub async fn inbound_deliver(
     .bind(id)
     .fetch_one(&state.pool)
     .await?;
-    if !store_frame(&state, id, msg).await? {
-        // Retry after a lost HTTP response: the frame is already stored.
-        // Acknowledge it without repeating gateway events or push notifications.
-        sqlx::query("UPDATE conversations SET last_seq = MAX(last_seq, ?) WHERE id = ?")
-            .bind(seq)
-            .bind(id)
-            .execute(&state.pool)
+    store_frame(&state, id, msg).await?;
+    if msg.get("kind").and_then(Value::as_str) == Some("application") {
+        if let Some(notification_id) = msg.get("notification_id").and_then(Value::as_str) {
+            validate_notification_id(notification_id)?;
+            consume_dm_notification_hints(
+                &state,
+                id,
+                notification_id,
+                msg.get("sender").and_then(Value::as_str).unwrap_or_default(),
+            )
             .await?;
-        return Ok(Json(json!({ "ok": true })));
+        }
     }
     sqlx::query("UPDATE conversations SET last_seq = MAX(last_seq, ?), updated_at = ? WHERE id = ?")
         .bind(seq)
@@ -200,39 +203,18 @@ pub async fn inbound_deliver(
             }
         });
     }
-    announce_frame(&state, id, msg).await?;
-    Ok(Json(json!({ "ok": true })))
-}
 
-/// Every side effect a newly stored frame owes its recipients: the
-/// sender-provisioned push hints, a gateway event per visible local member,
-/// and a background notification wake for the members told. Gap repair runs
-/// this too, so frames recovered from the sequencer reach connected clients
-/// exactly once -- store_frame only reports a frame it just inserted.
-async fn announce_frame(state: &AppState, conversation_id: &str, msg: &Value) -> ApiResult<()> {
-    if msg.get("kind").and_then(Value::as_str) == Some("application") {
-        if let Some(notification_id) = msg.get("notification_id").and_then(Value::as_str) {
-            validate_notification_id(notification_id)?;
-            consume_dm_notification_hints(
-                state,
-                conversation_id,
-                notification_id,
-                msg.get("sender").and_then(Value::as_str).unwrap_or_default(),
-            )
-            .await?;
-        }
-    }
     let locals: Vec<String> = sqlx::query_scalar(
         "SELECT user_id FROM conversation_members WHERE conversation_id = ? AND home_domain = ? \
          AND state = 'active'",
     )
-    .bind(conversation_id)
+    .bind(id)
     .bind(&state.cfg.server_name)
     .fetch_all(&state.pool)
     .await?;
     let mut told: Vec<String> = Vec::with_capacity(locals.len());
     for user_id in locals {
-        let policy = local_dm_policy(state, conversation_id, &user_id).await?;
+        let policy = local_dm_policy(&state, id, &user_id).await?;
         if policy.visible {
             let mut delivered = msg.clone();
             if let Some(request_state) = policy.request_state {
@@ -245,8 +227,8 @@ async fn announce_frame(state: &AppState, conversation_id: &str, msg: &Value) ->
             told.push(user_id);
         }
     }
-    crate::routes::push::wake_conversation(state, conversation_id, msg, &told).await;
-    Ok(())
+    crate::routes::push::wake_conversation(&state, id, msg, &told).await;
+    Ok(Json(json!({ "ok": true })))
 }
 
 const FRAMES_PAGE: i64 = 500;
@@ -328,7 +310,7 @@ pub(crate) fn not_sequencer(sequencer: &str) -> ApiError {
         .with_detail("sequencer", sequencer.to_string())
 }
 
-pub(super) async fn store_frame(state: &AppState, conversation_id: &str, msg: &Value) -> ApiResult<bool> {
+pub(super) async fn store_frame(state: &AppState, conversation_id: &str, msg: &Value) -> ApiResult<()> {
     let seq = msg.get("seq").and_then(Value::as_i64).unwrap_or(0);
     if seq <= 0 {
         return Err(ApiError::BadRequest("frame has no sequence number".into()));
@@ -336,7 +318,7 @@ pub(super) async fn store_frame(state: &AppState, conversation_id: &str, msg: &V
     // A second delivery can still be in flight while a mirrored duplicate
     // is torn down. Require the parent to exist *at insertion time* so the
     // late delivery cannot recreate an orphan message after the cleanup.
-    let inserted = sqlx::query(
+    sqlx::query(
         "INSERT INTO dm_messages (id, conversation_id, seq, epoch, kind, sender, \
          sender_device, ciphertext, notification_id, created_at, generation, notify) \
          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? \
@@ -359,7 +341,7 @@ pub(super) async fn store_frame(state: &AppState, conversation_id: &str, msg: &V
     .bind(conversation_id)
     .execute(&state.pool)
     .await?;
-    Ok(inserted.rows_affected() > 0)
+    Ok(())
 }
 
 pub(super) async fn first_hole(
@@ -451,13 +433,7 @@ pub(crate) async fn repair(
         let messages = answer.get("messages").and_then(Value::as_array).cloned().unwrap_or_default();
         let mut top = 0;
         for m in &messages {
-            let fresh = store_frame(state, conversation_id, m).await?;
-            if fresh {
-                // Frames the page overlaps with direct delivery (or a racing
-                // repair) were announced by whoever inserted them; replayed
-                // rows stay silent.
-                announce_frame(state, conversation_id, m).await?;
-            }
+            store_frame(state, conversation_id, m).await?;
             top = top.max(m.get("seq").and_then(Value::as_i64).unwrap_or(0));
         }
         if top > 0 {
