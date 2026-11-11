@@ -2,7 +2,7 @@ name: Bump release version
 
 # Bump only. Tag creation and release publication remain deliberate GitHub UI
 # steps so maintainers can use the native "Generate release notes" button.
-# One action supports the independent server and SFU release trains.
+# One action supports the independent server, SFU, and desktop release trains.
 on:
   workflow_dispatch:
     inputs:
@@ -13,6 +13,7 @@ on:
         options:
           - server
           - sfu
+          - desktop
       bump:
         description: 'Semantic version bump'
         type: choice
@@ -62,7 +63,7 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Update Cargo versions and commit to main
+      - name: Update release versions and commit to main
         id: bump
         env:
           COMPONENT: ${{ inputs.component }}
@@ -74,7 +75,7 @@ jobs:
           set -euo pipefail
 
           case "$COMPONENT" in
-            server|sfu) ;;
+            server|sfu|desktop) ;;
             *) echo "::error::Invalid component"; exit 1 ;;
           esac
           case "$BUMP" in
@@ -82,7 +83,13 @@ jobs:
             *) echo "::error::Invalid version bump"; exit 1 ;;
           esac
 
-          current="$(awk -F '"' '/^version = "/ { print $2; exit }' "$COMPONENT/Cargo.toml")"
+          # Desktop builds take the version from web/package.json; the Electron
+          # manifest is synchronized to it. Server/SFU remain Cargo-based.
+          if [ "$COMPONENT" = "desktop" ]; then
+            current="$(node -p "require('./web/package.json').version")"
+          else
+            current="$(awk -F '"' '/^version = "/ { print $2; exit }' "$COMPONENT/Cargo.toml")"
+          fi
           if [[ ! "$current" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
             echo "::error::Expected a major.minor.patch version, got '$current'"
             exit 1
@@ -103,10 +110,30 @@ jobs:
             exit 1
           fi
 
-          # Reuse the established scripts: they update both Cargo.toml and
-          # Cargo.lock, and validate the pair with cargo metadata --locked.
-          bash "scripts/bump-$COMPONENT-version.sh" "$version" --no-commit
-          git add "$COMPONENT/Cargo.toml" "$COMPONENT/Cargo.lock"
+          if [ "$COMPONENT" = "desktop" ]; then
+            # The renderer and electron-builder must ship the same version.
+            # Parse both files before writing, so malformed JSON fails without
+            # leaving a partially updated pair.
+            node - "$version" <<'NODE'
+          const fs = require('node:fs');
+          const version = process.argv[2];
+          const files = ['web/package.json', 'web/electron/package.json'];
+          const packages = files.map((file) => ({
+            file,
+            data: JSON.parse(fs.readFileSync(file, 'utf8')),
+          }));
+          for (const { file, data } of packages) {
+            data.version = version;
+            fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
+          }
+          NODE
+            git add web/package.json web/electron/package.json
+          else
+            # Existing scripts update Cargo.toml and Cargo.lock, and validate
+            # their consistency with cargo metadata --locked.
+            bash "scripts/bump-$COMPONENT-version.sh" "$version" --no-commit
+            git add "$COMPONENT/Cargo.toml" "$COMPONENT/Cargo.lock"
+          fi
           git diff --cached --check
           if git diff --cached --quiet; then
             echo "::error::Version bump made no changes"
@@ -168,5 +195,9 @@ jobs:
             echo "2. Open [Draft a new release](https://github.com/$GITHUB_REPOSITORY/releases/new)."
             echo "3. Create tag \`$TAG\` targeting the commit above (which is on main)."
             echo "4. Click **Generate release notes**, edit them, then **Publish release**."
-            echo "5. The existing $COMPONENT release workflow builds and attaches the binaries and Docker image, without replacing your release description."
+            if [ "$COMPONENT" = "desktop" ]; then
+              echo "5. The [Linux AppImage](https://github.com/$GITHUB_REPOSITORY/actions/workflows/build-appimage.yml) and [Windows](https://github.com/$GITHUB_REPOSITORY/actions/workflows/build-windows.yml) release workflows build and attach desktop installers and update metadata without replacing your release description."
+            else
+              echo "5. The existing $COMPONENT release workflow builds and attaches the binaries and Docker image, without replacing your release description."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
