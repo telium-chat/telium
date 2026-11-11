@@ -39,8 +39,11 @@ In the browser, choose **Full installation** or **Portable native installation**
 Full mode installs a privileged nginx/Certbot helper for the dashboard;
 portable mode **does not**. Both modes install an automatic native updater
 (checking every five minutes, draining calls and rolling back on a failed
-health check). Native SFU releases need to include the portable configuration
-support before deploying this mode.
+health check). Portable mode checks the downloaded release **before** installing
+users, services or directories and refuses older releases without the portable
+dashboard support and an embedded update-signing key. If it says the current
+release is unsupported, publish a new SFU release containing this change
+before attempting portable installation.
 
 **Portable directory example:**
 
@@ -52,9 +55,14 @@ support before deploying this mode.
   updates/        # root-owned update config, lock, downloads and rollback staging
 ```
 
-The updater policy lives at `updates/update-sfu.conf` and is **root-only**,
-so the SFU process cannot replace a root-executed shell configuration. The
-service account can edit `config/sfu.toml` and its own data. The portable
+The updater policy lives at `updates/update-sfu.conf` and is **root-only**.
+Portable updates verify the release against the binary's embedded publisher
+key and the trusted manifest URL, rather than accepting signing keys or URLs
+from the service-writable `sfu.toml`. The reference `sfu.example.toml` also
+lives in root-owned `updates/`, not in the service-writable config directory.
+The service account can edit `config/sfu.toml` and its own data. Reruns will
+reject symlinks or writable ancestors in the installation path rather than
+following them with root privileges. The portable
 setup dashboard binds to `127.0.0.1:7891`; connect with:
 
 ```sh
