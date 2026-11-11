@@ -105,6 +105,9 @@ enum UpdatesCommand {
         /// Read the manifest from here instead of `updates.manifest_url`.
         #[arg(long)]
         manifest_url: Option<String>,
+        /// Root-controlled native updates cannot trust service-editable release settings.
+        #[arg(long)]
+        trusted_native: bool,
     },
 }
 
@@ -145,9 +148,8 @@ async fn main() -> anyhow::Result<()> {
         SfuConfig::default()
     };
 
-    if let Some(Command::Updates(UpdatesCommand::Check { artifact, pin, manifest_url })) = &cli.command {
-        cfg.updates.validate()?;
-        return updates_check(&cfg.updates, artifact.clone(), pin.as_deref(), manifest_url.as_deref()).await;
+    if let Some(Command::Updates(UpdatesCommand::Check { artifact, pin, manifest_url, trusted_native })) = &cli.command {
+        return updates_check(&cfg.updates, artifact.clone(), pin.as_deref(), manifest_url.as_deref(), *trusted_native).await;
     }
 
     cfg.updates.validate()?;
@@ -375,6 +377,12 @@ fn print_version() -> anyhow::Result<()> {
         "built_at={}",
         if b.built_at_ms == 0 { String::new() } else { b.built_at_ms.to_string() }
     );
+    // The installer checks both markers before changing the system.
+    println!("portable_native_installer=1");
+    println!(
+        "publisher_key_embedded={}",
+        !option_env!("TELIUM_RELEASE_PUBLIC_KEY").unwrap_or("").is_empty()
+    );
     Ok(())
 }
 
@@ -382,16 +390,47 @@ fn default_artifact() -> String {
     format!("sfu-linux-{}", std::env::consts::ARCH)
 }
 
+const OFFICIAL_SFU_MANIFEST_URL: &str =
+    "https://raw.githubusercontent.com/telium-chat/telium/main/deploy/sfu-releases.json";
+
+/// Root-owned native update policy overrides the service-writable config.
+fn trusted_native_update_policy(
+    service: &crate::config::Updates,
+    manifest_url: Option<&str>,
+    publisher_key: &str,
+) -> anyhow::Result<crate::config::Updates> {
+    anyhow::ensure!(!publisher_key.is_empty(), "native auto-update requires an embedded publisher signing key");
+    let mut result = service.clone();
+    result.check = true;
+    result.manifest_url = manifest_url.unwrap_or(OFFICIAL_SFU_MANIFEST_URL).to_owned();
+    anyhow::ensure!(result.manifest_url.starts_with("https://"), "trusted native update manifest URL must use HTTPS");
+    result.manifest_signature_url.clear();
+    result.manifest_public_key = publisher_key.to_owned();
+    result.validate()?;
+    Ok(result)
+}
+
 async fn updates_check(
     updates: &crate::config::Updates,
     artifact: String,
     pin: Option<&str>,
     manifest_url: Option<&str>,
+    trusted_native: bool,
 ) -> anyhow::Result<()> {
-    let mut updates = updates.clone();
-    if let Some(url) = manifest_url {
-        updates.manifest_url = url.to_string();
-    }
+    let updates = if trusted_native {
+        trusted_native_update_policy(
+            updates,
+            manifest_url,
+            option_env!("TELIUM_RELEASE_PUBLIC_KEY").unwrap_or(""),
+        )?
+    } else {
+        let mut updates = updates.clone();
+        if let Some(url) = manifest_url {
+            updates.manifest_url = url.to_owned();
+        }
+        updates.validate()?;
+        updates
+    };
     let manifest = crate::updates::read_manifest(&updates)
         .await
         .map_err(|(kind, e)| anyhow::anyhow!("{}: {e}", kind.as_str()))?;
@@ -441,4 +480,35 @@ async fn updates_check(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod native_updater_trust_tests {
+    use super::*;
+
+    #[test]
+    fn service_writable_updates_cannot_choose_native_publisher_or_source() {
+        let mut service = crate::config::Updates::default();
+        service.check = false;
+        service.manifest_url = "https://attacker.example/manifest".into();
+        service.manifest_signature_url = "https://attacker.example/signature".into();
+        service.manifest_public_key = "attacker-key".into();
+        let result = trusted_native_update_policy(&service, None, "root-pinned-key").unwrap();
+        assert!(result.check);
+        assert_eq!(result.manifest_url, OFFICIAL_SFU_MANIFEST_URL);
+        assert!(result.manifest_signature_url.is_empty());
+        assert_eq!(result.manifest_public_key, "root-pinned-key");
+    }
+
+    #[test]
+    fn trusted_native_updates_fail_closed_without_publisher_key() {
+        let service = crate::config::Updates::default();
+        assert!(trusted_native_update_policy(&service, None, "").is_err());
+        assert!(trusted_native_update_policy(&service, Some("http://attacker.example"), "key").is_err());
+        assert_eq!(
+            trusted_native_update_policy(&service, Some("https://trusted.example/manifest"), "key")
+                .unwrap().manifest_url,
+            "https://trusted.example/manifest"
+        );
+    }
 }
