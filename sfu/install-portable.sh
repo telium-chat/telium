@@ -241,8 +241,16 @@ if [[ ! -e "$PREFIX/updates/update-sfu.conf" ]]; then
   printf '\nTELIUM_SFU_USAGE_LEDGER=%s/data/livekit/usage.json\n' "$PREFIX" >> "$PREFIX/updates/update-sfu.conf"
   printf 'TELIUM_SFU_EXAMPLE_CONFIG=%s/updates/sfu.example.toml\n' "$PREFIX" >> "$PREFIX/updates/update-sfu.conf"
   printf 'TELIUM_SFU_TRUSTED_NATIVE=1\n' >> "$PREFIX/updates/update-sfu.conf"
-  chmod 0600 "$PREFIX/updates/update-sfu.conf"
 fi
+# A rerun from an early portable preview must also enforce the new trusted
+# native updater policy; never silently retain its service-writable source.
+if ! grep -Fxq 'TELIUM_SFU_TRUSTED_NATIVE=1' "$PREFIX/updates/update-sfu.conf"; then
+  printf '\nTELIUM_SFU_TRUSTED_NATIVE=1\n' >> "$PREFIX/updates/update-sfu.conf"
+fi
+if ! grep -Fq 'TELIUM_SFU_EXAMPLE_CONFIG=' "$PREFIX/updates/update-sfu.conf"; then
+  printf 'TELIUM_SFU_EXAMPLE_CONFIG=%s/updates/sfu.example.toml\n' "$PREFIX" >> "$PREFIX/updates/update-sfu.conf"
+fi
+chmod 0600 "$PREFIX/updates/update-sfu.conf"
 cat > /etc/systemd/system/telium-sfu.service <<EOF
 [Unit]
 Description=Telium SFU (portable)
