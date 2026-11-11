@@ -493,20 +493,20 @@ mod native_updater_trust_tests {
         service.manifest_url = "https://attacker.example/manifest".into();
         service.manifest_signature_url = "https://attacker.example/signature".into();
         service.manifest_public_key = "attacker-key".into();
-        let result = trusted_native_update_policy(&service, None, "root-pinned-key").unwrap();
+        let result = trusted_native_update_policy(&service, None, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA").unwrap();
         assert!(result.check);
         assert_eq!(result.manifest_url, OFFICIAL_SFU_MANIFEST_URL);
         assert!(result.manifest_signature_url.is_empty());
-        assert_eq!(result.manifest_public_key, "root-pinned-key");
+        assert_eq!(result.manifest_public_key, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
     }
 
     #[test]
     fn trusted_native_updates_fail_closed_without_publisher_key() {
         let service = crate::config::Updates::default();
         assert!(trusted_native_update_policy(&service, None, "").is_err());
-        assert!(trusted_native_update_policy(&service, Some("http://attacker.example"), "key").is_err());
+        assert!(trusted_native_update_policy(&service, Some("http://attacker.example"), "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA").is_err());
         assert_eq!(
-            trusted_native_update_policy(&service, Some("https://trusted.example/manifest"), "key")
+            trusted_native_update_policy(&service, Some("https://trusted.example/manifest"), "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
                 .unwrap().manifest_url,
             "https://trusted.example/manifest"
         );
