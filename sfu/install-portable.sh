@@ -15,7 +15,7 @@ while [[ "$check" != "/" ]]; do
   fi
   check="$(dirname "$check")"
 done
-for cmd in curl python3 tar sha256sum openssl systemctl useradd install sed flock; do
+for cmd in curl python3 tar sha256sum openssl systemctl useradd install sed flock runuser grep stat; do
   command -v "$cmd" >/dev/null 2>&1 || {
     echo "Missing $cmd. Portable mode never modifies system packages." >&2; exit 1;
   }
@@ -27,47 +27,126 @@ if [[ -f /etc/systemd/system/telium-sfu.service ]] \
 fi
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY="$(cd "$HERE/../deploy" && pwd)"
-if ! id telium-sfu >/dev/null 2>&1; then
-  useradd --system --home "$PREFIX" --shell /usr/sbin/nologin --no-create-home telium-sfu
-fi
-for subpath in bin config data updates; do
-  [[ ! -L "$PREFIX/$subpath" ]] || { echo "Symlink at $PREFIX/$subpath; refusing" >&2; exit 1; }
-done
-for protected in bin updates; do
-  if [[ -e "$PREFIX/$protected" && "$(stat -c %u "$PREFIX/$protected")" != "0" ]]; then
-    echo "Root-owned directory required: $PREFIX/$protected" >&2; exit 1
+
+# Never run a root-managed binary from a symlink or from a writable directory.
+# Check every existing root-owned ancestor, including /opt or /srv.
+for target in "$PREFIX" "$PREFIX/bin" "$PREFIX/updates"; do
+  [[ ! -L "$target" ]] || { echo "Symlink at $target; refusing" >&2; exit 1; }
+  if [[ -e "$target" ]]; then
+    [[ -d "$target" && "$(stat -c %u "$target")" = 0 ]] || {
+      echo "Expected root-owned directory: $target" >&2; exit 1;
+    }
+    mode="$(stat -c %a "$target")"
+    if (( (8#$mode & 0022) != 0 )); then
+      echo "Root-managed directory is group/world-writable: $target" >&2; exit 1
+    fi
   fi
 done
-install -d -o root -g root -m 0755 "$PREFIX" "$PREFIX/bin"
-install -d -o telium-sfu -g telium-sfu -m 0750 "$PREFIX/config" "$PREFIX/data" "$PREFIX/data/state" "$PREFIX/data/livekit"
-install -d -o root -g root -m 0700 "$PREFIX/updates"
-case "$(uname -m)" in
-  x86_64) arch=x86_64; lk_arch=amd64 ;;
-  aarch64) arch=aarch64; lk_arch=arm64 ;;
-  *) echo "Unsupported architecture" >&2; exit 1 ;;
-esac
+for target in "$PREFIX/bin/telium-sfu" "$PREFIX/bin/livekit-server" "$PREFIX/bin/update-sfu" \
+              "$PREFIX/updates/update-sfu.conf" "$PREFIX/updates/sfu.example.toml" \
+              "$PREFIX/config" "$PREFIX/data" "$PREFIX/data/state" "$PREFIX/data/livekit" \
+              "$PREFIX/config/sfu.toml"; do
+  [[ ! -L "$target" ]] || { echo "Symlink at $target; refusing" >&2; exit 1; }
+done
+for target in "$PREFIX/bin/telium-sfu" "$PREFIX/bin/livekit-server" "$PREFIX/bin/update-sfu"; do
+  if [[ -e "$target" ]]; then
+    [[ -f "$target" && "$(stat -c %u "$target")" = 0 ]] || {
+      echo "Root-owned regular file required: $target" >&2; exit 1;
+    }
+    mode="$(stat -c %a "$target")"
+    if (( (8#$mode & 0022) != 0 )); then
+      echo "Root-managed executable is group/world-writable: $target" >&2; exit 1
+    fi
+  fi
+done
 
-# Official native releases embed the publisher signing key. Verify the
-# published archive checksum before extraction; never compile an unpinned SFU.
-if [[ ! -x "$PREFIX/bin/telium-sfu" ]]; then
-  echo "[portable] Downloading Telium SFU release..."
-  tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+# Fail before creating users, directories or units if sfu-latest is too old.
+# Both the portable dashboard and the hardened native updater are required.
+require_compatible_sfu() {
+  local version_output
+  version_output="$("$1" version)" || { echo "Unable to inspect SFU release: $1" >&2; return 1; }
+  if ! grep -Fxq 'portable_native_installer=1' <<< "$version_output" \
+      || ! grep -Fxq 'publisher_key_embedded=true' <<< "$version_output"; then
+    echo "This SFU release lacks portable installer support or its pinned signing key." >&2
+    echo "Publish a new signed SFU release containing this PR before installing portable mode." >&2
+    return 1
+  fi
+}
+tmp=""
+if [[ -x "$PREFIX/bin/telium-sfu" ]]; then
+  require_compatible_sfu "$PREFIX/bin/telium-sfu"
+else
+  echo "[portable] Checking latest signed Telium SFU release for portable support..."
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  case "$(uname -m)" in
+    x86_64) arch=x86_64 ;;
+    aarch64) arch=aarch64 ;;
+    *) echo "Unsupported architecture" >&2; exit 1 ;;
+  esac
   asset="telium-sfu-linux-$arch.tar.gz"
   base="https://github.com/telium-chat/telium/releases/download/sfu-latest"
   curl -fsSL --retry 3 --max-time 900 "$base/$asset" -o "$tmp/$asset"
   curl -fsSL --retry 3 --max-time 60 "$base/$asset.sha256" -o "$tmp/$asset.sha256"
   ( cd "$tmp"; sha256sum -c "$asset.sha256" )
   tar -xzf "$tmp/$asset" -C "$tmp" telium-sfu sfu.example.toml
+  chmod 0755 "$tmp/telium-sfu"
+  require_compatible_sfu "$tmp/telium-sfu"
+fi
+
+if ! id telium-sfu >/dev/null 2>&1; then
+  useradd --system --home "$PREFIX" --shell /usr/sbin/nologin --no-create-home telium-sfu
+fi
+# Only create/chown directory entries whose immediate parent is root-owned.
+# In particular, never run root's 'install -d -o ...' below writable data/.
+install -d -o root -g root -m 0755 "$PREFIX" "$PREFIX/bin"
+install -d -o root -g root -m 0700 "$PREFIX/updates"
+new_config_dir=0
+if [[ ! -e "$PREFIX/config" ]]; then
+  install -d -o root -g root -m 0700 "$PREFIX/config"
+  new_config_dir=1
+else
+  [[ -d "$PREFIX/config" && "$(stat -c %u "$PREFIX/config")" = "$(id -u telium-sfu)" ]] || {
+    echo "Existing config directory must belong to telium-sfu: $PREFIX/config" >&2; exit 1;
+  }
+fi
+if [[ ! -e "$PREFIX/data" ]]; then
+  install -d -o telium-sfu -g telium-sfu -m 0750 "$PREFIX/data"
+else
+  [[ -d "$PREFIX/data" && "$(stat -c %u "$PREFIX/data")" = "$(id -u telium-sfu)" ]] || {
+    echo "Existing data directory must belong to telium-sfu: $PREFIX/data" >&2; exit 1;
+  }
+fi
+# The service account creates its own state: root never traverses a
+# service-writable path while chmod-ing or chown-ing directories.
+for name in state livekit; do
+  target="$PREFIX/data/$name"
+  if [[ ! -e "$target" ]]; then
+    runuser -u telium-sfu -- mkdir -- "$target"
+  fi
+  [[ ! -L "$target" && -d "$target" && "$(stat -c %u "$target")" = "$(id -u telium-sfu)" ]] || {
+    echo "Expected a real telium-sfu-owned directory: $target" >&2; exit 1
+  }
+done
+if [[ -n "$tmp" ]]; then
   install -m 0755 "$tmp/telium-sfu" "$PREFIX/bin/telium-sfu"
-  install -m 0644 "$tmp/sfu.example.toml" "$PREFIX/config/sfu.example.toml"
+  install -m 0644 "$tmp/sfu.example.toml" "$PREFIX/updates/sfu.example.toml"
   rm -rf "$tmp"; trap - EXIT
+else
+  [[ -f "$PREFIX/updates/sfu.example.toml" ]] ||
+    install -m 0644 "$HERE/sfu.example.toml" "$PREFIX/updates/sfu.example.toml"
 fi
 if [[ ! -x "$PREFIX/bin/livekit-server" ]]; then
   echo "[portable] Downloading private LiveKit executable..."
+  case "$(uname -m)" in
+    x86_64) lk_arch=amd64 ;;
+    aarch64) lk_arch=arm64 ;;
+    *) echo "Unsupported architecture" >&2; exit 1 ;;
+  esac
   lk_tag="$(curl -fsSL --max-time 60 https://api.github.com/repos/livekit/livekit/releases/latest \
      | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')"
   [[ "$lk_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid LiveKit release tag" >&2; exit 1; }
-  lk_ver="$(printf '%s' "$lk_tag" | cut -c2-)"
+  lk_ver="${lk_tag#v}"
   tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
   curl -fsSL --retry 3 --max-time 900 \
     "https://github.com/livekit/livekit/releases/download/$lk_tag/livekit_${lk_ver}_linux_${lk_arch}.tar.gz" -o "$tmp/livekit.tar.gz"
@@ -82,6 +161,11 @@ CONFIG="$PREFIX/config/sfu.toml"
   echo "Refusing symlinked privileged update config" >&2; exit 1;
 }
 if [[ ! -e "$CONFIG" ]]; then
+  # Never write as root inside an existing service-writable config directory.
+  if [[ "$new_config_dir" != 1 ]]; then
+    echo "Missing sfu.toml in an existing service-writable config directory. Refusing unsafe root write." >&2
+    exit 1
+  fi
   cat > "$CONFIG" <<'SFU_CONFIG'
 bind = "127.0.0.1:7890"
 
@@ -142,6 +226,11 @@ SFU_CONFIG
          -e "s|^api_secret = \"\"|api_secret = \"$lk_secret\"|" "$CONFIG"
   chown telium-sfu:telium-sfu "$CONFIG"; chmod 0600 "$CONFIG"
 fi
+# Hand over config/ only after initial secrets have been written.
+if [[ "$new_config_dir" = 1 ]]; then
+  chown telium-sfu:telium-sfu "$PREFIX/config"
+  chmod 0750 "$PREFIX/config"
+fi
 
 install -m 0755 "$DEPLOY/update-sfu-native.sh" "$PREFIX/bin/update-sfu"
 if [[ ! -e "$PREFIX/updates/update-sfu.conf" ]]; then
@@ -150,6 +239,8 @@ if [[ ! -e "$PREFIX/updates/update-sfu.conf" ]]; then
       -e "s|^TELIUM_SFU_MANIFEST_URL=.*|TELIUM_SFU_MANIFEST_URL=|" \
       "$DEPLOY/update-sfu.conf" > "$PREFIX/updates/update-sfu.conf"
   printf '\nTELIUM_SFU_USAGE_LEDGER=%s/data/livekit/usage.json\n' "$PREFIX" >> "$PREFIX/updates/update-sfu.conf"
+  printf 'TELIUM_SFU_EXAMPLE_CONFIG=%s/updates/sfu.example.toml\n' "$PREFIX" >> "$PREFIX/updates/update-sfu.conf"
+  printf 'TELIUM_SFU_TRUSTED_NATIVE=1\n' >> "$PREFIX/updates/update-sfu.conf"
   chmod 0600 "$PREFIX/updates/update-sfu.conf"
 fi
 cat > /etc/systemd/system/telium-sfu.service <<EOF
