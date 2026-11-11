@@ -739,7 +739,7 @@ fn unique_usage_dir() -> std::path::PathBuf {
         assert!(matches!(status.assessment, crate::updates::Assessment::Behind { .. }));
 
         // The CLI half the updater script consumes answers over the same feed.
-        crate::updates_check(&h.state.cfg.updates, "sfu-linux-x86_64".into(), None, None)
+        crate::updates_check(&h.state.cfg.updates, "sfu-linux-x86_64".into(), None, None, false)
             .await
             .expect("updates check prints a plan");
 
