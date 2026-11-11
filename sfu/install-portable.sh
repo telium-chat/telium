@@ -10,8 +10,16 @@ fi
 check="$PREFIX"
 while [[ "$check" != "/" ]]; do
   [[ ! -L "$check" ]] || { echo "Symlink in installation path: $check" >&2; exit 1; }
-  if [[ -e "$check" && "$(stat -c %u "$check")" != "0" ]]; then
-    echo "Non-root-owned installation path component: $check" >&2; exit 1
+  if [[ -e "$check" ]]; then
+    [[ "$(stat -c %u "$check")" = 0 ]] || {
+      echo "Non-root-owned installation path component: $check" >&2; exit 1;
+    }
+    # A root-owned but group/world-writable parent can be renamed by an
+    # unprivileged process while the installer performs privileged writes.
+    permissions="$(stat -c %a "$check")"
+    if (( (8#$permissions & 0022) != 0 )); then
+      echo "Group/world-writable installation path component: $check" >&2; exit 1
+    fi
   fi
   check="$(dirname "$check")"
 done
