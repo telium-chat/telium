@@ -87,6 +87,12 @@ log_destinations = false
 default = "enabled"          # enabled | quota | disabled
 # The allowance, used when default = "quota", and for allowlisted users.
 quota_bytes = "1GiB"         # used when default = "quota", and for allowlisted users
+# Whole-server cap on unique media stored across all accounts; zero is unlimited.
+# For an approximately 1 TiB public VPS, start around 700-750 GiB and monitor.
+max_total_bytes = 0
+# Minimum free space on the media filesystem while accepting uploads.
+# Protect room for database, logs, and housekeeping; zero disables this check.
+min_free_bytes = 0
 # User ids that always get tier-1 upload / that never do.
 allowlist = []
 blocklist = []
