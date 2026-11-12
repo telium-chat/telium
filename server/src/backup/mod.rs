@@ -537,6 +537,17 @@ async fn write_archive(pool: &SqlitePool, cfg: &Config) -> anyhow::Result<(PathB
     let final_path = dir.join(archive_name(stamp));
     let scratch = Scratch(vec![snapshot.clone(), payload.clone(), partial.clone()]);
 
+    // VACUUM INTO writes a full SQLite snapshot. Check its estimated size
+    // before starting so it cannot immediately eat the reserved disk space.
+    if cfg.backup.min_free_bytes > 0 {
+        let pages: i64 = sqlx::query_scalar("PRAGMA page_count").fetch_one(pool).await?;
+        let page_bytes: i64 = sqlx::query_scalar("PRAGMA page_size").fetch_one(pool).await?;
+        let estimate = (pages.max(0) as u64)
+            .saturating_mul(page_bytes.max(0) as u64)
+            .saturating_add(16 * 1024 * 1024);
+        check_backup_space(&dir, cfg.backup.min_free_bytes, estimate)?;
+    }
+
     // VACUUM INTO refuses to overwrite, which is wanted.
     let target = snapshot.to_string_lossy().replace('\'', "''");
     sqlx::query(&format!("VACUUM INTO '{target}'")).execute(pool).await?;
@@ -559,20 +570,87 @@ async fn write_archive(pool: &SqlitePool, cfg: &Config) -> anyhow::Result<(PathB
             payload_bytes,
             payload_sha256: hex::encode(payload_sha256),
         };
-        let file = std::fs::File::create(&partial)?;
+        let file = ReservedFile::new(
+            std::fs::File::create(&partial)?, &partial, cfg.backup.min_free_bytes,
+        )?;
         let mut sealed = format::Writer::new(HashingWriter::new(io::BufWriter::new(file)), &key, &manifest)?;
         let mut src = io::BufReader::new(std::fs::File::open(&payload)?);
         io::copy(&mut src, &mut sealed)?;
         let hashing = sealed.finish()?;
         let (mut buf, sha256, _) = hashing.finish();
         buf.flush()?;
-        buf.into_inner().map_err(|e| e.into_error())?.sync_all()?;
+        buf.into_inner().map_err(|e| e.into_error())?.inner.sync_all()?;
         std::fs::rename(&partial, &done)?;
         drop(scratch);
         Ok((manifest, sha256))
     })
     .await??;
     Ok((final_path, out.0, out.1))
+}
+
+/// Prevent a scheduled archive from consuming the whole filesystem. Checks
+/// while writing both the compressed payload and the encrypted copy; on error
+/// the existing archives remain intact and Scratch removes partial files.
+struct ReservedFile {
+    inner: std::fs::File,
+    path: PathBuf,
+    reserve: i64,
+    since_check: u64,
+}
+
+impl ReservedFile {
+    fn new(inner: std::fs::File, path: &Path, reserve: i64) -> io::Result<Self> {
+        let file = Self { inner, path: path.to_path_buf(), reserve, since_check: 0 };
+        check_backup_space(&file.path, reserve, 0)?;
+        Ok(file)
+    }
+}
+
+impl Write for ReservedFile {
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+        self.since_check = self.since_check.saturating_add(data.len() as u64);
+        if self.since_check >= 4 * 1024 * 1024 {
+            check_backup_space(&self.path, self.reserve, data.len() as u64)?;
+            self.since_check = 0;
+        }
+        self.inner.write(data)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+fn check_backup_space(path: &Path, reserve: i64, incoming: u64) -> io::Result<()> {
+    if reserve <= 0 {
+        return Ok(());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let path = std::ffi::CString::new(path.as_os_str().as_bytes())
+            .map_err(io::Error::other)?;
+        let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+        // SAFETY: path is NUL-terminated, stat points to writable memory.
+        if unsafe { libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: statvfs succeeded and filled the buffer.
+        let stat = unsafe { stat.assume_init() };
+        let available = (stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64);
+        if available < (reserve as u64).saturating_add(incoming) {
+            return Err(io::Error::other(format!(
+                "backup refused to consume the filesystem reserve ({} free, {} reserved); \
+                 use another filesystem or reduce backup.include_media only if media is backed up separately",
+                available, reserve,
+            )));
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, incoming);
+        Err(io::Error::other("backup.min_free_bytes needs a Unix filesystem space check"))
+    }
 }
 
 struct HashingWriter<W: Write> {
@@ -618,7 +696,9 @@ impl<R: Read> Read for HashingReader<R> {
 }
 
 fn build_payload(cfg: &Config, snapshot: &Path, payload: &Path) -> anyhow::Result<(Vec<Part>, u64, [u8; 32])> {
-    let file = std::fs::File::create(payload)?;
+    let file = ReservedFile::new(
+        std::fs::File::create(payload)?, payload, cfg.backup.min_free_bytes,
+    )?;
     let gz = flate2::write::GzEncoder::new(HashingWriter::new(io::BufWriter::new(file)), flate2::Compression::default());
     let mut tar = tar::Builder::new(gz);
     tar.follow_symlinks(true);
