@@ -95,7 +95,7 @@ command -v useradd   >/dev/null 2>&1 || die "useradd is required to create the t
 
 # Catch incomplete, individually downloaded installers before modifying the host.
 # bootstrap-native.sh always fetches these files together.
-for required_file in update-native.sh telium-server.service telium-update-native.service telium-update-native.timer; do
+for required_file in storage-wizard.sh update-native.sh telium-server.service telium-update-native.service telium-update-native.timer; do
   [ -f "$here/$required_file" ] ||
     die "missing $required_file beside install-native.sh; use bootstrap-native.sh or download the complete deploy directory"
 done
@@ -224,6 +224,31 @@ step "Configuration"
 if [ -e "$CONF" ]; then
   say "$CONF already exists; left alone"
 else
+  # Choose registration once; storage defaults depend on public vs private.
+  # Existing configs never enter this path and are not rewritten.
+  registration="${TELIUM_REGISTRATION:-}"
+  if [ -z "$registration" ]; then
+    [ -t 0 ] || die "unattended setup requires TELIUM_REGISTRATION=closed or TELIUM_REGISTRATION=open"
+    printf '\nAllow anyone to create an account on this server? [y/N] '
+    read -r answer || die "could not read the registration choice"
+    case "$answer" in
+      y|Y|yes|YES) registration=open ;;
+      ""|n|N|no|NO) registration=closed ;;
+      *) die "choose yes or no" ;;
+    esac
+  fi
+  case "$registration" in
+    open|closed) : ;;
+    *) die "TELIUM_REGISTRATION must be open or closed" ;;
+  esac
+
+  # New-install media and backup policy, with defaults based on actual disk
+  # space. Unattended operators may override each choice using TELIUM_* vars.
+  # shellcheck source=storage-wizard.sh
+  source "$here/storage-wizard.sh"
+  storage_wizard "$DATA" "$BACKUPS" "$registration" ||
+    die "invalid media/backup choices; no server configuration was written"
+
   # Write to a temporary file so interruption never leaves truncated TOML.
   generated_conf="$(mktemp "$ETC/.telium.toml.XXXXXX")"
   chown telium:telium "$generated_conf"
@@ -246,6 +271,18 @@ bind = "127.0.0.1:8448"
 database_url = "sqlite://$DATA/telium.db?mode=rwc"
 media_dir = "$DATA/media"
 
+[media_policy]
+# Explicit new-install policy; never modified by installer reruns.
+default = "$storage_policy"
+quota_bytes = "$storage_user_quota"
+max_file_bytes = "$storage_file_max"
+max_total_bytes = "$storage_media_total"
+min_free_bytes = "$storage_media_free"
+# Positive retention deletes attachments even while referenced by messages.
+default_expiry_secs = "$storage_expiry"
+max_expiry_secs = "$storage_expiry"
+attachment_max_age_days = $storage_retention_days
+
 [rate_limit]
 # The proxy's address, so rate limits apply to real clients and not to it.
 trusted_proxies = ["127.0.0.1"]
@@ -256,6 +293,11 @@ trusted_proxies = ["127.0.0.1"]
 # server logs that it minted one.
 dir = "$BACKUPS/archives"
 key_file = "$BACKUPS/backup.key"
+enabled = true
+interval_secs = "$storage_backup_interval"
+keep = $storage_backup_keep
+include_media = $storage_include_media
+min_free_bytes = "$storage_backup_free"
 
 [mfa]
 # An absolute path also works for ad-hoc CLI commands run outside the
@@ -279,7 +321,7 @@ if ! grep -qE '^[[:space:]]*\[registration\][[:space:]]*(#.*)?$' "$CONF"; then
   if ! grep -Fq "# Written by deploy/install-native.sh for " "$CONF"; then
     die "$CONF is not an installer-generated config; configure [registration] before continuing"
   fi
-  registration="${TELIUM_REGISTRATION:-}"
+  registration="${registration:-${TELIUM_REGISTRATION:-}}"
   if [ -z "$registration" ]; then
     [ -t 0 ] || die "unattended setup requires TELIUM_REGISTRATION=closed or TELIUM_REGISTRATION=open; refusing to guess"
     printf '\nAllow anyone to create an account on this server? [y/N] '
