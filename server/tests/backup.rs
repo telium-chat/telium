@@ -462,6 +462,7 @@ impl Server {
 #[tokio::test]
 async fn backup_reserve_refuses_new_archive_without_losing_existing_backups() {
     let s = start(|_| {}).await;
+    s.keygen();
     let original = s.backup().await.path;
     assert!(original.exists());
 
