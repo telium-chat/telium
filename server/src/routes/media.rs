@@ -250,6 +250,9 @@ async fn stage_body(
     tokio::fs::create_dir_all(&tmp_dir)
         .await
         .map_err(|e| ApiError::Internal(e.into()))?;
+    // An upload may not consume the operator\'s reserved free space even before
+    // its content hash (and thus its whole-server quota impact) is known.
+    enforce_free_space(&tmp_dir, state.cfg.media_policy.min_free_bytes, 0)?;
     let temp = TempFile(tmp_dir.join(format!(
         "upload-{}-{}",
         std::process::id(),
@@ -286,6 +289,7 @@ async fn stage_body(
         if size > cap {
             return Err(ApiError::TooLarge(over));
         }
+        enforce_free_space(&tmp_dir, state.cfg.media_policy.min_free_bytes, chunk.len() as u64)?;
         hasher_blake3.update(&chunk);
         hasher_sha256.update(&chunk);
         hasher_sha1.update(&chunk);
@@ -355,6 +359,42 @@ pub async fn store_bytes(
     .await
 }
 
+/// Check available space before writing additional bytes. This protects the
+/// filesystem shared by staging, media and often the SQLite database. A separate
+/// whole-server media quota protects against account-farm exhaustion.
+fn enforce_free_space(path: &std::path::Path, reserve: i64, incoming: u64) -> ApiResult<()> {
+    if reserve <= 0 {
+        return Ok(());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let path = std::ffi::CString::new(path.as_os_str().as_bytes())
+            .map_err(|e| ApiError::Internal(e.into()))?;
+        let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+        // SAFETY: path is a NUL-terminated C string and stat points to writable memory.
+        if unsafe { libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) } != 0 {
+            return Err(ApiError::Internal(std::io::Error::last_os_error().into()));
+        }
+        // SAFETY: statvfs returned success and initialized the structure.
+        let stat = unsafe { stat.assume_init() };
+        let available = (stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64);
+        if available < (reserve as u64).saturating_add(incoming) {
+            return Err(ApiError::TooLarge(
+                "this homeserver is protecting its disk reserve; try another media origin or retry later".into(),
+            ).with_code("server_storage_full"));
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, incoming);
+        Err(ApiError::Internal(anyhow::anyhow!(
+            "media_policy.min_free_bytes requires a Unix filesystem availability check"
+        )))
+    }
+}
+
 /// The settle step shared by both ingest paths: dedup on the content hash,
 /// expiry narrowing, the media row, and the object store write. `payload`
 /// carries the bytes either in memory or as a staged file to move in.
@@ -379,6 +419,9 @@ async fn store_payload(
         .unwrap_or("application/octet-stream");
     let mime = sanitize_mime(purpose, claimed_mime);
 
+    // The lock covers deduplication, budget accounting, the object-store write
+    // and row insertion, so simultaneous accounts cannot overspend one budget.
+    let _capacity_slot = state.media_capacity_lock.lock().await;
     let existing: Option<(String, String, Option<i64>)> =
         sqlx::query_as("SELECT capability, owner_user_id, expires_at FROM media WHERE hash = ?")
             .bind(hash)
@@ -409,6 +452,30 @@ async fn store_payload(
             capability
         }
         None => {
+            let budget = state.cfg.media_policy.max_total_bytes;
+            if budget > 0 {
+                let used: i64 = sqlx::query_scalar(
+                    "SELECT COALESCE(SUM(size), 0) FROM media"
+                )
+                .fetch_one(&state.pool)
+                .await?;
+                if used > budget.saturating_sub(size as i64) {
+                    return Err(ApiError::TooLarge(
+                        "this homeserver's media storage budget is full; try another media origin or retry later".into(),
+                    ).with_code("server_storage_full")
+                     .with_detail("used", used)
+                     .with_detail("limit", budget));
+                }
+            }
+            // Streamed uploads are already in media_dir/tmp. Memory-backed
+            // voucher uploads still need room for their new on-disk bytes.
+            if state.media_store.is_local() {
+                let additional = match &payload {
+                    StagedBytes::Memory(_) => size as u64,
+                    StagedBytes::File(_) => 0,
+                };
+                enforce_free_space(&state.cfg.media_dir, state.cfg.media_policy.min_free_bytes, additional)?;
+            }
             let capability = random_token(24);
             let key = media_key(state, hash);
             match payload {
