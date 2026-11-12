@@ -250,7 +250,7 @@ async fn stage_body(
     tokio::fs::create_dir_all(&tmp_dir)
         .await
         .map_err(|e| ApiError::Internal(e.into()))?;
-    // An upload may not consume the operator\'s reserved free space even before
+    // An upload may not consume the operator's reserved free space even before
     // its content hash (and thus its whole-server quota impact) is known.
     enforce_free_space(&tmp_dir, state.cfg.media_policy.min_free_bytes, 0)?;
     let temp = TempFile(tmp_dir.join(format!(
@@ -362,7 +362,7 @@ pub async fn store_bytes(
 /// Check available space before writing additional bytes. This protects the
 /// filesystem shared by staging, media and often the SQLite database. A separate
 /// whole-server media quota protects against account-farm exhaustion.
-fn enforce_free_space(path: &std::path::Path, reserve: i64, incoming: u64) -> ApiResult<()> {
+pub(crate) fn enforce_free_space(path: &std::path::Path, reserve: i64, incoming: u64) -> ApiResult<()> {
     if reserve <= 0 {
         return Ok(());
     }
@@ -393,6 +393,38 @@ fn enforce_free_space(path: &std::path::Path, reserve: i64, incoming: u64) -> Ap
             "media_policy.min_free_bytes requires a Unix filesystem availability check"
         )))
     }
+}
+
+/// Call while holding state.media_capacity_lock and only for new unique
+/// media hashes. Shared with regular uploads, voucher uploads and guild
+/// expression uploads so public accounts cannot route around the budget.
+pub(crate) async fn enforce_global_media_budget(
+    state: &AppState,
+    size: usize,
+    additional_local_bytes: u64,
+) -> ApiResult<()> {
+    let budget = state.cfg.media_policy.max_total_bytes;
+    if budget > 0 {
+        let used: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(size), 0) FROM media")
+            .fetch_one(&state.pool)
+            .await?;
+        if used > budget.saturating_sub(size as i64) {
+            return Err(ApiError::TooLarge(
+                "this homeserver's media storage budget is full; try another media origin or retry later".into(),
+            )
+            .with_code("server_storage_full")
+            .with_detail("used", used)
+            .with_detail("limit", budget));
+        }
+    }
+    if state.media_store.is_local() {
+        enforce_free_space(
+            &state.cfg.media_dir,
+            state.cfg.media_policy.min_free_bytes,
+            additional_local_bytes,
+        )?;
+    }
+    Ok(())
 }
 
 /// The settle step shared by both ingest paths: dedup on the content hash,
@@ -452,30 +484,13 @@ async fn store_payload(
             capability
         }
         None => {
-            let budget = state.cfg.media_policy.max_total_bytes;
-            if budget > 0 {
-                let used: i64 = sqlx::query_scalar(
-                    "SELECT COALESCE(SUM(size), 0) FROM media"
-                )
-                .fetch_one(&state.pool)
-                .await?;
-                if used > budget.saturating_sub(size as i64) {
-                    return Err(ApiError::TooLarge(
-                        "this homeserver's media storage budget is full; try another media origin or retry later".into(),
-                    ).with_code("server_storage_full")
-                     .with_detail("used", used)
-                     .with_detail("limit", budget));
-                }
-            }
             // Streamed uploads are already in media_dir/tmp. Memory-backed
             // voucher uploads still need room for their new on-disk bytes.
-            if state.media_store.is_local() {
-                let additional = match &payload {
-                    StagedBytes::Memory(_) => size as u64,
-                    StagedBytes::File(_) => 0,
-                };
-                enforce_free_space(&state.cfg.media_dir, state.cfg.media_policy.min_free_bytes, additional)?;
-            }
+            let additional = match &payload {
+                StagedBytes::Memory(_) => size as u64,
+                StagedBytes::File(_) => 0,
+            };
+            enforce_global_media_budget(state, size, additional).await?;
             let capability = random_token(24);
             let key = media_key(state, hash);
             match payload {
