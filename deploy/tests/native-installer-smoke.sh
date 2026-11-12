@@ -341,7 +341,8 @@ unset MOCK_BACKUP_FAIL
 bash deploy/install-native.sh open.test > "$work/open.log" 2>&1
 assert_contains "$work/open.log" "Registration is open; no invitation code is required."
 assert_contains /etc/telium/telium.toml 'attachment_max_age_days = 30'
-assert_contains /etc/telium/telium.toml 'max_expiry_secs = "30d"'
+assert_contains /etc/telium/telium.toml 'default_expiry_secs = 0'
+assert_contains /etc/telium/telium.toml 'max_expiry_secs = 0'
 assert_contains /etc/telium/telium.toml 'include_media = false'
 assert_contains "$work/open.log" 'Backups EXCLUDE uploaded files'
 assert_absent "$work/open.log" "Further registration codes"
