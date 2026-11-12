@@ -959,6 +959,12 @@ pub struct MediaPolicy {
     pub default: MediaDefault,
     #[serde(deserialize_with = "de_bytes_i64")]
     pub quota_bytes: i64,
+    /// Maximum bytes of unique media stored by this homeserver; zero means unlimited.
+    #[serde(deserialize_with = "de_bytes_i64")]
+    pub max_total_bytes: i64,
+    /// Minimum available filesystem space to retain when accepting uploads; zero disables the guard.
+    #[serde(deserialize_with = "de_bytes_i64")]
+    pub min_free_bytes: i64,
     pub allowlist: Vec<String>,
     pub blocklist: Vec<String>,
     #[serde(deserialize_with = "de_bytes_i64")]
@@ -1856,6 +1862,8 @@ impl Default for MediaPolicy {
         Self {
             default: MediaDefault::Enabled,
             quota_bytes: 1024 * 1024 * 1024,
+            max_total_bytes: 0,
+            min_free_bytes: 0,
             allowlist: Vec::new(),
             blocklist: Vec::new(),
             profile_asset_carveout_bytes: 512 * 1024,
