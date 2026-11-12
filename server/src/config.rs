@@ -1208,6 +1208,9 @@ pub struct Backup {
     pub stale_after_secs: i64,
     /// Include `media_dir`; off if media is backed up elsewhere.
     pub include_media: bool,
+    /// Keep this many bytes free on the backup filesystem while writing archives; zero disables.
+    #[serde(deserialize_with = "de_bytes_i64")]
+    pub min_free_bytes: i64,
     /// AES-256 key sealing archives, base64; generated if missing. `TELIUM_BACKUP_KEY` overrides it.
     pub key_file: PathBuf,
     /// Retired keys: archives carry no key id, so restore tries each. Drop one once its last archive ages out of `keep`.
@@ -1909,6 +1912,7 @@ impl Default for Backup {
             keep: 8,
             stale_after_secs: 60 * 60 * 24 * 2,
             include_media: true,
+            min_free_bytes: 0,
             key_file: PathBuf::from("backup.key"),
             previous_key_files: Vec::new(),
             drill: true,
