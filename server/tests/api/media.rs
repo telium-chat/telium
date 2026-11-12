@@ -303,6 +303,22 @@ async fn an_avatar_is_capped_far_below_the_general_attachment_limit() {
 }
 
 #[tokio::test]
+async fn guild_emoji_uploads_cannot_bypass_server_media_capacity() {
+    let s = start_with(|cfg| cfg.media_policy.max_total_bytes = 1).await;
+    let alice = s.user("alice").await;
+    let (_, guild) = s.post("/_telium/v1/guilds", Some(&alice.token), json!({ "name": "G" })).await;
+    let gid = guild["id"].as_str().unwrap();
+    let bytes = png_fixture(40, 40);
+    let (status, body) = s.post(
+        &format!("/_telium/v1/guilds/{gid}/emojis"),
+        Some(&alice.token),
+        json!({ "name": "limit", "data": URL_SAFE_NO_PAD.encode(bytes), "mime": "image/png" }),
+    ).await;
+    assert_eq!(status, 413, "{body}");
+    assert_eq!(body["code"], "server_storage_full");
+}
+
+#[tokio::test]
 async fn an_expression_asset_claims_shared_bytes_as_public() {
     let s = start().await;
     let alice = s.user("alice").await;
