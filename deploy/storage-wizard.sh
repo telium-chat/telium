@@ -95,11 +95,9 @@ storage_wizard() {
     storage_error "backup free-space reserve cannot exceed current free disk space"
     return 1
   fi
-  if [[ "$storage_retention_days" == 0 ]]; then
-    storage_expiry="0"
-  else
-    storage_expiry="${storage_retention_days}d"
-    printf '  WARNING: Files will expire after %s days, including files in live messages.\n' "$storage_retention_days" >&2
+  if [[ "$storage_retention_days" != 0 ]]; then
+    printf '  WARNING: Attachments will expire after %s days, even in live messages.\n' "$storage_retention_days" >&2
+    printf '  Profile pictures and custom emoji are not subject to this age rule.\n' >&2
   fi
   if [[ "$storage_backup_media" == yes ]]; then
     storage_include_media=true
