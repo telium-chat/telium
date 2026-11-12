@@ -278,9 +278,11 @@ quota_bytes = "$storage_user_quota"
 max_file_bytes = "$storage_file_max"
 max_total_bytes = "$storage_media_total"
 min_free_bytes = "$storage_media_free"
-# Positive retention deletes attachments even while referenced by messages.
-default_expiry_secs = "$storage_expiry"
-max_expiry_secs = "$storage_expiry"
+# The hard age below applies only to attachments. Leave general media TTL
+# unset so avatars and other profile assets do not unexpectedly expire.
+# Clients may still request shorter lifetimes explicitly.
+default_expiry_secs = 0
+max_expiry_secs = 0
 attachment_max_age_days = $storage_retention_days
 
 [rate_limit]
