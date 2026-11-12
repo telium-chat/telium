@@ -458,6 +458,21 @@ impl Server {
     }
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn backup_reserve_refuses_new_archive_without_losing_existing_backups() {
+    let s = start(|_| {}).await;
+    let original = s.backup().await.path;
+    assert!(original.exists());
+
+    let mut guarded = s.cfg().clone();
+    guarded.backup.min_free_bytes = i64::MAX;
+    let err = backup::run_once(&s.state.pool, &guarded).await.unwrap_err().to_string();
+    assert!(err.contains("reserve"), "{err}");
+    assert!(original.exists(), "an unsuccessful backup must not prune a good archive");
+    assert_eq!(backup::local_archives(&guarded.backup.dir).len(), 1);
+}
+
 fn noise(seed: u64, len: usize) -> Vec<u8> {
     let mut x = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
     (0..len)
