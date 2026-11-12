@@ -382,7 +382,7 @@ pub(crate) fn enforce_free_space(path: &std::path::Path, reserve: i64, incoming:
         if available < (reserve as u64).saturating_add(incoming) {
             return Err(ApiError::TooLarge(
                 "this homeserver is protecting its disk reserve; try another media origin or retry later".into(),
-            ).with_code("server_storage_full"));
+            ).with_code(crate::errcodes::SERVER_STORAGE_FULL));
         }
         Ok(())
     }
@@ -412,7 +412,7 @@ pub(crate) async fn enforce_global_media_budget(
             return Err(ApiError::TooLarge(
                 "this homeserver's media storage budget is full; try another media origin or retry later".into(),
             )
-            .with_code("server_storage_full")
+            .with_code(crate::errcodes::SERVER_STORAGE_FULL)
             .with_detail("used", used)
             .with_detail("limit", budget));
         }
