@@ -371,6 +371,11 @@ stale_after_secs = "2d"
 # archive. The `cache/` and `camo/` subdirectories never do; they are copies of
 # other servers' bytes and are re-fetched on demand.
 include_media = true
+# Free-space floor while building the compressed and encrypted backup files.
+# Set to a substantial reserve on public servers with large local media stores.
+# This is not a media backup: including media can still require multiple copies
+# of the same data temporarily. Zero (the default) disables this safety check.
+min_free_bytes = 0
 # Every archive is sealed under the 32-byte key in this file, and cannot be
 # read without it. `telium-server backup keygen` creates it (mode 0600); the
 # server creates one at startup if none exists and says so in the log.
