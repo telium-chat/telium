@@ -2054,6 +2054,12 @@ impl Config {
         if self.server_name.is_empty() {
             anyhow::bail!("server_name must be set");
         }
+        if self.media_policy.max_total_bytes < 0 || self.media_policy.min_free_bytes < 0 {
+            anyhow::bail!("media_policy.max_total_bytes and min_free_bytes cannot be negative");
+        }
+        if self.backup.min_free_bytes < 0 {
+            anyhow::bail!("backup.min_free_bytes cannot be negative");
+        }
         if !(self.roles.identity || self.roles.guild || self.roles.media) {
             anyhow::bail!("at least one role must be enabled");
         }
