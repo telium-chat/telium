@@ -347,7 +347,7 @@ suggest_alternatives = false
 # A scheduled backup that runs without being thought about, and a restore that
 # is one command. Each run writes one encrypted `telium-<stamp>.tbk` to `dir`
 # (a consistent database snapshot plus the cold and media stores), then copies
-# it to the bucket below if one is configured. Operator guide: docs/backup.md.
+# it to the bucket below if one is configured. Operator guide: https://docs.telium.chat/self-hosting/backups/.
 [backup]
 enabled = true
 # Local backup directory. These copies help recover from accidental data loss.
