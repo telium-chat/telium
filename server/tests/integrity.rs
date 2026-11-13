@@ -267,11 +267,11 @@ fn the_example_config_still_describes_the_config_this_binary_has() {
     assert!(b.enabled, "the example turns backups on deliberately");
     assert_eq!(
         (
-            b.interval_secs, b.keep, b.stale_after_secs, b.include_media, b.drill, b.drill_interval_secs,
+            b.interval_secs, b.keep, b.stale_after_secs, b.media_mode, b.drill, b.drill_interval_secs,
             b.drill_stale_after_secs, b.pre_migration_backup, b.require_backup_before_migration,
         ),
         (
-            d.interval_secs, d.keep, d.stale_after_secs, d.include_media, d.drill, d.drill_interval_secs,
+            86400, 1, d.stale_after_secs, telium_server::config::MediaMode::ProfileAssets, d.drill, d.drill_interval_secs,
             d.drill_stale_after_secs, d.pre_migration_backup, d.require_backup_before_migration,
         )
     );
@@ -290,12 +290,18 @@ fn the_example_config_still_describes_the_config_this_binary_has() {
 }
 
 #[test]
-fn the_example_config_equals_the_compiled_defaults() {
+fn the_example_config_equals_defaults_except_documented_backup_recommendations() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("telium.example.toml");
     let text = std::fs::read_to_string(&path).unwrap();
     let parsed: Config = toml::from_str(&text).expect("telium.example.toml parses");
     // Compared through their TOML round trip: `Config` does not derive
     // `PartialEq`, and serializing normalizes key order on both sides.
     let written = |c: &Config| toml::to_string_pretty(c).expect("config serializes");
-    assert_eq!(written(&parsed), written(&Config::default()));
+    let mut recommended = Config::default();
+    recommended.backup.interval_secs = 86400;
+    recommended.backup.keep = 1;
+    recommended.backup.media_mode = telium_server::config::MediaMode::ProfileAssets;
+    recommended.backup.remote.keep = 2;
+    assert!(!parsed.backup.remote.enabled);
+    assert_eq!(written(&parsed), written(&recommended));
 }

@@ -350,27 +350,26 @@ suggest_alternatives = false
 # it to the bucket below if one is configured. Operator guide: docs/backup.md.
 [backup]
 enabled = true
-# Put this where the data is not. An archive inside the directory it is an
-# archive of survives a single corrupt file and nothing else -- not the volume
-# being removed, not the disk, not the box -- and the server says so at startup
-# and on the admin screen (`placement`: inside, same-device, separate). A second
-# mount is the floor; the bucket below is the only one of the three that
-# outlives the machine.
+# Local backup directory. These copies help recover from accidental data loss.
+# For recovery after loss of the VPS/disk, optionally copy backups offsite or
+# configure the remote section below. No remote setup is required to start.
 dir = "backups"
 # Every interval, and the first one at startup unless an archive newer than one
 # interval already exists -- so a new server is not left with nothing to restore
 # from for the length of its first interval.
-interval_secs = "6h"
+interval_secs = "1d"
 # How many archives to keep on this disk.
-keep = 8
+keep = 1
 # Log loudly, and show the admin screen a warning, once the newest archive --
 # or the newest successful upload, if a remote is configured -- is older than
 # this.
 stale_after_secs = "2d"
-# Whether `media_dir` (attachments, avatars, emoji, stickers) goes into the
-# archive. The `cache/` and `camo/` subdirectories never do; they are copies of
-# other servers' bytes and are re-fetched on demand.
-include_media = true
+# Recommended for small public servers: keep avatars, banners, guild icons,
+# custom emoji and stickers. Attachments/videos are absent after recovery.
+# Options: none, profile_assets, all. Omitted settings default to all for
+# compatibility. Legacy include_media = true/false maps to all/none (deprecated).
+# cache/ and camo/ are excluded in every mode.
+media_mode = "profile_assets"
 # Free-space floor while building the compressed and encrypted backup files.
 # Set to a substantial reserve on public servers with large local media stores.
 # This is not a media backup: including media can still require multiple copies
@@ -400,6 +399,7 @@ pre_migration_backup = true
 # Refuse to migrate if that backup fails.
 require_backup_before_migration = false
 
+# Optional offsite copies. Local backups work without configuring S3.
 # An S3-compatible bucket the archives are copied to after every run. Works
 # with AWS S3, Cloudflare R2, Backblaze B2, MinIO and anything else that
 # speaks the S3 API with Signature Version 4.
@@ -422,8 +422,8 @@ secret_access_key = ""
 # Works everywhere, MinIO included; AWS accepts both.
 path_style = true
 # How many archives to keep in the bucket. Separate from the local `keep`:
-# bucket space is cheap and the bucket is the copy that has to survive the box.
-keep = 8
+# keeping only one can replace the last healthy recovery point with a bad backup.
+keep = 2
 # Per-request timeout for small requests; uploads and downloads get more in
 # proportion to their size.
 timeout_secs = "60s"

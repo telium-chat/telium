@@ -249,8 +249,8 @@ pub fn excluded(cfg: &Config) -> Vec<format::Excluded> {
         })
     };
 
-    // `include_media = false` wins.
-    if !cfg.backup.include_media {
+    // Explicitly disabling media takes precedence over its storage backend.
+    if cfg.backup.media_mode == crate::config::MediaMode::None {
         out.push(format::Excluded {
             kind: "media".into(),
             reason: "disabled".into(),
@@ -264,6 +264,9 @@ pub fn excluded(cfg: &Config) -> Vec<format::Excluded> {
         });
     }
 
+    if cfg.backup.media_mode == crate::config::MediaMode::ProfileAssets {
+        out.push(format::Excluded { kind: "attachments".into(), reason: "media-mode".into(), detail: None });
+    }
     if cfg.archive.enabled && cfg.archive.store == crate::config::StoreBackend::S3 {
         out.push(format::Excluded {
             kind: "cold".into(),
@@ -283,8 +286,9 @@ pub fn excluded_sentence(e: &format::Excluded) -> String {
         ("media", "object-store") => format!(
             "media is in {where_it_is} and is not in the backup: a restore brings back the              database and every attachment in it would 404"
         ),
+        ("attachments", "media-mode") => "attachments are excluded by backup.media_mode = profile_assets".into(),
         ("media", "disabled") => {
-            "media is excluded by backup.include_media = false".to_string()
+            "media is excluded by backup.media_mode = none".to_string()
         }
         _ => format!("{} is not in the backup ({})", e.kind, e.reason),
     }
@@ -555,10 +559,16 @@ async fn write_archive(pool: &SqlitePool, cfg: &Config) -> anyhow::Result<(PathB
         .fetch_one(pool)
         .await?;
 
+    let selected = if cfg.backup.media_mode == crate::config::MediaMode::ProfileAssets {
+        Some(profile_asset_hashes(&snapshot, &cfg.server_name).await?)
+    } else { None };
+    if selected.as_ref().is_some_and(|hashes| !hashes.is_empty()) && !cfg.media_dir.is_dir() {
+        anyhow::bail!("referenced profile assets cannot be backed up: media directory is missing");
+    }
     let cfg = cfg.clone();
     let done = final_path.clone();
     let out = tokio::task::spawn_blocking(move || -> anyhow::Result<(Manifest, [u8; 32])> {
-        let (parts, payload_bytes, payload_sha256) = build_payload(&cfg, &snapshot, &payload)?;
+        let (parts, payload_bytes, payload_sha256) = build_payload(&cfg, &snapshot, &payload, selected.as_deref())?;
         let manifest = Manifest {
             format: format::VERSION,
             server_name: cfg.server_name.clone(),
@@ -640,7 +650,7 @@ fn check_backup_space(path: &Path, reserve: i64, incoming: u64) -> io::Result<()
         if available < (reserve as u64).saturating_add(incoming) {
             return Err(io::Error::other(format!(
                 "backup refused to consume the filesystem reserve ({} free, {} reserved); \
-                 use another filesystem or reduce backup.include_media only if media is backed up separately",
+                 use another filesystem or change backup.media_mode only if media is backed up separately",
                 available, reserve,
             )));
         }
@@ -695,7 +705,32 @@ impl<R: Read> Read for HashingReader<R> {
     }
 }
 
-fn build_payload(cfg: &Config, snapshot: &Path, payload: &Path) -> anyhow::Result<(Vec<Part>, u64, [u8; 32])> {
+// Resolve against the snapshot so selection matches the database being restored.
+async fn profile_asset_hashes(snapshot: &Path, server: &str) -> anyhow::Result<Vec<String>> {
+    use sqlx::Connection;
+    let opts = sqlx::sqlite::SqliteConnectOptions::new().filename(snapshot).read_only(true);
+    let mut conn = sqlx::SqliteConnection::connect_with(&opts).await?;
+    let refs: Vec<String> = sqlx::query_scalar(
+        "SELECT avatar_ref FROM profiles WHERE avatar_ref IS NOT NULL
+         UNION SELECT banner_ref FROM profiles WHERE banner_ref IS NOT NULL
+         UNION SELECT icon_ref FROM guilds WHERE icon_ref IS NOT NULL
+         UNION SELECT media_hash FROM emojis
+         UNION SELECT media_hash FROM stickers"
+    ).fetch_all(&mut conn).await?;
+    let prefix = format!("media://{server}/");
+    let mut hashes = std::collections::BTreeSet::new();
+    for reference in refs {
+        let hash = reference.strip_prefix(&prefix).unwrap_or(&reference);
+        if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) { continue; }
+        let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media WHERE hash = ?)")
+            .bind(hash).fetch_one(&mut conn).await?;
+        if exists { hashes.insert(hash.to_owned()); }
+    }
+    conn.close().await?;
+    Ok(hashes.into_iter().collect())
+}
+
+fn build_payload(cfg: &Config, snapshot: &Path, payload: &Path, selected: Option<&[String]>) -> anyhow::Result<(Vec<Part>, u64, [u8; 32])> {
     let file = ReservedFile::new(
         std::fs::File::create(payload)?, payload, cfg.backup.min_free_bytes,
     )?;
@@ -712,8 +747,25 @@ fn build_payload(cfg: &Config, snapshot: &Path, payload: &Path) -> anyhow::Resul
         let (files, bytes) = add_dir(&mut tar, &cfg.archive.dir, Path::new("cold"), &[])?;
         parts.push(Part { kind: "cold".into(), name: "cold".into(), files, bytes });
     }
-    if cfg.backup.include_media && cfg.media_dir.is_dir() {
-        let (files, bytes) = add_dir(&mut tar, &cfg.media_dir, Path::new("media"), MEDIA_SKIP)?;
+    if cfg.backup.media_mode != crate::config::MediaMode::None && (cfg.media_dir.is_dir() || selected.is_some()) {
+        let (files, bytes) = if let Some(hashes) = selected {
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(tar::EntryType::Directory);
+            header.set_mode(0o700);
+            header.set_size(0);
+            header.set_cksum();
+            tar.append_data(&mut header, "media/", io::empty())?;
+            let mut bytes = 0;
+            for hash in hashes {
+                let relative = Path::new(&hash[..2]).join(hash);
+                let path = cfg.media_dir.join(&relative);
+                bytes += std::fs::metadata(&path)?.len();
+                tar.append_path_with_name(path, Path::new("media").join(relative))?;
+            }
+            (hashes.len() as u64, bytes)
+        } else {
+            add_dir(&mut tar, &cfg.media_dir, Path::new("media"), MEDIA_SKIP)?
+        };
         parts.push(Part { kind: "media".into(), name: "media".into(), files, bytes });
     }
 
