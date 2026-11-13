@@ -144,9 +144,13 @@ async fn store_expression_asset(
     if hash != uploaded_hash {
         crate::scan::screen_upload(state, uploader, &hash, &normalized.bytes).await?;
     }
-    // Serialize with ordinary media uploads so expression assets cannot
-    // bypass the same whole-server limit (or race another upload of this hash).
-    let _capacity_slot = state.media_capacity_lock.lock().await;
+    // Serialize with ordinary media uploads (when a whole-server budget is set)
+    // so expression assets cannot bypass the same limit.
+    let _capacity_slot = if state.cfg.media_policy.max_total_bytes > 0 {
+        Some(state.media_capacity_lock.lock().await)
+    } else {
+        None
+    };
     let existing: Option<String> = sqlx::query_scalar("SELECT hash FROM media WHERE hash = ?")
         .bind(&hash).fetch_optional(&state.pool).await?;
     if existing.is_none() {

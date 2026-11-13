@@ -559,7 +559,11 @@ async fn write_archive(pool: &SqlitePool, cfg: &Config) -> anyhow::Result<(PathB
         .fetch_one(pool)
         .await?;
 
-    let selected = if cfg.backup.media_mode == crate::config::MediaMode::ProfileAssets {
+    // Only a local media store can be selected from; an object store is
+    // reported as excluded and falls back to the pre-existing behaviour.
+    let selected = if cfg.backup.media_mode == crate::config::MediaMode::ProfileAssets
+        && cfg.media_store.store == crate::config::StoreBackend::Local
+    {
         Some(profile_asset_hashes(&snapshot, &cfg.server_name).await?)
     } else { None };
     if selected.as_ref().is_some_and(|hashes| !hashes.is_empty()) && !cfg.media_dir.is_dir() {
@@ -755,14 +759,24 @@ fn build_payload(cfg: &Config, snapshot: &Path, payload: &Path, selected: Option
             header.set_size(0);
             header.set_cksum();
             tar.append_data(&mut header, "media/", io::empty())?;
-            let mut bytes = 0;
+            let (mut files, mut bytes) = (0, 0);
             for hash in hashes {
                 let relative = Path::new(&hash[..2]).join(hash);
                 let path = cfg.media_dir.join(&relative);
-                bytes += std::fs::metadata(&path)?.len();
+                // One referenced file missing from disk must not fail every backup.
+                let len = match std::fs::metadata(&path) {
+                    Ok(m) => m.len(),
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                        tracing::warn!(target: crate::logcat::BACKUP, %hash, "referenced profile asset is missing from media_dir; skipped");
+                        continue;
+                    }
+                    Err(e) => return Err(e.into()),
+                };
                 tar.append_path_with_name(path, Path::new("media").join(relative))?;
+                files += 1;
+                bytes += len;
             }
-            (hashes.len() as u64, bytes)
+            (files, bytes)
         } else {
             add_dir(&mut tar, &cfg.media_dir, Path::new("media"), MEDIA_SKIP)?
         };

@@ -1211,7 +1211,7 @@ fn de_media_mode<'de, D: serde::Deserializer<'de>>(d: D) -> Result<MediaMode, D:
     match Input::deserialize(d)? {
         Input::Mode(mode) => Ok(mode),
         Input::Legacy(value) => {
-            tracing::warn!("backup.include_media is deprecated; use backup.media_mode = all or none");
+            tracing::warn!(target: crate::logcat::STARTUP, "backup.include_media is deprecated; use backup.media_mode = all or none");
             Ok(if value { MediaMode::All } else { MediaMode::None })
         }
     }
