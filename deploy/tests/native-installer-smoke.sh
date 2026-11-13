@@ -245,7 +245,7 @@ assert_contains /etc/telium/telium.toml 'default = "quota"'
 assert_contains /etc/telium/telium.toml 'quota_bytes = "1GiB"'
 assert_contains /etc/telium/telium.toml 'max_file_bytes = "50MiB"'
 assert_contains /etc/telium/telium.toml 'attachment_max_age_days = 0'
-assert_contains /etc/telium/telium.toml 'include_media = true'
+assert_contains /etc/telium/telium.toml 'media_mode = "all"'
 assert_contains /etc/telium/telium.toml 'interval_secs = "6h"'
 assert_contains /etc/telium/telium.toml 'min_free_bytes = "'
 assert_contains "$work/fresh.log" 'Found '
@@ -274,7 +274,7 @@ assert_contains "$work/rerun.log" "deployed "
 assert_contains "$work/rerun.log" "Enter your saved private registration code"
 assert_contains "$work/rerun.log" "existing configuration and administrator access were preserved"
 assert_contains /etc/telium/telium.toml 'attachment_max_age_days = 0'
-assert_contains /etc/telium/telium.toml 'include_media = true'
+assert_contains /etc/telium/telium.toml 'media_mode = "all"'
 assert_absent "$work/rerun.log" 'Storage configuration'
 assert_absent "$work/rerun.log" "Enter the one-time registration code shown above"
 assert_absent "$work/rerun.log" "admin recover USERNAME"
@@ -343,7 +343,7 @@ assert_contains "$work/open.log" "Registration is open; no invitation code is re
 assert_contains /etc/telium/telium.toml 'attachment_max_age_days = 30'
 assert_contains /etc/telium/telium.toml 'default_expiry_secs = 0'
 assert_contains /etc/telium/telium.toml 'max_expiry_secs = 0'
-assert_contains /etc/telium/telium.toml 'include_media = false'
+assert_contains /etc/telium/telium.toml 'media_mode = "profile_assets"'
 assert_contains "$work/open.log" 'Backups EXCLUDE uploaded files'
 assert_absent "$work/open.log" "Further registration codes"
 assert_absent "$work/open.log" "If your setup code was lost"
@@ -384,7 +384,7 @@ assert_contains /etc/telium/telium.toml 'quota_bytes = "256MiB"'
 assert_contains /etc/telium/telium.toml 'max_file_bytes = "100MiB"'
 assert_contains /etc/telium/telium.toml 'max_total_bytes = "1GiB"'
 assert_contains /etc/telium/telium.toml 'attachment_max_age_days = 7'
-assert_contains /etc/telium/telium.toml 'include_media = true'
+assert_contains /etc/telium/telium.toml 'media_mode = "all"'
 assert_contains /etc/telium/telium.toml 'interval_secs = "12h"'
 assert_contains /etc/telium/telium.toml 'keep = 3'
 unset TELIUM_MEDIA_POLICY TELIUM_MEDIA_QUOTA TELIUM_MEDIA_FILE_MAX TELIUM_MEDIA_TOTAL

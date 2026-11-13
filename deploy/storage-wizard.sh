@@ -75,9 +75,9 @@ storage_wizard() {
   printf '  Retention deletes attachments EVEN WHEN STILL REFERENCED by messages.\n' >&2
   storage_retention_days="$(storage_ask TELIUM_MEDIA_RETENTION_DAYS 'Delete uploads after N days (0 = no forced expiry)' "$expiry_default" '^(0|[1-9][0-9]{0,3})$')" || return 1
 
-  printf '  Media backups make multiple copies of the same files; excluding them\n' >&2
+  printf '  Attachment backups make multiple copies of the same files; excluding them\n' >&2
   printf '  means those attachments cannot be restored after a disk failure.\n' >&2
-  storage_backup_media="$(storage_ask TELIUM_BACKUP_MEDIA 'Include media in backups? (yes/no)' "$backup_media_default" '^(yes|no)$')" || return 1
+  storage_backup_media="$(storage_ask TELIUM_BACKUP_MEDIA 'Include attachments in backups? (yes/no)' "$backup_media_default" '^(yes|no)$')" || return 1
   storage_backup_interval="$(storage_ask TELIUM_BACKUP_INTERVAL 'Backup frequency (6h, 12h, 1d)' 6h '^[1-9][0-9]{0,2}(h|d)$')" || return 1
   storage_backup_keep="$(storage_ask TELIUM_BACKUP_KEEP 'Local backups to retain' 8 '^[1-9][0-9]{0,2}$')" || return 1
   storage_backup_free="$(storage_ask TELIUM_BACKUP_FREE_RESERVE 'Reserved free space for backups (0 = disabled)' "${backup_reserve_gib}GiB" "$size_re")" || return 1
@@ -100,11 +100,13 @@ storage_wizard() {
     printf '  Profile pictures and custom emoji are not subject to this age rule.\n' >&2
   fi
   if [[ "$storage_backup_media" == yes ]]; then
-    storage_include_media=true
+    storage_backup_media_mode=all
   else
-    storage_include_media=false
-    printf '  WARNING: Backups EXCLUDE uploaded files, avatars and custom emoji.\n' >&2
-    printf '  A disk failure will permanently lose media without a separate media backup.\n' >&2
+    # Avatars, banners, guild icons, emoji and stickers are small; keep them.
+    storage_backup_media_mode=profile_assets
+    printf '  WARNING: Backups EXCLUDE uploaded files (attachments). Avatars, banners,\n' >&2
+    printf '  guild icons, emoji and stickers are still backed up. A disk failure will\n' >&2
+    printf '  permanently lose attachments without a separate media backup.\n' >&2
   fi
   if [[ "$storage_media_total" == 0 || "$storage_policy" == enabled ]]; then
     printf '  WARNING: One or more upload budgets are unlimited.\n' >&2

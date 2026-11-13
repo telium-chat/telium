@@ -298,7 +298,7 @@ key_file = "$BACKUPS/backup.key"
 enabled = true
 interval_secs = "$storage_backup_interval"
 keep = $storage_backup_keep
-include_media = $storage_include_media
+media_mode = "$storage_backup_media_mode"
 min_free_bytes = "$storage_backup_free"
 
 [mfa]
