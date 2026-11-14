@@ -151,7 +151,7 @@ const regionCodes = [
                   <div class="mt-0.5 font-mono text-[12.5px] text-muted" data-preview-domain>–</div>
                 </td>
                 <td class="hidden py-3 pr-4 text-[13.5px] text-muted sm:table-cell" data-preview-region>–</td>
-                <td class="tnum hidden py-3 text-right text-[13.5px] text-muted md:table-cell" data-preview-band>–</td>
+                <td class="tnum hidden py-3 pr-4 text-right text-[13.5px] text-muted md:table-cell" data-preview-band>–</td>
                 <td class="tnum py-3 text-right text-[13.5px] text-muted" title="Uptime starts at the first hourly probe after the merge">–</td>
               </tr>
             </tbody>
@@ -162,6 +162,16 @@ const regionCodes = [
             <dd data-preview-operator>–</dd>
             <dt class="text-muted">Version</dt>
             <dd class="font-mono" data-preview-version>–</dd>
+            <div style="display: contents" data-preview-server-rows>
+              <dt class="text-muted">Registration</dt>
+              <dd data-preview-registration>–</dd>
+              <dt class="text-muted">Uploads</dt>
+              <dd data-preview-uploads>–</dd>
+              <dt class="text-muted">Max file</dt>
+              <dd class="tnum" data-preview-maxfile>–</dd>
+              <dt class="text-muted">Files expire after</dt>
+              <dd class="tnum" data-preview-expiry>–</dd>
+            </div>
           </dl>
         </div>
       </div>
@@ -353,6 +363,8 @@ const regionCodes = [
 </style>
 
 <script>
+  import { formatBytes, formatSpan, flagOf } from '../lib/registry-format'
+
   /* Progressive enhancement, the same discipline as ServerTable: the page
      above is complete without JavaScript — the checks read as instructions,
      the manual path is open — and this script turns it into the wizard. */
@@ -420,6 +432,11 @@ const regionCodes = [
     const previewDescription = root.querySelector<HTMLElement>('[data-preview-description]')!
     const previewOperator = root.querySelector<HTMLElement>('[data-preview-operator]')!
     const previewVersion = root.querySelector<HTMLElement>('[data-preview-version]')!
+    const previewServerRows = root.querySelector<HTMLElement>('[data-preview-server-rows]')!
+    const previewRegistration = root.querySelector<HTMLElement>('[data-preview-registration]')!
+    const previewUploads = root.querySelector<HTMLElement>('[data-preview-uploads]')!
+    const previewMaxFile = root.querySelector<HTMLElement>('[data-preview-maxfile]')!
+    const previewExpiry = root.querySelector<HTMLElement>('[data-preview-expiry]')!
 
     const preflight = root.querySelector<HTMLElement>('[data-preflight]')!
     const githubButton = root.querySelector<HTMLAnchorElement>('[data-github-button]')!
@@ -860,10 +877,27 @@ const regionCodes = [
       if (current) {
         previewName.textContent = str(current.name) || '–'
         previewDomain.textContent = check!.identity
-        previewRegion.textContent = str((current.region as any)?.label) || '–'
+        const regionLabel = str((current.region as any)?.label)
+        previewRegion.textContent = regionLabel ? `${flagOf(regionLabel)} ${regionLabel}` : '–'
+        const media = check!.capabilities?.media
+        const caps = check!.capabilities
+        // The same fields, read the same way, as the hourly probe stores and the table shows.
+        previewServerRows.style.display = mode === 'server' ? 'contents' : 'none'
         previewBand.textContent = mode === 'server'
-          ? (check!.capabilities?.registration_open === true ? 'Open' : 'Closed')
+          ? (typeof media?.max_file_bytes === 'number' ? formatBytes(media.max_file_bytes) : '–')
           : (str(current.capacity_band) || '–')
+        if (mode === 'server') {
+          previewRegistration.textContent = typeof caps?.registration_open === 'boolean'
+            ? `${caps.registration_open ? 'Open' : 'Closed'}${caps.registration_code_required ? ' · invite code required' : ''}`
+            : '–'
+          previewUploads.textContent = typeof media?.enabled === 'boolean'
+            ? `${media.enabled ? 'Enabled' : 'Disabled'}${media.default_policy ? ` · default ${media.default_policy}` : ''}`
+            : '–'
+          previewMaxFile.textContent = typeof media?.max_file_bytes === 'number' ? formatBytes(media.max_file_bytes) : '–'
+          previewExpiry.textContent = typeof media?.attachment_max_age_days === 'number'
+            ? formatSpan(media.attachment_max_age_days * 86400, 'Never')
+            : '–'
+        }
         previewDescription.textContent = str(current.description)
         previewOperator.textContent = str((current.operator as any)?.name) || '–'
         previewVersion.textContent = str((mode === 'server' ? check!.capabilities?.server_version : undefined)) || '–'
