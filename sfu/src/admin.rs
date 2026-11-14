@@ -451,10 +451,11 @@ async fn setup_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) ->
     if !authenticated(&state, &headers).await {
         return Redirect::to("/admin/login").into_response();
     }
+    let portable = state.cfg.admin.install_mode == "portable";
     // Compose deployments do not have the native host-side sudo helper, and
     // their sfu.toml is intentionally read-only. Do not present a wizard
     // that will fail after asking for domains and certificates.
-    if !native_admin_helper_available(&state.cfg.admin.helper_path) {
+    if !portable && !native_admin_helper_available(&state.cfg.admin.helper_path) {
         return page(
             "Configure the Compose SFU",
             r#"<h1>Configure your Compose SFU on the host</h1>
@@ -476,11 +477,30 @@ async fn setup_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) ->
     let livekit_domain = public_host(&current.livekit.public_url);
     let checked = if current.trust.public { "checked" } else { "" };
     let origin = current.trust.origins.first();
+    let setup_description = if portable {
+        "Portable installation: Telium saves its config but does NOT manage nginx, Certbot, HTTPS certificates or firewall rules. Use your existing reverse proxy."
+    } else {
+        "Full installation: Telium configures nginx, HTTPS certificates, LiveKit signaling and recommended firewall ports."
+    };
+    let email_input = if portable {
+        r#"<input type="hidden" name="email" value="">"#
+    } else {
+        r#"<label>Let's Encrypt email<input type="email" name="email" placeholder="admin@example.com" required></label>"#
+    };
+    let setup_footer = if portable {
+        r#"<strong>Before continuing:</strong> Configure your existing proxy to send HTTPS requests
+        for the SFU domain to <code>127.0.0.1:7890</code>, and LiveKit HTTPS/WebSocket requests
+        to <code>127.0.0.1:7880</code>. Keep the admin dashboard private using an
+        SSH tunnel to <code>127.0.0.1:7891</code>. Allow the appropriate LiveKit media ports
+        through your firewall (UDP 3478 and 50000-60000, TCP 7881)."#
+    } else {
+        r#"<strong>Before continuing:</strong> create DNS A/AAAA records for both domains pointing at this machine. The installer handles nginx and Certbot after that."#
+    };
     let html = format!(
         r#"
         <nav><strong>Telium SFU</strong><span><a href="/admin/status">Status</a> · <a href="/admin/trust">Trusted servers</a> · <a href="/admin/setup">Configure</a></span></nav>
         <h1>Finish your SFU</h1>
-        <p>This configures Telium, nginx, HTTPS certificates, LiveKit's public signaling URL, and the recommended firewall ports.</p>
+        <p>{setup_description}</p>
         <form method="post" action="/admin/setup">
           <label>SFU domain
             <input name="sfu_domain" placeholder="sfu.example.com" value="{sfu_domain}" required>
@@ -490,9 +510,7 @@ async fn setup_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) ->
             <input name="livekit_domain" placeholder="livekit.example.com" value="{livekit_domain}" required>
             <small>Used for secure LiveKit WebSocket signaling.</small>
           </label>
-          <label>Let's Encrypt email
-            <input type="email" name="email" placeholder="admin@example.com" required>
-          </label>
+          {email_input}
           <label class="check"><input type="checkbox" name="public_sfu" {checked}> Make this a public SFU</label>
           <hr>
           <h2>Private SFU trust</h2>
@@ -505,13 +523,16 @@ async fn setup_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) ->
           </label>
           <button type="submit">Configure everything</button>
         </form>
-        <aside><strong>Before continuing:</strong> create DNS A/AAAA records for both domains pointing at this machine. The installer handles nginx and Certbot after that.</aside>
+        <aside>{setup_footer}</aside>
         "#,
         sfu_domain = esc(&sfu_domain),
         livekit_domain = esc(&livekit_domain),
         checked = checked,
         origin_name = esc(origin.map(|o| o.server_name.as_str()).unwrap_or("")),
         origin_url = esc(origin.and_then(|o| o.discovery_url.as_deref()).unwrap_or("")),
+        setup_description = setup_description,
+        email_input = email_input,
+        setup_footer = setup_footer,
     );
     page("Configure Telium SFU", &html)
 }
@@ -524,7 +545,8 @@ async fn apply_setup(
     if !authenticated(&state, &headers).await {
         return Redirect::to("/admin/login").into_response();
     }
-    if !native_admin_helper_available(&state.cfg.admin.helper_path) {
+    let portable = state.cfg.admin.install_mode == "portable";
+    if !portable && !native_admin_helper_available(&state.cfg.admin.helper_path) {
         return error_page(
             StatusCode::BAD_REQUEST,
             "The setup wizard requires the native host helper. Configure Compose on the host; see deploy/README.md.",
@@ -536,7 +558,7 @@ async fn apply_setup(
     if !valid_domain(&sfu_domain) || !valid_domain(&livekit_domain) {
         return error_page(StatusCode::BAD_REQUEST, "Enter valid DNS hostnames, not URLs or IP:port values.");
     }
-    if !form.email.contains('@') {
+    if !portable && !form.email.contains('@') {
         return error_page(StatusCode::BAD_REQUEST, "Enter a valid email address for Let's Encrypt.");
     }
 
@@ -565,33 +587,49 @@ async fn apply_setup(
         }
     }
 
-    if let Err(e) = apply_proxy(&sfu_domain, &livekit_domain, form.email.trim()).await {
-        return error_page(
-            StatusCode::BAD_GATEWAY,
-            &format!("nginx/Certbot setup failed: {e}. Check DNS, then submit this page again."),
-        );
+    if !portable {
+        if let Err(e) = apply_proxy(&sfu_domain, &livekit_domain, form.email.trim()).await {
+            return error_page(
+                StatusCode::BAD_GATEWAY,
+                &format!("nginx/Certbot setup failed: {e}. Check DNS, then submit this page again."),
+            );
+        }
     }
 
     if let Err(e) = write_config(&state.config_path, &cfg) {
         return error_page(StatusCode::INTERNAL_SERVER_ERROR, &format!("Could not save sfu.toml: {e}"));
     }
 
-    schedule_restart(Duration::from_millis(800));
+    if portable {
+        schedule_portable_restart(Duration::from_millis(800));
+    } else {
+        schedule_restart(Duration::from_millis(800));
+    }
+    let result_note = if portable {
+        "Configuration saved and the SFU is restarting. Configure your HTTPS/WebSocket reverse proxy separately; Telium has not changed it."
+    } else {
+        "HTTPS is configured and the SFU is restarting with the new settings."
+    };
 
+    let dashboard_url = if portable {
+        "http://localhost:7891/admin".to_string()
+    } else {
+        format!("https://{sfu_domain}/admin")
+    };
     page(
         "Telium SFU configured",
         &format!(
             r#"<h1>You're done.</h1>
-            <p>HTTPS is configured and the SFU is restarting with the new settings.</p>
+            <p>{result_note}</p>
             <p>SFU endpoint: <code>https://{}</code></p>
             <p>LiveKit signaling: <code>wss://{}</code></p>
-            <p>Dashboard: <a href="https://{}/admin">https://{}/admin</a></p>
+            <p>Dashboard: <a href="{dashboard_url}">{dashboard_url}</a></p>
             <p>You can now add <code>https://{}</code> as a Telium voice region.</p>"#,
             esc(&sfu_domain),
             esc(&livekit_domain),
             esc(&sfu_domain),
-            esc(&sfu_domain),
-            esc(&sfu_domain),
+            result_note = result_note,
+            dashboard_url = esc(&dashboard_url),
         ),
     )
 }
@@ -738,14 +776,27 @@ async fn restart(State(state): State<Arc<AdminState>>, headers: HeaderMap) -> Re
     if !authenticated(&state, &headers).await {
         return Redirect::to("/admin/login").into_response();
     }
-    if !native_admin_helper_available(&state.cfg.admin.helper_path) {
-        return error_page(
-            StatusCode::BAD_REQUEST,
-            "Restart this Compose deployment on the host using docker compose restart sfu.",
-        );
+    if state.cfg.admin.install_mode == "portable" {
+        schedule_portable_restart(Duration::from_millis(500));
+    } else {
+        if !native_admin_helper_available(&state.cfg.admin.helper_path) {
+            return error_page(
+                StatusCode::BAD_REQUEST,
+                "Restart this Compose deployment on the host using docker compose restart sfu.",
+            );
+        }
+        schedule_restart(Duration::from_millis(500));
     }
-    schedule_restart(Duration::from_millis(500));
     page("Restarting", "<h1>Restarting SFU…</h1><p>The service will be back in a moment.</p>")
+}
+
+/// Portable deployments use systemd Restart=always, so an unprivileged exit
+/// reloads the configuration without installing a privileged admin helper.
+fn schedule_portable_restart(delay: Duration) {
+    tokio::spawn(async move {
+        tokio::time::sleep(delay).await;
+        std::process::exit(0);
+    });
 }
 
 fn schedule_restart(delay: Duration) {
@@ -950,6 +1001,24 @@ pub fn now_ms() -> i64 {
 fn write_config(path: &Path, cfg: &SfuConfig) -> anyhow::Result<()> {
     let text = toml::to_string_pretty(cfg)?;
     let tmp = path.with_extension("toml.tmp");
+    // The TOML contains the LiveKit API secret. Use restrictive permissions
+    // before writing any secret bytes; std::fs::write creates mode 0644 under
+    // a typical umask, which would leak credentials on a shared machine.
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .mode(0o600)
+            .open(&tmp)?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+    }
+    #[cfg(not(unix))]
     std::fs::write(&tmp, text)?;
     std::fs::rename(tmp, path)?;
     Ok(())
@@ -1074,6 +1143,24 @@ mod tests {
         for path in ["/tmp/forged-helper", "bin/../other-helper", "/usr/local/bin/sudo"] {
             assert!(!native_admin_helper_available(path), "unexpected helper path: {path}");
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saved_sfu_config_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("telium-config-test-{}", random_token()));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("sfu.toml");
+        let mut cfg = SfuConfig::default();
+        cfg.admin.install_mode = "portable".into();
+        cfg.livekit.api_secret = "private-test-credential".into();
+        write_config(&path, &cfg).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        let loaded = SfuConfig::load(&path).unwrap();
+        assert_eq!(loaded.admin.install_mode, "portable");
+        assert_eq!(loaded.livekit.api_secret, "private-test-credential");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
