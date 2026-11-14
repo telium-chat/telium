@@ -236,6 +236,12 @@ async fn stage_body(
             let cap = global_cap.min(state.cfg.media_policy.max_profile_asset_bytes);
             (cap, format!("profile assets are capped at {cap} bytes; crop or downscale it first"))
         }
+        // Expression bytes are public by hash and outside attachment
+        // retention, so hold them to the emoji route's own ceiling.
+        "expression" => {
+            let cap = global_cap.min(crate::routes::guild::MAX_EXPRESSION_BYTES);
+            (cap, format!("expression assets are capped at {cap} bytes"))
+        }
         "attachment" => match dest_cap {
             Some(dest) if usize::try_from(dest).unwrap_or(usize::MAX) < global_cap => (
                 usize::try_from(dest).unwrap_or(usize::MAX),
@@ -349,6 +355,12 @@ pub async fn store_bytes(
         )));
     }
 
+    if purpose == "expression" && body.len() > crate::routes::guild::MAX_EXPRESSION_BYTES {
+        return Err(ApiError::TooLarge(format!(
+            "expression assets are capped at {} bytes",
+            crate::routes::guild::MAX_EXPRESSION_BYTES
+        )));
+    }
     let digests = crate::scan::UploadDigests::of(&body);
     let hash = digests.blake3.clone();
     crate::scan::screen_upload_digests(state, user_id, &digests, &hash, body.len()).await?;

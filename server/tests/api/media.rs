@@ -1049,6 +1049,35 @@ async fn shared_bytes_used_as_an_avatar_escape_attachment_policy() {
 }
 
 #[tokio::test]
+async fn a_large_file_cannot_dodge_retention_by_calling_itself_an_expression() {
+    let s = start_with(|cfg| cfg.media_policy.default_expiry_secs = 3_600).await;
+    let alice = s.user("alice").await;
+    let big = vec![7u8; telium_server::routes::guild::MAX_EXPRESSION_BYTES + 1];
+
+    let expression = |body: Vec<u8>| {
+        s.client
+            .post(format!("{}/_telium/v1/media", s.base))
+            .bearer_auth(&alice.home)
+            .header("X-Telium-Purpose", "expression")
+            .header("Content-Type", "image/png")
+            .body(body)
+            .send()
+    };
+    let refused = expression(big.clone()).await.unwrap();
+    assert_eq!(refused.status().as_u16(), 413, "a new expression over the emoji ceiling");
+
+    // Nor by re-uploading an attachment's bytes as one: the row keeps its
+    // attachment purpose and expiry.
+    let attachment = upload_as(&s, &alice, "attachment", big.clone(), &[]).await;
+    let hash = attachment["hash"].as_str().unwrap().to_string();
+    let refused = expression(big).await.unwrap();
+    assert_eq!(refused.status().as_u16(), 413);
+    let (expires, purpose) = stored_expiry(&s, &hash).await;
+    assert!(expires.is_some());
+    assert_eq!(purpose, "attachment");
+}
+
+#[tokio::test]
 async fn the_age_sweep_takes_only_attachments_past_the_ceiling() {
     let s = start_with(|cfg| cfg.media_policy.attachment_max_age_days = 1).await;
     let alice = s.user("alice").await;
