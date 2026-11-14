@@ -1,0 +1,55 @@
+---
+import LegalPage from '../components/LegalPage.astro'
+import { URLS } from '../config'
+---
+
+<LegalPage
+  title="Terms"
+  description="Terms for using the telium.chat website, and how homeserver terms relate to it."
+  updated="2026-11-13"
+>
+  <p>
+    These terms cover your use of <strong>telium.chat</strong>: the website, the server
+    directory and the hosted copy of the web client. They do not cover homeservers.
+  </p>
+
+  <h2>Telium is a network of independent servers</h2>
+  <p>
+    Telium is free software under the <a href={URLS.license}>Apache-2.0 licence</a>. Anyone can run a
+    homeserver, and each is run by its own operator. When you create an account on a
+    homeserver you accept <strong>that operator's terms</strong>, not ours, and the operator
+    alone is responsible for the server, its content and its moderation. We do not operate,
+    endorse or control the servers listed in the directory, and we cannot read, restore or
+    remove anything stored on them.
+  </p>
+
+  <h2>Using this website</h2>
+  <ul>
+    <li>You may use the site and hosted client for lawful purposes.</li>
+    <li>Don't attack, overload or scrape the site or the directory in ways that disrupt it.</li>
+    <li>
+      Don't use the directory to misrepresent a server you don't run. The directory is for
+      servers their own operators list.
+    </li>
+  </ul>
+
+  <h2>Directory listings</h2>
+  <p>
+    Listing is by pull request to the public registry. We may remove or hide a listing that
+    is unreachable, misrepresents itself, or shows a pattern of serious abuse reported and
+    ignored. Being listed is not an endorsement.
+  </p>
+
+  <h2>No warranty</h2>
+  <p>
+    The site and software are provided as they are, without warranty of any kind, and the
+    contributors are not liable for losses arising from their use, to the extent the law
+    allows. Telium is pre-1.0 software: keep your own backups of anything you can't lose.
+  </p>
+
+  <h2>Changes and contact</h2>
+  <p>
+    We may update these terms; the date at the top shows the latest revision. Questions go to
+    <a href={URLS.github}>GitHub</a>.
+  </p>
+</LegalPage>

@@ -1,0 +1,69 @@
+---
+import LegalPage from '../components/LegalPage.astro'
+import { URLS } from '../config'
+---
+
+<LegalPage
+  title="Privacy"
+  description="What telium.chat collects (almost nothing) and who is responsible for your data on a homeserver."
+  updated="2026-11-13"
+>
+  <p>
+    This page covers <strong>telium.chat, the website and the copy of the Telium web client we host</strong>.
+    It does not cover any homeserver. Homeservers are run by independent operators, and
+    your account, messages and files live on the one you choose.
+  </p>
+
+  <h2>What this website collects</h2>
+  <ul>
+    <li>No accounts, no sign-up and no cookies.</li>
+    <li>No analytics, no advertising, no third-party fonts and no trackers.</li>
+    <li>
+      Your browser stores two preferences locally, and they never leave your device: your
+      theme choice and whether the directory may measure latency to servers.
+    </li>
+  </ul>
+  <p>
+    The site is served as static files by our hosting provider (Cloudflare). Like any web
+    host, the provider may keep standard request logs such as IP address and requested
+    page. We do not receive or analyse them.
+  </p>
+
+  <h2>The directory and latency checks</h2>
+  <p>
+    The <a href={URLS.servers}>server directory</a> lists homeservers that asked to be listed.
+    Registration status, versions and uptime come from our own periodic checks of those
+    servers' public endpoints. The latency column is measured <strong>by your browser</strong>
+    contacting each listed server directly, so each of those servers can see your IP address
+    for that request. You can switch this off in the directory; nothing else on the site
+    depends on it.
+  </p>
+
+  <h2>The hosted web client</h2>
+  <p>
+    The client at telium.chat is the same static program anyone can host. It runs in your
+    browser and talks directly to the homeserver you give it. Your messages, account and
+    files are never sent to telium.chat, which only delivers the program itself.
+  </p>
+
+  <h2>Your homeserver</h2>
+  <p>
+    Whoever runs your homeserver controls what is stored about you there, how long it is kept,
+    and who can see it. In a federated network, servers that share a guild with yours also
+    receive the content and the account identifiers needed for that guild to work. Before
+    you sign up, read the privacy policy and terms the operator publishes. Operators are expected to
+    publish them; if you can't find any, ask the operator before you trust the server with anything sensitive.
+  </p>
+  <p>
+    Direct messages and calls use end-to-end encryption where your client and the other
+    person's client support it. An operator cannot read content that is encrypted end to end,
+    but can still see metadata such as who talks to whom and when.
+  </p>
+
+  <h2>Questions</h2>
+  <p>
+    For this website, open an issue on <a href={URLS.github}>GitHub</a>. For a security
+    problem, use the private reporting flow described in the repository's security policy.
+    For anything on a homeserver, contact that server's operator (see <a href="/abuse">Abuse and takedowns</a>).
+  </p>
+</LegalPage>
