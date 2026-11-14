@@ -95,7 +95,7 @@ command -v useradd   >/dev/null 2>&1 || die "useradd is required to create the t
 
 # Catch incomplete, individually downloaded installers before modifying the host.
 # bootstrap-native.sh always fetches these files together.
-for required_file in storage-wizard.sh update-native.sh telium-server.service telium-update-native.service telium-update-native.timer; do
+for required_file in storage-wizard.sh setup-caddy.sh update-native.sh telium-server.service telium-update-native.service telium-update-native.timer; do
   [ -f "$here/$required_file" ] ||
     die "missing $required_file beside install-native.sh; use bootstrap-native.sh or download the complete deploy directory"
 done
@@ -134,7 +134,7 @@ if [ -e "$BIN" ]; then
        { [ -d "$BACKUPS" ] && [ -n "$(find "$BACKUPS" -mindepth 1 -print -quit)" ]; }; then
     die "$BIN exists without $CONF, but server data or backups remain; restore the original config before continuing"
   else
-    say "recovering an interrupted first install (no existing config or database)"
+    say "an earlier install was interrupted before it saved anything; continuing it"
   fi
 elif [ -e "$CONF" ]; then
   die "$CONF exists without the installed server binary; restore the binary through the recovery procedure before rerunning"
@@ -148,9 +148,9 @@ if { [ ! -f "$CONF" ] || ! grep -qE '^[[:space:]]*\[registration\][[:space:]]*(#
 fi
 
 step "Installing for chat on $DOMAIN ($machine)"
-say "setup uses root privileges, but the server service runs as the unprivileged 'telium' account"
+say "this setup runs as root, but the server itself runs as a separate, restricted 'telium' user"
 if [ "${SUDO_USER:-root}" = root ]; then
-  say "for routine administration, use sudo from a regular login; do not run the homeserver as root"
+  say "afterwards, log in as a normal user and use sudo for admin tasks instead of working as root"
 fi
 
 # ---------------------------------------------------------------- the binary
@@ -164,7 +164,7 @@ fi
 
 if [ "$existing_install" -eq 1 ]; then
   step "Existing server"
-  say "keeping the installed binary; the signed updater handles backups and restarts"
+  say "keeping the server that is already installed; the updater takes care of upgrades"
 else
   step "Downloading the server"
   tmp="$(mktemp -d)"
@@ -192,7 +192,8 @@ else
 
   install -Dm755 "$tmp/telium-server" "$BIN"
   install -Dm644 "$tmp/telium.example.toml" "$EXAMPLE"
-  say "$BIN is release ${commit:0:12}; the annotated config is at $EXAMPLE"
+  say "installed the Telium server (build ${commit:0:12}) at $BIN"
+  say "a sample config explaining every setting is at $EXAMPLE"
 fi
 
 # ------------------------------------------------------------ user and paths
@@ -215,6 +216,54 @@ as_telium() (
 
 # --------------------------------------------------------------- the config
 #
+# Ask who may sign up. Sets $registration to open or closed.
+ask_registration() {
+  printf '\nLet anyone create an account on this server? [y/N]\n'
+  printf '  y = public: anybody who finds your server can sign up.\n'
+  printf '  N = private: only people you give a registration code to can sign up.\n'
+  printf '  You can change this later in %s.\n> ' "$CONF"
+  read -r answer || die "could not read your answer"
+  case "$answer" in
+    y|Y|yes|YES) registration=open ;;
+    ""|n|N|no|NO) registration=closed ;;
+    *) die "please answer y (yes) or n (no)" ;;
+  esac
+}
+
+# Ask whether to set up HTTPS now. Sets $https_choice to caddy or manual.
+# Unattended runs do nothing unless TELIUM_HTTPS=caddy is set, because HTTPS
+# needs DNS and open ports that only the person at the keyboard can vouch for.
+ask_https() {
+  https_choice="${TELIUM_HTTPS:-}"
+  if [ -z "$https_choice" ]; then
+    if [ ! -t 0 ] || { ! command -v apt-get >/dev/null 2>&1 && ! command -v caddy >/dev/null 2>&1; }; then
+      https_choice=manual
+      return 0
+    fi
+    printf '\nSet up HTTPS for %s automatically? [y/N]\n' "$DOMAIN"
+    printf '  Browsers and other servers need HTTPS to talk to you. This installs Caddy, a\n'
+    printf '  small web server that gets and renews a free certificate for you.\n'
+    printf '  Say N if you already have a web server or tunnel (for example Cloudflare)\n'
+    printf '  handling this; the end of the setup shows how to connect it by hand.\n'
+    printf '  Before you say y:\n'
+    printf '    - DNS for %s must already point at this machine, and\n' "$DOMAIN"
+    printf '    - ports 80 and 443 must be open to the internet.\n> '
+    read -r answer || die "could not read your answer"
+    case "$answer" in
+      y|Y|yes|YES) https_choice=caddy ;;
+      ""|n|N|no|NO) https_choice=manual ;;
+      *) die "please answer y (yes) or n (no)" ;;
+    esac
+  fi
+  case "$https_choice" in
+    caddy|manual) : ;;
+    *) die "TELIUM_HTTPS must be caddy or manual" ;;
+  esac
+}
+
+https_choice=manual
+https_ok=0
+#
 # Preserve all existing configuration on reruns. The one exception is
 # installer-generated configs missing [registration] from older releases:
 # they receive an appended safe registration section after the operator chooses.
@@ -222,25 +271,20 @@ as_telium() (
 step "Configuration"
 
 if [ -e "$CONF" ]; then
-  say "$CONF already exists; left alone"
+  say "$CONF already exists; keeping it as it is"
 else
   # Choose registration once; storage defaults depend on public vs private.
   # Existing configs never enter this path and are not rewritten.
   registration="${TELIUM_REGISTRATION:-}"
   if [ -z "$registration" ]; then
     [ -t 0 ] || die "unattended setup requires TELIUM_REGISTRATION=closed or TELIUM_REGISTRATION=open"
-    printf '\nAllow anyone to create an account on this server? [y/N] '
-    read -r answer || die "could not read the registration choice"
-    case "$answer" in
-      y|Y|yes|YES) registration=open ;;
-      ""|n|N|no|NO) registration=closed ;;
-      *) die "choose yes or no" ;;
-    esac
+    ask_registration
   fi
   case "$registration" in
     open|closed) : ;;
     *) die "TELIUM_REGISTRATION must be open or closed" ;;
   esac
+  ask_https
 
   # New-install media and backup policy, with defaults based on actual disk
   # space. Unattended operators may override each choice using TELIUM_* vars.
@@ -312,7 +356,7 @@ client_url = "https://telium.chat"
 invite_portal = "https://telium.chat"
 EOF
   mv -f "$generated_conf" "$CONF"
-  say "$CONF written for $DOMAIN"
+  say "saved your settings to $CONF"
 fi
 
 # --------------------------------------------------------- registration setup
@@ -326,13 +370,7 @@ if ! grep -qE '^[[:space:]]*\[registration\][[:space:]]*(#.*)?$' "$CONF"; then
   registration="${registration:-${TELIUM_REGISTRATION:-}}"
   if [ -z "$registration" ]; then
     [ -t 0 ] || die "unattended setup requires TELIUM_REGISTRATION=closed or TELIUM_REGISTRATION=open; refusing to guess"
-    printf '\nAllow anyone to create an account on this server? [y/N] '
-    read -r answer || die "could not read the registration choice"
-    case "$answer" in
-      y|Y|yes|YES) registration=open ;;
-      ""|n|N|no|NO) registration=closed ;;
-      *) die "choose yes or no" ;;
-    esac
+    ask_registration
   fi
   case "$registration" in
     open) registration_bool=true ;;
@@ -355,12 +393,13 @@ EOF
   chmod 600 "$registration_conf"
   mv -f "$registration_conf" "$CONF"
   if [ "$registration" = closed ]; then
-    say "registration PRIVATE: only people with a valid registration code can sign up"
+    say "registration PRIVATE: only people with a registration code can sign up"
   else
-    say "registration OPEN: anyone can sign up, but no signup automatically becomes admin"
+    say "registration OPEN: anyone can sign up. Nobody becomes an admin automatically;"
+    say "you will make your own account the admin in the last step"
   fi
 else
-  say "existing [registration] policy retained"
+  say "keeping the sign-up setting already in $CONF"
 fi
 
 # ----------------------------------------------------------------- the units
@@ -401,11 +440,11 @@ TELIUM_UPDATES=automatic
 # TELIUM_HEALTH_URL=    local health URL if you changed the default 127.0.0.1:8448 bind
 # TELIUM_HEALTH_RETRIES=30  checks after restart before reporting a failure
 EOF
-  say "$UPD_CONF written: updates are ON"
+  say "$UPD_CONF written: automatic updates are ON"
 fi
 
 systemctl daemon-reload
-say "units installed"
+say "system services installed"
 
 # ------------------------------------------------------------------- check
 #
@@ -413,7 +452,7 @@ say "units installed"
 # against the new config -- so a finding is a person reading a line now
 # instead of a unit that refuses to start in five minutes.
 
-step "Checking the configuration"
+step "Checking the settings"
 
 # Installation requires root, but the service itself runs as User=telium.
 # Validate under that actual identity. Show actionable warnings, not default notices.
@@ -434,7 +473,7 @@ fi
 step "Starting"
 
 systemctl enable --now telium-server.service telium-update-native.timer
-say "telium-server.service and telium-update-native.timer are enabled"
+say "the Telium server and its automatic updater will now start on every boot"
 
 if [ "$existing_install" -eq 1 ] && [ "$service_was_active" -eq 1 ]; then
   # The updater uses the signed release manifest, takes a verified local
@@ -457,7 +496,7 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
   sleep 1
 done
 [ -n "$ok" ] || die "the health endpoint on 127.0.0.1:8448 did not answer; look at: journalctl -u telium-server -n 50"
-say "the server is up on 127.0.0.1:8448"
+say "the server is running (listening on this machine only, at 127.0.0.1:8448)"
 
 # ------------------------------------------------------ private registration
 # The database exists now and is owned by telium, not root. The bootstrap
@@ -467,66 +506,112 @@ step "Registration"
 # a hand-parsed TOML boolean. The code is still shown only once to stdout.
 registration_result="$(as_telium registration-code bootstrap)" \
   || die "could not create the setup registration code"
-printf '%s\n' "$registration_result"
 case "$registration_result" in
-  "registration is public;"*) registration_state=open ;;
-  "Initial private registration code"*) registration_state=new_private ;;
-  "the initial code was already created"*) registration_state=existing_private ;;
+  "registration is public;"*)
+    registration_state=open
+    say "sign-ups are public, so no registration code is needed"
+    ;;
+  "Initial private registration code"*)
+    registration_state=new_private
+    printf '%s\n' "$registration_result"
+    ;;
+  "the initial code was already created"*)
+    registration_state=existing_private
+    printf '%s\n' "$registration_result"
+    ;;
   *) die "unexpected response from registration-code bootstrap; check the server version" ;;
 esac
 
+# ------------------------------------------------------------------- HTTPS
+#
+# Only on a first install, and only if the operator asked for it. A failure
+# here never fails the install: the server is already running, and the same
+# script can be rerun later by itself.
+
+if [ "$existing_install" -eq 0 ] && [ "$https_choice" = caddy ]; then
+  if bash "$here/setup-caddy.sh" "$DOMAIN"; then
+    https_ok=1
+  else
+    say "HTTPS is not finished yet, but the server itself is installed and running."
+    say "The steps at the end tell you how to finish it."
+  fi
+fi
+
 # ------------------------------------------------------------ what is left
 #
-# DNS and TLS need external setup; the centralized client handles account
-# creation. Only a person with local machine access can grant server admin.
+# DNS and HTTPS may need setup outside the installer; the centralized client
+# handles account creation. Only a person with local machine access can grant
+# server admin.
+
+caddy_script_url="https://raw.githubusercontent.com/telium-chat/telium/main/deploy/setup-caddy.sh"
 
 if [ "$existing_install" -eq 1 ]; then
   step "Existing server checked"
-  say "existing configuration and administrator access were preserved"
-  say "public discovery: curl -fsS https://$DOMAIN/.well-known/telium/server"
+  say "your settings and your admin access were left as they were"
+  say "check that other servers can find you: curl -fsS https://$DOMAIN/.well-known/telium/server"
   say "web client: https://telium.chat"
+  if ! curl -fsS --max-time 8 "https://$DOMAIN/.well-known/telium/server" >/dev/null 2>&1; then
+    say "that address is not answering over HTTPS yet. To set up HTTPS with Caddy:"
+    say "  curl -fsSLo /tmp/telium-setup-caddy.sh $caddy_script_url"
+    say "  sudo bash /tmp/telium-setup-caddy.sh"
+  fi
   if [ "$registration_state" = existing_private ]; then
-    say "Enter your saved private registration code to add an account."
-    say "If lost or expired, mint a replacement on the server:"
+    say "Enter your saved registration code to add an account."
+    say "If it is lost or expired, make a new one on this server:"
     say "  ( cd $DATA && runuser -u telium -- $BIN --config $CONF registration-code create )"
   elif [ "$registration_state" = open ]; then
-    say "Registration remains open; no invitation code is required."
+    say "Sign-ups are open; no registration code is needed."
   else
-    say "Save the initial private registration code printed above."
+    say "Save the first registration code printed above."
   fi
 else
-  step "Still to do, by hand"
+  step "What to do next"
 
-  say "1. point DNS: $DOMAIN -> this box's public address"
-  say "2. put TLS in front, one of:"
-  say "     a Cloudflare Tunnel (no open ports):  docs.telium.chat/self-hosting/exposing/"
-  say "     or Caddy on this box (real certificates): docs.telium.chat/self-hosting/exposing/"
-  say "   then verify:"
-  say "     curl -fsS https://$DOMAIN/.well-known/telium/server"
-  say "3. open https://telium.chat to register your account on this server."
+  n=0
+  if [ "$https_ok" -eq 1 ]; then
+    say "HTTPS is set up and working: https://$DOMAIN"
+  else
+    n=$((n + 1))
+    say "$n. Point DNS at this machine. In your domain's DNS settings, add an A record"
+    say "   for $DOMAIN that points to this machine's public IP address."
+    n=$((n + 1))
+    say "$n. Set up HTTPS. The easiest way is Caddy, which gets a free certificate for you."
+    say "   DNS must already point here, and ports 80 and 443 must be open:"
+    say "     curl -fsSLo /tmp/telium-setup-caddy.sh $caddy_script_url"
+    say "     sudo bash /tmp/telium-setup-caddy.sh"
+    say "   Already using a Cloudflare Tunnel or another proxy? Instructions:"
+    say "     https://docs.telium.chat/self-hosting/exposing/"
+    say "   Check that it works with:"
+    say "     curl -fsS https://$DOMAIN/.well-known/telium/server"
+  fi
+  n=$((n + 1))
+  say "$n. Create your account: open https://telium.chat and sign up using this server."
   case "$registration_state" in
     new_private)
-      say "   Enter the one-time registration code shown above; save it securely."
+      say "   Enter the one-time registration code shown above. Save it somewhere safe."
       ;;
     existing_private)
-      say "   Enter your saved private registration code."
-      say "   If it was lost or expired, generate another on this machine:"
+      say "   Enter your saved registration code."
+      say "   If it is lost or expired, make a new one on this machine:"
       say "     ( cd $DATA && runuser -u telium -- $BIN --config $CONF registration-code create )"
       ;;
     open)
-      say "   Registration is open; no invitation code is required."
+      say "   Sign-ups are open; no registration code is needed."
       ;;
   esac
-  say "4. grant the account administrator access, here on the server:"
+  n=$((n + 1))
+  say "$n. Make your account the server admin. After you have signed up, run this on"
+  say "   this machine, replacing USERNAME with the name you signed up with:"
   say "     ( cd $DATA && runuser -u telium -- $BIN --config $CONF admin recover USERNAME --reason \"Initial server owner\" )"
-  say "   Replace USERNAME with the account localpart (or full @name:domain)."
-  say "   Confirm the username; the holder of that account must still sign in."
+  say "   (You can write just the name, or the full form @name:$DOMAIN.)"
+  say "   Double-check the username first, then sign in to that account."
+  say ""
   if [ "$registration_state" != open ]; then
-    say "   Further registration codes: Control plane > Registration codes."
-fi
-say "   To change signup later, edit [registration].open in $CONF"
-say "   and restart telium-server."
-say ""
-  say "voice uses the signed public SFU directory by default; hosting your own"
-  say "voice relay is optional: docs.telium.chat/self-hosting/sfu/"
+    say "More registration codes can be made in the admin area under Registration codes."
+  fi
+  say "To change who can sign up later, edit [registration] open in $CONF"
+  say "and restart the server: systemctl restart telium-server"
+  say ""
+  say "Voice calls work out of the box using Telium's shared relay. Running your own"
+  say "is optional: https://docs.telium.chat/self-hosting/sfu/"
 fi

@@ -228,6 +228,20 @@ writes `/etc/telium/telium.toml`, installs the unit and native update timer,
 and starts the server. A complete checkout still supports
 `bash deploy/install-native.sh chat.example.com` from the repository root.
 
+On a first install it also offers to set up HTTPS for you with Caddy
+(`setup-caddy.sh`; Debian/Ubuntu, needs DNS pointing at the machine and ports
+80/443 open). The same script can be run later on an existing server, with no
+checkout:
+
+```sh
+curl -fsSLo /tmp/telium-setup-caddy.sh https://raw.githubusercontent.com/telium-chat/telium/main/deploy/setup-caddy.sh
+sudo bash /tmp/telium-setup-caddy.sh
+```
+
+It never overwrites a Caddyfile you wrote; it saves the Telium block to
+`/etc/caddy/telium.caddy` and tells you the `import` line to add. Unattended
+installs opt in with `TELIUM_HTTPS=caddy`.
+
 That is the whole thing. It puts the files in `/opt/telium`, creates
 `/srv/telium-backups` owned by the container's uid, writes the systemd units
 with this box's account substituted in, and **enables the timer**. Running it
