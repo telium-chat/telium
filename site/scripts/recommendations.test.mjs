@@ -27,7 +27,6 @@ const entry = (overrides = {}) => ({
   name: 'Community',
   description: 'A community Telium homeserver for tests.',
   region: { label: 'Oregon, US', code: 'na-west' },
-  size_band: '100-1k',
   operator: { name: 'Community Ops', contact: 'https://community.example/contact' },
   added: '2026-08-01',
   recommendations: { opt_in: true },

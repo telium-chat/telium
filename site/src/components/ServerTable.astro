@@ -1,6 +1,6 @@
 ---
 import Icon from './Icon.astro'
-import { defaultOrder, SIZE_LABEL, SIZE_RANK, formatBytes, roleList, type Server } from '../lib/servers'
+import { defaultOrder, formatBytes, formatSpan, flagOf, roleList, type Server } from '../lib/servers'
 
 interface Props {
   /* The landing page shows a few rows as a taste; /servers shows the lot with
@@ -27,7 +27,7 @@ const rows: Server[] = (limit ? defaultOrder.filter((s) => s.probe.registration_
 const columns = [
   { key: 'name', label: 'Server', align: 'left' },
   { key: 'region', label: 'Region', align: 'left' },
-  { key: 'size', label: 'Accounts', align: 'right' },
+  { key: 'upload', label: 'Max upload', align: 'right' },
   { key: 'uptime', label: 'Uptime', align: 'right' },
   { key: 'latency', label: 'Latency', align: 'right' },
 ] as const
@@ -69,7 +69,7 @@ const columns = [
 
   <table class="w-full border-collapse text-left">
     <caption class="sr-only">
-      Community Telium homeservers, with region, declared account range, measured uptime and
+      Community Telium homeservers, with region, upload limit, measured uptime and
       latency from your browser.
     </caption>
     <thead>
@@ -82,7 +82,7 @@ const columns = [
                 'eyebrow py-2.5 font-medium whitespace-nowrap',
                 column.align === 'right' && 'text-right',
                 column.key === 'region' && 'hidden md:table-cell',
-                column.key === 'size' && 'hidden lg:table-cell',
+                column.key === 'upload' && 'hidden lg:table-cell',
                 column.key === 'uptime' && 'hidden sm:table-cell',
               ]}
               aria-sort={column.key === 'name' ? 'ascending' : 'none'}
@@ -122,7 +122,7 @@ const columns = [
                 data-name={server.name.toLowerCase()}
                 data-region={`${server.region.label} ${server.region.code}`.toLowerCase()}
                 data-open={probe.registration_open === true ? 'true' : 'false'}
-                data-size={SIZE_RANK[server.size_band]}
+                data-upload={probe.upload?.max_file_bytes ?? probe.max_file_bytes ?? ''}
                 data-uptime={probe.uptime_30d ?? ''}
               >
                 <td class="py-3.5 pr-4">
@@ -155,16 +155,14 @@ const columns = [
                 </td>
 
                 <td class="hidden py-3.5 pr-4 text-[13.5px] text-muted md:table-cell" data-label="Region">
-                  {server.region.label}
+                  <span aria-hidden="true" class="mr-1.5">{flagOf(server.region.label)}</span>{server.region.label}
                 </td>
 
                 <td
                   class="tnum hidden py-3.5 pr-4 text-right text-[13.5px] text-muted lg:table-cell"
-                  data-label="Accounts"
+                  data-label="Max upload"
                 >
-                  <span title="Declared by the operator. Telium exposes no account count to verify it against.">
-                    {SIZE_LABEL[server.size_band]}
-                  </span>
+                  {formatBytes(probe.upload?.max_file_bytes ?? probe.max_file_bytes)}
                 </td>
 
                 <td
@@ -221,8 +219,18 @@ const columns = [
                       <dt class="text-muted">Roles</dt>
                       <dd>{roles.length ? roles.join(', ') : '–'}</dd>
 
-                      <dt class="text-muted">Max upload</dt>
-                      <dd class="tnum">{formatBytes(probe.max_file_bytes)}</dd>
+                      <dt class="text-muted">Registration</dt>
+                      <dd>
+                        {probe.registration_open === null ? '–' : probe.registration_open ? 'Open' : 'Closed'}
+                        {probe.registration_policy?.invite_code_required && ' · invite code required'}
+                      </dd>
+
+                      <dt class="text-muted">Min password</dt>
+                      <dd class="tnum">
+                        {probe.registration_policy?.min_password_len
+                          ? `${probe.registration_policy.min_password_len} characters`
+                          : '–'}
+                      </dd>
                     </dl>
 
                     <dl class="grid grid-cols-[auto_1fr] gap-x-5 gap-y-1.5 text-[13px]">
@@ -235,6 +243,29 @@ const columns = [
                       <dt class="text-muted">Listed</dt>
                       <dd class="tnum">{server.added}</dd>
                     </dl>
+
+                    {probe.upload && (
+                      <div class="sm:col-span-2">
+                        <p class="eyebrow mb-2">Upload policy · fetched from the server</p>
+                        <dl class="grid grid-cols-[auto_1fr] gap-x-5 gap-y-1.5 text-[13px] sm:grid-cols-[auto_1fr_auto_1fr]">
+                          <dt class="text-muted">Uploads</dt>
+                          <dd>
+                            {probe.upload.enabled === null ? '–' : probe.upload.enabled ? 'Enabled' : 'Disabled'}
+                            {probe.upload.default_policy && ` · default ${probe.upload.default_policy}`}
+                          </dd>
+                          <dt class="text-muted">Max file</dt>
+                          <dd class="tnum">{formatBytes(probe.upload.max_file_bytes)}</dd>
+                          <dt class="text-muted">Files expire after</dt>
+                          <dd class="tnum">{formatSpan(probe.upload.attachment_max_age_days === null ? null : probe.upload.attachment_max_age_days * 86400, 'Never')}</dd>
+                          {probe.upload.abuse_contact && (
+                            <>
+                              <dt class="text-muted">Abuse contact</dt>
+                              <dd class="font-mono text-[12px]">{probe.upload.abuse_contact}</dd>
+                            </>
+                          )}
+                        </dl>
+                      </div>
+                    )}
 
                     {features.length > 0 && (
                       <div class="sm:col-span-2">
@@ -579,8 +610,8 @@ const columns = [
           return row.dataset.name ?? ''
         case 'region':
           return row.dataset.region ?? ''
-        case 'size':
-          return Number(row.dataset.size ?? -1)
+        case 'upload':
+          return row.dataset.upload === '' ? -1 : Number(row.dataset.upload)
         case 'uptime':
           return row.dataset.uptime === '' ? -1 : Number(row.dataset.uptime)
         case 'latency': {

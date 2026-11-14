@@ -30,7 +30,6 @@ body:
           "name": "Example Chat",
           "description": "General-purpose homeserver for the Example community, open registration.",
           "region": { "label": "Frankfurt, DE", "code": "eu-central" },
-          "size_band": "100-1k",
           "operator": { "name": "Example Collective", "contact": "https://example.org/contact" }
         }
         ```

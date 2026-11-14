@@ -9,7 +9,7 @@
     "entry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["domain", "name", "description", "region", "size_band", "operator", "added"],
+      "required": ["domain", "name", "description", "region", "operator", "added"],
       "properties": {
         "domain": {
           "type": "string",
@@ -54,11 +54,6 @@
               ]
             }
           }
-        },
-        "size_band": {
-          "type": "string",
-          "description": "Approximate registered accounts. Self-reported by the operator: the server exposes no account count, so there is nothing to verify this against and the directory labels it as declared.",
-          "enum": ["<100", "100-1k", "1k-10k", "10k+"]
         },
         "operator": {
           "type": "object",
