@@ -1,1 +1,19 @@
-[]
+[
+  {
+    "domain": "notdiscord.fyi",
+    "name": "notdiscord.fyi",
+    "description": "A telium homeserver",
+    "region": {
+      "label": "San Jose, US",
+      "code": "na-west"
+    },
+    "operator": {
+      "name": "20plays",
+      "contact": "mailto:himself@20plays.com"
+    },
+    "recommendations": {
+      "opt_in": true
+    },
+    "added": "2026-11-14"
+  }
+]
