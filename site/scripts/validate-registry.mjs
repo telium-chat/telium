@@ -19,10 +19,9 @@ import { readFile } from 'node:fs/promises'
 const REGISTRY = process.argv[2] ?? new URL('../registry/servers.json', import.meta.url)
 const LABEL = typeof REGISTRY === 'string' ? REGISTRY : 'registry/servers.json'
 
-const REGIONS = new Set([
-  'af-south', 'ap-east', 'ap-south', 'ap-southeast', 'eu-central', 'eu-north',
-  'eu-west', 'me-central', 'na-central', 'na-east', 'na-west', 'oc-southeast', 'sa-east',
-])
+import { REGION_CODES, checkRegion } from '../src/lib/regions.mjs'
+
+const REGIONS = new Set(REGION_CODES)
 const DOMAIN = /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 const CONTACT = /^(https:\/\/|mailto:)/
@@ -97,6 +96,10 @@ const main = async () => {
       str(where, entry.region.label, 'region.label', { min: 2, max: 40 })
       if (!REGIONS.has(entry.region.code)) {
         fail(where, `region.code must be one of ${[...REGIONS].join(', ')} — got ${JSON.stringify(entry.region.code)}`)
+      } else {
+        // The label's country decides which codes are allowed, so the two cannot drift apart.
+        const problem = checkRegion(entry.region)
+        if (problem) fail(where, problem)
       }
     }
 

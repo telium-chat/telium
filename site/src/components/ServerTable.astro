@@ -1,6 +1,6 @@
 ---
 import Icon from './Icon.astro'
-import { defaultOrder, formatBytes, formatSpan, flagOf, roleList, type Server } from '../lib/servers'
+import { defaultOrder, formatStorage, formatBytes, formatSpan, flagOf, roleList, type Server } from '../lib/servers'
 
 interface Props {
   /* The landing page shows a few rows as a taste; /servers shows the lot with
@@ -248,10 +248,9 @@ const columns = [
                       <div class="sm:col-span-2">
                         <p class="eyebrow mb-2">Upload policy · fetched from the server</p>
                         <dl class="grid grid-cols-[auto_1fr] gap-x-5 gap-y-1.5 text-[13px] sm:grid-cols-[auto_1fr_auto_1fr]">
-                          <dt class="text-muted">Uploads</dt>
-                          <dd>
-                            {probe.upload.enabled === null ? '–' : probe.upload.enabled ? 'Enabled' : 'Disabled'}
-                            {probe.upload.default_policy && ` · default ${probe.upload.default_policy}`}
+                          <dt class="text-muted">Storage per account</dt>
+                          <dd class="tnum">
+                            {formatStorage(probe.upload.default_policy, probe.upload.enabled, probe.upload.quota_bytes)}
                           </dd>
                           <dt class="text-muted">Max file</dt>
                           <dd class="tnum">{formatBytes(probe.upload.max_file_bytes)}</dd>
