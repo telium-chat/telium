@@ -112,6 +112,10 @@ pub const VERIFICATION_ALREADY_REQUESTED: &str = "verification_already_requested
 /// Out of storage; carries `used` and `limit` in bytes.
 pub const QUOTA_EXCEEDED: &str = "quota_exceeded";
 
+/// This server has exhausted its global media budget or protected free-space reserve.
+/// Carries `used` and `limit` in bytes when the aggregate media budget is hit.
+pub const SERVER_STORAGE_FULL: &str = "server_storage_full";
+
 /// DM commit not built on the current epoch. Carries `epoch` and, when taken, `winner_seq`, `winner_epoch`, `winner_sender`, `winner_digest` (base64url SHA-256 of ciphertext) and `winner_frame_id`.
 pub const EPOCH_CONFLICT: &str = "epoch_conflict";
 
@@ -146,7 +150,7 @@ mod tests {
         BOT_ASSERTION_REJECTED, NOT_A_GUILD_SERVER, UNKNOWN_BOT_TOKEN, BOT_CREDENTIAL_REVOKED,
         PARTY_IS_BOT, SUBJECT_IS_BOT, VERIFICATION_ALREADY_REQUESTED, RATE_LIMITED, DEMOTED,
         STANDBY_READ_ONLY, SHUT_DOWN, TRY_AGAIN, MIGRATION_IN_PROGRESS, MIGRATION_HANDOFF_INVALID,
-        MIGRATION_REFUSED, TOO_LARGE, UNSUPPORTED_MEDIA_TYPE, QUOTA_EXCEEDED,
+        MIGRATION_REFUSED, TOO_LARGE, UNSUPPORTED_MEDIA_TYPE, QUOTA_EXCEEDED, SERVER_STORAGE_FULL,
         EPOCH_CONFLICT, FRAME_ID_REUSED, VAULT_VERSION_CONFLICT, NOT_SEQUENCER,
         NOT_COMMITTER, HANDOFF_STALE, GENERATION_CONFLICT,
     ];

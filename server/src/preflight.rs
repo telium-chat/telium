@@ -235,6 +235,15 @@ pub fn audit(cfg: &Config, config_path: Option<&Path>) -> Audit {
         });
     }
 
+    if prod && cfg.registration.open && cfg.roles.media && cfg.media_policy.max_total_bytes == 0 {
+        f.push(Finding {
+            key: "media_policy.max_total_bytes".into(),
+            level: Level::Warn,
+            exposes: "public signups can collectively store unlimited media: per-user quotas alone do not bound total disk use, even when every account has a quota.".into(),
+            remedy: "set `media_policy.max_total_bytes` to a whole-server budget below the available disk capacity, and `media_policy.min_free_bytes` to reserve space for the database, backups and logs.".into(),
+        });
+    }
+
     if cfg.media_policy.attachment_max_age_days > 0 {
         f.push(Finding {
             key: "media_policy.attachment_max_age_days".into(),
@@ -363,6 +372,15 @@ pub fn audit(cfg: &Config, config_path: Option<&Path>) -> Audit {
             });
             break;
         }
+    }
+
+    if prod && cfg.backup.enabled && cfg.backup.media_mode != crate::config::MediaMode::None && cfg.backup.min_free_bytes == 0 {
+        f.push(Finding {
+            key: "backup.min_free_bytes".into(),
+            level: Level::Warn,
+            exposes: "backups include selected hosted media, and building an archive writes both a compressed payload and an encrypted copy; large media stores can exhaust the backup filesystem before old archives are pruned.".into(),
+            remedy: "set `backup.min_free_bytes` to a protective free-space floor. For budget public servers, consider `media_mode = profile_assets` to retain profile assets while excluding attachments.".into(),
+        });
     }
 
     if prod && !cfg.backup.enabled {

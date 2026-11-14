@@ -110,6 +110,7 @@ pub async fn build_state_as(cfg: Config, role: Role) -> anyhow::Result<AppState>
     let hash_lists = Arc::new(scan::HashLists::load(&cfg.moderation)?);
     let gofile_guest_token = Arc::new(tokio::sync::Mutex::new(None));
     let upload_locks = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+    let media_capacity_lock = Arc::new(tokio::sync::Mutex::new(()));
     // Claim the lease before anything touches rows a running instance might own (`mark_unclaimed` would hang up live calls). Tools claim nothing.
     let lease = if serving {
         let lease = Arc::new(instance::Lease::claim(&pool).await?);
@@ -166,6 +167,7 @@ pub async fn build_state_as(cfg: Config, role: Role) -> anyhow::Result<AppState>
         hash_lists,
         gofile_guest_token,
         upload_locks,
+        media_capacity_lock,
         dm_outbox_pump: Arc::new(state::OutboxPump::default()),
         friend_outbox_pump: Arc::new(state::OutboxPump::default()),
         demoted: Arc::new(std::sync::atomic::AtomicBool::new(false)),

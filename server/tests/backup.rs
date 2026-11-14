@@ -458,6 +458,22 @@ impl Server {
     }
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn backup_reserve_refuses_new_archive_without_losing_existing_backups() {
+    let s = start(|_| {}).await;
+    s.keygen();
+    let original = s.backup().await.path;
+    assert!(original.exists());
+
+    let mut guarded = s.cfg().clone();
+    guarded.backup.min_free_bytes = i64::MAX;
+    let err = backup::run_once(&s.state.pool, &guarded).await.unwrap_err().to_string();
+    assert!(err.contains("reserve"), "{err}");
+    assert!(original.exists(), "an unsuccessful backup must not prune a good archive");
+    assert_eq!(backup::local_archives(&guarded.backup.dir).len(), 1);
+}
+
 fn noise(seed: u64, len: usize) -> Vec<u8> {
     let mut x = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
     (0..len)
@@ -1446,12 +1462,12 @@ async fn what_an_archive_cannot_carry_is_named_in_the_manifest_report_and_drill(
     assert!(d.warnings.iter().any(|w| w.contains("s3://telium-cold")), "{:?}", d.warnings);
 
     let mut cfg = s.cfg().clone();
-    cfg.backup.include_media = false;
+    cfg.backup.media_mode = telium_server::config::MediaMode::None;
     let out = backup::run_once(&s.state.pool, &cfg).await.unwrap();
     let e = out.manifest.excluded.iter().find(|e| e.kind == "media").expect("recorded");
     assert_eq!((e.reason.as_str(), e.detail.as_deref()), ("disabled", None));
     assert!(!out.manifest.parts.iter().any(|p| p.kind == "media"));
-    assert!(backup::report(&cfg)["excluded"][0]["says"].as_str().unwrap().contains("include_media"));
+    assert!(backup::report(&cfg)["excluded"][0]["says"].as_str().unwrap().contains("media_mode"));
 }
 
 #[tokio::test]
@@ -1634,4 +1650,83 @@ async fn the_cli_with_no_key_says_where_it_looked_and_how_else_to_supply_one() {
     assert!(said.contains(&cfg2.backup.key_file.display().to_string()) && said.contains("TELIUM_BACKUP_KEY"), "{said}");
     assert!(!dir2.join("telium.db").exists());
     let _ = std::fs::remove_dir_all(&dir2);
+}
+
+#[test]
+fn media_modes_and_legacy_configs() {
+    use telium_server::config::{Backup, MediaMode};
+    for (text, expected) in [
+        ("", MediaMode::All),
+        ("media_mode = 'none'", MediaMode::None),
+        ("media_mode = 'profile_assets'", MediaMode::ProfileAssets),
+        ("media_mode = 'all'", MediaMode::All),
+        ("include_media = true", MediaMode::All),
+        ("include_media = false", MediaMode::None),
+    ] {
+        assert_eq!(toml::from_str::<Backup>(text).unwrap().media_mode, expected);
+    }
+    assert!(toml::from_str::<Backup>("include_media = true\nmedia_mode = 'none'").is_err());
+    assert!(toml::from_str::<Backup>("media_mode = 'invalid'").is_err());
+}
+
+#[tokio::test]
+async fn media_modes_restore_referenced_assets_regardless_of_category() {
+    use telium_server::config::MediaMode;
+    for mode in [MediaMode::None, MediaMode::ProfileAssets, MediaMode::All] {
+        let s = start(|_| {}).await;
+        let alice = s.register("assets").await;
+        let key = s.keygen();
+        let hashes: Vec<String> = (0..6).map(|i| format!("{i:064x}")).collect();
+        for hash in &hashes {
+            sqlx::query("INSERT INTO media (hash, owner_user_id, filename, mime, size, capability, purpose, created_at) VALUES (?, ?, 'asset', 'image/png', 5, 'cap', 'attachment', 0)")
+                .bind(hash).bind(&alice.user_id).execute(&s.state.pool).await.unwrap();
+            let path = s.cfg().media_dir.join(&hash[..2]).join(hash);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"asset").unwrap();
+        }
+        let reference = |i: usize| format!("media://{}/{}", s.cfg().server_name, hashes[i]);
+        sqlx::query("UPDATE profiles SET avatar_ref = ?, banner_ref = ? WHERE user_id = ?")
+            .bind(reference(0)).bind(reference(1)).bind(&alice.user_id).execute(&s.state.pool).await.unwrap();
+        // Guild icon deliberately has the wrong media purpose; another guild shares it.
+        for id in ["g1", "g2"] {
+            sqlx::query("INSERT INTO guilds (id, name, icon_ref, owner_user_id, created_at) VALUES (?, 'Guild', ?, ?, 0)")
+                .bind(id).bind(reference(2)).bind(&alice.user_id).execute(&s.state.pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO emojis (id, guild_id, name, media_hash, uploader, created_at) VALUES ('e', 'g1', 'emoji', ?, ?, 0)")
+            .bind(&hashes[3]).bind(&alice.user_id).execute(&s.state.pool).await.unwrap();
+        sqlx::query("INSERT INTO stickers (id, guild_id, name, media_hash, format, uploader, created_at) VALUES ('s', 'g1', 'sticker', ?, 'png', ?, 0)")
+            .bind(&hashes[4]).bind(&alice.user_id).execute(&s.state.pool).await.unwrap();
+        let mut cfg = s.cfg().clone();
+        cfg.backup.media_mode = mode;
+        let out = backup::run_once(&s.state.pool, &cfg).await.unwrap();
+        let expected = match mode { MediaMode::None => 0, MediaMode::ProfileAssets => 5, MediaMode::All => 6 };
+        assert_eq!(out.manifest.parts.iter().find(|p| p.kind == "media").map(|p| p.files).unwrap_or(0), expected);
+        let (cfg2, dir) = second_box(&cfg);
+        backup::restore(&cfg2, &Source::Path(out.path), &backup::Keyring::of(key), false).await.unwrap();
+        assert_eq!(localpart_of(&cfg2, &alice.user_id).await.as_deref(), Some("assets"));
+        for (i, hash) in hashes.iter().enumerate() {
+            assert_eq!(cfg2.media_dir.join(&hash[..2]).join(hash).exists(), i < expected as usize);
+        }
+        let pool = telium_server::db::connect(&cfg2.database_url).await.unwrap();
+        let icon: String = sqlx::query_scalar("SELECT icon_ref FROM guilds WHERE id = 'g1'").fetch_one(&pool).await.unwrap();
+        assert_eq!(icon, reference(2));
+        pool.close().await;
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn empty_profile_assets_restore_over_existing_media() {
+    let s = start(|_| {}).await;
+    let key = s.keygen();
+    let mut cfg = s.cfg().clone();
+    cfg.backup.media_mode = telium_server::config::MediaMode::ProfileAssets;
+    let out = backup::run_once(&s.state.pool, &cfg).await.unwrap();
+    let (cfg2, dir) = second_box(&cfg);
+    std::fs::create_dir_all(&cfg2.media_dir).unwrap();
+    std::fs::write(cfg2.media_dir.join("old-attachment"), b"old").unwrap();
+    let restored = backup::restore(&cfg2, &Source::Path(out.path), &backup::Keyring::of(key), true).await.unwrap();
+    assert!(!cfg2.media_dir.join("old-attachment").exists());
+    assert!(restored.moved_aside.iter().any(|p| p.join("old-attachment").exists()));
+    std::fs::remove_dir_all(dir).unwrap();
 }

@@ -249,8 +249,8 @@ pub fn excluded(cfg: &Config) -> Vec<format::Excluded> {
         })
     };
 
-    // `include_media = false` wins.
-    if !cfg.backup.include_media {
+    // Explicitly disabling media takes precedence over its storage backend.
+    if cfg.backup.media_mode == crate::config::MediaMode::None {
         out.push(format::Excluded {
             kind: "media".into(),
             reason: "disabled".into(),
@@ -264,6 +264,9 @@ pub fn excluded(cfg: &Config) -> Vec<format::Excluded> {
         });
     }
 
+    if cfg.backup.media_mode == crate::config::MediaMode::ProfileAssets {
+        out.push(format::Excluded { kind: "attachments".into(), reason: "media-mode".into(), detail: None });
+    }
     if cfg.archive.enabled && cfg.archive.store == crate::config::StoreBackend::S3 {
         out.push(format::Excluded {
             kind: "cold".into(),
@@ -283,8 +286,9 @@ pub fn excluded_sentence(e: &format::Excluded) -> String {
         ("media", "object-store") => format!(
             "media is in {where_it_is} and is not in the backup: a restore brings back the              database and every attachment in it would 404"
         ),
+        ("attachments", "media-mode") => "attachments are excluded by backup.media_mode = profile_assets".into(),
         ("media", "disabled") => {
-            "media is excluded by backup.include_media = false".to_string()
+            "media is excluded by backup.media_mode = none".to_string()
         }
         _ => format!("{} is not in the backup ({})", e.kind, e.reason),
     }
@@ -537,6 +541,17 @@ async fn write_archive(pool: &SqlitePool, cfg: &Config) -> anyhow::Result<(PathB
     let final_path = dir.join(archive_name(stamp));
     let scratch = Scratch(vec![snapshot.clone(), payload.clone(), partial.clone()]);
 
+    // VACUUM INTO writes a full SQLite snapshot. Check its estimated size
+    // before starting so it cannot immediately eat the reserved disk space.
+    if cfg.backup.min_free_bytes > 0 {
+        let pages: i64 = sqlx::query_scalar("PRAGMA page_count").fetch_one(pool).await?;
+        let page_bytes: i64 = sqlx::query_scalar("PRAGMA page_size").fetch_one(pool).await?;
+        let estimate = (pages.max(0) as u64)
+            .saturating_mul(page_bytes.max(0) as u64)
+            .saturating_add(16 * 1024 * 1024);
+        check_backup_space(&dir, cfg.backup.min_free_bytes, estimate)?;
+    }
+
     // VACUUM INTO refuses to overwrite, which is wanted.
     let target = snapshot.to_string_lossy().replace('\'', "''");
     sqlx::query(&format!("VACUUM INTO '{target}'")).execute(pool).await?;
@@ -544,10 +559,20 @@ async fn write_archive(pool: &SqlitePool, cfg: &Config) -> anyhow::Result<(PathB
         .fetch_one(pool)
         .await?;
 
+    // Only a local media store can be selected from; an object store is
+    // reported as excluded and falls back to the pre-existing behaviour.
+    let selected = if cfg.backup.media_mode == crate::config::MediaMode::ProfileAssets
+        && cfg.media_store.store == crate::config::StoreBackend::Local
+    {
+        Some(profile_asset_hashes(&snapshot, &cfg.server_name).await?)
+    } else { None };
+    if selected.as_ref().is_some_and(|hashes| !hashes.is_empty()) && !cfg.media_dir.is_dir() {
+        anyhow::bail!("referenced profile assets cannot be backed up: media directory is missing");
+    }
     let cfg = cfg.clone();
     let done = final_path.clone();
     let out = tokio::task::spawn_blocking(move || -> anyhow::Result<(Manifest, [u8; 32])> {
-        let (parts, payload_bytes, payload_sha256) = build_payload(&cfg, &snapshot, &payload)?;
+        let (parts, payload_bytes, payload_sha256) = build_payload(&cfg, &snapshot, &payload, selected.as_deref())?;
         let manifest = Manifest {
             format: format::VERSION,
             server_name: cfg.server_name.clone(),
@@ -559,20 +584,87 @@ async fn write_archive(pool: &SqlitePool, cfg: &Config) -> anyhow::Result<(PathB
             payload_bytes,
             payload_sha256: hex::encode(payload_sha256),
         };
-        let file = std::fs::File::create(&partial)?;
+        let file = ReservedFile::new(
+            std::fs::File::create(&partial)?, &partial, cfg.backup.min_free_bytes,
+        )?;
         let mut sealed = format::Writer::new(HashingWriter::new(io::BufWriter::new(file)), &key, &manifest)?;
         let mut src = io::BufReader::new(std::fs::File::open(&payload)?);
         io::copy(&mut src, &mut sealed)?;
         let hashing = sealed.finish()?;
         let (mut buf, sha256, _) = hashing.finish();
         buf.flush()?;
-        buf.into_inner().map_err(|e| e.into_error())?.sync_all()?;
+        buf.into_inner().map_err(|e| e.into_error())?.inner.sync_all()?;
         std::fs::rename(&partial, &done)?;
         drop(scratch);
         Ok((manifest, sha256))
     })
     .await??;
     Ok((final_path, out.0, out.1))
+}
+
+/// Prevent a scheduled archive from consuming the whole filesystem. Checks
+/// while writing both the compressed payload and the encrypted copy; on error
+/// the existing archives remain intact and Scratch removes partial files.
+struct ReservedFile {
+    inner: std::fs::File,
+    path: PathBuf,
+    reserve: i64,
+    since_check: u64,
+}
+
+impl ReservedFile {
+    fn new(inner: std::fs::File, path: &Path, reserve: i64) -> io::Result<Self> {
+        let file = Self { inner, path: path.to_path_buf(), reserve, since_check: 0 };
+        check_backup_space(&file.path, reserve, 0)?;
+        Ok(file)
+    }
+}
+
+impl Write for ReservedFile {
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+        self.since_check = self.since_check.saturating_add(data.len() as u64);
+        if self.since_check >= 4 * 1024 * 1024 {
+            check_backup_space(&self.path, self.reserve, data.len() as u64)?;
+            self.since_check = 0;
+        }
+        self.inner.write(data)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+fn check_backup_space(path: &Path, reserve: i64, incoming: u64) -> io::Result<()> {
+    if reserve <= 0 {
+        return Ok(());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let path = std::ffi::CString::new(path.as_os_str().as_bytes())
+            .map_err(io::Error::other)?;
+        let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+        // SAFETY: path is NUL-terminated, stat points to writable memory.
+        if unsafe { libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: statvfs succeeded and filled the buffer.
+        let stat = unsafe { stat.assume_init() };
+        let available = (stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64);
+        if available < (reserve as u64).saturating_add(incoming) {
+            return Err(io::Error::other(format!(
+                "backup refused to consume the filesystem reserve ({} free, {} reserved); \
+                 use another filesystem or change backup.media_mode only if media is backed up separately",
+                available, reserve,
+            )));
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, incoming);
+        Err(io::Error::other("backup.min_free_bytes needs a Unix filesystem space check"))
+    }
 }
 
 struct HashingWriter<W: Write> {
@@ -617,8 +709,35 @@ impl<R: Read> Read for HashingReader<R> {
     }
 }
 
-fn build_payload(cfg: &Config, snapshot: &Path, payload: &Path) -> anyhow::Result<(Vec<Part>, u64, [u8; 32])> {
-    let file = std::fs::File::create(payload)?;
+// Resolve against the snapshot so selection matches the database being restored.
+async fn profile_asset_hashes(snapshot: &Path, server: &str) -> anyhow::Result<Vec<String>> {
+    use sqlx::Connection;
+    let opts = sqlx::sqlite::SqliteConnectOptions::new().filename(snapshot).read_only(true);
+    let mut conn = sqlx::SqliteConnection::connect_with(&opts).await?;
+    let refs: Vec<String> = sqlx::query_scalar(
+        "SELECT avatar_ref FROM profiles WHERE avatar_ref IS NOT NULL
+         UNION SELECT banner_ref FROM profiles WHERE banner_ref IS NOT NULL
+         UNION SELECT icon_ref FROM guilds WHERE icon_ref IS NOT NULL
+         UNION SELECT media_hash FROM emojis
+         UNION SELECT media_hash FROM stickers"
+    ).fetch_all(&mut conn).await?;
+    let prefix = format!("media://{server}/");
+    let mut hashes = std::collections::BTreeSet::new();
+    for reference in refs {
+        let hash = reference.strip_prefix(&prefix).unwrap_or(&reference);
+        if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) { continue; }
+        let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media WHERE hash = ?)")
+            .bind(hash).fetch_one(&mut conn).await?;
+        if exists { hashes.insert(hash.to_owned()); }
+    }
+    conn.close().await?;
+    Ok(hashes.into_iter().collect())
+}
+
+fn build_payload(cfg: &Config, snapshot: &Path, payload: &Path, selected: Option<&[String]>) -> anyhow::Result<(Vec<Part>, u64, [u8; 32])> {
+    let file = ReservedFile::new(
+        std::fs::File::create(payload)?, payload, cfg.backup.min_free_bytes,
+    )?;
     let gz = flate2::write::GzEncoder::new(HashingWriter::new(io::BufWriter::new(file)), flate2::Compression::default());
     let mut tar = tar::Builder::new(gz);
     tar.follow_symlinks(true);
@@ -632,8 +751,35 @@ fn build_payload(cfg: &Config, snapshot: &Path, payload: &Path) -> anyhow::Resul
         let (files, bytes) = add_dir(&mut tar, &cfg.archive.dir, Path::new("cold"), &[])?;
         parts.push(Part { kind: "cold".into(), name: "cold".into(), files, bytes });
     }
-    if cfg.backup.include_media && cfg.media_dir.is_dir() {
-        let (files, bytes) = add_dir(&mut tar, &cfg.media_dir, Path::new("media"), MEDIA_SKIP)?;
+    if cfg.backup.media_mode != crate::config::MediaMode::None && (cfg.media_dir.is_dir() || selected.is_some()) {
+        let (files, bytes) = if let Some(hashes) = selected {
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(tar::EntryType::Directory);
+            header.set_mode(0o700);
+            header.set_size(0);
+            header.set_cksum();
+            tar.append_data(&mut header, "media/", io::empty())?;
+            let (mut files, mut bytes) = (0, 0);
+            for hash in hashes {
+                let relative = Path::new(&hash[..2]).join(hash);
+                let path = cfg.media_dir.join(&relative);
+                // One referenced file missing from disk must not fail every backup.
+                let len = match std::fs::metadata(&path) {
+                    Ok(m) => m.len(),
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                        tracing::warn!(target: crate::logcat::BACKUP, %hash, "referenced profile asset is missing from media_dir; skipped");
+                        continue;
+                    }
+                    Err(e) => return Err(e.into()),
+                };
+                tar.append_path_with_name(path, Path::new("media").join(relative))?;
+                files += 1;
+                bytes += len;
+            }
+            (files, bytes)
+        } else {
+            add_dir(&mut tar, &cfg.media_dir, Path::new("media"), MEDIA_SKIP)?
+        };
         parts.push(Part { kind: "media".into(), name: "media".into(), files, bytes });
     }
 

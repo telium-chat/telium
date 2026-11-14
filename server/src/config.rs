@@ -959,6 +959,12 @@ pub struct MediaPolicy {
     pub default: MediaDefault,
     #[serde(deserialize_with = "de_bytes_i64")]
     pub quota_bytes: i64,
+    /// Maximum bytes of unique media stored by this homeserver; zero means unlimited.
+    #[serde(deserialize_with = "de_bytes_i64")]
+    pub max_total_bytes: i64,
+    /// Minimum available filesystem space to retain when accepting uploads; zero disables the guard.
+    #[serde(deserialize_with = "de_bytes_i64")]
+    pub min_free_bytes: i64,
     pub allowlist: Vec<String>,
     pub blocklist: Vec<String>,
     #[serde(deserialize_with = "de_bytes_i64")]
@@ -1189,6 +1195,28 @@ impl Default for Mfa {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MediaMode {
+    None,
+    ProfileAssets,
+    #[default]
+    All,
+}
+
+fn de_media_mode<'de, D: serde::Deserializer<'de>>(d: D) -> Result<MediaMode, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Input { Mode(MediaMode), Legacy(bool) }
+    match Input::deserialize(d)? {
+        Input::Mode(mode) => Ok(mode),
+        Input::Legacy(value) => {
+            tracing::warn!(target: crate::logcat::STARTUP, "backup.include_media is deprecated; use backup.media_mode = all or none");
+            Ok(if value { MediaMode::All } else { MediaMode::None })
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Backup {
@@ -1200,8 +1228,12 @@ pub struct Backup {
     /// Warn once a backup is older than this, including the off-box copy.
     #[serde(deserialize_with = "de_secs")]
     pub stale_after_secs: i64,
-    /// Include `media_dir`; off if media is backed up elsewhere.
-    pub include_media: bool,
+    /// Select local media coverage; defaults to all for existing deployments.
+    #[serde(alias = "include_media", deserialize_with = "de_media_mode")]
+    pub media_mode: MediaMode,
+    /// Keep this many bytes free on the backup filesystem while writing archives; zero disables.
+    #[serde(deserialize_with = "de_bytes_i64")]
+    pub min_free_bytes: i64,
     /// AES-256 key sealing archives, base64; generated if missing. `TELIUM_BACKUP_KEY` overrides it.
     pub key_file: PathBuf,
     /// Retired keys: archives carry no key id, so restore tries each. Drop one once its last archive ages out of `keep`.
@@ -1856,6 +1888,8 @@ impl Default for MediaPolicy {
         Self {
             default: MediaDefault::Enabled,
             quota_bytes: 1024 * 1024 * 1024,
+            max_total_bytes: 0,
+            min_free_bytes: 0,
             allowlist: Vec::new(),
             blocklist: Vec::new(),
             profile_asset_carveout_bytes: 512 * 1024,
@@ -1900,7 +1934,8 @@ impl Default for Backup {
             interval_secs: 60 * 60 * 6,
             keep: 8,
             stale_after_secs: 60 * 60 * 24 * 2,
-            include_media: true,
+            media_mode: MediaMode::All,
+            min_free_bytes: 0,
             key_file: PathBuf::from("backup.key"),
             previous_key_files: Vec::new(),
             drill: true,
@@ -2041,6 +2076,12 @@ impl Config {
     pub fn validate(&self) -> anyhow::Result<()> {
         if self.server_name.is_empty() {
             anyhow::bail!("server_name must be set");
+        }
+        if self.media_policy.max_total_bytes < 0 || self.media_policy.min_free_bytes < 0 {
+            anyhow::bail!("media_policy.max_total_bytes and min_free_bytes cannot be negative");
+        }
+        if self.backup.min_free_bytes < 0 {
+            anyhow::bail!("backup.min_free_bytes cannot be negative");
         }
         if !(self.roles.identity || self.roles.guild || self.roles.media) {
             anyhow::bail!("at least one role must be enabled");

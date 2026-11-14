@@ -59,6 +59,62 @@ async fn media_capability_urls_gate_access_and_dedup_by_hash() {
     assert_eq!(guessed.status().as_u16(), 404, "the content address alone must not be enough");
 }
 
+
+#[tokio::test]
+async fn a_server_wide_media_budget_counts_unique_bytes_and_refuses_exhaustion() {
+    let s = start_with(|cfg| cfg.media_policy.max_total_bytes = 12).await;
+    let alice = s.user("alice").await;
+    let bob = s.user("bob").await;
+
+    let upload = |token: &str, body: &'static str| {
+        s.client.post(format!("{}/_telium/v1/media", s.base))
+            .bearer_auth(token)
+            .body(body)
+            .send()
+    };
+    let first = upload(&alice.home, "12345678").await.unwrap();
+    assert_eq!(first.status().as_u16(), 200);
+    let duplicate = upload(&bob.home, "12345678").await.unwrap();
+    assert_eq!(duplicate.status().as_u16(), 200, "deduplicated bytes are not stored twice");
+    let full = upload(&bob.home, "another five").await.unwrap();
+    assert_eq!(full.status().as_u16(), 413, "new bytes beyond the server budget are refused");
+    let error: Value = full.json().await.unwrap();
+    assert_eq!(error["code"], "server_storage_full");
+
+    let within = upload(&alice.home, "abcd").await.unwrap();
+    assert_eq!(within.status().as_u16(), 200, "exactly the remaining budget is usable");
+    let over = upload(&bob.home, "z").await.unwrap();
+    assert_eq!(over.status().as_u16(), 413);
+}
+
+#[tokio::test]
+async fn simultaneous_accounts_cannot_bypass_the_global_media_budget() {
+    let s = start_with(|cfg| cfg.media_policy.max_total_bytes = 10).await;
+    let alice = s.user("alice").await;
+    let bob = s.user("bob").await;
+
+    let a = s.client.post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home).body("aaaaaaa").send();
+    let b = s.client.post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&bob.home).body("bbbbbbb").send();
+    let (a, b) = tokio::join!(a, b);
+    let statuses = [a.unwrap().status().as_u16(), b.unwrap().status().as_u16()];
+    assert_eq!(statuses.iter().filter(|&&s| s == 200).count(), 1);
+    assert_eq!(statuses.iter().filter(|&&s| s == 413).count(), 1);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn upload_refuses_to_consume_configured_filesystem_reserve() {
+    let s = start_with(|cfg| cfg.media_policy.min_free_bytes = i64::MAX).await;
+    let alice = s.user("alice").await;
+    let resp = s.client.post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&alice.home).body("do not store this").send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 413);
+    let body: Value = resp.json().await.unwrap();
+    assert_eq!(body["code"], "server_storage_full");
+}
+
 #[tokio::test]
 async fn uploaded_media_expires_after_its_ttl_and_then_404s() {
     let s = start().await;
@@ -244,6 +300,22 @@ async fn an_avatar_is_capped_far_below_the_general_attachment_limit() {
         .await
         .unwrap();
     assert_eq!(allowed.status().as_u16(), 200);
+}
+
+#[tokio::test]
+async fn guild_emoji_uploads_cannot_bypass_server_media_capacity() {
+    let s = start_with(|cfg| cfg.media_policy.max_total_bytes = 1).await;
+    let alice = s.user("alice").await;
+    let (_, guild) = s.post("/_telium/v1/guilds", Some(&alice.token), json!({ "name": "G" })).await;
+    let gid = guild["id"].as_str().unwrap();
+    let bytes = png_fixture(40, 40);
+    let (status, body) = s.post(
+        &format!("/_telium/v1/guilds/{gid}/emojis"),
+        Some(&alice.token),
+        json!({ "name": "limit", "data": URL_SAFE_NO_PAD.encode(bytes), "mime": "image/png" }),
+    ).await;
+    assert_eq!(status, 413, "{body}");
+    assert_eq!(body["code"], "server_storage_full");
 }
 
 #[tokio::test]

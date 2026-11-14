@@ -61,6 +61,8 @@ pub struct AppState {
     /// an account's parallel uploads cannot all read a stale total and land
     /// over its quota. The instance lease keeps this single-process.
     pub upload_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    /// Serializes the whole-server media budget check and new media insertion.
+    pub media_capacity_lock: Arc<Mutex<()>>,
     pub dm_outbox_pump: Arc<OutboxPump>,
     pub friend_outbox_pump: Arc<OutboxPump>,
     pub demoted: Arc<std::sync::atomic::AtomicBool>,
