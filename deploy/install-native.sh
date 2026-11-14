@@ -268,6 +268,23 @@ https_ok=0
 # installer-generated configs missing [registration] from older releases:
 # they receive an appended safe registration section after the operator chooses.
 
+# Ask whether to take part in telium.chat's automatic account-home referrals.
+# Sets $recommendations to yes or no. Only meaningful for open registration.
+ask_recommendations() {
+  printf '\nShow this server to new people looking for a home on telium.chat? [y/N]\n'
+  printf '  y = telium.chat may suggest this server to people signing up. This sets\n'
+  printf '      accepting = true under [registration.recommendations].\n'
+  printf '  N = stay out of automatic suggestions (the default).\n'
+  printf '  You also need to list this domain at https://telium.chat/list; both\n'
+  printf '  sides must opt in. You can change this later in %s.\n> ' "$CONF"
+  read -r answer || die "could not read your answer"
+  case "$answer" in
+    y|Y|yes|YES) recommendations=yes ;;
+    ""|n|N|no|NO) recommendations=no ;;
+    *) die "please answer y (yes) or n (no)" ;;
+  esac
+}
+
 step "Configuration"
 
 if [ -e "$CONF" ]; then
@@ -377,6 +394,19 @@ if ! grep -qE '^[[:space:]]*\[registration\][[:space:]]*(#.*)?$' "$CONF"; then
     closed) registration_bool=false ;;
     *) die "TELIUM_REGISTRATION must be open or closed" ;;
   esac
+  # Public-list participation only makes sense when anyone can sign up. Unattended
+  # runs never opt in unless TELIUM_RECOMMENDATIONS=yes is set.
+  recommendations="${TELIUM_RECOMMENDATIONS:-}"
+  if [ "$registration" = closed ]; then
+    recommendations=no
+  elif [ -z "$recommendations" ]; then
+    if [ -t 0 ]; then ask_recommendations; else recommendations=no; fi
+  fi
+  case "$recommendations" in
+    yes) recommendations_bool=true ;;
+    no) recommendations_bool=false ;;
+    *) die "TELIUM_RECOMMENDATIONS must be yes or no" ;;
+  esac
   # An interrupted append must not strand a partial [registration] section.
   registration_conf="$(mktemp "$ETC/.telium-registration.XXXXXX")"
   cat "$CONF" > "$registration_conf"
@@ -388,6 +418,11 @@ if ! grep -qE '^[[:space:]]*\[registration\][[:space:]]*(#.*)?$' "$CONF"; then
 first_account_is_admin = false
 open = $registration_bool
 admins = []
+
+[registration.recommendations]
+# Automatic referrals from telium.chat's public list. Both this and the
+# registry listing must opt in; either side can pause referrals.
+accepting = $recommendations_bool
 EOF
   chown telium:telium "$registration_conf"
   chmod 600 "$registration_conf"
@@ -397,6 +432,9 @@ EOF
   else
     say "registration OPEN: anyone can sign up. Nobody becomes an admin automatically;"
     say "you will make your own account the admin in the last step"
+  fi
+  if [ "$recommendations_bool" = true ]; then
+    say "public list: this server will accept telium.chat referrals once listed at https://telium.chat/list"
   fi
 else
   say "keeping the sign-up setting already in $CONF"
