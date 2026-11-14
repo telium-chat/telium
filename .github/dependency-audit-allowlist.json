@@ -44,6 +44,15 @@
       "reviewed": "2026-10-23",
       "expires": "2027-01-23",
       "reviewer": "@67plays"
+    },
+    {
+      "id": "RUSTSEC-2026-0459",
+      "ecosystem": "cargo",
+      "package": "libsqlite3-sys",
+      "reason": "The fix is libsqlite3-sys >= 0.39.0 (bundled SQLite 3.54), but no released sqlx can resolve to it: sqlx-sqlite 0.8.6 and 0.9.0 both require libsqlite3-sys < 0.38, so even moving to sqlx 0.9 only reaches 0.37.0, which is still affected. The flaw needs a process to open a database file together with a sibling -wal file whose page size differs, both crafted by someone else; the attack vector is local and the impact is disclosure of uninitialized page-cache bytes. The server opens only the database file it created itself in its own data directory, plus its own backup snapshots (backup/mod.rs, read-only). Restoring a snapshot or migration archive from an untrusted party is the one path that could expose it, and operators should be told to restore only their own backups. Renew by checking whether a sqlx release now allows libsqlite3-sys >= 0.39; if so, upgrade sqlx and delete this entry. If none exists by then, consider a [patch] of sqlx-sqlite.",
+      "reviewed": "2026-11-13",
+      "expires": "2027-01-13",
+      "reviewer": "@20plays"
     }
   ]
 }
