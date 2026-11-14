@@ -241,6 +241,14 @@ assert_contains "$work/fresh.log" "setup uses root privileges"
 assert_contains "$work/fresh.log" "Initial private registration code"
 assert_contains /etc/telium/telium.toml 'server_name = "chat.test"'
 assert_contains /etc/telium/telium.toml 'client_url = "https://telium.chat"'
+assert_contains /etc/telium/telium.toml 'default = "quota"'
+assert_contains /etc/telium/telium.toml 'quota_bytes = "1GiB"'
+assert_contains /etc/telium/telium.toml 'max_file_bytes = "50MiB"'
+assert_contains /etc/telium/telium.toml 'attachment_max_age_days = 0'
+assert_contains /etc/telium/telium.toml 'media_mode = "all"'
+assert_contains /etc/telium/telium.toml 'interval_secs = "6h"'
+assert_contains /etc/telium/telium.toml 'min_free_bytes = "'
+assert_contains "$work/fresh.log" 'Found '
 assert_contains "$work/fresh.log" "Enter the one-time registration code shown above"
 assert_live_matches_binary
 [ ! -e "$work/state/restarts" ] || fail "fresh install should not restart"
@@ -265,6 +273,9 @@ assert_contains "$work/rerun.log" "backup: /var/backups/telium/archives/snapshot
 assert_contains "$work/rerun.log" "deployed "
 assert_contains "$work/rerun.log" "Enter your saved private registration code"
 assert_contains "$work/rerun.log" "existing configuration and administrator access were preserved"
+assert_contains /etc/telium/telium.toml 'attachment_max_age_days = 0'
+assert_contains /etc/telium/telium.toml 'media_mode = "all"'
+assert_absent "$work/rerun.log" 'Storage configuration'
 assert_absent "$work/rerun.log" "Enter the one-time registration code shown above"
 assert_absent "$work/rerun.log" "admin recover USERNAME"
 assert_absent "$work/rerun.log" "1. point DNS:"
@@ -329,6 +340,11 @@ export MOCK_STAGE=1 TELIUM_REGISTRATION=open
 unset MOCK_BACKUP_FAIL
 bash deploy/install-native.sh open.test > "$work/open.log" 2>&1
 assert_contains "$work/open.log" "Registration is open; no invitation code is required."
+assert_contains /etc/telium/telium.toml 'attachment_max_age_days = 30'
+assert_contains /etc/telium/telium.toml 'default_expiry_secs = 0'
+assert_contains /etc/telium/telium.toml 'max_expiry_secs = 0'
+assert_contains /etc/telium/telium.toml 'media_mode = "profile_assets"'
+assert_contains "$work/open.log" 'Backups EXCLUDE uploaded files'
 assert_absent "$work/open.log" "Further registration codes"
 assert_absent "$work/open.log" "If your setup code was lost"
 assert_live_matches_binary
@@ -354,4 +370,37 @@ assert_contains "$work/recovery.log" "recovering an interrupted first install"
 assert_contains "$work/recovery.log" "Initial private registration code"
 assert_live_matches_binary
 
-echo 'native installer smoke: registration defaults, domain identity, interrupted setup, safe updates, live health, backup and restart failures passed'
+# Unattended custom storage policy: all fields must land in the first config.
+rm -rf /etc/telium /var/lib/telium /var/backups/telium /var/lib/telium-update
+rm -f /usr/local/bin/telium-server /usr/local/bin/telium-server.previous
+rm -f "$work/state/"*
+export MOCK_STAGE=1 TELIUM_REGISTRATION=open
+export TELIUM_MEDIA_POLICY=quota TELIUM_MEDIA_QUOTA=256MiB TELIUM_MEDIA_FILE_MAX=100MiB
+export TELIUM_MEDIA_TOTAL=1GiB TELIUM_MEDIA_FREE_RESERVE=1GiB TELIUM_MEDIA_RETENTION_DAYS=7
+export TELIUM_BACKUP_MEDIA=yes TELIUM_BACKUP_INTERVAL=12h TELIUM_BACKUP_KEEP=3
+export TELIUM_BACKUP_FREE_RESERVE=1GiB
+bash deploy/install-native.sh custom.test > "$work/custom.log" 2>&1
+assert_contains /etc/telium/telium.toml 'quota_bytes = "256MiB"'
+assert_contains /etc/telium/telium.toml 'max_file_bytes = "100MiB"'
+assert_contains /etc/telium/telium.toml 'max_total_bytes = "1GiB"'
+assert_contains /etc/telium/telium.toml 'attachment_max_age_days = 7'
+assert_contains /etc/telium/telium.toml 'media_mode = "all"'
+assert_contains /etc/telium/telium.toml 'interval_secs = "12h"'
+assert_contains /etc/telium/telium.toml 'keep = 3'
+unset TELIUM_MEDIA_POLICY TELIUM_MEDIA_QUOTA TELIUM_MEDIA_FILE_MAX TELIUM_MEDIA_TOTAL
+unset TELIUM_MEDIA_FREE_RESERVE TELIUM_MEDIA_RETENTION_DAYS TELIUM_BACKUP_MEDIA
+unset TELIUM_BACKUP_INTERVAL TELIUM_BACKUP_KEEP TELIUM_BACKUP_FREE_RESERVE
+
+# A malformed override fails before committing a new configuration.
+rm -rf /etc/telium /var/lib/telium /var/backups/telium /var/lib/telium-update
+rm -f /usr/local/bin/telium-server /usr/local/bin/telium-server.previous
+rm -f "$work/state/"*
+export TELIUM_MEDIA_QUOTA=not-a-size
+if bash deploy/install-native.sh invalid-storage.test > "$work/bad-storage.log" 2>&1; then
+  fail "installer accepted an invalid media quota"
+fi
+assert_contains "$work/bad-storage.log" 'invalid Per-user media allowance'
+test ! -e /etc/telium/telium.toml || fail "invalid storage choices wrote a config"
+unset TELIUM_MEDIA_QUOTA
+
+echo 'native installer smoke: registration, storage defaults and overrides, domain, recovery and safe updates passed'

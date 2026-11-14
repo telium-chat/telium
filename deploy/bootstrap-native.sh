@@ -50,7 +50,7 @@ done
 tmp="$(mktemp -d)"
 trap 'rm -rf -- "$tmp"' EXIT
 base=https://raw.githubusercontent.com/telium-chat/telium/main/deploy
-for file in install-native.sh update-native.sh telium-server.service telium-update-native.service telium-update-native.timer; do
+for file in install-native.sh storage-wizard.sh update-native.sh telium-server.service telium-update-native.service telium-update-native.timer; do
   curl -fsSL --retry 2 --connect-timeout 15 --max-time 90 -o "$tmp/$file" "$base/$file" ||
     die "could not download $file from GitHub; check network access and retry"
 done
