@@ -1972,6 +1972,10 @@ pub async fn capabilities(State(state): State<AppState>, headers: HeaderMap) -> 
             "enabled": state.cfg.roles.media,
             "default_policy": state.cfg.media_policy.default,
             "max_file_bytes": state.cfg.media_policy.max_file_bytes,
+            // Total an ordinary account may keep stored at once. Null when the
+            // default is not "quota" (unlimited or off); per-user overrides are not public.
+            "quota_bytes": (state.cfg.media_policy.default == crate::config::MediaDefault::Quota)
+                .then_some(state.cfg.media_policy.quota_bytes),
             "max_profile_asset_bytes": state.cfg.media_policy.max_profile_asset_bytes,
             "max_expiry_secs": state.cfg.media_policy.max_expiry_secs,
             "default_expiry_secs": state.cfg.media_policy.default_expiry_secs,

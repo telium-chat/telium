@@ -27,7 +27,7 @@ export const BAND_RANK: Record<CapacityBand, number> = {
 export const formatBytes = (bytes: number | null): string => {
   if (bytes === null || !Number.isFinite(bytes)) return '–'
   const mb = bytes / 1024 / 1024
-  return mb >= 1024 ? `${(mb / 1024).toFixed(mb % 1024 === 0 ? 0 : 1)} GB` : `${Math.round(mb)} MB`
+  return mb >= 1024 ? `${(mb / 1024).toFixed(mb % 1024 === 0 ? 0 : 1)} GiB` : `${Math.round(mb)} MiB`
 }
 
 /** Roles are the honest summary of what a server actually offers. */
@@ -50,3 +50,15 @@ export const flagOf = (label: string): string => {
   return code ? String.fromCodePoint(...[...code].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65)) : '🌐'
 }
 
+
+/** What an ordinary account can keep stored at once, from the server's default upload policy. */
+export const formatStorage = (
+  policy: string | null,
+  enabled: boolean | null,
+  quotaBytes: number | null,
+): string => {
+  if (enabled === false || policy === 'disabled') return 'No uploads'
+  if (policy === 'enabled') return 'Unlimited'
+  if (policy === 'quota') return quotaBytes === null ? '–' : formatBytes(quotaBytes)
+  return '–'
+}

@@ -173,6 +173,7 @@ const readUpload = (media) => {
     enabled: typeof media.enabled === 'boolean' ? media.enabled : null,
     default_policy: typeof media.default_policy === 'string' ? media.default_policy : null,
     max_file_bytes: num(media.max_file_bytes),
+    quota_bytes: num(media.quota_bytes),
     attachment_max_age_days: num(media.attachment_max_age_days),
     abuse_contact: typeof media.abuse_contact === 'string' ? media.abuse_contact : null,
   }

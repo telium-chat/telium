@@ -33,6 +33,7 @@
               "type": "string",
               "description": "Where the server physically is, as a person would say it.",
               "examples": ["Frankfurt, DE", "Oregon, US"],
+              "pattern": "^.{2,}, [A-Z]{2}$",
               "maxLength": 40
             },
             "code": {

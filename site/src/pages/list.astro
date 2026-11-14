@@ -3,6 +3,7 @@ import Base from '../layouts/Base.astro'
 import Icon from '../components/Icon.astro'
 import { URLS } from '../config'
 import { BAND_LABEL } from '../lib/registry-format'
+import { COUNTRY_REGIONS } from '../lib/regions.mjs'
 
 /* The listing wizard. The directory's own rule has always been that a machine
    verifies what a machine can verify, and an operator declares the rest. The
@@ -13,10 +14,13 @@ import { BAND_LABEL } from '../lib/registry-format'
    automation turns into a pull request. Nothing here writes to the registry;
    the git history stays the record, and a person still merges. */
 const bandOptions = Object.entries(BAND_LABEL)
-const regionCodes = [
-  'af-south', 'ap-east', 'ap-south', 'ap-southeast', 'eu-central', 'eu-north',
-  'eu-west', 'me-central', 'na-central', 'na-east', 'na-west', 'oc-southeast', 'sa-east',
-]
+const countryNames = new Intl.DisplayNames(['en'], { type: 'region' })
+const countryOptions = Object.keys(COUNTRY_REGIONS)
+  .map((code) => ({ code, name: countryNames.of(code) ?? code }))
+  .sort((a, b) => a.name.localeCompare(b.name))
+const multiRegion = Object.fromEntries(
+  Object.entries(COUNTRY_REGIONS).filter(([, codes]) => codes.length > 1),
+)
 ---
 
 <Base
@@ -101,16 +105,22 @@ const regionCodes = [
           </label>
 
           <label class="field-label">
-            <span>Where the hardware is</span>
-            <input type="text" data-field-region-label maxlength="40" autocomplete="off" placeholder="Frankfurt, DE" class="field mt-1.5 w-full px-3 py-2.5 text-[13.5px]" />
+            <span>Country where the hardware is</span>
+            <select data-field-country class="field mt-1.5 w-full px-3 py-2.5 text-[13.5px]">
+              <option value="">Choose a country</option>
+              {countryOptions.map((c) => <option value={c.code}>{c.name}</option>)}
+            </select>
           </label>
 
           <label class="field-label">
-            <span>Region code</span>
-            <select data-field-region-code class="field mt-1.5 w-full px-3 py-2.5 text-[13.5px]">
-              <option value="">Choose the nearest</option>
-              {regionCodes.map((code) => <option value={code}>{code}</option>)}
-            </select>
+            <span>City</span>
+            <input type="text" data-field-city maxlength="30" autocomplete="off" placeholder="Frankfurt" class="field mt-1.5 w-full px-3 py-2.5 text-[13.5px]" />
+          </label>
+
+          {/* Only countries that span several directory regions ask this. */}
+          <label class="field-label" data-area-wrap hidden>
+            <span>Nearest region</span>
+            <select data-field-area class="field mt-1.5 w-full px-3 py-2.5 text-[13.5px]"></select>
           </label>
 
           <label class="field-label" data-band-sfu hidden>
@@ -127,15 +137,40 @@ const regionCodes = [
           </label>
         </div>
 
-        <label class="mt-4 flex cursor-pointer items-start gap-2.5 text-[13.5px] leading-relaxed select-none">
-          <input type="checkbox" data-field-consent class="mt-0.5 size-3.5 accent-[var(--color-accent)]" />
-          <span data-consent-label>
-            Also suggest this server automatically to people picking their first server.
-            Optional. Your listing stays either way.
-          </span>
-        </label>
+        <fieldset class="discovery-panel mt-6" aria-describedby="discovery-intro discovery-note">
+          <legend class="text-[15px] font-semibold" data-discovery-heading>How should people discover your server?</legend>
+          <p id="discovery-intro" class="mt-2 text-[13px] leading-relaxed text-muted" data-discovery-intro>
+            Your server will appear in the public directory. You can also allow Telium to
+            recommend it to people choosing their first homeserver.
+          </p>
+          <div class="mt-4 grid gap-3">
+            <label class="discovery-choice">
+              <input type="radio" name="discovery-choice" value="directory" data-field-discovery checked />
+              <span class="discovery-choice-copy">
+                <span class="discovery-choice-title" data-discovery-directory-title>Public directory only</span>
+                <span class="discovery-choice-description" data-discovery-directory-description>
+                  People can find your server in the directory, but Telium won't recommend it automatically.
+                </span>
+              </span>
+            </label>
+            <label class="discovery-choice">
+              <input type="radio" name="discovery-choice" value="automatic" data-field-discovery />
+              <span class="discovery-choice-copy">
+                <span class="discovery-choice-title" data-discovery-automatic-title>Allow automatic recommendations</span>
+                <span class="discovery-choice-description" data-discovery-automatic-description>
+                  Your server becomes eligible to be suggested to new users. This may bring
+                  additional registrations, bandwidth use and storage demand.
+                </span>
+              </span>
+            </label>
+          </div>
+          <p id="discovery-note" class="mt-3 text-[12px] leading-relaxed text-muted" data-discovery-note>
+            Opting in does not guarantee recommendations. Your server must also allow them
+            and meet the directory's eligibility requirements.
+          </p>
+        </fieldset>
 
-        {/* The row preview mirrors ServerTable.astro's markup — the build-time
+                {/* The row preview mirrors ServerTable.astro's markup — the build-time
             component cannot take runtime data, and scoped styles do not cross
             files, so the few rules the preview needs are repeated below. */}
         <div class="panel-inset mt-5 px-4 py-3" data-preview hidden>
@@ -165,8 +200,8 @@ const regionCodes = [
             <div style="display: contents" data-preview-server-rows>
               <dt class="text-muted">Registration</dt>
               <dd data-preview-registration>–</dd>
-              <dt class="text-muted">Uploads</dt>
-              <dd data-preview-uploads>–</dd>
+              <dt class="text-muted">Storage per account</dt>
+              <dd class="tnum" data-preview-uploads>–</dd>
               <dt class="text-muted">Max file</dt>
               <dd class="tnum" data-preview-maxfile>–</dd>
               <dt class="text-muted">Files expire after</dt>
@@ -301,6 +336,62 @@ const regionCodes = [
     color: var(--color-foreground);
   }
 
+  /* Discovery is a consequential operator choice, not a footnote to the form. */
+  .discovery-panel {
+    border: 1px solid var(--color-separator);
+    border-radius: var(--radius-card);
+    background: var(--color-background-secondary);
+    padding: 1.25rem;
+  }
+
+  .discovery-panel legend {
+    padding: 0 0.25rem;
+  }
+
+  .discovery-choice {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    cursor: pointer;
+    border: 1px solid var(--color-separator);
+    border-radius: var(--radius-row);
+    padding: 0.875rem 1rem;
+    background: var(--color-surface);
+  }
+
+  .discovery-choice:has(input:checked) {
+    border-color: var(--color-accent);
+    background: var(--color-accent-soft);
+  }
+
+  .discovery-choice:has(input:focus-visible) {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
+  .discovery-choice input {
+    flex: none;
+    margin-top: 0.25rem;
+    accent-color: var(--color-accent);
+  }
+
+  .discovery-choice-copy {
+    display: grid;
+    gap: 0.25rem;
+  }
+
+  .discovery-choice-title {
+    color: var(--color-foreground);
+    font-size: 13.5px;
+    font-weight: 600;
+  }
+
+  .discovery-choice-description {
+    color: var(--color-muted);
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+
   /* The preview's badges mirror ServerTable.astro's — scoped styles do not
      cross files, and every badge is a fill. */
   .preview-badge {
@@ -363,7 +454,8 @@ const regionCodes = [
 </style>
 
 <script>
-  import { formatBytes, formatSpan, flagOf } from '../lib/registry-format'
+  import { formatBytes, formatSpan, flagOf, formatStorage } from '../lib/registry-format'
+  import { COUNTRY_REGIONS, REGION_NAME, buildLabel, checkRegion } from '../lib/regions.mjs'
 
   /* Progressive enhancement, the same discipline as ServerTable: the page
      above is complete without JavaScript — the checks read as instructions,
@@ -377,26 +469,47 @@ const regionCodes = [
   // round-trip a mistake costs is the issue, not a failed CI run.
   const DOMAIN = /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/
   const CONTACT = /^(https:\/\/|mailto:)/
-  const REGIONS = new Set([
-    'af-south', 'ap-east', 'ap-south', 'ap-southeast', 'eu-central', 'eu-north',
-    'eu-west', 'me-central', 'na-central', 'na-east', 'na-west', 'oc-southeast', 'sa-east',
-  ])
   const CAPACITY_BANDS = new Set(['<100m', '100m', '1g', '10g'])
 
-  const MODE_COPY: Record<Mode, { inputLabel: string; placeholder: string; consent: string; issueTemplate: string }> = {
+  const MODE_COPY: Record<Mode, { inputLabel: string; placeholder: string; issueTemplate: string }> = {
     server: {
       inputLabel: 'Server domain',
       placeholder: 'chat.example.org',
-      consent:
-        'Also suggest this server automatically to people picking their first server. Optional. Your listing stays either way. Your server has to allow it too.',
       issueTemplate: 'list-server.yml',
     },
     sfu: {
       inputLabel: 'Relay HTTPS origin',
       placeholder: 'https://sfu.example.com',
-      consent:
-        "Also let guilds in automatic mode route calls through this relay. Optional. Your listing stays either way.",
       issueTemplate: 'list-sfu.yml',
+    },
+  }
+
+  const DISCOVERY_COPY: Record<Mode, {
+    heading: string
+    intro: string
+    directoryTitle: string
+    directoryDescription: string
+    automaticTitle: string
+    automaticDescription: string
+    note: string
+  }> = {
+    server: {
+      heading: 'How should people discover your server?',
+      intro: 'Your server will appear in the public directory. You can also allow Telium to recommend it to people choosing their first homeserver.',
+      directoryTitle: 'Public directory only',
+      directoryDescription: "People can find your server in the directory, but Telium won't recommend it automatically.",
+      automaticTitle: 'Allow automatic recommendations',
+      automaticDescription: 'Your server becomes eligible to be suggested to new users. This may bring additional registrations, bandwidth use and storage demand.',
+      note: "Opting in does not guarantee recommendations. Your server must also allow them and meet the directory's eligibility requirements.",
+    },
+    sfu: {
+      heading: 'How should calls find your relay?',
+      intro: 'Your relay will appear in the public SFU directory. You can also allow guilds using automatic routing to send calls through it.',
+      directoryTitle: 'Public directory only',
+      directoryDescription: "Operators can find your relay in the directory, but automatic call routing won't select it.",
+      automaticTitle: 'Allow automatic call routing',
+      automaticDescription: 'Make your relay eligible for calls from guilds using automatic routing. This may increase bandwidth usage and traffic.',
+      note: "Opting in doesn't guarantee calls will be routed through your relay. Availability and capacity still affect selection.",
     },
   }
 
@@ -416,12 +529,22 @@ const regionCodes = [
     const descriptionInput = root.querySelector<HTMLTextAreaElement>('[data-field-description]')!
     const descCount = root.querySelector<HTMLElement>('[data-desc-count]')!
     const operatorInput = root.querySelector<HTMLInputElement>('[data-field-operator]')!
-    const regionLabelInput = root.querySelector<HTMLInputElement>('[data-field-region-label]')!
-    const regionCodeInput = root.querySelector<HTMLSelectElement>('[data-field-region-code]')!
+    const countryInput = root.querySelector<HTMLSelectElement>('[data-field-country]')!
+    const cityInput = root.querySelector<HTMLInputElement>('[data-field-city]')!
+    const areaWrap = root.querySelector<HTMLElement>('[data-area-wrap]')!
+    const areaInput = root.querySelector<HTMLSelectElement>('[data-field-area]')!
     const capacityInput = root.querySelector<HTMLSelectElement>('[data-field-capacity]')!
     const contactInput = root.querySelector<HTMLInputElement>('[data-field-contact]')!
-    const consentInput = root.querySelector<HTMLInputElement>('[data-field-consent]')!
-    const consentLabel = root.querySelector<HTMLElement>('[data-consent-label]')!
+    const discoveryInputs = [...root.querySelectorAll<HTMLInputElement>('[data-field-discovery]')]
+    const discoveryText = {
+      heading: root.querySelector<HTMLElement>('[data-discovery-heading]')!,
+      intro: root.querySelector<HTMLElement>('[data-discovery-intro]')!,
+      directoryTitle: root.querySelector<HTMLElement>('[data-discovery-directory-title]')!,
+      directoryDescription: root.querySelector<HTMLElement>('[data-discovery-directory-description]')!,
+      automaticTitle: root.querySelector<HTMLElement>('[data-discovery-automatic-title]')!,
+      automaticDescription: root.querySelector<HTMLElement>('[data-discovery-automatic-description]')!,
+      note: root.querySelector<HTMLElement>('[data-discovery-note]')!,
+    }
 
     const preview = root.querySelector<HTMLElement>('[data-preview]')!
     const previewName = root.querySelector<HTMLElement>('[data-preview-name]')!
@@ -464,7 +587,7 @@ const regionCodes = [
       mode = next
       check = null
       checkInput.value = ''
-      consentInput.checked = false
+      discoveryInputs[0].checked = true
       root.querySelector<HTMLElement>('[data-stage-details]')!.hidden = true
       root.querySelector<HTMLElement>('[data-stage-submit]')!.hidden = true
       for (const button of root.querySelectorAll<HTMLButtonElement>('[data-mode-switch]')) {
@@ -472,7 +595,10 @@ const regionCodes = [
       }
       checkLabel.textContent = MODE_COPY[mode].inputLabel
       checkInput.placeholder = MODE_COPY[mode].placeholder
-      consentLabel.textContent = MODE_COPY[mode].consent
+      const copy = DISCOVERY_COPY[mode]
+      for (const key of Object.keys(discoveryText) as (keyof typeof discoveryText)[]) {
+        discoveryText[key].textContent = copy[key]
+      }
       const isServer = mode === 'server'
       root.querySelector<HTMLElement>('[data-band-sfu]')!.hidden = isServer
       renderGates([])
@@ -480,7 +606,7 @@ const regionCodes = [
       checkInput.disabled = false
       checkButton.disabled = false
       checkButton.textContent = 'Check'
-      update() // the other mode's band, consent and identity change the entry
+      update() // the other mode's band, discovery choice and identity change the entry
     }
 
     // --- step 1: the probe ----------------------------------------------------
@@ -769,7 +895,15 @@ const regionCodes = [
 
     // --- step 2: the declared half --------------------------------------------
 
-    for (const input of [nameInput, descriptionInput, operatorInput, regionLabelInput, regionCodeInput, capacityInput, contactInput, consentInput]) {
+    // Countries spanning several directory regions (US, Canada) ask which is
+    // nearest; every other country's region follows from the country alone.
+    countryInput.addEventListener('change', () => {
+      const codes: string[] = COUNTRY_REGIONS[countryInput.value] ?? []
+      areaWrap.hidden = codes.length < 2
+      areaInput.replaceChildren(...codes.map((code) => new Option((REGION_NAME as Record<string, string>)[code] ?? code, code)))
+    })
+
+    for (const input of [nameInput, descriptionInput, operatorInput, cityInput, countryInput, areaInput, capacityInput, contactInput, ...discoveryInputs]) {
       input.addEventListener('input', update)
     }
 
@@ -780,18 +914,20 @@ const regionCodes = [
         : { url: check.identity }
       const name = nameInput.value.trim()
       const description = descriptionInput.value.trim()
-      const regionLabel = regionLabelInput.value.trim()
-      const regionCode = regionCodeInput.value
+      const country = countryInput.value
+      const city = cityInput.value.trim()
+      const regionCodes: string[] = COUNTRY_REGIONS[country] ?? []
+      const regionCode = regionCodes.length === 1 ? regionCodes[0] : areaInput.value
       const capacity = capacityInput.value
       const operator = operatorInput.value.trim()
       const contact = contactInput.value.trim()
 
       if (name) entry.name = name
       if (description) entry.description = description
-      if (regionLabel || regionCode) entry.region = { label: regionLabel, code: regionCode }
+      if (country || city) entry.region = { label: country ? buildLabel(city, country) : city, code: regionCode ?? '' }
       if (mode === 'sfu' && capacity) entry.capacity_band = capacity
       if (operator || contact) entry.operator = { name: operator, contact }
-      if (consentInput.checked) {
+      if (discoveryInputs.find((input) => input.checked)?.value === 'automatic') {
         if (mode === 'server') entry.recommendations = { opt_in: true }
         else entry.feed = { opt_in: true }
       }
@@ -812,11 +948,11 @@ const regionCodes = [
       checkLength(entry.name, 'Name', 2, 40)
       checkLength(entry.description, 'The one sentence', 10, 160)
       const region = entry.region as { label?: unknown; code?: unknown } | undefined
-      if (region) {
-        checkLength(region.label, 'The place name', 2, 40)
-        if (!REGIONS.has(str(region.code))) p.push('Pick the nearest region code')
-      } else {
-        p.push('Say where the hardware is, and pick the nearest region code')
+      if (!countryInput.value) p.push('Pick the country the hardware is in')
+      else if (cityInput.value.trim().length < 2) p.push('Add the city')
+      else if (region) {
+        const problem = checkRegion(region)
+        if (problem) p.push(problem)
       }
       if (mode === 'sfu' && !CAPACITY_BANDS.has(str(entry.capacity_band))) p.push('Pick an uplink band')
       const operator = entry.operator as { name?: unknown; contact?: unknown } | undefined
@@ -890,9 +1026,11 @@ const regionCodes = [
           previewRegistration.textContent = typeof caps?.registration_open === 'boolean'
             ? `${caps.registration_open ? 'Open' : 'Closed'}${caps.registration_code_required ? ' · invite code required' : ''}`
             : '–'
-          previewUploads.textContent = typeof media?.enabled === 'boolean'
-            ? `${media.enabled ? 'Enabled' : 'Disabled'}${media.default_policy ? ` · default ${media.default_policy}` : ''}`
-            : '–'
+          previewUploads.textContent = formatStorage(
+            media?.default_policy ?? null,
+            typeof media?.enabled === 'boolean' ? media.enabled : null,
+            typeof media?.quota_bytes === 'number' ? media.quota_bytes : null,
+          )
           previewMaxFile.textContent = typeof media?.max_file_bytes === 'number' ? formatBytes(media.max_file_bytes) : '–'
           previewExpiry.textContent = typeof media?.attachment_max_age_days === 'number'
             ? formatSpan(media.attachment_max_age_days * 86400, 'Never')

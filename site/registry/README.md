@@ -218,9 +218,14 @@ An entry looks like this:
 }
 ```
 
+`region.label` must read `City, CC`, where `CC` is the two-letter country code. The
+[wizard](https://telium.chat/list) builds it from a country dropdown so it cannot be
+mistyped, and the validator rejects a label whose country does not fit `region.code`.
+
 `region.code` must be one of: `af-south`, `ap-east`, `ap-south`, `ap-southeast`,
 `eu-central`, `eu-north`, `eu-west`, `me-central`, `na-central`, `na-east`, `na-west`,
-`oc-southeast`, `sa-east`. Pick the one nearest your hardware — it is a sort key, not a
+`oc-southeast`, `sa-east`. It follows from the country (the wizard asks only for the US and Canada,
+which span three); see [`regions.mjs`](../src/lib/regions.mjs). It is a proximity bucket, not a
 claim about your provider.
 
 [`schema.json`](./schema.json) is the same rules in JSON Schema form, for editors that

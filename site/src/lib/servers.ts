@@ -8,11 +8,11 @@
 
 import registry from '../../registry/servers.json'
 import status from '../../data/status.json'
-import { formatBytes, formatSpan, flagOf, roleList } from './registry-format'
+import { formatBytes, formatSpan, formatStorage, flagOf, roleList } from './registry-format'
 
 /* Labels, ranks and formatters live in registry-format.ts so the /list wizard's
    client script can use them without importing the registry or probe data. */
-export { formatBytes, formatSpan, flagOf, roleList }
+export { formatBytes, formatSpan, formatStorage, flagOf, roleList }
 
 export interface RegistryEntry {
   domain: string
@@ -28,6 +28,7 @@ export interface UploadPolicy {
   enabled: boolean | null
   default_policy: string | null
   max_file_bytes: number | null
+  quota_bytes: number | null
   attachment_max_age_days: number | null
   abuse_contact: string | null
 }
