@@ -1,4 +1,73 @@
 {
-  "generated_at": null,
-  "servers": {}
+  "generated_at": "2026-11-14T19:44:18.835Z",
+  "servers": {
+    "notdiscord.fyi": {
+      "domain": "notdiscord.fyi",
+      "ok": true,
+      "checked_at": "2026-11-14T19:44:18.424Z",
+      "error": null,
+      "server_name": "notdiscord.fyi",
+      "api_origin": "https://notdiscord.fyi",
+      "protocol_version": "v1",
+      "moved_to": null,
+      "sunset": null,
+      "registration_open": true,
+      "server_version": "0.4.0",
+      "roles": {
+        "guild": true,
+        "identity": true,
+        "media": true,
+        "relay": false
+      },
+      "features": {
+        "archive": false,
+        "automod": true,
+        "dms": true,
+        "embed_proxy": true,
+        "federation": true,
+        "gif_picker": true,
+        "migration": true,
+        "native_notifications": true,
+        "push": true,
+        "rate_limit": true,
+        "reactions": true,
+        "read_state": true,
+        "recovery_email": false,
+        "relay": false,
+        "search": true,
+        "threads": true,
+        "voice": true
+      },
+      "max_file_bytes": 52428800,
+      "upload": {
+        "enabled": true,
+        "default_policy": "quota",
+        "max_file_bytes": 52428800,
+        "quota_bytes": null,
+        "attachment_max_age_days": 30,
+        "abuse_contact": null
+      },
+      "registration_policy": {
+        "invite_code_required": false,
+        "min_password_len": 8
+      },
+      "recommendations_accepting": false,
+      "recommendations_referral_weight": 1,
+      "probe_ms": 411,
+      "uptime_30d": null,
+      "samples": 1,
+      "first_probe_at": "2026-11-14T19:44:19.000Z",
+      "recommendation": {
+        "eligible": false,
+        "reasons": [
+          "listing_too_new",
+          "insufficient_observed_age",
+          "insufficient_probe_history",
+          "uptime_below_minimum",
+          "live_recommendations_disabled"
+        ],
+        "weight": 1
+      }
+    }
+  }
 }
