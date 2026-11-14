@@ -8,6 +8,24 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
+/// One lock per destination so overlapping outbox pumps cannot deliver the
+/// same due row twice. Kept for the process lifetime like `upload_locks`;
+/// an entry is only added per remote server the outbox actually queues to.
+#[derive(Default)]
+pub struct OutboxPump {
+    destinations: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+}
+
+impl OutboxPump {
+    pub async fn lock_for(&self, destination: &str) -> Arc<Mutex<()>> {
+        let mut locks = self.destinations.lock().await;
+        locks
+            .entry(destination.to_owned())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub cfg: Arc<Config>,
@@ -43,6 +61,8 @@ pub struct AppState {
     /// an account's parallel uploads cannot all read a stale total and land
     /// over its quota. The instance lease keeps this single-process.
     pub upload_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    pub dm_outbox_pump: Arc<OutboxPump>,
+    pub friend_outbox_pump: Arc<OutboxPump>,
     pub demoted: Arc<std::sync::atomic::AtomicBool>,
     pub shut_down: Arc<std::sync::atomic::AtomicBool>,
     pub updates: Arc<RwLock<crate::updates::Status>>,
