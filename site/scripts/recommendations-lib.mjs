@@ -10,15 +10,10 @@ export const RECOMMENDATION_KIND = 'telium.account_home_recommendations'
 export const RECOMMENDATION_VERSION = 1
 export const CURRENT_PROTOCOL = 'v1'
 
-export const MIN_LISTING_AGE_DAYS = 7
-export const MIN_SAMPLES = 72
-export const MIN_UPTIME_PERCENT = 99
 export const MAX_PROBE_AGE_MINUTES = 180
 export const MAX_REFERRAL_WEIGHT = 3
 export const DEFAULT_VALIDITY_MINUTES = 120
 
-const DAY_MS = 24 * 60 * 60 * 1000
-const MIN_LISTING_AGE_MS = MIN_LISTING_AGE_DAYS * DAY_MS
 const MAX_PROBE_AGE_MS = MAX_PROBE_AGE_MINUTES * 60 * 1000
 
 const PKCS8_ED25519_SEED_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex')
@@ -127,18 +122,6 @@ export const verifyRecommendationDocument = (document, publicKeyText) => {
   }
 }
 
-const parseAdded = (value) => {
-  if (typeof value !== 'string') return null
-  const time = Date.parse(`${value}T00:00:00Z`)
-  return Number.isFinite(time) ? time : null
-}
-
-const parseTimestamp = (value) => {
-  if (typeof value !== 'string') return null
-  const time = Date.parse(value)
-  return Number.isFinite(time) ? time : null
-}
-
 const clampWeight = (value) => {
   if (!Number.isInteger(value) || value <= 0) return 0
   return Math.min(value, MAX_REFERRAL_WEIGHT)
@@ -167,20 +150,8 @@ export const recommendationEligibility = (entry, probe, nowMs = Date.now()) => {
   if (!optIn) reasons.push('operator_not_opted_in')
   if (!validOperatorContact(entry)) reasons.push('operator_contact_missing')
 
-  const added = parseAdded(entry?.added)
-  if (added === null || nowMs - added < MIN_LISTING_AGE_MS) reasons.push('listing_too_new')
-
-  // Registry metadata is operator-submitted, so the recommendation pool also
-  // requires an independently observed age from our own probe history. A new
-  // operator cannot backdate `added` and skip the maturation period.
-  const firstProbeAt = parseTimestamp(probe?.first_probe_at)
-  if (
-    firstProbeAt === null
-    || nowMs - firstProbeAt < MIN_LISTING_AGE_MS
-    || firstProbeAt > nowMs + 5 * 60 * 1000
-  ) {
-    reasons.push('insufficient_observed_age')
-  }
+  // Maturation (listing age, observed age, probe samples, 30-day uptime) is
+  // not enforced: new servers are approved manually before they are listed.
 
   if (!probe?.ok) reasons.push('unreachable')
   if (probe?.server_name !== entry?.domain) reasons.push('identity_domain_mismatch')
@@ -194,11 +165,6 @@ export const recommendationEligibility = (entry, probe, nowMs = Date.now()) => {
   const checkedAt = Date.parse(probe?.checked_at ?? '')
   if (!Number.isFinite(checkedAt) || nowMs - checkedAt > MAX_PROBE_AGE_MS || checkedAt > nowMs + 5 * 60 * 1000) {
     reasons.push('stale_probe')
-  }
-
-  if (!Number.isInteger(probe?.samples) || probe.samples < MIN_SAMPLES) reasons.push('insufficient_probe_history')
-  if (typeof probe?.uptime_30d !== 'number' || probe.uptime_30d < MIN_UPTIME_PERCENT) {
-    reasons.push('uptime_below_minimum')
   }
 
   if (probe?.recommendations_accepting !== true) reasons.push('live_recommendations_disabled')
@@ -267,10 +233,6 @@ export const buildUnsignedRecommendationDocument = (
       expires_at: expiresAt.toISOString(),
       criteria: {
         protocol_version: CURRENT_PROTOCOL,
-        min_listing_age_days: MIN_LISTING_AGE_DAYS,
-        min_observed_age_days: MIN_LISTING_AGE_DAYS,
-        min_probe_samples: MIN_SAMPLES,
-        min_uptime_percent: MIN_UPTIME_PERCENT,
         max_probe_age_minutes: MAX_PROBE_AGE_MINUTES,
         max_referral_weight: MAX_REFERRAL_WEIGHT,
         registry_opt_in_required: true,

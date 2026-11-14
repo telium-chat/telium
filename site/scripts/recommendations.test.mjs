@@ -64,14 +64,13 @@ test('registry listing alone never opts a server into automatic referrals', () =
   assert.ok(result.reasons.includes('operator_not_opted_in'))
 })
 
-test('a backdated registry entry cannot skip the observed maturation period', () => {
+test('a brand-new server with little probe history is eligible', () => {
   const result = recommendationEligibility(
-    entry({ added: '2025-01-01' }),
-    probe({ first_probe_at: '2026-09-15T00:00:00Z' }),
+    entry({ added: '2026-09-16' }),
+    probe({ first_probe_at: '2026-09-16T19:00:00Z', samples: 1, uptime_30d: 100 }),
     NOW,
   )
-  assert.equal(result.eligible, false)
-  assert.ok(result.reasons.includes('insufficient_observed_age'))
+  assert.equal(result.eligible, true)
 })
 
 test('a reachable operator contact is required for beginner recommendations', () => {
@@ -116,8 +115,6 @@ test('bad health, incompatible protocol, migration and stale probes exclude a se
     moved_to: 'new.example',
     sunset: { mode: 'planned' },
     checked_at: '2026-09-15T00:00:00Z',
-    samples: 3,
-    uptime_30d: 80,
   }), NOW)
   assert.equal(result.eligible, false)
   for (const reason of [
@@ -127,8 +124,6 @@ test('bad health, incompatible protocol, migration and stale probes exclude a se
     'server_moved',
     'server_sunsetting',
     'stale_probe',
-    'insufficient_probe_history',
-    'uptime_below_minimum',
   ]) {
     assert.ok(result.reasons.includes(reason), reason)
   }
@@ -170,7 +165,7 @@ test('document contains only eligible servers, normalized display metadata and s
   assert.equal(document.criteria.operator_contact_required, true)
   assert.equal(document.criteria.identity_domain_match_required, true)
   assert.equal(document.criteria.https_api_required, true)
-  assert.equal(document.criteria.min_observed_age_days, 7)
+  assert.equal(document.criteria.min_observed_age_days, undefined)
   assert.deepEqual(document.servers[0], {
     domain: 'a.example',
     api_origin: 'https://accounts.a.example:8443',
