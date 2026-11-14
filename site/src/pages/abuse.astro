@@ -1,0 +1,59 @@
+---
+import LegalPage from '../components/LegalPage.astro'
+import { URLS } from '../config'
+---
+
+<LegalPage
+  title="Abuse and takedowns"
+  description="How to report abuse on Telium: who can act, and how to reach them."
+  updated="2026-11-13"
+>
+  <p>
+    Telium has no central authority. The people who can actually remove content or
+    suspend an account are the <strong>operators of the servers it lives on</strong>.
+    telium.chat hosts only a website and a directory, so we cannot delete messages,
+    accounts or files on anyone's server. Reporting to the right place is what gets
+    things done.
+  </p>
+
+  <h2>If you are in Telium</h2>
+  <ul>
+    <li>
+      <strong>Report a message</strong> from its menu. Your home server forwards the report,
+      with a copy of the message as evidence, to the server of the person who wrote it.
+    </li>
+    <li>
+      <strong>Tell the guild's moderators</strong> as well. Moderators can remove the content
+      from the guild, which a report to the author's server cannot do.
+    </li>
+    <li>
+      <strong>Block the person</strong> to stop seeing them while you wait.
+    </li>
+  </ul>
+
+  <h2>If you are outside Telium</h2>
+  <p>
+    Find the server's domain: in a Telium address <code>@name:domain</code> it is the part
+    after the colon. Servers listed in the <a href={URLS.servers}>directory</a> must give an
+    operator contact that reaches a person. For other servers, look for a contact on the
+    server's own website, or ask its administrators in a guild hosted there. Send the operator
+    the address of the content, what is wrong with it and,
+    if the law requires it, the legal basis for your request.
+  </p>
+
+  <h2>What we can do</h2>
+  <ul>
+    <li>
+      Hide or remove a directory listing for a server that ignores serious abuse reports.
+      Report that on <a href={URLS.github}>GitHub</a>.
+    </li>
+    <li>Pass a report to the right operator if you can't tell who that is.</li>
+  </ul>
+
+  <h2>Emergencies and illegal content</h2>
+  <p>
+    If someone is in immediate danger, contact local emergency services, not a chat server.
+    For child sexual abuse material, report it to your national hotline or police as
+    well as the operator. Do not copy or forward the material itself.
+  </p>
+</LegalPage>

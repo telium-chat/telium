@@ -1,0 +1,53 @@
+---
+import Base from '../layouts/Base.astro'
+
+interface Props {
+  title: string
+  description: string
+  updated: string
+}
+
+const { title, description, updated } = Astro.props
+---
+
+{/* Shared shell for the plain-language policy pages. They are prose, so the
+    typography lives here once rather than in three places. */}
+<Base title={title} description={description}>
+  <section class="page py-16 sm:py-20">
+    <p class="eyebrow">Policy</p>
+    <h1 class="h2 mt-3">{title}</h1>
+    <p class="mt-2 text-[13px] text-muted">Last updated <time datetime={updated}>{updated}</time></p>
+    <div class="legal prose-measure mt-8 text-[15.5px] leading-relaxed text-muted">
+      <slot />
+    </div>
+  </section>
+</Base>
+
+<style is:global>
+  .legal h2 {
+    margin-top: 2.25rem;
+    margin-bottom: 0.5rem;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--color-foreground);
+  }
+  .legal p,
+  .legal ul {
+    margin-top: 0.75rem;
+  }
+  .legal ul {
+    list-style: disc;
+    padding-left: 1.25rem;
+  }
+  .legal li + li {
+    margin-top: 0.35rem;
+  }
+  .legal a {
+    color: var(--color-link);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .legal strong {
+    color: var(--color-foreground);
+  }
+</style>
