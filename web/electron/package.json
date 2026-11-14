@@ -2,7 +2,7 @@
   "name": "telium-desktop",
   "productName": "Telium",
   "desktopName": "chat.telium.Telium.desktop",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Telium desktop shell",
   "private": true,
   "main": "desktop-main.cjs",
