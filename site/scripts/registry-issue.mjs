@@ -130,7 +130,7 @@ export const rebuildEntry = (kind, raw, { added, consent }) => {
   }
   const entry = {}
   if (kind === 'server') {
-    pickStrings(raw, ['domain', 'name', 'description', 'size_band'], entry)
+    pickStrings(raw, ['domain', 'name', 'description'], entry)
     pickObject(raw, 'region', ['label', 'code'], entry)
     pickObject(raw, 'operator', ['name', 'contact'], entry)
     if (consent) entry.recommendations = { opt_in: true }

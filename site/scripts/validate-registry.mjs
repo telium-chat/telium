@@ -4,7 +4,7 @@
  * Hand-rolled rather than pulling a JSON Schema runtime: the schema next to the
  * data is there for editors, but the thing that runs on every pull request
  * should produce an error a first-time contributor can act on — "entry 4:
- * size_band must be one of …, got 'medium'" — not a JSON Pointer. It also
+ * description must be at least 10 characters" — not a JSON Pointer. It also
  * checks two things a schema cannot: duplicate domains, and that the file stays
  * sorted, so merging two PRs never produces a conflict over row order.
  *
@@ -23,7 +23,6 @@ const REGIONS = new Set([
   'af-south', 'ap-east', 'ap-south', 'ap-southeast', 'eu-central', 'eu-north',
   'eu-west', 'me-central', 'na-central', 'na-east', 'na-west', 'oc-southeast', 'sa-east',
 ])
-const SIZE_BANDS = new Set(['<100', '100-1k', '1k-10k', '10k+'])
 const DOMAIN = /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 const CONTACT = /^(https:\/\/|mailto:)/
@@ -42,7 +41,7 @@ const str = (where, value, field, { min = 1, max = Infinity } = {}) => {
   if (trimmed.length > max) fail(where, `${field} must be at most ${max} characters (got ${trimmed.length})`)
 }
 
-const REQUIRED_KEYS = ['domain', 'name', 'description', 'region', 'size_band', 'operator', 'added']
+const REQUIRED_KEYS = ['domain', 'name', 'description', 'region', 'operator', 'added']
 const ALLOWED_KEYS = [...REQUIRED_KEYS, 'recommendations']
 
 const main = async () => {
@@ -99,10 +98,6 @@ const main = async () => {
       if (!REGIONS.has(entry.region.code)) {
         fail(where, `region.code must be one of ${[...REGIONS].join(', ')} — got ${JSON.stringify(entry.region.code)}`)
       }
-    }
-
-    if (!SIZE_BANDS.has(entry.size_band)) {
-      fail(where, `size_band must be one of ${[...SIZE_BANDS].join(', ')} — got ${JSON.stringify(entry.size_band)}`)
     }
 
     if (typeof entry.operator !== 'object' || entry.operator === null || Array.isArray(entry.operator)) {

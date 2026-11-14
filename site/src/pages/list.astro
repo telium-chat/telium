@@ -2,7 +2,7 @@
 import Base from '../layouts/Base.astro'
 import Icon from '../components/Icon.astro'
 import { URLS } from '../config'
-import { SIZE_LABEL, BAND_LABEL } from '../lib/registry-format'
+import { BAND_LABEL } from '../lib/registry-format'
 
 /* The listing wizard. The directory's own rule has always been that a machine
    verifies what a machine can verify, and an operator declares the rest. The
@@ -12,7 +12,6 @@ import { SIZE_LABEL, BAND_LABEL } from '../lib/registry-format'
    the probe cannot determine, and files the prefilled listing issue the
    automation turns into a pull request. Nothing here writes to the registry;
    the git history stays the record, and a person still merges. */
-const sizeOptions = Object.entries(SIZE_LABEL)
 const bandOptions = Object.entries(BAND_LABEL)
 const regionCodes = [
   'af-south', 'ap-east', 'ap-south', 'ap-southeast', 'eu-central', 'eu-north',
@@ -111,14 +110,6 @@ const regionCodes = [
             <select data-field-region-code class="field mt-1.5 w-full px-3 py-2.5 text-[13.5px]">
               <option value="">Choose the nearest</option>
               {regionCodes.map((code) => <option value={code}>{code}</option>)}
-            </select>
-          </label>
-
-          <label class="field-label" data-band-server>
-            <span>Roughly how many accounts</span>
-            <select data-field-size class="field mt-1.5 w-full px-3 py-2.5 text-[13.5px]">
-              <option value="">Self-declared range</option>
-              {sizeOptions.map(([value, label]) => <option value={value}>{label}</option>)}
             </select>
           </label>
 
@@ -378,7 +369,6 @@ const regionCodes = [
     'af-south', 'ap-east', 'ap-south', 'ap-southeast', 'eu-central', 'eu-north',
     'eu-west', 'me-central', 'na-central', 'na-east', 'na-west', 'oc-southeast', 'sa-east',
   ])
-  const SIZE_BANDS = new Set(['<100', '100-1k', '1k-10k', '10k+'])
   const CAPACITY_BANDS = new Set(['<100m', '100m', '1g', '10g'])
 
   const MODE_COPY: Record<Mode, { inputLabel: string; placeholder: string; consent: string; issueTemplate: string }> = {
@@ -416,7 +406,6 @@ const regionCodes = [
     const operatorInput = root.querySelector<HTMLInputElement>('[data-field-operator]')!
     const regionLabelInput = root.querySelector<HTMLInputElement>('[data-field-region-label]')!
     const regionCodeInput = root.querySelector<HTMLSelectElement>('[data-field-region-code]')!
-    const sizeInput = root.querySelector<HTMLSelectElement>('[data-field-size]')!
     const capacityInput = root.querySelector<HTMLSelectElement>('[data-field-capacity]')!
     const contactInput = root.querySelector<HTMLInputElement>('[data-field-contact]')!
     const consentInput = root.querySelector<HTMLInputElement>('[data-field-consent]')!
@@ -764,7 +753,7 @@ const regionCodes = [
 
     // --- step 2: the declared half --------------------------------------------
 
-    for (const input of [nameInput, descriptionInput, operatorInput, regionLabelInput, regionCodeInput, sizeInput, capacityInput, contactInput, consentInput]) {
+    for (const input of [nameInput, descriptionInput, operatorInput, regionLabelInput, regionCodeInput, capacityInput, contactInput, consentInput]) {
       input.addEventListener('input', update)
     }
 
@@ -777,7 +766,6 @@ const regionCodes = [
       const description = descriptionInput.value.trim()
       const regionLabel = regionLabelInput.value.trim()
       const regionCode = regionCodeInput.value
-      const size = sizeInput.value
       const capacity = capacityInput.value
       const operator = operatorInput.value.trim()
       const contact = contactInput.value.trim()
@@ -785,7 +773,6 @@ const regionCodes = [
       if (name) entry.name = name
       if (description) entry.description = description
       if (regionLabel || regionCode) entry.region = { label: regionLabel, code: regionCode }
-      if (mode === 'server' && size) entry.size_band = size
       if (mode === 'sfu' && capacity) entry.capacity_band = capacity
       if (operator || contact) entry.operator = { name: operator, contact }
       if (consentInput.checked) {
@@ -815,7 +802,6 @@ const regionCodes = [
       } else {
         p.push('Say where the hardware is, and pick the nearest region code')
       }
-      if (mode === 'server' && !SIZE_BANDS.has(str(entry.size_band))) p.push('Pick an account range')
       if (mode === 'sfu' && !CAPACITY_BANDS.has(str(entry.capacity_band))) p.push('Pick an uplink band')
       const operator = entry.operator as { name?: unknown; contact?: unknown } | undefined
       if (operator) {
@@ -877,7 +863,7 @@ const regionCodes = [
         previewDomain.textContent = check!.identity
         previewRegion.textContent = str((current.region as any)?.label) || '–'
         previewBand.textContent = mode === 'server'
-          ? (str(current.size_band) || '–')
+          ? (check!.capabilities?.registration_open === true ? 'Open' : 'Closed')
           : (str(current.capacity_band) || '–')
         previewDescription.textContent = str(current.description)
         previewOperator.textContent = str((current.operator as any)?.name) || '–'

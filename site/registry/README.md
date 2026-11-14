@@ -15,7 +15,6 @@ merges the site rebuilds with your server in it.
 | `name` | What you call the server. |
 | `description` | One sentence: who runs it and who it's for. |
 | `region` | Where it physically is, plus a code the table sorts on. |
-| `size_band` | Roughly how many accounts. Nothing in Telium exposes a count, so this is yours to declare. |
 | `operator` | Who to contact. |
 | `recommendations` | Optional explicit consent to be considered for automatic beginner account-home referrals. |
 | `added` | The day the entry was opened. This is transparent registry metadata, not proof of recommendation age. |
@@ -210,7 +209,6 @@ An entry looks like this:
   "name": "Example Chat",
   "description": "General-purpose homeserver for the Example community, open registration.",
   "region": { "label": "Frankfurt, DE", "code": "eu-central" },
-  "size_band": "100-1k",
   "operator": {
     "name": "Example Collective",
     "contact": "https://example.org/contact"
@@ -224,10 +222,6 @@ An entry looks like this:
 `eu-central`, `eu-north`, `eu-west`, `me-central`, `na-central`, `na-east`, `na-west`,
 `oc-southeast`, `sa-east`. Pick the one nearest your hardware — it is a sort key, not a
 claim about your provider.
-
-`size_band` must be one of: `<100`, `100-1k`, `1k-10k`, `10k+`. The page labels it as
-self-reported, because it is. An honest band is more useful to a reader than a flattering
-one.
 
 [`schema.json`](./schema.json) is the same rules in JSON Schema form, for editors that
 offer completion.

@@ -11,7 +11,8 @@
  *                                     protocol_version, moved_to, sunset,
  *                                     onboarding.recommendations
  *   GET <api>/_telium/v1/capabilities → roles, registration_open, features,
- *                                     server_version, media.max_file_bytes
+ *                                     server_version, media.* (upload policy),
+ *                                     registration_code_required
  *
  * The two it cannot answer are population (no server-wide account count exists,
  * authenticated or otherwise) and uptime (nothing tracks it). Population is
@@ -89,6 +90,8 @@ const probe = async (entry) => {
     roles: null,
     features: null,
     max_file_bytes: null,
+    upload: null,
+    registration_policy: null,
     recommendations_accepting: null,
     recommendations_referral_weight: null,
     probe_ms: null,
@@ -134,6 +137,8 @@ const probe = async (entry) => {
       result.roles = caps.roles && typeof caps.roles === 'object' ? caps.roles : null
       result.features = caps.features && typeof caps.features === 'object' ? caps.features : null
       result.max_file_bytes = typeof caps.media?.max_file_bytes === 'number' ? caps.media.max_file_bytes : null
+      result.upload = readUpload(caps.media)
+      result.registration_policy = readRegistrationPolicy(caps)
 
       // Prefer capabilities when a server exposes the signal there; discovery
       // is the rollout-compatible fallback. This lets old and new reference
@@ -157,6 +162,26 @@ const probe = async (entry) => {
   result.probe_ms = Date.now() - started
   return result
 }
+
+const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+
+/* Upload policy, exactly as the server advertises it. Anything missing stays
+   null so the page can say "not advertised" instead of inventing a default. */
+const readUpload = (media) => {
+  if (!media || typeof media !== 'object') return null
+  return {
+    enabled: typeof media.enabled === 'boolean' ? media.enabled : null,
+    default_policy: typeof media.default_policy === 'string' ? media.default_policy : null,
+    max_file_bytes: num(media.max_file_bytes),
+    attachment_max_age_days: num(media.attachment_max_age_days),
+    abuse_contact: typeof media.abuse_contact === 'string' ? media.abuse_contact : null,
+  }
+}
+
+const readRegistrationPolicy = (caps) => ({
+  invite_code_required: typeof caps.registration_code_required === 'boolean' ? caps.registration_code_required : null,
+  min_password_len: num(caps.registration_min_password_len),
+})
 
 /** Run tasks with a ceiling on how many are in flight at once. */
 const pool = async (items, limit, worker) => {

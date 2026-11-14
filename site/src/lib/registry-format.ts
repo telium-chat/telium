@@ -7,24 +7,7 @@
  * vocabulary — with no data import at all.
  */
 
-export type SizeBand = '<100' | '100-1k' | '1k-10k' | '10k+'
-
 export type CapacityBand = '<100m' | '100m' | '1g' | '10g'
-
-export const SIZE_LABEL: Record<SizeBand, string> = {
-  '<100': 'Under 100',
-  '100-1k': '100 – 1k',
-  '1k-10k': '1k – 10k',
-  '10k+': '10k+',
-}
-
-/** Sort weight for the size column; the bands are ranges, so sort by their floor. */
-export const SIZE_RANK: Record<SizeBand, number> = {
-  '<100': 0,
-  '100-1k': 1,
-  '1k-10k': 2,
-  '10k+': 3,
-}
 
 export const BAND_LABEL: Record<CapacityBand, string> = {
   '<100m': 'Under 100 Mbps',
@@ -50,3 +33,20 @@ export const formatBytes = (bytes: number | null): string => {
 /** Roles are the honest summary of what a server actually offers. */
 export const roleList = (roles: Record<string, boolean> | null): string[] =>
   roles ? Object.entries(roles).filter(([, on]) => on).map(([role]) => role) : []
+
+/** "7 days", "12 hours"; zero means the server sets no limit. */
+export const formatSpan = (secs: number | null, unlimited = 'No limit'): string => {
+  if (secs === null || !Number.isFinite(secs)) return '–'
+  if (secs <= 0) return unlimited
+  const day = 86400
+  if (secs >= day) { const d = Math.round(secs / day); return `${d} day${d === 1 ? '' : 's'}` }
+  if (secs >= 3600) { const h = Math.round(secs / 3600); return `${h} hour${h === 1 ? '' : 's'}` }
+  return `${Math.max(1, Math.round(secs / 60))} min`
+}
+
+/** Flag emoji from the trailing ISO country code in a region label ("Frankfurt, DE"). */
+export const flagOf = (label: string): string => {
+  const code = /,\s*([A-Za-z]{2})\s*$/.exec(label)?.[1]?.toUpperCase()
+  return code ? String.fromCodePoint(...[...code].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65)) : '🌐'
+}
+

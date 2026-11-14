@@ -46,7 +46,6 @@ const serverEntry = (overrides = {}) => ({
   name: 'Example Chat',
   description: 'General-purpose homeserver for the Example community, open registration.',
   region: { label: 'Frankfurt, DE', code: 'eu-central' },
-  size_band: '100-1k',
   operator: { name: 'Example Collective', contact: 'https://example.org/contact' },
   ...overrides,
 })
@@ -91,7 +90,6 @@ test('rebuildEntry keeps only schema fields and stamps nothing it was not given'
     name: 'Example Chat',
     description: 'General-purpose homeserver for the Example community, open registration.',
     region: { label: 'Frankfurt, DE', code: 'eu-central' },
-    size_band: '100-1k',
     operator: { name: 'Example Collective', contact: 'https://example.org/contact' },
     added: '2026-11-04',
   })
@@ -191,7 +189,7 @@ test('the command line refuses duplicates and unparseable entries', async () => 
     // A different domain, so the duplicate check passes and the validator's
     // rejection is what stops the run.
     const bad = join(dir, 'bad.md')
-    await writeFile(bad, serverBody(serverEntry({ domain: 'other.example.org', description: 'too short' })).replace('size_band": "100-1k"', 'size_band": "medium"'))
+    await writeFile(bad, serverBody(serverEntry({ domain: 'other.example.org', description: 'too short' })))
     const runBad = spawnSync(process.execPath, [
       CLI,
       '--kind', 'server',
@@ -200,7 +198,7 @@ test('the command line refuses duplicates and unparseable entries', async () => 
       '--registry', registry,
     ], { encoding: 'utf8' })
     assert.equal(runBad.status, 1, 'the validator must gate the commit')
-    assert.match(runBad.stderr, /size_band must be one of/)
+    assert.match(runBad.stderr, /description must be at least/)
     assert.match(runBad.stderr, /did not pass the registry validator/)
   } finally {
     await rm(dir, { recursive: true, force: true })

@@ -8,22 +8,28 @@
 
 import registry from '../../registry/servers.json'
 import status from '../../data/status.json'
-import { SIZE_LABEL, SIZE_RANK, formatBytes, roleList, type SizeBand } from './registry-format'
+import { formatBytes, formatSpan, flagOf, roleList } from './registry-format'
 
 /* Labels, ranks and formatters live in registry-format.ts so the /list wizard's
    client script can use them without importing the registry or probe data. */
-export { SIZE_LABEL, SIZE_RANK, formatBytes, roleList }
-export type { SizeBand }
+export { formatBytes, formatSpan, flagOf, roleList }
 
 export interface RegistryEntry {
   domain: string
   name: string
   description: string
   region: { label: string; code: string }
-  size_band: SizeBand
   operator: { name: string; contact: string }
   recommendations?: { opt_in: boolean }
   added: string
+}
+
+export interface UploadPolicy {
+  enabled: boolean | null
+  default_policy: string | null
+  max_file_bytes: number | null
+  attachment_max_age_days: number | null
+  abuse_contact: string | null
 }
 
 export interface RecommendationDecision {
@@ -46,6 +52,8 @@ export interface ProbeResult {
   roles: Record<string, boolean> | null
   features: Record<string, boolean> | null
   max_file_bytes: number | null
+  upload: UploadPolicy | null
+  registration_policy: { invite_code_required: boolean | null; min_password_len: number | null } | null
   recommendations_accepting: boolean | null
   recommendations_referral_weight: number | null
   uptime_30d: number | null
@@ -72,6 +80,8 @@ const EMPTY_PROBE: ProbeResult = {
   roles: null,
   features: null,
   max_file_bytes: null,
+  upload: null,
+  registration_policy: null,
   recommendations_accepting: null,
   recommendations_referral_weight: null,
   uptime_30d: null,
