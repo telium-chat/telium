@@ -236,6 +236,12 @@ async fn stage_body(
             let cap = global_cap.min(state.cfg.media_policy.max_profile_asset_bytes);
             (cap, format!("profile assets are capped at {cap} bytes; crop or downscale it first"))
         }
+        // Expression bytes are public by hash and outside attachment
+        // retention, so hold them to the emoji route's own ceiling.
+        "expression" => {
+            let cap = global_cap.min(crate::routes::guild::MAX_EXPRESSION_BYTES);
+            (cap, format!("expression assets are capped at {cap} bytes"))
+        }
         "attachment" => match dest_cap {
             Some(dest) if usize::try_from(dest).unwrap_or(usize::MAX) < global_cap => (
                 usize::try_from(dest).unwrap_or(usize::MAX),
@@ -349,6 +355,12 @@ pub async fn store_bytes(
         )));
     }
 
+    if purpose == "expression" && body.len() > crate::routes::guild::MAX_EXPRESSION_BYTES {
+        return Err(ApiError::TooLarge(format!(
+            "expression assets are capped at {} bytes",
+            crate::routes::guild::MAX_EXPRESSION_BYTES
+        )));
+    }
     let digests = crate::scan::UploadDigests::of(&body);
     let hash = digests.blake3.clone();
     crate::scan::screen_upload_digests(state, user_id, &digests, &hash, body.len()).await?;
@@ -459,34 +471,57 @@ async fn store_payload(
     } else {
         None
     };
-    let existing: Option<(String, String, Option<i64>)> =
-        sqlx::query_as("SELECT capability, owner_user_id, expires_at FROM media WHERE hash = ?")
+    let existing: Option<(String, Option<i64>, String)> =
+        sqlx::query_as("SELECT capability, expires_at, purpose FROM media WHERE hash = ?")
             .bind(hash)
             .fetch_optional(&state.pool)
             .await?;
 
     let ttl = requested_ttl(headers)?;
-    // An origin that sets a default applies it only where the client did not
-    // choose: a requested TTL is never widened, and both still narrow against
-    // the destination's cap below.
-    let ttl = ttl.or_else(|| state.cfg.media_policy.default_expiry_secs.non_zero());
-    let expires_at = expires_at_from(now_ms(), ttl, &[destination]);
+    // Lifetime policy is for attachments. The origin's default and ceiling,
+    // and any guild or channel ceiling, never touch avatars, banners, guild
+    // icons, emoji or stickers: those stay until replaced or deleted, unless
+    // the client itself asked for a lifetime. For attachments, the default
+    // applies only where the client did not choose: a requested TTL is never
+    // widened, and both still narrow against the destination's cap.
+    let expires_at = if purpose == "attachment" {
+        let ttl = ttl.or_else(|| state.cfg.media_policy.default_expiry_secs.non_zero());
+        expires_at_from(now_ms(), ttl, &[destination])
+    } else {
+        expires_at_from(now_ms(), ttl, &[])
+    };
 
-    let capability = match existing {
-        Some((capability, _, existing_expires)) => {
+    let (capability, expires_at) = match existing {
+        Some((capability, existing_expires, existing_purpose)) => {
             sqlx::query("UPDATE media SET refcount = refcount + 1 WHERE hash = ?")
                 .bind(hash)
                 .execute(&state.pool)
                 .await?;
-            let settled = earlier_of(existing_expires, expires_at);
-            if settled != existing_expires {
+            // One row backs every upload of the same bytes, so attachment
+            // policy must not reach bytes a profile asset or expression also
+            // uses. Re-uploading an attachment's bytes as one takes the row
+            // out of attachment policy: no inherited expiry, no age sweep.
+            // An attachment upload of such bytes never shortens them.
+            let (settled, promote) = match (existing_purpose == "attachment", purpose == "attachment") {
+                (true, false) => (expires_at, true),
+                (false, true) => (existing_expires, false),
+                _ => (earlier_of(existing_expires, expires_at), false),
+            };
+            if promote {
+                sqlx::query("UPDATE media SET purpose = ?, expires_at = ? WHERE hash = ?")
+                    .bind(purpose)
+                    .bind(settled)
+                    .bind(hash)
+                    .execute(&state.pool)
+                    .await?;
+            } else if settled != existing_expires {
                 sqlx::query("UPDATE media SET expires_at = ? WHERE hash = ?")
                     .bind(settled)
                     .bind(hash)
                     .execute(&state.pool)
                     .await?;
             }
-            capability
+            (capability, settled)
         }
         None => {
             // Streamed uploads are already in media_dir/tmp. Memory-backed
@@ -523,7 +558,7 @@ async fn store_payload(
             .bind(local_dest)
             .execute(&state.pool)
             .await?;
-            capability
+            (capability, expires_at)
         }
     };
 

@@ -103,10 +103,12 @@ profile_asset_carveout_bytes = "512KiB"
 max_file_bytes = "100MiB"
 # Largest avatar or banner.
 max_profile_asset_bytes = "256KiB"
-# Longest lifetime a client may ask for an upload; zero caps nothing.
+# Longest lifetime an attachment may have; zero caps nothing. Avatars,
+# banners, guild icons, emoji and stickers are never capped.
 max_expiry_secs = 0
-# Lifetime applied when the client asks for none; zero keeps such uploads
-# until something reclaims them.
+# Lifetime given to an attachment when the client asks for none; zero keeps
+# such uploads until something reclaims them. Never applied to avatars,
+# banners, guild icons, emoji or stickers.
 default_expiry_secs = 0
 # Attachments older than this are swept even when a message still refers to
 # them. Destructive by design; zero never ages anything out.
