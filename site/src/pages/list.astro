@@ -457,7 +457,6 @@ const regionCodes = [
       checkInput.placeholder = MODE_COPY[mode].placeholder
       consentLabel.textContent = MODE_COPY[mode].consent
       const isServer = mode === 'server'
-      root.querySelector<HTMLElement>('[data-band-server]')!.hidden = !isServer
       root.querySelector<HTMLElement>('[data-band-sfu]')!.hidden = isServer
       renderGates([])
       continueButton.disabled = true
