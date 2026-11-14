@@ -18,7 +18,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 command -v systemctl >/dev/null 2>&1 ||
-  die "native installation needs a Linux machine running systemd"
+  die "this installer needs a Linux machine that uses systemd"
 
 # Bare Debian/Ubuntu images may lack curl, tar, and the user-management tools.
 # Install only when needed; don't silently install a new init system or
@@ -28,15 +28,15 @@ for tool in curl tar sha256sum runuser useradd; do
   command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
 done
 if [ "${#missing[@]}" -ne 0 ]; then
-  say "missing tools: ${missing[*]}"
+  say "some tools this setup needs are missing: ${missing[*]}"
   if command -v apt-get >/dev/null 2>&1; then
-    say "installing required packages with apt-get..."
+    say "installing them with apt-get..."
     export DEBIAN_FRONTEND=noninteractive
     apt-get update &&
       apt-get install -y --no-install-recommends ca-certificates curl tar coreutils util-linux passwd ||
       die "package installation failed; repair apt and rerun the installer"
   else
-    die "install the missing tools (${missing[*]}) with your distribution's package manager, then rerun"
+    die "please install these with your distribution's package manager (${missing[*]}), then run this script again"
   fi
 fi
 for tool in curl tar sha256sum runuser useradd; do
@@ -50,9 +50,9 @@ done
 tmp="$(mktemp -d)"
 trap 'rm -rf -- "$tmp"' EXIT
 base=https://raw.githubusercontent.com/telium-chat/telium/main/deploy
-for file in install-native.sh storage-wizard.sh update-native.sh telium-server.service telium-update-native.service telium-update-native.timer; do
+for file in install-native.sh storage-wizard.sh setup-caddy.sh update-native.sh telium-server.service telium-update-native.service telium-update-native.timer; do
   curl -fsSL --retry 2 --connect-timeout 15 --max-time 90 -o "$tmp/$file" "$base/$file" ||
-    die "could not download $file from GitHub; check network access and retry"
+    die "could not download $file from GitHub; check this machine's internet connection and try again"
 done
 
 printf '\n== Starting the Telium native installer\n'

@@ -54,6 +54,10 @@ case "$url" in
       printf '{"ok":true,"server_name":"%s"}\n' "$server"
     fi
     ;;
+  https://*/.well-known/telium/server)
+    test "${MOCK_HTTPS:-0}" = 1 || exit 22
+    echo '{"server_name":"mock"}'
+    ;;
   *SHA256SUMS-server)
     digest="$(sha256sum "$MOCK_WORK/releases/v$MOCK_STAGE/telium-server-linux-x86_64.tar.gz" | cut -d' ' -f1)"
     printf '%s  %s\n' "$digest" 'telium-server-linux-x86_64.tar.gz' > "$out"
@@ -73,8 +77,11 @@ cat > "$work/bin/systemctl" <<'MOCK_SYSTEMCTL'
 set -euo pipefail
 case "$1" in
   daemon-reload) ;;
+  reload) echo "$*" >> "$MOCK_WORK/state/caddy_calls" ;;
   enable)
-    if [[ " $* " == *" --now "* ]] && [ ! -f "$MOCK_WORK/state/active" ]; then
+    if [[ " $* " == *" caddy "* ]]; then
+      echo "$*" >> "$MOCK_WORK/state/caddy_calls"
+    elif [[ " $* " == *" --now "* ]] && [ ! -f "$MOCK_WORK/state/active" ]; then
       touch "$MOCK_WORK/state/active"
       /usr/local/bin/telium-server version | sed -n 's/^commit=//p' > "$MOCK_WORK/state/active_commit"
     fi
@@ -112,6 +119,12 @@ else
   exec /usr/bin/stat "$@"
 fi
 MOCK_STAT
+# Caddy itself: the installer only needs it to exist and to accept a config.
+cat > "$work/bin/caddy" <<'MOCK_CADDY'
+#!/usr/bin/env bash
+[ "${1:-}" = validate ] || { echo "unexpected caddy command: $*" >&2; exit 1; }
+echo "validated" >> "$MOCK_WORK/state/caddy_calls"
+MOCK_CADDY
 chmod +x "$work/bin/"*
 export PATH="$work/bin:$PATH"
 
@@ -237,7 +250,7 @@ export TELIUM_REGISTRATION=closed
 ( cd / && bash /repo/deploy/bootstrap-native.sh CHAT.TEST ) > "$work/fresh.log" 2>&1
 assert_contains "$work/fresh.log" "Starting the Telium native installer"
 assert_contains "$work/fresh.log" "registration PRIVATE"
-assert_contains "$work/fresh.log" "setup uses root privileges"
+assert_contains "$work/fresh.log" "this setup runs as root"
 assert_contains "$work/fresh.log" "Initial private registration code"
 assert_contains /etc/telium/telium.toml 'server_name = "chat.test"'
 assert_contains /etc/telium/telium.toml 'client_url = "https://telium.chat"'
@@ -248,7 +261,9 @@ assert_contains /etc/telium/telium.toml 'attachment_max_age_days = 0'
 assert_contains /etc/telium/telium.toml 'media_mode = "all"'
 assert_contains /etc/telium/telium.toml 'interval_secs = "6h"'
 assert_contains /etc/telium/telium.toml 'min_free_bytes = "'
-assert_contains "$work/fresh.log" 'Found '
+assert_contains "$work/fresh.log" 'Free disk space'
+assert_contains "$work/fresh.log" 'Point DNS at this machine'
+assert_absent "$work/fresh.log" 'Caddy is running'
 assert_contains "$work/fresh.log" "Enter the one-time registration code shown above"
 assert_live_matches_binary
 [ ! -e "$work/state/restarts" ] || fail "fresh install should not restart"
@@ -268,17 +283,18 @@ assert_contains "$work/wrong-domain.log" "use the domain relocation procedure"
 bash deploy/install-native.sh chat.test > "$work/rerun.log" 2>&1
 assert_contains /etc/systemd/system/telium-server.service '# operator-only hardening override'
 assert_contains "$work/rerun.log" 'preserved existing /etc/systemd/system/telium-server.service'
-assert_contains "$work/rerun.log" "keeping the installed binary"
+assert_contains "$work/rerun.log" "keeping the server that is already installed"
 assert_contains "$work/rerun.log" "backup: /var/backups/telium/archives/snapshot.test"
 assert_contains "$work/rerun.log" "deployed "
-assert_contains "$work/rerun.log" "Enter your saved private registration code"
-assert_contains "$work/rerun.log" "existing configuration and administrator access were preserved"
+assert_contains "$work/rerun.log" "Enter your saved registration code"
+assert_contains "$work/rerun.log" "your admin access were left as they were"
 assert_contains /etc/telium/telium.toml 'attachment_max_age_days = 0'
 assert_contains /etc/telium/telium.toml 'media_mode = "all"'
-assert_absent "$work/rerun.log" 'Storage configuration'
+assert_absent "$work/rerun.log" 'Storage settings'
 assert_absent "$work/rerun.log" "Enter the one-time registration code shown above"
 assert_absent "$work/rerun.log" "admin recover USERNAME"
-assert_absent "$work/rerun.log" "1. point DNS:"
+assert_absent "$work/rerun.log" "Point DNS at this machine."
+assert_contains "$work/rerun.log" "set up HTTPS with Caddy"
 test -s "$work/state/restarts" || fail "upgrader did not restart the active service"
 assert_live_matches_binary
 [ "$(binary_commit)" = "$(printf '%040d' 2)" ] || fail "upgrader did not install release 2"
@@ -339,13 +355,13 @@ rm -f "$work/state/"*
 export MOCK_STAGE=1 TELIUM_REGISTRATION=open
 unset MOCK_BACKUP_FAIL
 bash deploy/install-native.sh open.test > "$work/open.log" 2>&1
-assert_contains "$work/open.log" "Registration is open; no invitation code is required."
+assert_contains "$work/open.log" "Sign-ups are open; no registration code is needed."
 assert_contains /etc/telium/telium.toml 'attachment_max_age_days = 30'
 assert_contains /etc/telium/telium.toml 'default_expiry_secs = 0'
 assert_contains /etc/telium/telium.toml 'max_expiry_secs = 0'
 assert_contains /etc/telium/telium.toml 'media_mode = "profile_assets"'
-assert_contains "$work/open.log" 'Backups EXCLUDE uploaded files'
-assert_absent "$work/open.log" "Further registration codes"
+assert_contains "$work/open.log" 'backups do NOT include uploaded files'
+assert_absent "$work/open.log" "More registration codes"
 assert_absent "$work/open.log" "If your setup code was lost"
 assert_live_matches_binary
 
@@ -366,7 +382,7 @@ assert_contains "$work/refuse-orphaned-data.log" "server data or backups remain"
 test -f /var/lib/telium/orphaned-data || fail "interrupted state was lost"
 rm -rf /var/lib/telium
 bash deploy/install-native.sh recovery.test > "$work/recovery.log" 2>&1
-assert_contains "$work/recovery.log" "recovering an interrupted first install"
+assert_contains "$work/recovery.log" "an earlier install was interrupted"
 assert_contains "$work/recovery.log" "Initial private registration code"
 assert_live_matches_binary
 
@@ -399,8 +415,42 @@ export TELIUM_MEDIA_QUOTA=not-a-size
 if bash deploy/install-native.sh invalid-storage.test > "$work/bad-storage.log" 2>&1; then
   fail "installer accepted an invalid media quota"
 fi
-assert_contains "$work/bad-storage.log" 'invalid Per-user media allowance'
+assert_contains "$work/bad-storage.log" "not a valid answer for 'Storage allowance per person'"
 test ! -e /etc/telium/telium.toml || fail "invalid storage choices wrote a config"
 unset TELIUM_MEDIA_QUOTA
 
-echo 'native installer smoke: registration, storage defaults and overrides, domain, recovery and safe updates passed'
+# Automatic HTTPS on a fresh install: Caddy is configured, upload size limits
+# follow the server's own file limit, and the DNS/HTTPS to-do items go away.
+rm -rf /etc/telium /var/lib/telium /var/backups/telium /var/lib/telium-update /etc/caddy
+rm -f /usr/local/bin/telium-server /usr/local/bin/telium-server.previous
+rm -f "$work/state/"*
+export MOCK_STAGE=1 TELIUM_REGISTRATION=closed TELIUM_HTTPS=caddy MOCK_HTTPS=1
+export TELIUM_MEDIA_FILE_MAX=200MiB
+bash deploy/install-native.sh https.test > "$work/https.log" 2>&1
+unset TELIUM_MEDIA_FILE_MAX
+assert_contains "$work/https.log" "Caddy is running"
+assert_contains "$work/https.log" "HTTPS is working: https://https.test/.well-known/telium/server"
+assert_contains "$work/https.log" "HTTPS is set up and working: https://https.test"
+assert_absent "$work/https.log" "Point DNS at this machine."
+assert_absent "$work/https.log" "setup-caddy.sh"
+assert_contains /etc/caddy/Caddyfile 'https.test {'
+assert_contains /etc/caddy/Caddyfile 'reverse_proxy 127.0.0.1:8448'
+assert_contains /etc/caddy/Caddyfile 'max_size 216MiB'
+assert_contains "$work/state/caddy_calls" 'validated'
+assert_contains "$work/state/caddy_calls" 'reload caddy'
+assert_live_matches_binary
+
+# Running the HTTPS step later never overwrites a hand-written Caddy config.
+printf 'other.test {\n\trespond "hi"\n}\n' > /etc/caddy/Caddyfile
+bash deploy/setup-caddy.sh > "$work/caddy-custom.log" 2>&1
+assert_contains "$work/caddy-custom.log" "was not changed"
+assert_contains "$work/caddy-custom.log" "import /etc/caddy/telium.caddy"
+assert_contains /etc/caddy/telium.caddy 'https.test {'
+assert_absent /etc/caddy/Caddyfile 'https.test'
+if bash deploy/setup-caddy.sh wrong.test > "$work/caddy-wrong.log" 2>&1; then
+  fail "setup-caddy.sh accepted a domain this server is not configured for"
+fi
+assert_contains "$work/caddy-wrong.log" "is configured as 'https.test'"
+unset TELIUM_HTTPS MOCK_HTTPS
+
+echo 'native installer smoke: registration, storage defaults and overrides, HTTPS, domain, recovery and safe updates passed'
