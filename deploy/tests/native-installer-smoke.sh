@@ -442,7 +442,9 @@ assert_live_matches_binary
 
 # Running the HTTPS step later never overwrites a hand-written Caddy config.
 printf 'other.test {\n\trespond "hi"\n}\n' > /etc/caddy/Caddyfile
-bash deploy/setup-caddy.sh > "$work/caddy-custom.log" 2>&1
+rc=0
+bash deploy/setup-caddy.sh > "$work/caddy-custom.log" 2>&1 || rc=$?
+[ "$rc" -eq 4 ] || fail "setup-caddy.sh should exit 4 when a manual import is still needed (got $rc)"
 assert_contains "$work/caddy-custom.log" "was not changed"
 assert_contains "$work/caddy-custom.log" "import /etc/caddy/telium.caddy"
 assert_contains /etc/caddy/telium.caddy 'https.test {'
