@@ -974,12 +974,14 @@ pub struct MediaPolicy {
     /// Per-object ceiling for `purpose = profile`.
     #[serde(deserialize_with = "de_bytes")]
     pub max_profile_asset_bytes: usize,
-    /// Longest requested upload lifetime in seconds; zero is no cap.
+    /// Longest attachment lifetime in seconds; zero is no cap. Profile assets
+    /// and expressions are never capped by it.
     #[serde(deserialize_with = "de_secs")]
     pub max_expiry_secs: i64,
-    /// Lifetime applied when the client requests none; zero keeps such uploads
-    /// until something reclaims them. Never widens a client's own request and
-    /// still narrows against the destination's cap.
+    /// Lifetime applied to an attachment when the client requests none; zero
+    /// keeps such uploads until something reclaims them. Never widens a
+    /// client's own request and still narrows against the destination's cap.
+    /// Profile assets and expressions never receive it.
     #[serde(deserialize_with = "de_secs")]
     pub default_expiry_secs: i64,
     /// Attachment media older than this many days is swept even when a message

@@ -896,7 +896,9 @@ async fn a_default_expiry_applies_only_where_the_client_chose_none() {
             .post(format!("{}/_telium/v1/media", s.base))
             .bearer_auth(&alice.home)
             .header("Content-Type", "text/plain")
-            .body("kept for a while".to_string());
+            // Distinct bytes each time: identical ones share a row and its
+            // earliest expiry.
+            .body(format!("kept for a while ({ttl:?})"));
         if let Some(ttl) = ttl {
             req = req.header("X-Telium-Ttl-Secs", ttl);
         }
@@ -923,6 +925,127 @@ async fn a_default_expiry_applies_only_where_the_client_chose_none() {
         a_year["expires_at"].as_i64().unwrap() > now + 300 * 24 * 60 * 60 * 1000,
         "a longer request still wins over the default"
     );
+}
+
+async fn upload_as(
+    s: &Server,
+    who: &User,
+    purpose: &str,
+    body: Vec<u8>,
+    extra: &[(&str, &str)],
+) -> Value {
+    let mut req = s
+        .client
+        .post(format!("{}/_telium/v1/media", s.base))
+        .bearer_auth(&who.home)
+        .header("X-Telium-Purpose", purpose)
+        .header("Content-Type", if purpose == "attachment" { "text/plain" } else { "image/png" })
+        .body(body);
+    for (name, value) in extra {
+        req = req.header(*name, *value);
+    }
+    let resp = req.send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 200, "{purpose} upload");
+    resp.json().await.unwrap()
+}
+
+async fn stored_expiry(s: &Server, hash: &str) -> (Option<i64>, String) {
+    sqlx::query_as("SELECT expires_at, purpose FROM media WHERE hash = ?")
+        .bind(hash)
+        .fetch_one(&s.state.pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn origin_expiry_policy_reaches_attachments_but_not_profile_assets_or_expressions() {
+    let s = start_with(|cfg| {
+        cfg.media_policy.default_expiry_secs = 3_600;
+        cfg.media_policy.max_expiry_secs = 7_200;
+    })
+    .await;
+    let alice = s.user("alice").await;
+
+    let attachment = upload_as(&s, &alice, "attachment", b"a note".to_vec(), &[]).await;
+    assert!(attachment["expires_at"].is_i64(), "attachments still get the default: {attachment}");
+    let capped = upload_as(&s, &alice, "attachment", b"asked for a day".to_vec(), &[("X-Telium-Ttl-Secs", "86400")]).await;
+    let in_ms = capped["expires_at"].as_i64().unwrap() - telium_server::util::now_ms();
+    assert!(in_ms <= 7_200_000, "attachments still respect the ceiling: {in_ms}ms");
+
+    let avatar = upload_as(&s, &alice, "profile", b"pretend png".to_vec(), &[]).await;
+    let emoji = normalized(&s, &png_fixture(32, 32), telium_server::expression::Kind::Emoji);
+    let emoji = upload_as(&s, &alice, "expression", emoji, &[]).await;
+    for media in [&avatar, &emoji] {
+        assert!(media["expires_at"].is_null(), "no policy expiry: {media}");
+        let (stored, _) = stored_expiry(&s, media["hash"].as_str().unwrap()).await;
+        assert_eq!(stored, None);
+    }
+
+    // A lifetime the client asks for itself is still honoured, uncapped.
+    let chosen = upload_as(&s, &alice, "profile", b"temporary banner".to_vec(), &[("X-Telium-Ttl-Secs", "86400")]).await;
+    let in_ms = chosen["expires_at"].as_i64().unwrap() - telium_server::util::now_ms();
+    assert!(in_ms > 7_200_000, "a profile asset's own TTL is not capped: {in_ms}ms");
+}
+
+#[tokio::test]
+async fn a_guild_expiry_ceiling_leaves_its_icon_alone() {
+    let s = start().await;
+    let alice = s.user("alice").await;
+    let (_, guild) = s.post("/_telium/v1/guilds", Some(&alice.token), json!({ "name": "G" })).await;
+    let gid = guild["id"].as_str().unwrap().to_string();
+    sqlx::query("UPDATE guilds SET media_expiry_limit_secs = 600 WHERE id = ?")
+        .bind(&gid)
+        .execute(&s.state.pool)
+        .await
+        .unwrap();
+
+    let icon = upload_as(&s, &alice, "profile", b"pretend icon".to_vec(), &[("X-Telium-Guild-Id", &gid)]).await;
+    assert!(icon["expires_at"].is_null(), "the guild's attachment ceiling is not for its icon: {icon}");
+    let file = upload_as(&s, &alice, "attachment", b"guild file".to_vec(), &[("X-Telium-Guild-Id", &gid)]).await;
+    assert!(file["expires_at"].is_i64(), "but it still caps attachments: {file}");
+}
+
+#[tokio::test]
+async fn shared_bytes_used_as_an_avatar_escape_attachment_policy() {
+    let s = start_with(|cfg| {
+        cfg.media_policy.default_expiry_secs = 3_600;
+        cfg.media_policy.attachment_max_age_days = 1;
+    })
+    .await;
+    let alice = s.user("alice").await;
+    let bob = s.user("bob").await;
+
+    // Attachment first, then the same bytes as an avatar: the row leaves
+    // attachment policy, so neither the expiry nor the age sweep takes it.
+    let first = upload_as(&s, &alice, "attachment", b"same picture".to_vec(), &[]).await;
+    let hash = first["hash"].as_str().unwrap().to_string();
+    assert!(stored_expiry(&s, &hash).await.0.is_some());
+    let avatar = upload_as(&s, &bob, "profile", b"same picture".to_vec(), &[]).await;
+    assert_eq!(avatar["hash"], first["hash"]);
+    assert!(avatar["expires_at"].is_null(), "{avatar}");
+    assert_eq!(stored_expiry(&s, &hash).await, (None, "profile".to_string()));
+
+    sqlx::query("UPDATE media SET created_at = 0 WHERE hash = ?")
+        .bind(&hash)
+        .execute(&s.state.pool)
+        .await
+        .unwrap();
+    telium_server::routes::media::sweep_aged_attachments(&s.state).await.unwrap();
+    telium_server::routes::media::sweep_expired(&s.state).await.unwrap();
+    let (rows,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM media WHERE hash = ?")
+        .bind(&hash)
+        .fetch_one(&s.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 1, "an avatar's bytes survive both sweeps");
+
+    // Avatar first, then the same bytes as an attachment: the attachment
+    // default must not shorten them.
+    let avatar = upload_as(&s, &alice, "profile", b"another picture".to_vec(), &[]).await;
+    let hash = avatar["hash"].as_str().unwrap().to_string();
+    let again = upload_as(&s, &bob, "attachment", b"another picture".to_vec(), &[]).await;
+    assert!(again["expires_at"].is_null(), "the response reports the row's real expiry: {again}");
+    assert_eq!(stored_expiry(&s, &hash).await, (None, "profile".to_string()));
 }
 
 #[tokio::test]
