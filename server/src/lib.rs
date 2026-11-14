@@ -168,6 +168,8 @@ pub async fn build_state_as(cfg: Config, role: Role) -> anyhow::Result<AppState>
         gofile_guest_token,
         upload_locks,
         media_capacity_lock,
+        dm_outbox_pump: Arc::new(state::OutboxPump::default()),
+        friend_outbox_pump: Arc::new(state::OutboxPump::default()),
         demoted: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         shut_down,
         updates: Arc::new(tokio::sync::RwLock::new(if check {

@@ -1,0 +1,50 @@
+name: SFU native web installer
+
+on:
+  pull_request:
+    paths:
+      - 'sfu/install*.sh'
+      - 'sfu/scripts/install-wizard.py'
+      - 'sfu/scripts/test_install_wizard.py'
+      - 'sfu/src/admin.rs'
+      - 'sfu/src/config.rs'
+      - 'deploy/update-sfu-native.sh'
+      - 'sfu/README.md'
+      - '.github/workflows/sfu-native-installer.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'sfu/install*.sh'
+      - 'sfu/scripts/install-wizard.py'
+      - 'sfu/scripts/test_install_wizard.py'
+      - 'sfu/src/admin.rs'
+      - 'sfu/src/config.rs'
+      - 'deploy/update-sfu-native.sh'
+      - '.github/workflows/sfu-native-installer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installer-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+      - name: Validate shell scripts
+        run: |
+          bash -n sfu/install.sh
+          bash -n sfu/install-full.sh
+          bash -n sfu/install-portable.sh
+          bash -n deploy/update-sfu-native.sh
+      - name: Validate web installer and path guards
+        run: |
+          python3 -m py_compile sfu/scripts/install-wizard.py
+          python3 -m unittest discover -s sfu/scripts -p 'test_install_wizard.py' -v
+      - name: Verify portable installer does not invoke system package or proxy managers
+        run: |
+          if grep -En '^\s*(apt(-get)?|dnf|yum|ufw|certbot|nginx)\b' sfu/install-portable.sh; then
+            echo "Portable SFU installer must not run system package/proxy/firewall managers" >&2
+            exit 1
+          fi
