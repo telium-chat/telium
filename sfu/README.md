@@ -23,24 +23,74 @@ From a Telium checkout:
 sudo bash sfu/install.sh
 ```
 
-The installer installs nginx, Certbot, LiveKit, build dependencies, the
-`telium-sfu` systemd service, and a narrowly-scoped privileged helper. It then
-prints a one-time setup URL. Open it in a browser to:
+This starts a **local-only browser installer** before making any system-wide
+changes. Python 3 is required for this first step. The console prints a
+one-time URL with a random token; if using SSH, forward the printed port to
+your machine with `ssh -L PORT:127.0.0.1:PORT user@server`, then open the
+URL on localhost. **Do not expose this privileged installer to the internet.**
 
-1. create the SFU admin password;
-2. enter the SFU domain and LiveKit signaling domain;
-3. choose public/private SFU mode and optionally configure a trusted origin;
-4. have nginx + Let's Encrypt configured automatically;
-5. restart into the finished deployment.
+In the browser, choose **Full installation** or **Portable native installation**:
 
-After setup, the dashboard lives at
-`https://<your-sfu-domain>/admin`. The SFU API is served from the same domain,
-while LiveKit signaling uses the separate HTTPS hostname. WebRTC media remains
-direct on TCP 7881, UDP 3478, and UDP 50000-60000.
+| Mode | Best for | System changes |
+| --- | --- | --- |
+| Full | A fresh Ubuntu/Debian VPS | Installs packages, nginx, Certbot, a service account, systemd units, and UFW rules where enabled. It retains the existing automated HTTPS setup. |
+| Portable | A shared bare-metal host using an existing reverse proxy | Downloads the release SFU + LiveKit under a selected `/opt/…` or `/srv/…` directory. Creates a dedicated service account and three systemd units, but doesn't install packages or touch nginx, certificates, or the firewall. |
 
-The dashboard deliberately does **not** run as root. The installer creates a
-dedicated `telium-sfu` user and gives it permission to invoke only the
-root-owned nginx/Certbot helper.
+Full mode installs a privileged nginx/Certbot helper for the dashboard;
+portable mode **does not**. Both modes install an automatic native updater
+(checking every five minutes, draining calls and rolling back on a failed
+health check). Portable mode checks the downloaded release **before** installing
+users, services or directories and refuses older releases without the portable
+dashboard support and an embedded update-signing key. If it says the current
+release is unsupported, publish a new SFU release containing this change
+before attempting portable installation.
+
+**Portable directory example:**
+
+```text
+/opt/telium-sfu/
+  bin/            # release SFU, LiveKit, self-updater (root-owned)
+  config/         # operator SFU config; writable by SFU service account
+  data/           # usage ledger, admin password, LiveKit state
+  updates/        # root-owned update config, lock, downloads and rollback staging
+```
+
+The updater policy lives at `updates/update-sfu.conf` and is **root-only**.
+Portable updates verify the release against the binary's embedded publisher
+key and the trusted manifest URL, rather than accepting signing keys or URLs
+from the service-writable `sfu.toml`. The reference `sfu.example.toml` also
+lives in root-owned `updates/`, not in the service-writable config directory.
+The service account can edit `config/sfu.toml` and its own data. Reruns will
+reject symlinks or writable ancestors in the installation path rather than
+following them with root privileges. The portable
+setup dashboard binds to `127.0.0.1:7891`; connect with:
+
+```sh
+ssh -L 7891:127.0.0.1:7891 user@server
+```
+
+Open the one-time URL from the installer output, replacing `SERVER_IP` with
+`localhost`. After setting the admin password, the web wizard asks for the
+SFU hostname, LiveKit hostname, public/private mode and optional origin. It
+saves the configuration and restarts the service **without touching host
+HTTPS configuration**. Configure your existing reverse proxy to send the SFU
+hostname to `http://127.0.0.1:7890` and the LiveKit hostname (with WebSocket
+upgrades) to `http://127.0.0.1:7880`. Provide trusted HTTPS certificates
+for both names and permit the required WebRTC media ports in your own firewall.
+The browser-facing endpoints must be HTTPS/WSS for real voice calls.
+
+In full mode, the existing wizard also configures nginx and Let's Encrypt
+automatically. The full-mode dashboard lives at
+`https://<your-sfu-domain>/admin`; portable operators should normally
+keep the admin dashboard private to SSH rather than proxying it publicly.
+WebRTC media uses TCP 7881, UDP 3478 and UDP 50000-60000.
+
+**Uninstallation:** Portable mode does not have an automatic removal script
+yet. Stop/disable `telium-sfu.service` and
+`telium-sfu-update-native.timer`, remove the three Telium unit files from
+`/etc/systemd/system`, reload systemd, and only then remove the selected
+installation directory. Do not delete a shared `telium-sfu` account without
+checking for other users of that account.
 
 ### Managing a private SFU whitelist
 

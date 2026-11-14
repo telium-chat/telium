@@ -671,52 +671,94 @@ async fn relay(
 }
 
 pub async fn flush_outbox(state: &AppState) -> ApiResult<u64> {
+    // A flush still attempts at most 50 due rows, oldest first -- the same
+    // budget as a plain sequential pump. The rows are grouped per destination
+    // and the groups fan out, so a slow or offline peer cannot block a healthy
+    // one; the budget does not grow with the fan-out.
     let due: Vec<(String, String, String, i64)> = sqlx::query_as(
         "SELECT id, destination, payload, attempts FROM friend_outbox \
-         WHERE next_attempt_at <= ? ORDER BY created_at LIMIT 50",
+         WHERE next_attempt_at <= ? ORDER BY created_at, rowid LIMIT 50",
     )
     .bind(now_ms())
     .fetch_all(&state.pool)
     .await?;
 
-    let mut sent = 0;
-    for (id, destination, payload, attempts) in due {
-        let body: Value = serde_json::from_str(&payload).unwrap_or(Value::Null);
-        match federation::post_signed(state, &destination, "/_telium/v1/friends/relay", &body).await
-        {
-            Ok(_) => {
-                sqlx::query("DELETE FROM friend_outbox WHERE id = ?")
-                    .bind(&id)
-                    .execute(&state.pool)
-                    .await?;
-                crate::metrics::Metrics::bump(&state.metrics.federation_deliveries, 1);
-                sent += 1;
-            }
-            Err(e) => {
-                crate::metrics::Metrics::bump(&state.metrics.federation_delivery_failures, 1);
-                let attempts = attempts + 1;
-                let backoff =
-                    state.cfg.federation.dm_retry_secs as i64 * 1000 * (1i64 << attempts.min(10));
-                if attempts > 40 {
-                    tracing::warn!(target: crate::logcat::SOCIAL, destination = %destination, "dropping an undeliverable friend relay");
+    // One group per destination, in first-touched (oldest) order.
+    let mut groups: Vec<(String, Vec<String>)> = Vec::new();
+    for (id, destination, _, _) in &due {
+        match groups.iter_mut().find(|(known, _)| known == destination) {
+            Some((_, ids)) => ids.push(id.clone()),
+            None => groups.push((destination.clone(), vec![id.clone()])),
+        }
+    }
+
+    let outcomes = stream::iter(groups.into_iter().map(|(destination, picked)| async move {
+        let lock = state.friend_outbox_pump.lock_for(&destination).await;
+        let _destination_guard = lock.lock().await;
+        // Read only after the lock: another pump may already have sent or
+        // retried these rows. Only the rows this flush picked count against
+        // its budget, so re-read just those ids, still skipping rows that
+        // are no longer due.
+        let mut sql = format!(
+            "SELECT id, destination, payload, attempts FROM friend_outbox \
+             WHERE next_attempt_at <= ? AND id IN ({}) ORDER BY created_at, rowid",
+            std::iter::repeat("?").take(picked.len()).collect::<Vec<_>>().join(", ")
+        );
+        let mut requery = sqlx::query_as::<_, (String, String, String, i64)>(&sql).bind(now_ms());
+        for id in &picked {
+            requery = requery.bind(id);
+        }
+        let due: Vec<(String, String, String, i64)> = requery.fetch_all(&state.pool).await?;
+
+        let mut sent = 0;
+        for (id, destination, payload, attempts) in due {
+            let body: Value = serde_json::from_str(&payload).unwrap_or(Value::Null);
+            match federation::post_signed(state, &destination, "/_telium/v1/friends/relay", &body)
+                .await
+            {
+                Ok(_) => {
                     sqlx::query("DELETE FROM friend_outbox WHERE id = ?")
                         .bind(&id)
                         .execute(&state.pool)
                         .await?;
-                    continue;
+                    crate::metrics::Metrics::bump(&state.metrics.federation_deliveries, 1);
+                    sent += 1;
                 }
-                sqlx::query(
-                    "UPDATE friend_outbox SET attempts = ?, next_attempt_at = ?, last_error = ? \
-                     WHERE id = ?",
-                )
-                .bind(attempts)
-                .bind(now_ms() + backoff)
-                .bind(e.to_string())
-                .bind(&id)
-                .execute(&state.pool)
-                .await?;
+                Err(e) => {
+                    crate::metrics::Metrics::bump(&state.metrics.federation_delivery_failures, 1);
+                    let attempts = attempts + 1;
+                    let backoff =
+                        state.cfg.federation.dm_retry_secs as i64 * 1000 * (1i64 << attempts.min(10));
+                    if attempts > 40 {
+                        tracing::warn!(target: crate::logcat::SOCIAL, destination = %destination, "dropping an undeliverable friend relay");
+                        sqlx::query("DELETE FROM friend_outbox WHERE id = ?")
+                            .bind(&id)
+                            .execute(&state.pool)
+                            .await?;
+                        continue;
+                    }
+                    sqlx::query(
+                        // A flush that read an older attempt count must not
+                        // clobber a newer retry state written meanwhile.
+                        "UPDATE friend_outbox SET attempts = ?, next_attempt_at = ?, last_error = ? \
+                         WHERE id = ? AND attempts = ?",
+                    )
+                    .bind(attempts)
+                    .bind(now_ms() + backoff)
+                    .bind(e.to_string())
+                    .bind(&id)
+                    .bind(attempts - 1)
+                    .execute(&state.pool)
+                    .await?;
+                }
             }
         }
-    }
-    Ok(sent)
+        Ok::<u64, crate::error::ApiError>(sent)
+    }))
+    .buffer_unordered(8)
+    // Complete every in-flight batch before propagating an error. Aborting a
+    // successful HTTP send before its DELETE can cause an avoidable duplicate.
+    .collect::<Vec<_>>()
+    .await;
+    outcomes.into_iter().try_fold(0u64, |sum, result| result.map(|n| sum + n))
 }

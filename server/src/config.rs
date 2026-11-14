@@ -1195,6 +1195,28 @@ impl Default for Mfa {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MediaMode {
+    None,
+    ProfileAssets,
+    #[default]
+    All,
+}
+
+fn de_media_mode<'de, D: serde::Deserializer<'de>>(d: D) -> Result<MediaMode, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Input { Mode(MediaMode), Legacy(bool) }
+    match Input::deserialize(d)? {
+        Input::Mode(mode) => Ok(mode),
+        Input::Legacy(value) => {
+            tracing::warn!(target: crate::logcat::STARTUP, "backup.include_media is deprecated; use backup.media_mode = all or none");
+            Ok(if value { MediaMode::All } else { MediaMode::None })
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Backup {
@@ -1206,8 +1228,9 @@ pub struct Backup {
     /// Warn once a backup is older than this, including the off-box copy.
     #[serde(deserialize_with = "de_secs")]
     pub stale_after_secs: i64,
-    /// Include `media_dir`; off if media is backed up elsewhere.
-    pub include_media: bool,
+    /// Select local media coverage; defaults to all for existing deployments.
+    #[serde(alias = "include_media", deserialize_with = "de_media_mode")]
+    pub media_mode: MediaMode,
     /// Keep this many bytes free on the backup filesystem while writing archives; zero disables.
     #[serde(deserialize_with = "de_bytes_i64")]
     pub min_free_bytes: i64,
@@ -1911,7 +1934,7 @@ impl Default for Backup {
             interval_secs: 60 * 60 * 6,
             keep: 8,
             stale_after_secs: 60 * 60 * 24 * 2,
-            include_media: true,
+            media_mode: MediaMode::All,
             min_free_bytes: 0,
             key_file: PathBuf::from("backup.key"),
             previous_key_files: Vec::new(),

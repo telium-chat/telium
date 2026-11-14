@@ -451,9 +451,14 @@ async fn store_payload(
         .unwrap_or("application/octet-stream");
     let mime = sanitize_mime(purpose, claimed_mime);
 
-    // The lock covers deduplication, budget accounting, the object-store write
-    // and row insertion, so simultaneous accounts cannot overspend one budget.
-    let _capacity_slot = state.media_capacity_lock.lock().await;
+    // With a whole-server budget set, the lock covers deduplication, budget
+    // accounting, the object-store write and row insertion, so simultaneous
+    // accounts cannot overspend it. Without one, uploads stay concurrent.
+    let _capacity_slot = if state.cfg.media_policy.max_total_bytes > 0 {
+        Some(state.media_capacity_lock.lock().await)
+    } else {
+        None
+    };
     let existing: Option<(String, String, Option<i64>)> =
         sqlx::query_as("SELECT capability, owner_user_id, expires_at FROM media WHERE hash = ?")
             .bind(hash)

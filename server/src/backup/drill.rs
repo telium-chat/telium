@@ -525,15 +525,15 @@ fn part_warnings(cfg: &Config, manifest: &format::Manifest, verified: &Verified)
     let has = |kind: &str| verified.parts.iter().any(|p| p.kind == kind);
 
     for e in &manifest.excluded {
-        if e.reason == "disabled" {
+        if e.reason == "disabled" || e.reason == "media-mode" {
             continue;
         }
         out.push(format!("the archive drilled says {}", super::excluded_sentence(e)));
     }
     let non_empty = |dir: &Path| dir.read_dir().map(|mut d| d.next().is_some()).unwrap_or(false);
-    if cfg.backup.include_media && non_empty(&cfg.media_dir) && !has("media") {
+    if cfg.backup.media_mode != crate::config::MediaMode::None && non_empty(&cfg.media_dir) && !has("media") {
         out.push(
-            "include_media is on and this server has a media store, but the archive drilled \
+            "media_mode includes media and this server has a media store, but the archive drilled \
              carries no media part: a restore from it would come back without attachments"
                 .into(),
         );

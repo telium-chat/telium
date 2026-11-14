@@ -374,12 +374,12 @@ pub fn audit(cfg: &Config, config_path: Option<&Path>) -> Audit {
         }
     }
 
-    if prod && cfg.backup.enabled && cfg.backup.include_media && cfg.backup.min_free_bytes == 0 {
+    if prod && cfg.backup.enabled && cfg.backup.media_mode != crate::config::MediaMode::None && cfg.backup.min_free_bytes == 0 {
         f.push(Finding {
             key: "backup.min_free_bytes".into(),
             level: Level::Warn,
-            exposes: "backups include a full copy of hosted media, and building an archive writes both a compressed payload and an encrypted copy; large media stores can exhaust the backup filesystem before old archives are pruned.".into(),
-            remedy: "set `backup.min_free_bytes` to a protective free-space floor. For budget public servers, consider `include_media = false` only with a deliberate independent media recovery policy and public disclosure.".into(),
+            exposes: "backups include selected hosted media, and building an archive writes both a compressed payload and an encrypted copy; large media stores can exhaust the backup filesystem before old archives are pruned.".into(),
+            remedy: "set `backup.min_free_bytes` to a protective free-space floor. For budget public servers, consider `media_mode = profile_assets` to retain profile assets while excluding attachments.".into(),
         });
     }
 

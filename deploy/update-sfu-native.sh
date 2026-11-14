@@ -47,10 +47,10 @@ set -euo pipefail
 # One updater at a time. The timer and an operator running --now by hand can
 # otherwise interleave a drain, a swap and two restarts, and the failure modes
 # of that interleave are all worse than skipping a tick.
-LOCK=/run/telium-update-sfu-native.lock
+LOCK=${TELIUM_SFU_UPDATE_LOCK:-/run/telium-update-sfu-native.lock}
 
-STATE=/var/lib/telium-update-sfu
-CONF=/etc/telium/update-sfu.conf
+STATE=${TELIUM_SFU_UPDATE_STATE:-/var/lib/telium-update-sfu}
+CONF=${TELIUM_SFU_UPDATE_CONFIG:-/etc/telium/update-sfu.conf}
 SELF="$(readlink -f "$0")"
 
 # Defaults, then whatever the operator said. A box with no update-sfu.conf
@@ -68,6 +68,9 @@ TELIUM_SFU_UNIT=telium-sfu.service
 TELIUM_SFU_HEALTH_URL=http://127.0.0.1:7890/health
 TELIUM_SFU_DRAIN_TIMEOUT=900
 TELIUM_SFU_MANIFEST_URL=
+TELIUM_SFU_USAGE_LEDGER=
+TELIUM_SFU_EXAMPLE_CONFIG=
+TELIUM_SFU_TRUSTED_NATIVE=0
 if [ -r "$CONF" ]; then
   # shellcheck source=/dev/null
   . "$CONF"
@@ -120,6 +123,9 @@ case "${1:-}" in
     ;;
 esac
 
+# Portable units keep both the lock and the entire update staging tree inside
+# their installation prefix. Full installs retain the original /run and /var paths.
+mkdir -p "$(dirname "$LOCK")" "$STATE"
 exec 9>"$LOCK"
 if ! flock -n 9; then
   echo "another update run holds the lock; nothing to do"
@@ -207,8 +213,14 @@ fi
 # different thing from "stay put", and it stops the run.
 
 plan="$STATE/plan"
+# Service-editable sfu.toml must not control root-executed update trust.
+native_trust_args=()
+if [ "$TELIUM_SFU_TRUSTED_NATIVE" = 1 ]; then
+  native_trust_args+=(--trusted-native)
+fi
 if ! "$TELIUM_SFU_BIN" --config "$TELIUM_SFU_CONFIG" updates check \
     --artifact "$TELIUM_SFU_ARTIFACT" \
+    "${native_trust_args[@]}" \
     ${TELIUM_SFU_PIN:+--pin "$TELIUM_SFU_PIN"} \
     ${TELIUM_SFU_MANIFEST_URL:+--manifest-url "$TELIUM_SFU_MANIFEST_URL"} \
     > "$plan"; then
@@ -396,7 +408,7 @@ fi
 #    rename(2), so there is no moment when the path exists but is partial.
 # 4. A restart, a wait that watches systemd, and one rollback attempt.
 
-usage_ledger="$(dirname "$TELIUM_SFU_CONFIG")/livekit/usage.json"
+usage_ledger="${TELIUM_SFU_USAGE_LEDGER:-$(dirname "$TELIUM_SFU_CONFIG")/livekit/usage.json}"
 if [ -f "$usage_ledger" ]; then
   if cp -a "$usage_ledger" "$STATE/usage.json.pre-update"; then
     echo "backup: ${STATE}/usage.json.pre-update"
@@ -437,7 +449,7 @@ mv -f "$(dirname "$TELIUM_SFU_BIN")/.telium-sfu.incoming" "$TELIUM_SFU_BIN"
 
 # The reference config, never the live one. Every key the relay reads has a
 # default compiled in, so a release cannot break an sfu.toml by adding to it.
-example="$(dirname "$TELIUM_SFU_CONFIG")/sfu.example.toml"
+example="${TELIUM_SFU_EXAMPLE_CONFIG:-$(dirname "$TELIUM_SFU_CONFIG")/sfu.example.toml}"
 if ! cmp -s "$STATE/staged/sfu.example.toml" "$example"; then
   install -m644 "$STATE/staged/sfu.example.toml" "$example" 2>/dev/null || true
   echo "sfu.example.toml updated; diff it against sfu.toml to see what this release added"

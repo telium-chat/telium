@@ -26,7 +26,7 @@ jobs:
       github.event_name != 'pull_request' ||
       (github.head_ref != 'fix/verification-recovery-e2e' &&
        github.head_ref != 'fix/recovery-enrollment-reset-e2e')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # Playwright cannot install Chromium on ubuntu-latest (26.04) yet
     steps:
       # Every `uses:` below names a commit, not a tag. A tag is a mutable
       # pointer that the action's owner -- or anyone who takes their account

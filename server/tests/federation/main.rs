@@ -291,6 +291,7 @@ mod bundle_limits;
 mod calls;
 mod dm;
 mod friends;
+mod outbox_concurrency;
 mod guild_handoff;
 mod handoff;
 mod moves;
