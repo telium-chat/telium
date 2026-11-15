@@ -131,10 +131,10 @@ export const auth = {
   // DATA-shaped: an example handle on the project's own server. The shape --
   // `@name:server` -- is the message; translate "you" only if the locale
   // writes example names differently.
-  'auth.find.placeholder': '@you:telium.chat',
+  'auth.find.placeholder': '@you:example.org',
   // Forgetting the server has to read as fine, because it is: a bare name is
   // looked for on the servers this device knows.
-  'auth.find.hint': 'Your username and server, like @ada:telium.chat. Forgot your server? Just type your username.',
+  'auth.find.hint': 'Your username and server, like @ada:example.org. Forgot your server? Just type your username.',
   // Screen-reader name for the list of accounts this machine has used.
   'auth.find.recentLabel': 'Accounts on this device',
   // `{user}` is a full handle and is data.

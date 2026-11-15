@@ -615,6 +615,110 @@ async fn a_voice_channel_carries_a_status_set_by_the_people_in_it() {
 }
 
 #[tokio::test]
+async fn a_voice_status_goes_when_the_last_person_leaves() {
+    let (s, alice, bob, gid, cid) = voice_fixture().await;
+    for who in [&alice, &bob] {
+        let (status, join) = s
+            .post(&format!("/_telium/v1/channels/{cid}/voice/join"), Some(&who.token), json!({"key_package": "pkg"}))
+            .await;
+        assert_eq!(status, 200, "{join}");
+    }
+    let resp = s
+        .client
+        .put(format!("{}/_telium/v1/channels/{cid}/voice-status", s.base))
+        .bearer_auth(&alice.token)
+        .json(&json!({ "status": "movie night" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+
+    let status_now = |token: String| {
+        let s = &s;
+        let gid = gid.clone();
+        let cid = cid.clone();
+        async move {
+            let (_, list) = s.get(&format!("/_telium/v1/guilds/{gid}/channels"), Some(&token)).await;
+            list["channels"].as_array().unwrap().iter().find(|c| c["id"] == cid.as_str()).unwrap()["voice_status"].clone()
+        }
+    };
+
+    let (st, _) = s.post(&format!("/_telium/v1/channels/{cid}/voice/leave"), Some(&alice.token), json!({})).await;
+    assert_eq!(st, 200);
+    assert_eq!(status_now(bob.token.clone()).await, "movie night", "someone is still in the call");
+
+    let (st, _) = s.post(&format!("/_telium/v1/channels/{cid}/voice/leave"), Some(&bob.token), json!({})).await;
+    assert_eq!(st, 200);
+    assert!(status_now(bob.token.clone()).await.is_null(), "an empty channel keeps no status");
+}
+
+async fn second_voice_channel(s: &Server, owner: &User, gid: &str) -> String {
+    let (status, ch) = s
+        .post(&format!("/_telium/v1/guilds/{gid}/channels"), Some(&owner.token), json!({ "name": "Other", "type": "voice" }))
+        .await;
+    assert_eq!(status, 200, "{ch}");
+    ch["id"].as_str().unwrap().to_string()
+}
+
+async fn set_status(s: &Server, token: &str, cid: &str, text: &str) {
+    let resp = s
+        .client
+        .put(format!("{}/_telium/v1/channels/{cid}/voice-status", s.base))
+        .bearer_auth(token)
+        .json(&json!({ "status": text }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+}
+
+async fn status_of(s: &Server, token: &str, gid: &str, cid: &str) -> Value {
+    let (_, list) = s.get(&format!("/_telium/v1/guilds/{gid}/channels"), Some(token)).await;
+    list["channels"].as_array().unwrap().iter().find(|c| c["id"] == cid).unwrap()["voice_status"].clone()
+}
+
+#[tokio::test]
+async fn a_voice_status_goes_when_the_last_person_switches_channels() {
+    let (s, alice, _bob, gid, cid) = voice_fixture().await;
+    let other = second_voice_channel(&s, &alice, &gid).await;
+    join_voice(&s, &cid, &alice.token).await;
+    set_status(&s, &alice.token, &cid, "movie night").await;
+
+    join_voice(&s, &other, &alice.token).await;
+    assert!(status_of(&s, &alice.token, &gid, &cid).await.is_null(), "the room she left is empty");
+}
+
+#[tokio::test]
+async fn a_voice_status_goes_when_the_last_person_is_moved_out() {
+    let (s, alice, bob, gid, cid) = voice_fixture().await;
+    let other = second_voice_channel(&s, &alice, &gid).await;
+    join_voice(&s, &cid, &bob.token).await;
+    set_status(&s, &bob.token, &cid, "movie night").await;
+
+    let (status, moved) = s
+        .post(&format!("/_telium/v1/guilds/{gid}/voice/{}", bob.user_id), Some(&alice.token), json!({ "channel_id": other }))
+        .await;
+    assert_eq!(status, 200, "{moved}");
+    assert!(status_of(&s, &alice.token, &gid, &cid).await.is_null(), "the room he was moved out of is empty");
+}
+
+#[tokio::test]
+async fn expiring_calls_at_startup_keeps_a_status_set_ahead_on_another_empty_channel() {
+    let (s, alice, bob, gid, cid) = voice_fixture().await;
+    let other = second_voice_channel(&s, &alice, &gid).await;
+    set_status(&s, &alice.token, &other, "town hall at 8").await;
+    join_voice(&s, &cid, &bob.token).await;
+    set_status(&s, &bob.token, &cid, "movie night").await;
+
+    telium_server::routes::voice::mark_unclaimed(&s.state.pool, 0).await.unwrap();
+    let (expired, _) = telium_server::routes::voice::mark_unclaimed(&s.state.pool, 0).await.unwrap();
+    assert_eq!(expired, 1);
+
+    assert!(status_of(&s, &alice.token, &gid, &cid).await.is_null(), "the expired call's room is empty");
+    assert_eq!(status_of(&s, &alice.token, &gid, &other).await, "town hall at 8");
+}
+
+#[tokio::test]
 async fn joining_voice_mints_a_token_the_sfu_can_check_without_knowing_the_guild() {
     let (s, alice, _bob, gid, cid) = voice_fixture().await;
 
