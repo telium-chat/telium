@@ -74,10 +74,27 @@ function contiguousFrom(frames, through) {
 }
 
 /// A floor under the conversation's epoch.
-function highestCommitEpoch(frames) {
+/// The newest group generation stamped on any of the frames, or null when none is.
+function newestGeneration(frames) {
+  let high = null;
+  for (const f of frames || []) {
+    if (Number.isInteger(f?.generation) && (high === null || f.generation > high)) high = f.generation;
+  }
+  return high;
+}
+
+/// A start-over restarts epochs at 1, so a frame of a replaced group says nothing about the current one. Unstamped frames are kept, and so are generation 0's: nothing was founded yet, so they are the founding group's own (its GroupInfo is published just before its Welcome is ordered).
+function ofGeneration(frame, generation) {
+  return generation === null || !Number.isInteger(frame?.generation) || frame.generation === 0
+    || frame.generation >= generation;
+}
+
+function highestCommitEpoch(frames, generation = null) {
   let high = -1;
   for (const f of frames || []) {
-    if (f?.kind === 'commit' && Number.isFinite(Number(f.epoch))) high = Math.max(high, Number(f.epoch));
+    if (f?.kind === 'commit' && ofGeneration(f, generation) && Number.isFinite(Number(f.epoch))) {
+      high = Math.max(high, Number(f.epoch));
+    }
   }
   return high;
 }
@@ -140,6 +157,8 @@ export class Mls {
     // Newest GroupInfo the sequencer rejected as behind; `selfJoin` stops offering it.
     this.staleJoins = new Map();
     this.leftAt = new Map();
+    // Conversations whose held group a start-over replaced without letting this device in (`walk`); the store asks to be let back in.
+    this.replaced = new Set();
     this.cs = null;
     // Admission hook from Store/Trust: false rejects, null means legacy identity with no root, throwing fails closed.
     this.verifyClaimedPackage = null;
@@ -853,10 +872,10 @@ export class Mls {
   }
 
   /// Only our own frames are tried; others are sealed to their accounts.
-  async newestGroupInfo(frames) {
+  async newestGroupInfo(frames, generation = null) {
     if (!this.recoveryKey) return null;
     const mine = frames
-      .filter((f) => f.kind === 'groupinfo' && f.sender === this.userId)
+      .filter((f) => f.kind === 'groupinfo' && f.sender === this.userId && ofGeneration(f, generation))
       .sort((a, b) => (b.seq || 0) - (a.seq || 0));
     for (const frame of mine) {
       // A GroupInfo from before a custody switch is sealed under the retired key.
@@ -873,11 +892,12 @@ export class Mls {
 
   /// Fetched, not taken from the on-screen window: a busy group can have its GroupInfo below it. Also returns how far the walk got, for `selfJoin`. Bounded.
   async ownGroupInfoFrames(conversationId) {
-    if (!this.recoveryKey || !this.home.dmHistory) return { frames: [], through: 0, epoch: -1 };
+    if (!this.recoveryKey || !this.home.dmHistory) return { frames: [], through: 0, commits: [], generation: null };
     const frames = [];
     let through = 0;
-    // Highest commit epoch seen, so `selfJoin` can detect a GroupInfo already moved past.
-    let epoch = -1;
+    // Commits seen, so `selfJoin` can detect a GroupInfo already moved past; and the newest generation, so it only tries the current group's.
+    const commits = [];
+    let generation = null;
     for (let page = 0; page < HISTORY_PAGES; page += 1) {
       const answer = await this.home.dmHistory(
         conversationId, { after: through, limit: HISTORY_PAGE },
@@ -886,7 +906,11 @@ export class Mls {
       for (const frame of got) {
         if (frame.kind === 'groupinfo' && frame.sender === this.userId) frames.push(frame);
       }
-      epoch = Math.max(epoch, highestCommitEpoch(got));
+      for (const frame of got) {
+        if (frame.kind === 'commit') commits.push({ kind: frame.kind, epoch: frame.epoch, generation: frame.generation });
+      }
+      const seen = newestGeneration(got);
+      if (seen !== null && (generation === null || seen > generation)) generation = seen;
       through = got.reduce((max, f) => Math.max(max, f.seq || 0), through);
       // A hole is not the end: this is a search.
       if (answer?.incomplete && answer.missing_from > through) {
@@ -895,7 +919,7 @@ export class Mls {
       }
       if (!got.length || got.length < HISTORY_PAGE) break;
     }
-    return { frames, through, epoch };
+    return { frames, through, commits, generation };
   }
 
   /// Via an external commit from a GroupInfo. A 409 means the GroupInfo was stale.
@@ -913,14 +937,19 @@ export class Mls {
       }
       // Giving up queues this device for manual admission, so check the server first.
       let through = frames.reduce((max, f) => Math.max(max, f.seq || 0), 0);
-      let newest = await this.newestGroupInfo(frames);
-      let moved = highestCommitEpoch(frames);
+      // A GroupInfo of a group a start-over replaced still admits at its old epoch, and the sequencer (which counts epochs from 1 again) would order that join into the new generation: a fork nobody else can read. So only the current generation's.
+      let generation = newestGeneration(frames);
+      let newest = await this.newestGroupInfo(frames, generation);
+      let moved = highestCommitEpoch(frames, generation);
       if (!newest) {
         const rest = await this.ownGroupInfoFrames(conversationId);
-        newest = await this.newestGroupInfo(rest.frames);
+        if (rest.generation !== null && (generation === null || rest.generation > generation)) {
+          generation = rest.generation;
+        }
+        newest = await this.newestGroupInfo(rest.frames, generation);
         // Only raised when something was found.
         if (newest) through = Math.max(through, rest.through);
-        moved = Math.max(moved, rest.epoch ?? -1);
+        moved = Math.max(highestCommitEpoch(frames, generation), highestCommitEpoch(rest.commits, generation));
       }
       if (!newest) return false;
 
@@ -2102,7 +2131,12 @@ export class Mls {
   /// Frames at or before `lastSeq` are skipped; the first unprocessable frame stops the walk since later ones depend on its key schedule. Never steps over a hole: the sequencer fans out after committing, so frames can arrive out of order, and walking the later one first would move `lastSeq` past a frame that could never be opened. `served`: the page came from the server, so a hole is its answer, not a delay.
   async sync(conversationId, frames, { backfill = false, served = false } = {}) {
     if (backfill) await this.catchUpTo(conversationId, frames);
-    const first = await this.walk(conversationId, frames, served);
+    let first = await this.walk(conversationId, frames, served);
+    // Let go of a replaced group: walk again from no group, where the new generation's Welcome may be taken.
+    if (first.replaced) {
+      const retried = await this.walk(conversationId, frames, served);
+      first = { ...retried, opened: [...first.opened, ...retried.opened] };
+    }
     if (!first.gap) {
       this.gaps.delete(conversationId);
       return first.opened;
@@ -2136,6 +2170,7 @@ export class Mls {
       let stopped = false;
       let gap = false;
       let droppedJoin = false;
+      let replacedAt = null;
 
       for (const frame of ordered) {
         const seq = frame.seq || 0;
@@ -2197,6 +2232,8 @@ export class Mls {
                 break;
               }
               if (!refusal) {
+                // Epochs restart at 1 in a new generation, so the publish watermark of the old group would hold back this one's GroupInfo.
+                if (!entry || entry.generation !== generation) this.published.delete(conversationId);
                 entry = { state: joined, lastSeq: seq, generation };
                 dirty = true;
                 this.failed.delete(conversationId);
@@ -2208,6 +2245,16 @@ export class Mls {
           }
           // Walk past it so it doesn't read as a hole.
           if (entry) { entry.lastSeq = seq; dirty = true; }
+          continue;
+        }
+
+        // A frame of a newer group than the one held: a start-over replaced it and its Welcome did not let this device in (refused, or for a key not held here). The held group is spent — the sequencer refuses anything stamped with it — and opening the new group's frames with it only fails with a bare OperationError and stops the walk for good. Let it go: Welcomes of the new generation are tried again from no group, and failing that the store asks to be let in.
+        if (entry && !mine && generation !== null && Number.isInteger(entry.generation)
+          && entry.generation > 0 && generation > entry.generation) {
+          const first = ordered.find((f) => Number.isInteger(f.generation) && f.generation > entry.generation);
+          replacedAt = Math.max(0, (first?.seq || seq) - 1);
+          entry = null;
+          dirty = false;
           continue;
         }
 
@@ -2316,6 +2363,12 @@ export class Mls {
       }
 
       if (droppedJoin && !entry) await this.forget(conversationId);
+      const replaced = replacedAt !== null && !entry;
+      if (replaced) {
+        // Kept as a stateless row so the replaced generation's Welcomes are not taken again.
+        await this.forget(conversationId, { leftAt: replacedAt });
+        this.replaced.add(conversationId);
+      }
       if (entry && dirty) await this.saveGroup(conversationId, entry);
       // No echo by the end: resend under the same frame id (idempotent).
       if (!gap && !stopped && (entry ? entry.pending : this.joining.has(conversationId))) {
@@ -2329,8 +2382,14 @@ export class Mls {
       if (!stopped) this.failed.delete(conversationId);
       // One GroupInfo per sync.
       if (entry) await this.publishGroupInfo(conversationId, entry.state);
-      return { opened, gap };
+      return { opened, gap, replaced };
     });
+  }
+
+  /// Once: whether a walk since the last ask let go of a group a start-over replaced (`walk`).
+  takeReplaced(conversationId) {
+    if (this.joined(conversationId)) this.replaced.delete(conversationId);
+    return this.replaced.delete(conversationId);
   }
 
   /// Null accepts; else the refusal reason; throws if an identity check couldn't be reached. The group id must be this conversation's; a group this device still uses is replaced only by a fresh one (epoch 1, not an older generation), while a device removed from its tree or with a stopped walk may be re-added at any epoch; every other leaf passes the claimed-KeyPackage check, so a replacement admits no stranger on a legacy unsigned leaf.

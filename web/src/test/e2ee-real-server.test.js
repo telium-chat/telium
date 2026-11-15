@@ -5,7 +5,9 @@ import { Mls, wipe } from '../lib/mls.js';
 import { dmMethods } from '../lib/store/dms.js';
 import { forgetDeviceSecrets, heldRecoveryKeyring } from '../lib/device-secrets.js';
 import { load as loadVault, setMode } from '../lib/vault.js';
-import { registerOpaque } from '../lib/opaque-auth.js';
+import { loginOpaque, registerOpaque } from '../lib/opaque-auth.js';
+import { Trust } from '../lib/verify.js';
+import { trustMethods } from '../lib/store/trust.js';
 import { recoveryVaultWrapper } from '../lib/account-recovery.js';
 import { sessionMethods } from '../lib/store/session.js';
 import { RealHome, haveServer, lossy } from './real-home.js';
@@ -122,6 +124,61 @@ describe.skipIf(!haveServer)('against the real server', () => {
     expect(am.epochOf(id)).toBe(bm.epochOf(id));
     expect(await says(am, alice.api, bm, bob.api, id, 'one group')).toBe('one group');
     expect(await says(bm, bob.api, am, alice.api, id, 'this one')).toBe('this one');
+  });
+
+  it('lets go of a group a start-over replaced, and never rejoins through its GroupInfo', async () => {
+    const alice = await server.register(name('alice'));
+    const bob = await server.register(name('bob'));
+    const key = () => crypto.getRandomValues(new Uint8Array(32));
+    const am = await engine(alice, alice.api, key());
+    const bm = await engine(bob, bob.api, key());
+    const convo = await alice.api.createConversation({ kind: 'dm', members: [bob.userId] });
+    const id = convo.id;
+    const built = await am.establish(id, [bob.userId], { generation: 0 });
+    await alice.api.sendFrame(id, {
+      kind: 'welcome', ciphertext: built.welcome, epoch: built.epoch, start_over: true, generation: 0,
+    });
+    await catchUp(am, alice.api, id);
+    await catchUp(bm, bob.api, id);
+    const a = storeFor(alice, am);
+    await a.refreshConversations();
+    await a.resetConversation(id);
+
+    // The new group's Welcome does not let Bob's device in.
+    bm.join = async () => { throw new Error('not addressed to this device'); };
+    await am.send(id, 'after the start-over');
+    await catchUp(bm, bob.api, id);
+    expect(bm.errorFor(id)).toBeUndefined();
+    expect(bm.joined(id)).toBe(false);
+
+    // Bob's only GroupInfo is the replaced group's, at an epoch the restarted count would accept.
+    expect(await bm.selfJoin(id, await history(bob.api, id))).toBe(false);
+    const frames = await history(alice.api, id);
+    expect(frames.some((f) => f.kind === 'commit' && f.sender === bob.userId)).toBe(false);
+    await catchUp(am, alice.api, id);
+    expect(am.errorFor(id)).toBeUndefined();
+  });
+
+  it('publishes a GroupInfo for the group a start-over made, though its epoch restarted', async () => {
+    const alice = await server.register(name('alice'));
+    const bob = await server.register(name('bob'));
+    const key = () => crypto.getRandomValues(new Uint8Array(32));
+    const am = await engine(alice, alice.api, key());
+    const bm = await engine(bob, bob.api, key());
+    const convo = await alice.api.createConversation({ kind: 'dm', members: [bob.userId] });
+    const id = convo.id;
+    const built = await am.establish(id, [bob.userId], { generation: 0 });
+    await alice.api.sendFrame(id, {
+      kind: 'welcome', ciphertext: built.welcome, epoch: built.epoch, start_over: true, generation: 0,
+    });
+    await catchUp(bm, bob.api, id);
+    const a = storeFor(alice, am);
+    await a.refreshConversations();
+    await a.resetConversation(id);
+    await catchUp(bm, bob.api, id);
+    expect(bm.groups.get(id).generation).toBe(2);
+    const infos = (await history(bob.api, id)).filter((f) => f.kind === 'groupinfo' && f.sender === bob.userId);
+    expect(infos.map((f) => f.generation)).toEqual([1, 2]);
   });
 
   it('adopts a commit whose answer was lost, and sends it once', async () => {
@@ -276,6 +333,44 @@ describe.skipIf(!haveServer)('against the real server', () => {
     expect(bm.epochOf(id)).toBe(am.epochOf(id));
     expect(await says(am, alice.api, bm, bob.api, id, 'welcome back')).toBe('welcome back');
     expect(await says(bm, bob.api, cm, carol.api, id, 'glad to be')).toBe('glad to be');
+  });
+
+  it('a device that signs in to a password account after the one that made it can sign itself', async () => {
+    const password = `pw-${crypto.randomUUID()}`;
+    const reg = await registerOpaque(server.base, name('alice'), password, 'web');
+    const first = server.wrap(reg.session);
+    const ring = await loadVault(
+      first.api, null, first.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper,
+    );
+    expect(ring.mode).toBe('opaque_custody');
+    // As at sign-up: custody was read before this device created the vault.
+    const mode = trustMethods.custodyMode.call({ custody: { mode: 'none' }, vault: ring });
+    expect(mode).toBe('opaque_custody');
+    const m1 = await engine(first, first.api, ring.key);
+    const t1 = new Trust(first.api, { userId: first.userId, deviceId: first.deviceId, recovery: ring });
+    await t1.start(m1.cs, ring.key, await m1.leafKey(), mode);
+    expect(t1.canSign).toBe(true);
+
+    // Another app on another machine: nothing of the first device's on disk.
+    globalThis.indexedDB = new IDBFactory();
+    localStorage.clear();
+    await wipe();
+    await forgetDeviceSecrets(first.userId);
+    const login = await loginOpaque(server.base, first.userId, password, 'desktop');
+    const second = server.wrap(login.session);
+    const again = await loadVault(second.api, null, second.userId, login.recoveryWrapper);
+    expect(again.raw).toEqual(ring.raw);
+    const m2 = await engine(second, second.api, again.key);
+    const t2 = new Trust(second.api, { userId: second.userId, deviceId: second.deviceId, recovery: again });
+    await t2.start(m2.cs, again.key, await m2.leafKey(), trustMethods.custodyMode.call({ vault: again }));
+    expect(t2.canSign).toBe(true);
+    expect(t2.identityMismatch).toBeFalsy();
+    // What another person's device checks before adding this one to a group.
+    const bob = await server.register(name('bob'));
+    const bm = await engine(bob, bob.api, crypto.getRandomValues(new Uint8Array(32)));
+    const tb = new Trust(bob.api, { userId: bob.userId, deviceId: bob.deviceId });
+    await tb.start(bm.cs, null, await bm.leafKey(), 'device_custody');
+    expect(await tb.verifyClaimedPackage(second.userId, second.deviceId, await m2.leafKey())).toBe(true);
   });
 
   it('replaces a recovery key so the new one opens the vault, and a failed try keeps the old', async () => {

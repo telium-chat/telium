@@ -558,6 +558,10 @@ export const dispatchMethods = {
           this.scheduleSignals(d.conversation_id);
           this.answerRejoins(d.conversation_id);
           if (d.kind === 'commit') this.rereadMembers(d.conversation_id);
+          // A start-over this device was not let into: its old group is gone, so ask to be let in now rather than at the next open or send.
+          if (this.mls.takeReplaced?.(d.conversation_id) && !this.vault?.needs_device) {
+            this.rejoinConversation(d.conversation_id).catch(() => {});
+          }
           // Unopened live frame the gap-fill missed: re-read history once, bounded, so it arrives late not never.
           if (d.kind === 'application'
             && this.dmFrames.has(d.conversation_id)

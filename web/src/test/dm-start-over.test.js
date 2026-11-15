@@ -187,6 +187,46 @@ describe('starting a conversation over', () => {
     expect(alice.textOf(frames(home, 'dm-1').at(-1).id)).toBe('new');
   });
 
+  it('lets go of the group a start-over replaced when its Welcome did not let this device in', async () => {
+    const { home, alice, bob, a } = await pair();
+    await a.store.resetConversation('dm-1');
+    // The new group's Welcome does not open here (in the field: refused, or for a key not held).
+    const join = bob.join.bind(bob);
+    let once = true;
+    bob.join = async (message) => {
+      if (once) { once = false; throw new Error('not addressed to this device'); }
+      return join(message);
+    };
+    await alice.send('dm-1', 'after the start-over');
+    await bob.sync('dm-1', frames(home, 'dm-1'));
+
+    // Not "OperationError" from opening the new group's frames with the old group's keys.
+    expect(bob.errorFor('dm-1')).toBeUndefined();
+    expect(bob.joined('dm-1')).toBe(true);
+    expect(bob.groups.get('dm-1').generation).toBe(2);
+    expect(read(bob, home, 'dm-1')).toContain('after the start-over');
+    await bob.send('dm-1', 'and back');
+    await alice.sync('dm-1', frames(home, 'dm-1'));
+    expect(read(alice, home, 'dm-1')).toContain('and back');
+  });
+
+  it('stays out of a new group it cannot open rather than stalling on it, and never retakes the old one', async () => {
+    const { home, alice, bob, a } = await pair();
+    await a.store.resetConversation('dm-1');
+    bob.join = async () => { throw new Error('not addressed to this device'); };
+    await alice.send('dm-1', 'unreadable here');
+    await bob.sync('dm-1', frames(home, 'dm-1'));
+
+    expect(bob.errorFor('dm-1')).toBeUndefined();
+    expect(bob.joined('dm-1')).toBe(false);
+    expect(bob.takeReplaced('dm-1')).toBe(true);
+    expect(bob.takeReplaced('dm-1')).toBe(false);
+    // The replaced generation's Welcome is not taken again on a later walk.
+    delete bob.join;
+    await bob.sync('dm-1', frames(home, 'dm-1').filter((f) => f.generation === 1));
+    expect(bob.joined('dm-1')).toBe(false);
+  });
+
   it('drops a founding another member beat it to, and takes the one ordered', async () => {
     const home = new FakeHome();
     const alice = await engine(home, '@a:h', 'd-alice');
