@@ -1,7 +1,29 @@
 {
   "channel": "releases",
-  "generated_at": 1794635696230,
+  "generated_at": 1794720723526,
   "releases": [
+    {
+      "version": "0.4.1",
+      "commit": "de8884c54d1685b27774e7064fada2e9006b239d",
+      "released_at": 1794719248000,
+      "security": false,
+      "summary": "Release server 0.4.1",
+      "image": "sha256:c2229b4f87f8226f338769811c7ead7e148e90002e2d1d2fe3b68953c7fdf777",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "server-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/server-v0.4.1/telium-server-linux-x86_64.tar.gz",
+          "sha256": "99f1b2c5946bac67e850ad66d44b59e26c209c48d3f5a855f52fa2266593dd2b",
+          "size": 13004379
+        },
+        "server-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/server-v0.4.1/telium-server-linux-aarch64.tar.gz",
+          "sha256": "a543048480d6ab1c8268d1f1ab2c324a028ebc49e6ed1b63927157c47d00d7a3",
+          "size": 12375940
+        }
+      }
+    },
     {
       "version": "0.4.0",
       "commit": "c01f8a6f66a0e56eb2d35d10a9e444850383df00",
