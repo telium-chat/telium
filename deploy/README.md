@@ -191,7 +191,7 @@ operator configuration changes, use `docker compose up -d` to apply them.
 ## Files not used by this box
 
 - `telium-server.service`: the native systemd path. It runs `telium-server check` as `ExecStartPre`.
-- `update-native.sh`, `telium-update-native.service`, `telium-update-native.timer`: the native path's updater, the container one's counterpart -- same arrow, same `update.conf` fields, manifest and sha256 instead of a registry digest, and a backup before every swap. Installed to `/usr/local/sbin` and `/etc/systemd/system` by hand; `docs/updates.md` has the commands.
+- `update-native.sh`, `telium-update-native.service`, `telium-update-native.timer`: the native path's updater, the container one's counterpart -- same arrow, same `update.conf` fields, manifest and sha256 instead of a registry digest, and a backup before every swap. Installed to `/usr/local/sbin` and `/etc/systemd/system` by hand; `docs/updates.md` has the commands. Each release tarball also carries `update-native.sh`; after a release installs and passes its health check, the updater replaces itself with that copy (by rename, never in place), so updater fixes arrive with releases instead of only on an installer re-run. That copy is trusted exactly as far as the binary beside it: the tarball's sha256 is pinned by the signed manifest. `update.conf` is never touched; `TELIUM_UPDATER_SELF_UPDATE=no` in it keeps a locally modified updater. The systemd units are not replaced, for the same reason the installer preserves edited units. `update-sfu-native.sh` does the same for relays (`TELIUM_SFU_UPDATER_SELF_UPDATE`).
 - `reverse-proxy/nginx.conf`, `reverse-proxy/Caddyfile`: TLS in front, server on loopback ([production.md](../docs/production.md#the-reverse-proxy)).
 
 ## Installing

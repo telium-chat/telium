@@ -70,6 +70,10 @@ TELIUM_WORKDIR=/var/lib/telium
 TELIUM_HEALTH_URL=http://127.0.0.1:8448/_telium/v1/health
 TELIUM_HEALTH_RETRIES=30
 TELIUM_MANIFEST_URL=
+# yes: after a healthy install, replace this script with the copy the release
+# shipped (see replace_self). no: keep this copy, for a box carrying local
+# changes to it; the release's copy is then only reported.
+TELIUM_UPDATER_SELF_UPDATE=yes
 if [ -r "$CONF" ]; then
   # shellcheck source=/dev/null
   . "$CONF"
@@ -343,7 +347,31 @@ if [ "$(cat "$STATE/staged/commit" 2>/dev/null || true)" != "$after" ] \
     rm -f "$tarball"
     exit 1
   fi
-  rm -f "$tarball"
+  # Releases since this script learned to replace itself also carry it, as
+  # `update-native.sh` beside the binary, under the same sha256 the manifest
+  # pinned for the whole tarball. It is optional on purpose: every release
+  # published before then has only the two members above, and those must
+  # keep installing exactly as they did. It is unpacked here, with the
+  # digest-checked tarball still on disk, because the tarball is deleted
+  # next and nothing else this box holds is evidence of where a file came
+  # from. Whether it is ever used is decided after the release has proved
+  # healthy -- see replace_self.
+  if tar -tzf "$tarball" > "$STATE/staged/members" 2>/dev/null \
+     && grep -qx 'update-native.sh' "$STATE/staged/members"; then
+    # Owned by whoever unpacked it and writable by nobody else, whatever the
+    # archive's headers say: the staged directory is readable by the service
+    # user, and a file root may install later must not be one it can edit.
+    # A link is refused before chmod, which would follow it.
+    if ! tar --no-same-owner -xzf "$tarball" -C "$STATE/staged" update-native.sh \
+       || [ -L "$STATE/staged/update-native.sh" ] \
+       || [ ! -f "$STATE/staged/update-native.sh" ] \
+       || ! chmod 0644 "$STATE/staged/update-native.sh"; then
+      echo "ERROR: the downloaded artifact lists an updater it cannot unpack; this box stays on ${before}." >&2
+      rm -rf "$STATE/staged"
+      exit 1
+    fi
+  fi
+  rm -f "$tarball" "$STATE/staged/members"
   # The sha256 proved the bytes are the ones the release published. This
   # proves the published bytes are the release this run aimed at, and -- as
   # a side effect of asking -- that the binary so much as runs on this
@@ -538,6 +566,69 @@ if [ "$healthy" -ne 1 ]; then
   exit 1
 fi
 echo "verified live process, database health and server identity"
+
+# The updater travels with the release it installed. Without this, a fix to
+# this script reached a box only when a person re-ran the installer, and the
+# boxes that most needed one -- every unattended box an updater bug was
+# holding back -- were exactly the boxes nobody was looking at.
+#
+# The trust model does not move: the only file this ever installs is the one
+# unpacked above from a tarball whose sha256 the signed manifest published,
+# and it is installed only here, after that release has restarted into a
+# healthy, correctly identified server. A release that was held, refused,
+# unhealthy or never restarted leaves this script exactly as it was, because
+# every one of those paths has already exited.
+#
+# It is a rename(2), never a write: bash reads a script as it runs, so
+# rewriting this file in place would hand the rest of this very run whatever
+# bytes now sit at its offset. A rename swaps the directory entry and leaves
+# the inode this run is reading alone. /etc/telium/update.conf is a separate
+# file this never touches, so every operator setting survives it.
+#
+# A failure here is a warning and not an exit: the release is installed and
+# healthy, and reporting the run as failed would misstate the box's state.
+# The next release carries the script again.
+replace_self() {
+  local new="$STATE/staged/update-native.sh" incoming
+  if [ ! -e "$new" ] && [ ! -L "$new" ]; then
+    # A release from before the updater was bundled. Nothing to do.
+    return 0
+  fi
+  if [ "$TELIUM_UPDATER_SELF_UPDATE" = no ]; then
+    if ! cmp -s "$new" "$SELF"; then
+      echo "the release ships a different updater; TELIUM_UPDATER_SELF_UPDATE=no keeps ${SELF}"
+    fi
+    return 0
+  fi
+  case "$SELF" in
+    *.sh)
+      # The installed copy is named telium-update-native. A path ending in
+      # .sh is this file in a checkout, run by hand -- a source tree is not
+      # this script's to rewrite.
+      echo "running from ${SELF}, not an installed updater; leaving it alone"
+      return 0
+      ;;
+  esac
+  if [ -L "$new" ] || [ ! -f "$new" ]; then
+    echo "WARNING: the release's update-native.sh is not a regular file; keeping ${SELF}" >&2
+    return 0
+  fi
+  if cmp -s "$new" "$SELF"; then
+    return 0
+  fi
+  if ! bash -n "$new" 2>/dev/null; then
+    echo "WARNING: the release's update-native.sh does not parse; keeping ${SELF}" >&2
+    return 0
+  fi
+  incoming="$(dirname "$SELF")/.${SELF##*/}.incoming"
+  if install -m755 "$new" "$incoming" && mv -f "$incoming" "$SELF"; then
+    echo "updater: ${SELF} replaced with the copy ${after_short} shipped; it takes effect from the next run"
+  else
+    rm -f "$incoming"
+    echo "WARNING: could not replace ${SELF} with the copy ${after_short} shipped; keeping the current one" >&2
+  fi
+}
+replace_self
 
 rm -rf "$STATE/staged"
 rm -f "$STATE/waiting-manual" "$STATE/waiting-window" "$STATE/waiting-breaking" \
