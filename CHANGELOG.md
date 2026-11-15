@@ -12,6 +12,13 @@ Write for the people using the app, not the repo: what changed in their
 hands, not which PRs merged.
 -->
 
+## 15 November 2026
+
+- Fixed: "Encryption is out of sync" after someone starts a conversation over. If one of your devices missed the start-over, it used to get stuck: newer messages wouldn't open, and anything you sent was refused. Your device now notices, gets itself back into the conversation, and catches up — nobody has to press anything.
+- Fixed: signing in on a second device now gets your account's keys properly. An account's keys could end up held only by the device that created it, which left every device you signed in on later unable to prove it was yours — and quietly left out of conversations.
+- If one of your devices (or someone else's) can't be confirmed yet, the conversation now says so in one quiet line, and lets it in by itself once it is — instead of leaving it out without a word.
+- The note about someone having a new account key is calmer, and says what it usually means: they set their account up again. Messages stay encrypted either way.
+
 ## 26 October 2026
 
 - Fixed: calls in a voice channel now stay up through server trouble. If a server the call runs on goes down or restarts for a few minutes, the call waits for it and rejoins on its own when it's back, instead of ending and taking everyone out of the voice channel. And a call that drops twice in a row now pauses briefly and tries again, instead of removing you from the channel.

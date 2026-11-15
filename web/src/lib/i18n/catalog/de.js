@@ -2854,14 +2854,14 @@ export const messages = {
   // --------------------------------------------------------- the header chip
 
   // Four pills beside a channel name on a phone, and German loses this fight on
-  // three of them. „Schlüssel geändert“ is two words for English's two and fits.
+  // three of them. „Neuer Schlüssel“ is two words for English's two and fits.
   // „Server kann mitlesen“ is three words and eighteen characters against
   // English's fifteen, and it is kept because „mitlesen“ is the exact verb — it
   // says somebody is reading along with you, which is what escrow means and what
   // „lesbar“ would leave vague. „Ende-zu-Ende“ is the established German
   // spelling, hyphens and all, and is two characters longer than the English.
   // None of them is abbreviated to fit; the pill is what has to give.
-  'chat.encryption.chip.keyChanged': 'Schlüssel geändert',
+  'chat.encryption.chip.keyChanged': 'Neuer Schlüssel',
   'chat.encryption.chip.serverCanRead': 'Server kann mitlesen',
   'chat.encryption.chip.endToEnd': 'Ende-zu-Ende',
   'chat.encryption.chip.encrypted': 'Verschlüsselt',
@@ -2879,11 +2879,10 @@ export const messages = {
   'chat.encryption.chip.open': 'Details zur Verschlüsselung',
 
   // The chip's tooltip: the banner's two sentences as one string, because a
-  // `title` attribute is one string. „Identitätsdiebstahl“ is the German word a
-  // reader already owns for somebody pretending to be somebody else; the
-  // literal „Identitätsvortäuschung“ is a legal term nobody says. Both readings
-  // stay in the order of likelihood and neither is chosen between.
-  'chat.encryption.chip.keyChangedTooltip': 'Jemand hier verwendet einen anderen Kontoschlüssel. So sieht ein zurückgesetzter Schlüssel aus, und so sieht auch ein Identitätsdiebstahl aus. Verifiziere die Person noch einmal, bevor du darauf vertraust.',
+  // `title` attribute is one string. The wording is calm on purpose: a new key
+  // usually just means the person set their account up again, so it says that
+  // and points at comparing keys, without naming anything alarming.
+  'chat.encryption.chip.keyChangedTooltip': 'Jemand hier hat einen neuen Kontoschlüssel, meist weil die Person ihr Konto neu eingerichtet hat. Die Nachrichten bleiben verschlüsselt. Um sicherzugehen, dass sie es ist, vergleiche die Schlüssel in ihrem Profil.',
 
   // ------------------------------------------------------------- the banners
 
@@ -2920,11 +2919,11 @@ export const messages = {
   'chat.encryption.rejoinUndeliverable.title': 'Niemand wurde gebeten, dieses Gerät hereinzulassen.',
   'chat.encryption.rejoinUndeliverable.body': 'Der Server, der diese Unterhaltung ordnet, ist nicht erreichbar; die Anfrage ist deshalb nie losgegangen. Ein Neuanfang gibt allen, die noch erreichbar sind, eine neue Gruppe.',
 
-  // The one banner that might be another person. Same two readings as the chip
-  // tooltip, in the same words, because a reader can see both within a second
-  // of each other and two spellings would read as two different problems.
-  'chat.encryption.changedIdentity.title': 'Jemand hier verwendet einen anderen Kontoschlüssel.',
-  'chat.encryption.changedIdentity.body': 'So sieht ein zurückgesetzter Schlüssel aus, und so sieht auch ein Identitätsdiebstahl aus. Verifiziere die Person noch einmal, bevor du darauf vertraust.',
+  // The one banner that might be another person. Same wording as the chip
+  // tooltip, because a reader can see both within a second of each other and
+  // two spellings would read as two different problems.
+  'chat.encryption.changedIdentity.title': 'Jemand hier hat einen neuen Kontoschlüssel.',
+  'chat.encryption.changedIdentity.body': 'Das heißt meist, dass die Person ihr Konto neu eingerichtet hat. Die Nachrichten bleiben verschlüsselt. Um sicherzugehen, dass sie es ist, vergleiche die Schlüssel in ihrem Profil.',
 
   // „verschlossen“ and not „gesperrt“: see the glossary block. A client that
   // also bans people cannot use the ban verb for a key vault, and „verschlossen“
@@ -2948,6 +2947,8 @@ export const messages = {
   'chat.encryption.recoveryFallback.title': 'Die Anmeldung hat deine älteren Nachrichten nicht aufgeschlossen.',
   'chat.encryption.recoveryFallback.body': 'Gib unter Einstellungen → {pane} deine Wiederherstellungs-Passphrase ein, oder gib dieses Gerät von einem frei, das du schon benutzt.',
 
+  'chat.encryption.heldBack.own': 'Dein anderes Gerät ist noch nicht in dieser Unterhaltung. Es kommt von selbst dazu, sobald bestätigt ist, dass es deins ist.',
+  'chat.encryption.heldBack.other': 'Eines ihrer Geräte ist noch nicht in dieser Unterhaltung. Es kommt von selbst dazu, sobald bestätigt ist, dass es ihr gehört.',
   // Messages held back on purpose, said as such, because the fear this banner
   // answers is that messages are being lost. „zurückgehalten“ is the word for
   // deliberately keeping something back and cannot be read as „verloren“.
