@@ -129,7 +129,8 @@ chmod +x "$work/bin/"*
 export PATH="$work/bin:$PATH"
 
 # The fake binaries exercise the CLI contract, including multi-line backup
-# output and the difference between an old and a new 'check --help'.
+# output with a log line ahead of the path, a check that refuses root, and
+# the difference between an old and a new 'check --help'.
 for version in 1 2 3 4 5; do
   mkdir -p "$work/releases/v$version"
   cat > "$work/releases/v$version/telium-server" <<'MOCK_BINARY'
@@ -154,6 +155,13 @@ case "${1:-}" in
         echo installation >> "$MOCK_WORK/state/check_flags"
         echo "Configuration check passed."
       else
+        # The real audit calls a root process DANGER and exits non-zero, so
+        # an updater that asks it as root can never take a release.
+        if [ "$(id -u)" -eq 0 ]; then
+          echo " DANGER  (process)"
+          echo "         this server is running as root."
+          exit 1
+        fi
         echo "profile: production"
         echo "Nothing dangerous."
       fi
@@ -200,6 +208,9 @@ case "${1:-}" in
     mkdir -p /var/backups/telium/archives
     archive=/var/backups/telium/archives/snapshot.test
     printf 'backup contents' > "$archive"
+    # Releases up to 0.4.1 log to stdout, ahead of the archive path; the
+    # updater runs the installed (older) binary's backup, so it must cope.
+    echo "2026-11-15T06:10:13.102018Z  INFO telium::startup: voice: no local TURN relay"
     echo "$archive"
     echo 'files: 4'
     echo 'format: telium-backup-v1'

@@ -368,7 +368,14 @@ fi
 # where the operator still has a running server -- instead of at
 # ExecStartPre, where the unit would refuse to start and the box would crash
 # loop instead.
-if ! "$STATE/staged/telium-server" --config "$TELIUM_CONFIG" check > /dev/null; then
+#
+# It runs as the service user, the way install-native.sh runs it and the way
+# the unit's ExecStartPre will: this script is root, and the audit rightly
+# calls a root process DANGER, so asking it as root fails every release on
+# every box. The staged directory has to be reachable by that user for this.
+chmod 0755 "$STATE" "$STATE/staged"
+if ! (cd "$TELIUM_WORKDIR" && runuser -u "$TELIUM_SERVICE_USER" -- \
+      "$STATE/staged/telium-server" --config "$TELIUM_CONFIG" check) > /dev/null; then
   announce_once check-failed "$after" \
     "the staged release ${after_short} fails \`telium-server check\` against this box's configuration; it is waiting. Run the check to read why, then run: $SELF --now"
   exit 0
@@ -413,9 +420,16 @@ backup_output="$(cd "$TELIUM_WORKDIR" && runuser -u "$TELIUM_SERVICE_USER" -- \
   "$TELIUM_SERVER_BIN" --config "$TELIUM_CONFIG" backup now)"
 backup_rc=$?
 set -e
-# The backup CLI prints the archive path on line 1, followed by its manifest
-# and optional remote upload result. The entire output is not a filename.
-backup_path="$(printf '%s\n' "$backup_output" | sed -n '1p')"
+# The backup CLI prints the archive path, followed by its manifest and
+# optional remote upload result. The entire output is not a filename. The
+# binary doing this backup is the one already installed, and releases up to
+# 0.4.1 also log to stdout, so the path is not necessarily line 1: take the
+# first line that names an existing file by absolute path.
+backup_path="$(printf '%s\n' "$backup_output" | while IFS= read -r line; do
+  case "$line" in
+    /*) if [ -f "$line" ]; then printf '%s\n' "$line"; break; fi ;;
+  esac
+done)"
 if [ -n "$backup_path" ] && [ -f "$backup_path" ]; then
   # The archive exists, which is the thing the rollback needs. A non-zero
   # exit here means its upload to the remote failed, which is a real problem
