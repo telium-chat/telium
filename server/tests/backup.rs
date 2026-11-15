@@ -1730,3 +1730,39 @@ async fn empty_profile_assets_restore_over_existing_media() {
     assert!(restored.moved_aside.iter().any(|p| p.join("old-attachment").exists()));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+// deploy/update-native.sh reads the archive path from `backup now`'s stdout
+// before it installs a release. Logs on stdout pushed that path off line 1
+// and held every native update; they belong on stderr.
+#[test]
+fn the_backup_cli_prints_the_archive_path_first_and_logs_only_to_stderr() {
+    let dir = fresh_dir("cli-stdout");
+    let config = dir.join("telium.toml");
+    std::fs::write(
+        &config,
+        format!(
+            "server_name = \"test.example\"\ndatabase_url = \"sqlite://{}?mode=rwc\"\nmedia_dir = \"{}\"\n[archive]\ndir = \"{}\"\n[backup]\ndir = \"{}\"\nkey_file = \"{}\"\n",
+            dir.join("telium.db").display(),
+            dir.join("media").display(),
+            dir.join("archive").display(),
+            dir.join("backups").display(),
+            dir.join("backup.key").display(),
+        ),
+    )
+    .unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_telium-server"))
+        .args(["--config", config.to_str().unwrap(), "backup", "now"])
+        .env("RUST_LOG", "info")
+        .env_remove("TELIUM_BACKUP_KEY")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "stdout:\n{stdout}\nstderr:\n{stderr}");
+    let first = stdout.lines().next().unwrap_or_default();
+    assert!(Path::new(first).is_file(), "line 1 of stdout is not the archive: {first:?}\n{stdout}");
+    // Match the log target rather than the level, which may be wrapped in colour codes.
+    assert!(!stdout.contains("telium::"), "a log line reached stdout:\n{stdout}");
+    assert!(stderr.contains("telium::startup"), "expected the startup logs on stderr:\n{stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
