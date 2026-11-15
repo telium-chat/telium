@@ -2,6 +2,14 @@ import * as vault from '../vault.js';
 import { verification } from './shared.js';
 
 export const trustMethods = {
+  /// How this account's keys are kept, for sealing the identity secret. The server says "none" before the vault exists, and
+  /// the first custody read is sent before this device creates it: taking that answer sealed a new account's identity under a
+  /// throwaway key, so every device signed in later could never sign itself. A real mode only.
+  custodyMode() {
+    const real = (mode) => (mode && mode !== 'none' ? mode : null);
+    return real(this.custody?.mode) || real(this.vault?.mode) || 'device_custody';
+  },
+
   /// Fails closed: an outage must not become device trust.
   async startTrust() {
     // No IndexedDB means no local device identity: an expected degraded mode.
@@ -23,12 +31,12 @@ export const trustMethods = {
           this.mls.cs,
           this.vault?.key || null,
           await this.mls.leafKey(),
-          this.custody?.mode || this.vault?.mode || 'device_custody',
+          this.custodyMode(),
         );
         this.trust = trust;
 
         trust.onRecoveryAdopted = async (ring) => {
-          const mode = this.custody?.mode || this.vault?.mode || 'device_custody';
+          const mode = this.custodyMode();
           let recovered = {
             ...ring,
             mode,

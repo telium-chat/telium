@@ -2884,11 +2884,11 @@ export const messages = {
   // width of a Latin letter, so English's "two words at the very most" becomes
   // "five glyphs at the very most" here, and every entry below is four or five.
 
-  // 体言止め, a noun phrase: 鍵の変更, "a key change". 鍵が変わりました is the
-  // sentence and is eight glyphs, which is a pill that pushes the channel name
+  // 体言止め, a noun phrase: 新しい鍵, "a new key". 新しい鍵になりました is the
+  // sentence and is longer, which is a pill that pushes the channel name
   // off a phone. Named for the meaning rather than the mechanism, as English
   // requires -- 鍵エスクロー中 would be accurate and would tell a reader nothing.
-  'chat.encryption.chip.keyChanged': '鍵の変更',
+  'chat.encryption.chip.keyChanged': '新しい鍵',
   // A relative clause used as a label, with no です. This is the one thing a
   // reader needs off a glance and it says it in six glyphs: the server can read.
   'chat.encryption.chip.serverCanRead': 'サーバーが読める',
@@ -2914,11 +2914,10 @@ export const messages = {
 
   // Identical to `changedIdentity.title` plus `.body` run together, because a
   // `title` attribute is one string and the banner and the tooltip must not tell
-  // two stories. こう見えます twice, once for each reading, which is how Japanese
-  // says "looks like this; so does" -- the language has no elliptical "so does",
-  // so both halves state the verb and the parallelism carries the refusal to
-  // choose between them.
-  'chat.encryption.chip.keyChangedTooltip': 'ここにいる誰かが別のアカウント鍵を使っています。鍵をリセットしたときもこう見えますし、なりすましでもこう見えます。信頼する前に、もう一度確認してください。',
+  // two stories. Calm and plain: a new key usually means the account was set up
+  // again, so that is said first, then that messages stay encrypted, then how to
+  // be sure -- 見比べて, compare side by side.
+  'chat.encryption.chip.keyChangedTooltip': 'ここにいる誰かが新しいアカウント鍵を使っています。多くの場合、アカウントを設定し直したことを意味します。メッセージは暗号化されたままです。本人かどうか確かめるには、相手のプロフィールから鍵を見比べてください。',
 
   // ------------------------------------------------------------------ the banners
   //
@@ -2956,12 +2955,12 @@ export const messages = {
   // now, which is a state rather than a past event.
   'chat.encryption.rejoinUndeliverable.body': 'この会話の順序を決めるサーバーに接続できないため、要求は送り出されていません。やり直すと、まだ接続できる全員に新しいグループができます。',
 
-  'chat.encryption.changedIdentity.title': 'ここにいる誰かが別のアカウント鍵を使っています。',
+  'chat.encryption.changedIdentity.title': 'ここにいる誰かが新しいアカウント鍵を使っています。',
   // なりすまし, the native noun for impersonation, and it is not softened into
   // 第三者の可能性 or anything hedged. The English refuses to choose between the
   // two readings and so does this: both are stated, in the same shape, in the
   // order of likelihood.
-  'chat.encryption.changedIdentity.body': '鍵をリセットしたときもこう見えますし、なりすましでもこう見えます。信頼する前に、もう一度確認してください。',
+  'chat.encryption.changedIdentity.body': '多くの場合、アカウントを設定し直したことを意味します。メッセージは暗号化されたままです。本人かどうか確かめるには、相手のプロフィールから鍵を見比べてください。',
 
   'chat.encryption.vaultLocked.title': '以前のメッセージは、この端末ではロックされています。',
   // 設定 →「{pane}」 -- see the section note on why the pane name is a
@@ -2983,6 +2982,8 @@ export const messages = {
   // the way English's "or" does.
   'chat.encryption.recoveryFallback.body': '設定 →「{pane}」で復旧パスフレーズを入力するか、すでに使っている端末からこの端末を承認してください。',
 
+  'chat.encryption.heldBack.own': 'あなたのもう1台の端末は、まだこの会話に入っていません。あなたの端末だと確認できると、自動的に参加します。',
+  'chat.encryption.heldBack.other': '相手の端末のうち1台は、まだこの会話に入っていません。相手の端末だと確認できると、自動的に参加します。',
   'chat.encryption.syncFailed.title': 'この端末では暗号化の同期がずれています。',
   // 保留されます, "are being held back", which is deliberately not 届いていません
   // -- the fear this banner answers is that messages are being lost, and 保留
