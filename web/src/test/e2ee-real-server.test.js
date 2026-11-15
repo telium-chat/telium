@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
-import { Mls, wipe } from '../lib/mls.js';
+import { Mls, decodeMessage, wipe } from '../lib/mls.js';
 import { dmMethods } from '../lib/store/dms.js';
 import { forgetDeviceSecrets, heldRecoveryKeyring } from '../lib/device-secrets.js';
 import { load as loadVault, setMode } from '../lib/vault.js';
@@ -156,6 +156,35 @@ describe.skipIf(!haveServer)('against the real server', () => {
     const frames = await history(alice.api, id);
     expect(frames.some((f) => f.kind === 'commit' && f.sender === bob.userId)).toBe(false);
     await catchUp(am, alice.api, id);
+    expect(am.errorFor(id)).toBeUndefined();
+  });
+
+  it('lets a device back in that a start-over did not reach, with nobody pressing anything', async () => {
+    const { id, alice, bob, am, bm } = await dm();
+    const a = storeFor(alice, am);
+    const b = storeFor(bob, bm);
+    a.trust = { authorizedRejoinDevice: async () => true };
+    await a.refreshConversations();
+    await b.refreshConversations();
+    await a.resetConversation(id);
+    const never = (await history(bob.api, id)).findLast((f) => f.kind === 'welcome').ciphertext;
+    const mark = (m) => String(m?.welcome?.encryptedGroupInfo?.slice?.(0, 16));
+    const blocked = mark(decodeMessage(never));
+    const join = bm.join.bind(bm);
+    bm.join = async (message) => {
+      if (mark(message) === blocked) throw new Error('not addressed to this device');
+      return join(message);
+    };
+    await am.send(id, 'one');
+    await b.loadConversationNow(id);
+    expect(bm.joined(id)).toBe(false);
+    expect(bm.errorFor(id)).toBeUndefined();
+
+    await a.loadConversationNow(id);
+    await b.loadConversationNow(id);
+    expect(bm.joined(id)).toBe(true);
+    expect(await says(am, alice.api, bm, bob.api, id, 'two')).toBe('two');
+    expect(await says(bm, bob.api, am, alice.api, id, 'back')).toBe('back');
     expect(am.errorFor(id)).toBeUndefined();
   });
 

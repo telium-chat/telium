@@ -10,7 +10,7 @@ import {
 import { defaultClientConfig } from 'ts-mls/clientConfig.js';
 import { decryptSenderData } from 'ts-mls/privateMessage.js';
 import { ratchetTreeFromExtension } from 'ts-mls/groupInfo.js';
-import { rejoinBody, rejoinKey } from './rejoin.js';
+import { rejoinBody, rejoinKey, rejoinSeen } from './rejoin.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { open, seal } from './vault.js';
 import { frameIdOf, withFrameId } from './frame-id.js';
@@ -159,6 +159,8 @@ export class Mls {
     this.leftAt = new Map();
     // Conversations whose held group a start-over replaced without letting this device in (`walk`); the store asks to be let back in.
     this.replaced = new Set();
+    // Newest seq handed to a walk, per conversation: what a rejoin request says this device has seen (`requestRejoin`).
+    this.seenTo = new Map();
     this.cs = null;
     // Admission hook from Store/Trust: false rejects, null means legacy identity with no root, throwing fails closed.
     this.verifyClaimedPackage = null;
@@ -457,6 +459,8 @@ export class Mls {
       // Persisted so sign-in doesn't republish a GroupInfo per conversation.
       published: row.published || 0,
       recoveryKeyId: row.recoveryKeyId || null,
+      // Seq of the newest commit or Welcome of this group: the last change to its tree (`catchUp`). Null when not known.
+      treeSeq: Number.isInteger(row.treeSeq) ? row.treeSeq : null,
       // Own unanswered commit; only one moving past the current epoch means anything.
       pending: row.pending && row.pending.epoch === current + 1 ? row.pending : null,
     };
@@ -474,6 +478,7 @@ export class Mls {
       generation: Number.isInteger(entry.generation) ? entry.generation : null,
       published: entry.published || 0,
       recoveryKeyId: entry.recoveryKeyId || null,
+      treeSeq: Number.isInteger(entry.treeSeq) ? entry.treeSeq : null,
       pending: entry.pending || null,
       saved_at: Date.now(),
       stamp,
@@ -513,6 +518,7 @@ export class Mls {
       state: { ...decoded[0], clientConfig: defaultClientConfig },
       lastSeq,
       generation: Number.isInteger(entry?.generation) ? entry.generation : null,
+      treeSeq: Number.isInteger(entry?.treeSeq) ? entry.treeSeq : null,
       published: 0,
       recoveryKeyId: pending.recoveryKeyId !== undefined
         ? pending.recoveryKeyId
@@ -557,12 +563,17 @@ export class Mls {
       if (outcome === 'lost') await this.dropPending(conversationId, entry);
       throw e;
     }
-    await this.takePending(conversationId, entry, pending, entry ? entry.lastSeq : (pending.lastSeq || 0));
+    await this.takePending(
+      conversationId, entry, pending, entry ? entry.lastSeq : (pending.lastSeq || 0), Number(answer?.seq) || null,
+    );
     return answer;
   }
 
-  async takePending(conversationId, entry, pending, lastSeq) {
+  /// `treeSeq` is the ordered commit's seq; unknown (no answer) until its echo is walked, so a rejoin request ordered before it
+  /// is not mistaken for one asked after it.
+  async takePending(conversationId, entry, pending, lastSeq, treeSeq = null) {
     const next = this.pendingEntry(entry, pending, lastSeq);
+    next.treeSeq = Number.isInteger(treeSeq) ? treeSeq : null;
     this.published.delete(conversationId);
     await this.saveGroup(conversationId, next);
     this.joining.delete(conversationId);
@@ -598,7 +609,7 @@ export class Mls {
       throw e;
     }
     const next = await this.takePending(
-      conversationId, entry, pending, entry ? entry.lastSeq : (pending.lastSeq || 0),
+      conversationId, entry, pending, entry ? entry.lastSeq : (pending.lastSeq || 0), Number(answer?.seq) || null,
     );
     await this.sendWelcomeIfMissing(conversationId, pending.body, answer);
     return next;
@@ -1006,7 +1017,7 @@ export class Mls {
   }
 
   /// Under a policy a new person needs the add right; another device of someone in the tree does not. `lenient` drops whoever this account may not add instead of failing. The commit declares who it adds so the sequencer enforces the same policy.
-  async addMembers(conversationId, userIds, { lenient = false } = {}) {
+  async addMembers(conversationId, userIds, { lenient = false, replacing = null } = {}) {
     return this.run(conversationId, async () => {
       let entry = await this.loadGroup(conversationId);
       entry = await this.settlePending(conversationId, entry);
@@ -1015,6 +1026,17 @@ export class Mls {
       const inTree = usersInTree(entry.state.ratchetTree);
       // Read from the same state the commit is built on, not the caller's possibly stale picture.
       const held = clientsInTree(entry.state.ratchetTree);
+      // Leftover leaves to swap for fresh ones: never our own, and only where removing is allowed.
+      const own = entry.state.privatePath?.leafIndex;
+      const swap = new Map();
+      if (replacing?.size && (!policy || this.permits(conversationId, 'remove'))) {
+        (entry.state.ratchetTree || []).forEach((node, index) => {
+          if (index % 2 || node?.nodeType !== 'leaf' || index / 2 === own) return;
+          const key = node.leaf?.signaturePublicKey && encode64(node.leaf.signaturePublicKey);
+          if (key && replacing.has(key)) swap.set(key, index / 2);
+        });
+        for (const key of swap.keys()) held.delete(key);
+      }
       let asked = userIds;
       if (asked.some((u) => !inTree.has(u)) && !this.permits(conversationId, 'add')) {
         if (!lenient) throw new Error('this group’s membership policy does not let you add people');
@@ -1049,8 +1071,15 @@ export class Mls {
           : 'nobody had a key package to add');
       }
 
+      // Remove a leftover leaf only when its device is being added back: a remove alone would shut it out.
+      const coming = new Set(packages.map((p) => encode64(p.leafNode.signaturePublicKey)));
+      const removals = [...swap.entries()].filter(([key]) => coming.has(key))
+        .map(([, removed]) => ({ proposalType: 'remove', remove: { removed } }));
       const commit = await createCommit({ state: entry.state, cipherSuite: this.cs }, {
-        extraProposals: packages.map((keyPackage) => ({ proposalType: 'add', add: { keyPackage } })),
+        extraProposals: [
+          ...removals,
+          ...packages.map((keyPackage) => ({ proposalType: 'add', add: { keyPackage } })),
+        ],
         ratchetTreeExtension: true,
       });
       const epoch = Number(commit.newState.groupContext.epoch);
@@ -1267,12 +1296,14 @@ export class Mls {
     const keys = new Set(devices.map((d) => d.signatureKey).filter(Boolean));
     // Check before claiming: claiming consumes a key package per device, so answering an answered request would drain everyone's stock. Judge by signature key when given (a reload mints a new device id for the same key); a present key whose device has no group is a leftover leaf the device replaces itself.
     const absent = requesters.filter((r) => (r.signatureKey
-      ? !keys.has(r.signatureKey)
+      ? !keys.has(r.signatureKey) || r.leftover
       : !present.has(`${r.userId}|${r.deviceId}`)));
     if (!absent.length) return { added: 0, missing: [], rejected: [] };
 
+    // A leftover leaf (see `walk`) is replaced in the same commit that adds the device back.
+    const replacing = new Set(absent.filter((r) => r.leftover && keys.has(r.signatureKey)).map((r) => r.signatureKey));
     const userIds = [...new Set(absent.map((r) => r.userId))];
-    return this.addMembers(conversationId, userIds, { lenient: true });
+    return this.addMembers(conversationId, userIds, { lenient: true, replacing });
   }
 
   /// Only a request; the receiver decides.
@@ -1280,7 +1311,9 @@ export class Mls {
     // Body is the leaf signature key, identifying the device in tree terms (`catchUp`).
     const key = await this.leafKey().catch(() => null);
     await this.home.sendFrame(conversationId, {
-      kind: 'rejoin', ciphertext: key ? rejoinBody(key) : '', epoch: this.epochOf(conversationId),
+      kind: 'rejoin',
+      ciphertext: key ? rejoinBody(key, this.seenTo.get(conversationId) || 0) : '',
+      epoch: this.epochOf(conversationId),
     });
   }
 
@@ -2165,6 +2198,15 @@ export class Mls {
       await this.loadConversationState(conversationId);
       await this.recall(conversationId, ordered);
       let entry = await this.loadGroup(conversationId);
+      const newestSeq = ordered.reduce((high, f) => Math.max(high, f.seq || 0), 0);
+      if (newestSeq > (this.seenTo.get(conversationId) || 0)) this.seenTo.set(conversationId, newestSeq);
+      // A group saved before tree changes were tracked: take it from the frames in hand, if they reach back to one.
+      if (entry && !Number.isInteger(entry.treeSeq)) {
+        const changed = ordered.findLast((f) => (f.kind === 'commit' || f.kind === 'welcome')
+          && (f.seq || 0) <= entry.lastSeq
+          && (!Number.isInteger(entry.generation) || f.generation === entry.generation));
+        if (changed) entry.treeSeq = changed.seq;
+      }
       const opened = [];
       let dirty = false;
       let stopped = false;
@@ -2193,6 +2235,9 @@ export class Mls {
           continue;
         }
 
+        // Every commit or Welcome of this group may change its tree, ours included.
+        if (entry && (frame.kind === 'commit' || frame.kind === 'welcome')) entry.treeSeq = seq;
+
         // GroupInfo is a recovery aid and never advances state.
         if (frame.kind === 'groupinfo') {
           if (entry) { entry.lastSeq = seq; dirty = true; }
@@ -2206,9 +2251,15 @@ export class Mls {
             if (!waiting) this.rejoins.set(conversationId, waiting = new Map());
             // Keyed by device, which is what lacks a leaf.
             const signatureKey = rejoinKey(frame.ciphertext);
+            // Asked by a device that had seen every change to the tree and still has no group: the leaf it has is a leftover.
+            const seen = rejoinSeen(frame.ciphertext);
+            const leftover = Boolean(entry && signatureKey && seen !== null
+              && Number.isInteger(entry.treeSeq) && seen >= entry.treeSeq
+              && clientsInTree(entry.state.ratchetTree).has(signatureKey));
             waiting.set(signatureKey ? `${frame.sender}|${signatureKey}` : `${frame.sender}|${frame.sender_device}`, {
               userId: frame.sender, deviceId: frame.sender_device,
               ...(signatureKey ? { signatureKey } : {}),
+              ...(leftover ? { leftover: true } : {}),
             });
           }
           if (entry) { entry.lastSeq = seq; dirty = true; }
@@ -2234,7 +2285,7 @@ export class Mls {
               if (!refusal) {
                 // Epochs restart at 1 in a new generation, so the publish watermark of the old group would hold back this one's GroupInfo.
                 if (!entry || entry.generation !== generation) this.published.delete(conversationId);
-                entry = { state: joined, lastSeq: seq, generation };
+                entry = { state: joined, lastSeq: seq, generation, treeSeq: seq };
                 dirty = true;
                 this.failed.delete(conversationId);
                 this.topUpSoon();
@@ -2353,6 +2404,27 @@ export class Mls {
           }
           // Otherwise stop: continuing past a divergence leaves silent holes.
           this.failed.set(conversationId, e);
+          // Unless the commit came with a Welcome for this device: it replaced a leaf this device could not use (`catchUp`), and the Welcome is the way into the group the commit made. A stopped walk is what lets `admitWelcome` replace a held group.
+          const attached = frame.kind === 'commit'
+            ? ordered.find((f) => f.seq === seq + 1 && f.kind === 'welcome' && f.sender === frame.sender)
+            : null;
+          if (attached) {
+            let joined = null;
+            try { joined = await this.join(decodeMessage(attached.ciphertext)); } catch { /* not for this device */ }
+            let refusal = 'not for this device';
+            if (joined) {
+              try { refusal = await this.admitWelcome(conversationId, entry, joined, generation); }
+              catch (unanswered) { this.failed.set(conversationId, unanswered); }
+            }
+            if (joined && !refusal) {
+              entry = { state: joined, lastSeq: attached.seq, generation, treeSeq: attached.seq };
+              this.failed.delete(conversationId);
+              this.published.delete(conversationId);
+              dirty = true;
+              this.topUpSoon();
+              continue;
+            }
+          }
           stopped = true;
           break;
         }

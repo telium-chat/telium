@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { HttpError } from '../lib/api.js';
-import { Mls, wipe } from '../lib/mls.js';
+import { Mls, decodeMessage, wipe } from '../lib/mls.js';
 import { dmMethods } from '../lib/store/dms.js';
 import { FakeHome } from './mls-home.js';
 
@@ -225,6 +225,87 @@ describe('starting a conversation over', () => {
     delete bob.join;
     await bob.sync('dm-1', frames(home, 'dm-1').filter((f) => f.generation === 1));
     expect(bob.joined('dm-1')).toBe(false);
+  });
+
+  it('lets a device back in that a start-over left with a leaf it cannot use, once', async () => {
+    const { home, alice, bob, a, b } = await pair();
+    a.store.trust = { authorizedRejoinDevice: async () => true };
+    await a.store.resetConversation('dm-1');
+    // The new group's Welcome never opens on Bob's device; anything addressed to it later does.
+    const join = bob.join.bind(bob);
+    let blocked = true;
+    bob.join = async (message) => {
+      if (blocked) throw new Error('not addressed to this device');
+      return join(message);
+    };
+    await alice.send('dm-1', 'one');
+    await b.store.loadConversationNow('dm-1');
+    expect(bob.joined('dm-1')).toBe(false);
+    expect(bob.errorFor('dm-1')).toBeUndefined();
+    // Asked twice before anyone answers (an open and a send, say).
+    await b.store.askToRejoin('dm-1');
+    expect(frames(home, 'dm-1').filter((f) => f.kind === 'rejoin').length).toBeGreaterThanOrEqual(2);
+    blocked = false;
+
+    const commitsBefore = frames(home, 'dm-1').filter((f) => f.kind === 'commit').length;
+    await a.store.loadConversationNow('dm-1');
+    await a.store.loadConversationNow('dm-1');
+    const answers = frames(home, 'dm-1').filter((f) => f.kind === 'commit').length - commitsBefore;
+    expect(answers).toBe(1);
+
+    await b.store.loadConversationNow('dm-1');
+    expect(bob.joined('dm-1')).toBe(true);
+    expect(bob.errorFor('dm-1')).toBeUndefined();
+    await alice.send('dm-1', 'two');
+    await bob.sync('dm-1', frames(home, 'dm-1'));
+    expect(read(bob, home, 'dm-1')).toContain('two');
+    await bob.send('dm-1', 'back');
+    await alice.sync('dm-1', frames(home, 'dm-1'));
+    expect(alice.errorFor('dm-1')).toBeUndefined();
+    expect(read(alice, home, 'dm-1')).toContain('back');
+    // The tree holds one leaf per device, not the leftover beside the new one.
+    expect(alice.devicesIn('dm-1').filter((d) => d.userId === '@b:h')).toHaveLength(1);
+  });
+
+  it('lets a device back in whose start-over Welcome never opens there', async () => {
+    const { home, alice, bob, a, b } = await pair();
+    a.store.trust = { authorizedRejoinDevice: async () => true };
+    await a.store.resetConversation('dm-1');
+    const unopenable = frames(home, 'dm-1').findLast((f) => f.kind === 'welcome' && f.generation === 2);
+    const mark = (m) => String(m?.welcome?.encryptedGroupInfo?.slice?.(0, 16));
+    const never = mark(decodeMessage(unopenable.ciphertext));
+    const join = bob.join.bind(bob);
+    bob.join = async (message) => {
+      if (mark(message) === never) throw new Error('not addressed to this device');
+      return join(message);
+    };
+    await alice.send('dm-1', 'one');
+    await b.store.loadConversationNow('dm-1');
+    expect(bob.joined('dm-1')).toBe(false);
+    await a.store.loadConversationNow('dm-1');
+    await b.store.loadConversationNow('dm-1');
+    expect(bob.joined('dm-1')).toBe(true);
+    expect(bob.errorFor('dm-1')).toBeUndefined();
+    await alice.send('dm-1', 'two');
+    await bob.sync('dm-1', frames(home, 'dm-1'));
+    expect(read(bob, home, 'dm-1')).toContain('two');
+    await bob.send('dm-1', 'back');
+    await alice.sync('dm-1', frames(home, 'dm-1'));
+    expect(read(alice, home, 'dm-1')).toContain('back');
+  });
+
+  it('does not replace a leaf whose device asked before the answer it is still walking towards', async () => {
+    const { home, alice, bob, a } = await pair();
+    a.store.trust = { authorizedRejoinDevice: async () => true };
+    // A request that has not seen the tree's newest change is not a leftover.
+    const key = await bob.leafKey();
+    await home.for('@b:h', 'd-bob').sendFrame('dm-1', { kind: 'rejoin', ciphertext: `key:${key};seen:1`, epoch: 0 });
+    const before = frames(home, 'dm-1').filter((f) => f.kind === 'commit').length;
+    await a.store.loadConversationNow('dm-1');
+    expect(frames(home, 'dm-1').filter((f) => f.kind === 'commit').length).toBe(before);
+    await alice.send('dm-1', 'still the same group');
+    await bob.sync('dm-1', frames(home, 'dm-1'));
+    expect(read(bob, home, 'dm-1')).toContain('still the same group');
   });
 
   it('drops a founding another member beat it to, and takes the one ordered', async () => {

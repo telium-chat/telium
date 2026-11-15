@@ -189,7 +189,7 @@ describe('what the engine is asked, and when', () => {
     expect(store.mls.walked).toEqual([['w1'], ['w1', 'f1']]);
   });
 
-  it('still answers a rejoin without walking it', async () => {
+  it('answers a rejoin at once, then walks it to judge a leftover leaf', async () => {
     const store = quietStore({ mls: fakeEngine() });
     const asked = [];
     store.admitSigned = async (id, rows) => { asked.push([id, rows]); };
@@ -197,8 +197,8 @@ describe('what the engine is asked, and when', () => {
     store.onDmFrame(frame('r1', 7, { kind: 'rejoin' }), false);
     await settle();
 
-    expect(asked).toEqual([['dm1', [{ userId: CAROL, deviceId: 'd-carol' }]]]);
-    expect(store.mls.walked).toEqual([]);
+    expect(asked[0]).toEqual(['dm1', [{ userId: CAROL, deviceId: 'd-carol' }]]);
+    expect(store.mls.walked).toEqual([['r1']]);
     expect(ids(store.dmPending.get('dm1'))).toEqual(['r1']);
   });
 });

@@ -542,7 +542,11 @@ export const dispatchMethods = {
       this.admitSigned(
         d.conversation_id,
         [{ userId: d.sender, deviceId: d.sender_device, ...(signatureKey ? { signatureKey } : {}) }],
-      ).catch(() => {});
+      )
+        // The walk judges whether the asker's leaf is a leftover to replace, which this frame alone cannot tell.
+        .then(() => this.mls.sync(d.conversation_id, list || [d]))
+        .then(() => this.answerRejoins(d.conversation_id))
+        .catch(() => {});
       return;
     }
 
