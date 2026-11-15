@@ -598,13 +598,14 @@ function installUpdateBridge() {
     const image = runningAppImage();
     // A detached helper starts the new image once this process has exited, so it
     // cannot lose the single-instance race against us.
-    if (image && relaunchAppImage({ imagePath: image })) {
+    restartInFlight = (async () => {
+      if (!image || !(await relaunchAppImage({ imagePath: image }))) {
+        app.relaunch(image ? { execPath: image } : {});
+      }
       app.exit(0);
       return true;
-    }
-    app.relaunch(image ? { execPath: image } : {});
-    app.exit(0);
-    return true;
+    })().finally(() => { restartInFlight = null; });
+    return restartInFlight;
   });
 }
 

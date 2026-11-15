@@ -244,9 +244,9 @@ describe('recent accounts', () => {
   beforeEach(() => { localStorage.clear(); });
   afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
 
-  it('starts empty and suggests the default home', () => {
+  it('starts empty and suggests no home of its own', () => {
     expect(recentAccounts()).toEqual([]);
-    expect(suggestedHomes()).toEqual(['telium.chat']);
+    expect(suggestedHomes()).toEqual([]);
   });
 
   it('keeps only public fields, most recent first', () => {
@@ -302,14 +302,14 @@ describe('recent accounts', () => {
     expect(recentAccounts()).toEqual([]);
     expect(() => rememberAccount({ userId: '@a:b.example', host: 'b.example' })).not.toThrow();
     expect(() => forgetAccount('@a:b.example')).not.toThrow();
-    expect(suggestedHomes()).toEqual(['telium.chat']);
+    expect(suggestedHomes()).toEqual([]);
   });
 
-  it('suggests unique recent hosts, then the default, at most four', () => {
+  it('suggests unique recent hosts, and nothing else, at most four', () => {
     rememberAccount({ userId: '@a:one.example', host: 'one.example' });
     rememberAccount({ userId: '@b:one.example', host: 'one.example' });
-    rememberAccount({ userId: '@c:telium.chat', host: 'telium.chat' });
-    expect(suggestedHomes()).toEqual(['telium.chat', 'one.example']);
+    rememberAccount({ userId: '@c:two.example', host: 'two.example' });
+    expect(suggestedHomes()).toEqual(['two.example', 'one.example']);
     for (const h of ['two', 'three', 'four', 'five']) {
       rememberAccount({ userId: `@x:${h}.example`, host: `${h}.example` });
     }
@@ -345,7 +345,8 @@ describe('the portal is not a home', () => {
     }
   });
 
-  it('still suggests the default home away from the portal', () => {
-    expect(suggestedHomes()).toEqual(['telium.chat']);
+  it('suggests no default home away from the portal either, and searches none', () => {
+    expect(suggestedHomes()).toEqual([]);
+    expect(searchCandidates({ recent: [] })).toEqual([]);
   });
 });

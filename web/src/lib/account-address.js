@@ -1,10 +1,8 @@
 // Parses the desktop sign-in field: handle, server, invite link or bare name. Pure; network lookups run on commit.
 
 import { discover, request } from './api.js';
-import { isPortalHost, normalizeHomeserver } from './homeserver.js';
+import { normalizeHomeserver } from './homeserver.js';
 import { readStored } from './local-state.js';
-
-export const DEFAULT_HOME = 'telium.chat';
 
 const RECENT_KEY = 'telium.recent-accounts.v1';
 const RECENT_MAX = 5;
@@ -186,9 +184,6 @@ export function suggestedHomes() {
     const h = host.toLowerCase();
     if (!hosts.includes(h)) hosts.push(h);
   }
-  // The default home is a suggestion, and on the portal it is a dead one: the
-  // site there runs no server, so it is not offered as a place to sign in.
-  if (!hosts.includes(DEFAULT_HOME) && !isPortalHost()) hosts.push(DEFAULT_HOME);
   return hosts.slice(0, SUGGEST_MAX);
 }
 
@@ -199,7 +194,7 @@ export const SEARCH_TIMEOUT_MS = 4000;
 
 const SEARCH_FOUND = new Set(['active', 'deactivated', 'moved']);
 
-/// The serving server comes first on the web. Recent accounts and recommended servers already carry an API base, so only the serving server and default home need discovering.
+/// The serving server comes first on the web. Recent accounts and recommended servers already carry an API base, so only the serving server needs discovering. There is no default home to try.
 export function searchCandidates({ recent = recentAccounts(), recommended = [], here = null } = {}) {
   const seen = new Set();
   const out = [];
@@ -213,9 +208,6 @@ export function searchCandidates({ recent = recentAccounts(), recommended = [], 
   if (here) add(here, null);
   for (const account of recent) add(account.host, account.base);
   for (const server of recommended) add(server?.domain, server?.api_origin);
-  // Not on the portal: the default home is the official site there, which runs
-  // no server, and a bare-name search must not knock on its door.
-  if (!isPortalHost()) add(DEFAULT_HOME, null);
   return out;
 }
 

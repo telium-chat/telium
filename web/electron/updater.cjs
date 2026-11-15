@@ -504,22 +504,27 @@ const APPIMAGE_RUNTIME_ENV = ['APPIMAGE', 'APPDIR', 'ARGV0', 'OWD', 'ELECTRON_RU
 /// child while the parent still holds the single-instance lock, so the new copy saw
 /// "already running" and quit, and the parent then exited too: the app just closed.
 /// A detached shell waits for our pid to die, then execs the image with a clean environment.
+/// Resolves true once the helper process exists, false if it could not start (spawn errors
+/// arrive asynchronously), so the caller can fall back instead of just exiting.
 function relaunchAppImage({ imagePath, pid = process.pid, spawnFn = require('node:child_process').spawn, env = process.env }) {
   const cleanEnv = { ...env };
   for (const key of APPIMAGE_RUNTIME_ENV) delete cleanEnv[key];
   const script = 'while kill -0 "$1" 2>/dev/null; do sleep 0.2; done; sleep 0.3; exec "$2"';
-  try {
-    const child = spawnFn('/bin/sh', ['-c', script, 'telium-relaunch', String(pid), imagePath], {
-      detached: true,
-      stdio: 'ignore',
-      env: cleanEnv,
-    });
-    child.on?.('error', () => {});
-    child.unref?.();
-    return true;
-  } catch {
-    return false;
-  }
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawnFn('/bin/sh', ['-c', script, 'telium-relaunch', String(pid), imagePath], {
+        detached: true,
+        stdio: 'ignore',
+        env: cleanEnv,
+      });
+    } catch {
+      resolve(false);
+      return;
+    }
+    child.once('error', () => resolve(false));
+    child.once('spawn', () => { child.unref(); resolve(true); });
+  });
 }
 
 const Phase = {

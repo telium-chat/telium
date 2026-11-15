@@ -4,8 +4,6 @@ import { isTauriRuntime } from '../../lib/platform.js';
 
 export const PENDING_RECOVERY_KEY = 'telium.pending-account-recovery.v1';
 
-export const FLAGSHIP_HOME = 'https://telium.chat';
-
 export const DEPTH = {
   server: 0, start: 1, find: 1, recover: 2, identity: 2, password: 3, reset: 3, key: 4,
 };
@@ -40,10 +38,11 @@ export function knownServer(handoff) {
   const remembered = readHome(sessionStorage)
     || (isTauriRuntime() ? readHome(localStorage) : null);
   if (remembered) return remembered;
-  // The portal is a static site: its own origin is not anybody's account home,
-  // so signup there starts from nothing and takes a recommendation instead.
-  if (isPortalHost()) return '';
-  return isTauriRuntime() ? FLAGSHIP_HOME : location.origin;
+  // There is no default home. The portal is a static site and the desktop app is served by
+  // no server, so both start from nothing and take a recommendation (or ask) instead; only
+  // a web client served by a homeserver starts on that server.
+  if (isPortalHost() || isTauriRuntime()) return '';
+  return location.origin;
 }
 
 export function looksAddressable(value) {

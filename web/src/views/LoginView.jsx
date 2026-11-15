@@ -56,7 +56,7 @@ import { AccountAddress, HomeChip, useAlternativeHomesOffered } from './AccountH
 import { downloadRecoveryKey, recoveryKeyNote } from './user-settings/RecoveryParts.jsx';
 import { BackToAccount } from './login/BackToAccount.jsx';
 import {
-  DEPTH, DESKTOP_DOTS, DOTS, FLAGSHIP_HOME, PENDING_RECOVERY_KEY, RECOMMENDATION_WAIT_MS, accountId,
+  DEPTH, DESKTOP_DOTS, DOTS, PENDING_RECOVERY_KEY, RECOMMENDATION_WAIT_MS, accountId,
   knownServer, looksAddressable, rememberHome, settleWithin,
 } from './login/helpers.js';
 
@@ -204,6 +204,8 @@ export function LoginView({
   // visible, so a failed probe never hides the only way to register on a closed server.
   const [codeRequired, setCodeRequired] = useState(null);
   useEffect(() => {
+    // Forget the last server's answer first: it must never hide the field for this one.
+    setCodeRequired(null);
     if (!registering || step !== 'password') return undefined;
     const home = normalizeHomeserver(server) || server.trim();
     if (!home) return undefined;
@@ -673,9 +675,8 @@ export function LoginView({
 
   const createAccount = (carry = null) => {
     const home = carry?.home ?? null;
-    // Like the website's portal: no flagship default on the desktop app, a recommendation
-    // (or the server step) instead. A home the person remembered still wins.
-    const base = home?.api || (native && initialHome === FLAGSHIP_HOME ? '' : initialHome);
+    // No default home: a home handed off or remembered, else a recommendation (or the server step).
+    const base = home?.api || initialHome;
     cancelFind();
     clearAttempt();
     setFindError(null);
