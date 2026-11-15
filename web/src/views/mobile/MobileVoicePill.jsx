@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useStore, useStoreEventFor } from '../../hooks/useStore.jsx';
 import { useVoice } from '../../hooks/useVoice.jsx';
 import { cn } from '../../lib/cn.js';
+import { formatCallElapsed } from '../../lib/call-elapsed.js';
 import { conversationName } from '../../lib/util.js';
 import { EmojiText, MicIcon, MicOffIcon, PhoneOffIcon } from '../../components/index.js';
 
@@ -17,9 +18,7 @@ export function MobileVoicePill({ onExpand }) {
     const interval = setInterval(() => {
       if (!voice.joinedAt) return;
       const sec = Math.max(0, Math.floor((Date.now() - voice.joinedAt) / 1000));
-      const m = Math.floor(sec / 60);
-      const s = sec % 60;
-      setElapsed(`${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`);
+      setElapsed(formatCallElapsed(sec));
     }, 1000);
     return () => clearInterval(interval);
   }, [voice.phase, voice.joinedAt]);

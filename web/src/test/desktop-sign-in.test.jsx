@@ -378,14 +378,12 @@ describe('the desktop first screen', () => {
     expect(document.querySelector('.stage__cur .auth-host').textContent).toContain('example.org');
   });
 
-  it('creates an account on telium.chat, with the way to choose another in sight', async () => {
+  it('asks for a home server directly on signup, like the website, instead of defaulting to telium.chat', async () => {
     const { user } = mount();
     await user.click(await screen.findByRole('button', { name: 'Create an account' }));
-    expect(await screen.findByRole('heading', { name: 'Pick a username' })).toBeTruthy();
-    expect(document.querySelector('.stage__cur .auth-host').textContent).toContain('telium.chat');
-    expect(screen.getByText(/Your account home keeps your profile/)).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: 'Choose a different home' }));
     expect(await screen.findByRole('textbox', { name: 'Home server' })).toBeTruthy();
+    expect(document.querySelector('.stage__cur .auth-host')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Choose a different home' })).toBeNull();
   });
 });
 
@@ -455,23 +453,21 @@ describe('recommending a server, and not having to remember it', () => {
     expect(await screen.findByRole('textbox', { name: 'Home server' })).toBeTruthy();
   });
 
-  it('falls back to telium.chat, without a word, when the list does not verify', async () => {
+  it('asks for a server, without a word, when the list does not verify', async () => {
     vi.stubEnv('VITE_TELIUM_RECOMMENDATION_PUBLIC_KEY', OTHER_KEY);
     const { user } = mount();
     await user.click(await screen.findByRole('button', { name: 'Create an account' }));
-    await waitFor(() => expect(document.querySelector('.stage__cur .auth-host')).toBeTruthy());
-    expect(document.querySelector('.stage__cur .auth-host').textContent).toContain('telium.chat');
+    expect(await screen.findByRole('textbox', { name: 'Home server' })).toBeTruthy();
     expect(screen.queryByTestId('recommended-home')).toBeNull();
     expect(screen.queryByText(/recommendation/i)).toBeNull();
-    expect(screen.getByRole('button', { name: 'Choose a different home' })).toBeTruthy();
   });
 
-  it('falls back to telium.chat on a build that pinned no key, and asks the list for nothing', async () => {
+  it('asks for a server on a build that pinned no key, and asks the list for nothing', async () => {
     vi.stubEnv('VITE_TELIUM_RECOMMENDATION_PUBLIC_KEY', '');
     const network = installNetwork();
     const { user } = mount();
     await user.click(await screen.findByRole('button', { name: 'Create an account' }));
-    expect(document.querySelector('.stage__cur .auth-host').textContent).toContain('telium.chat');
+    expect(await screen.findByRole('textbox', { name: 'Home server' })).toBeTruthy();
     expect(screen.queryByTestId('recommended-home')).toBeNull();
     expect(network.mock.calls.map(([url]) => String(url))).not.toContain(DEFAULT_RECOMMENDATION_URL);
   });

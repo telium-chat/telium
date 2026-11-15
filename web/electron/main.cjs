@@ -30,6 +30,7 @@ const {
   Phase,
   createUpdateService,
   launchStagedInstaller,
+  relaunchAppImage,
   readPendingUpdate,
   removePendingUpdate,
   reconcilePendingUpdate,
@@ -595,6 +596,12 @@ function installUpdateBridge() {
 
     // `execPath` is the AppImage, not the unpacked binary inside its disappearing mount.
     const image = runningAppImage();
+    // A detached helper starts the new image once this process has exited, so it
+    // cannot lose the single-instance race against us.
+    if (image && relaunchAppImage({ imagePath: image })) {
+      app.exit(0);
+      return true;
+    }
     app.relaunch(image ? { execPath: image } : {});
     app.exit(0);
     return true;

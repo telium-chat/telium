@@ -1,7 +1,7 @@
 
 use crate::auth::GuildAuth;
 use crate::error::{ApiError, ApiResult};
-use crate::gateway::events::{Event, INTENT_GUILD_VOICE_STATES};
+use crate::gateway::events::{Event, INTENT_GUILD_STRUCTURE, INTENT_GUILD_VOICE_STATES};
 use crate::guildstore;
 use crate::perms;
 use crate::state::AppState;
@@ -665,6 +665,37 @@ pub async fn disconnect(state: &AppState, guild_id: &str, user_id: &str) -> ApiR
             json!({ "guild_id": guild_id, "user_id": user_id, "channel_id": Value::Null }),
         ))
         .await;
+    if let Err(err) = clear_status_if_empty(state, guild_id, &channel_id).await {
+        tracing::warn!(target: crate::logcat::VOICE, %err, %channel_id, "could not clear an emptied channel's status");
+    }
+    Ok(())
+}
+
+/// A voice channel's status describes the call in it; once the last person leaves there is
+/// no call left to describe, so the status goes with them.
+async fn clear_status_if_empty(state: &AppState, guild_id: &str, channel_id: &str) -> ApiResult<()> {
+    let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM voice_states WHERE channel_id = ?")
+        .bind(channel_id)
+        .fetch_one(&state.pool)
+        .await?;
+    if remaining > 0 {
+        return Ok(());
+    }
+    let cleared = sqlx::query(
+        "UPDATE channels SET voice_status = NULL, voice_status_at = NULL, voice_status_author = NULL \
+         WHERE id = ? AND voice_status IS NOT NULL",
+    )
+    .bind(channel_id)
+    .execute(&state.pool)
+    .await?
+    .rows_affected();
+    if cleared > 0 {
+        let out = crate::routes::guild::channel_json(state, channel_id).await?;
+        state
+            .hub
+            .publish(Event::in_channel("CHANNEL_UPDATE", guild_id, channel_id, INTENT_GUILD_STRUCTURE, out))
+            .await;
+    }
     Ok(())
 }
 
@@ -725,6 +756,15 @@ pub async fn mark_unclaimed(
         .bind(now)
         .execute(pool)
         .await?;
+    if expired > 0 {
+        // Calls that timed out unreclaimed leave empty rooms; their statuses go too.
+        sqlx::query(
+            "UPDATE channels SET voice_status = NULL, voice_status_at = NULL, voice_status_author = NULL \
+             WHERE voice_status IS NOT NULL AND id NOT IN (SELECT channel_id FROM voice_states)",
+        )
+        .execute(pool)
+        .await?;
+    }
 
     let unclaimed = sqlx::query("UPDATE voice_states SET reclaim_until = ? WHERE reclaim_until IS NULL")
         .bind(deadline)

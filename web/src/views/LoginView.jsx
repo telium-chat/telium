@@ -200,6 +200,28 @@ export function LoginView({
     return () => { live = false; clearTimeout(timer); };
   }, [server, step]);
 
+  // Whether the chosen home wants a registration code. Unknown (null) keeps the field
+  // visible, so a failed probe never hides the only way to register on a closed server.
+  const [codeRequired, setCodeRequired] = useState(null);
+  useEffect(() => {
+    if (!registering || step !== 'password') return undefined;
+    const home = normalizeHomeserver(server) || server.trim();
+    if (!home) return undefined;
+    let live = true;
+    (async () => {
+      try {
+        const api = serverInfo?.api
+          || probed.current.get(home)?.info?.api
+          || (await discover(home)).api;
+        const caps = await request(api, 'GET', '/_telium/v1/capabilities');
+        if (live) setCodeRequired(typeof caps?.registration_code_required === 'boolean' ? caps.registration_code_required : null);
+      } catch {
+        if (live) setCodeRequired(null);
+      }
+    })();
+    return () => { live = false; };
+  }, [registering, step, server, serverInfo]);
+
   const resetLegacy = () => {
     setLegacyAuth(null);
     setLegacyApproved(false);
@@ -255,7 +277,7 @@ export function LoginView({
       const resp = await store.signIn(api, user.trim(), password, {
         home,
         register: registering,
-        registrationCode: registering ? registrationCode.trim() : null,
+        registrationCode: registering && codeRequired !== false ? registrationCode.trim() : null,
         reactivate: mode === 'reactivate',
         mfaCode: requiresMfa ? mfaCode.trim() : null,
         allowLegacyAuth,
@@ -590,14 +612,14 @@ export function LoginView({
     resetLegacy();
   };
 
-  const recommendHome = () => {
+  const recommendHome = (emptyStart = !server.trim()) => {
     if (rec.phase === 'ready') { applyRecommended(rec.selected); return; }
     if (rec.phase === 'loading') return;
     const nowhere = () => {
       setRec({ phase: 'none', servers: [], selected: null });
       // On the portal an empty pick means there is nothing to prefill: the manual
       // server step is the honest next screen, never a chip for a dead origin.
-      if (portal && !regNow.current.serverExplicit && !server.trim()) setStep('server');
+      if ((portal || native) && !regNow.current.serverExplicit && emptyStart) setStep('server');
     };
     if (!hasPinnedRecommendationKey()) { nowhere(); return; }
     setRec({ phase: 'loading', servers: [], selected: null });
@@ -651,7 +673,9 @@ export function LoginView({
 
   const createAccount = (carry = null) => {
     const home = carry?.home ?? null;
-    const base = home?.api || (native ? FLAGSHIP_HOME : initialHome);
+    // Like the website's portal: no flagship default on the desktop app, a recommendation
+    // (or the server step) instead. A home the person remembered still wins.
+    const base = home?.api || (native && initialHome === FLAGSHIP_HOME ? '' : initialHome);
     cancelFind();
     clearAttempt();
     setFindError(null);
@@ -665,7 +689,7 @@ export function LoginView({
     setMode('register');
     setStep('identity');
     regNow.current = { registering: true, serverExplicit: Boolean(home) };
-    if (!home && (native || portal)) recommendHome();
+    if (!home && (native || portal)) recommendHome(!base);
   };
 
   const checkRecovery = async (e) => {
@@ -1275,7 +1299,7 @@ export function LoginView({
             enterKeyHint={registering ? 'next' : 'go'}
             onChange={(e) => { setPassword(e.target.value); setNoAccount(null); resetLegacy(); }}
           />
-          {registering ? (
+          {registering && codeRequired !== false ? (
             <TextInput
               label={t('auth.password.registrationCodeLabel')}
               autoComplete="off"

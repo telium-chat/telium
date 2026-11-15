@@ -496,6 +496,32 @@ function runningAppImage(env = process.env) {
   }
 }
 
+/// Variables the AppImage runtime sets for the *old* mount; a child that inherits them
+/// can load libraries from a mount that is about to vanish, or believe it is the old image.
+const APPIMAGE_RUNTIME_ENV = ['APPIMAGE', 'APPDIR', 'ARGV0', 'OWD', 'ELECTRON_RUN_AS_NODE'];
+
+/// Starts the new AppImage only after this process is gone. `app.relaunch()` starts the
+/// child while the parent still holds the single-instance lock, so the new copy saw
+/// "already running" and quit, and the parent then exited too: the app just closed.
+/// A detached shell waits for our pid to die, then execs the image with a clean environment.
+function relaunchAppImage({ imagePath, pid = process.pid, spawnFn = require('node:child_process').spawn, env = process.env }) {
+  const cleanEnv = { ...env };
+  for (const key of APPIMAGE_RUNTIME_ENV) delete cleanEnv[key];
+  const script = 'while kill -0 "$1" 2>/dev/null; do sleep 0.2; done; sleep 0.3; exec "$2"';
+  try {
+    const child = spawnFn('/bin/sh', ['-c', script, 'telium-relaunch', String(pid), imagePath], {
+      detached: true,
+      stdio: 'ignore',
+      env: cleanEnv,
+    });
+    child.on?.('error', () => {});
+    child.unref?.();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const Phase = {
   Idle: 'idle',
   Checking: 'checking',
@@ -636,6 +662,7 @@ module.exports = {
   launchStagedInstaller,
   readPendingUpdate,
   reconcilePendingUpdate,
+  relaunchAppImage,
   removePendingUpdate,
   runningAppImage,
   stageAppImage,
