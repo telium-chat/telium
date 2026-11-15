@@ -346,6 +346,7 @@ export const dmMethods = {
       }
       // No automatic repair of a stopped walk: `forget` would delete the creator's only group state.
       await this.mendConversation(id, convo, window).catch(() => {});
+      await this.retryHeldBack(id).catch(() => {});
       this.scheduleSignals(id);
       await this.answerRejoins(id);
       await this.settleDepartures(id, convo).catch(() => {});
@@ -470,6 +471,20 @@ export const dmMethods = {
     await this.rebased(id, () => this.mls.addMembers(id, absent, { lenient: true }));
   },
 
+  /// A device left out because its identity could not be confirmed joins by itself once it is: checked against the
+  /// identity record first, so an unconfirmed device costs no key package.
+  async retryHeldBack(id) {
+    const held = this.mls?.heldBackIn?.(id) || [];
+    if (!held.length || !this.trust?.deviceConfirmed || !this.mls.joined(id)) return;
+    const ready = [];
+    for (const row of held) {
+      if (await this.trust.deviceConfirmed(row.userId, row.deviceId).catch(() => false)) ready.push(row.userId);
+    }
+    if (!ready.length) return;
+    await this.rebased(id, () => this.mls.addMembers(id, [...new Set(ready)], { lenient: true }));
+    this.emit('dm', { conversation_id: id });
+  },
+
   /// On a 409 walk to the newest epoch and rebuild; if the walk does not move the epoch, report instead of retrying.
   async rebased(id, commit, attempts = 3) {
     for (let attempt = 1; ; attempt += 1) {
@@ -533,6 +548,7 @@ export const dmMethods = {
   async installBeginning(id, built, answer, fallback = null) {
     const taken = answer ? (Number.isInteger(answer.generation) ? answer.generation : null) : fallback;
     await this.mls.install(id, { ...built.entry, generation: taken });
+    this.mls.noteHeldBack?.(id, built.unconfirmed, { fresh: true });
     const fresh = this.loadFrames(id, await readWindow(this.home, id));
     await this.mls.sync(id, fresh).catch(() => {});
     this.emit('dm', { conversation_id: id });

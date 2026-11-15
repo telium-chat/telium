@@ -308,6 +308,40 @@ describe('starting a conversation over', () => {
     expect(read(bob, home, 'dm-1')).toContain('still the same group');
   });
 
+  it('holds back a device whose identity cannot be confirmed, says so, and lets it in once it is', async () => {
+    const home = new FakeHome();
+    const alice = await engine(home, '@a:h', 'd-alice');
+    const bob = await engine(home, '@b:h', 'd-bob');
+    const carol = await engine(home, '@c:h', 'd-carol');
+    const convo = () => ({ ...row(home, 'gc-1', '@a:h', ['@a:h', '@b:h', '@c:h'])(), kind: 'gc' });
+    const a = storeFor(home, alice, '@a:h', 'd-alice', convo);
+    let confirmed = false;
+    alice.verifyClaimedPackage = async (userId) => (userId === '@c:h' ? confirmed : true);
+    a.store.trust = { deviceConfirmed: async (userId) => (userId === '@c:h' ? confirmed : true) };
+
+    const built = await a.store.resetConversation('gc-1');
+    expect(built.welcome).toBeTruthy();
+    expect(alice.heldBackIn('gc-1')).toEqual([{ userId: '@c:h', deviceId: 'd-carol' }]);
+    await alice.send('gc-1', 'before carol');
+    await carol.sync('gc-1', frames(home, 'gc-1'));
+    expect(carol.joined('gc-1')).toBe(false);
+
+    // Not yet confirmed: nothing is claimed, nothing changes.
+    await a.store.loadConversationNow('gc-1');
+    expect(alice.heldBackIn('gc-1')).toHaveLength(1);
+
+    confirmed = true;
+    await a.store.loadConversationNow('gc-1');
+    expect(alice.heldBackIn('gc-1')).toEqual([]);
+    await carol.sync('gc-1', frames(home, 'gc-1'));
+    expect(carol.joined('gc-1')).toBe(true);
+    await alice.send('gc-1', 'with carol');
+    await carol.sync('gc-1', frames(home, 'gc-1'));
+    expect(read(carol, home, 'gc-1')).toContain('with carol');
+    await bob.sync('gc-1', frames(home, 'gc-1'));
+    expect(read(bob, home, 'gc-1')).toContain('with carol');
+  });
+
   it('drops a founding another member beat it to, and takes the one ordered', async () => {
     const home = new FakeHome();
     const alice = await engine(home, '@a:h', 'd-alice');

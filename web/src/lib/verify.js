@@ -391,6 +391,14 @@ export class Trust {
     this.requests.delete(userId);
   }
 
+  /// Whether a device is signed by its account's current, continuous identity: what a group build requires of it.
+  async deviceConfirmed(userId, deviceId) {
+    const peer = await this.refresh(userId);
+    if (!peer || peer.continuityRejected || peer.continuityUnknown) return false;
+    const device = peer.devices.get(deviceId);
+    return Boolean(device?.ok && device.active !== false && !this.isRevokedKey(userId, device.mls_key));
+  }
+
   /// null only for a legacy account with no root; otherwise a hard boolean so a server can't smuggle in an unsigned leaf.
   async verifyClaimedPackage(userId, deviceId, signatureKey) {
     const peer = await this.refresh(userId);

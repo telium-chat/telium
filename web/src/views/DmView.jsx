@@ -112,6 +112,7 @@ export function DmView({ conversationId, mobile = false, onBack, onMore, onOpenN
     frames, conversationId, store.mls,
   );
   const syncError = (settled && store.mls?.errorFor?.(conversationId)) || null;
+  const heldBack = store.mls?.heldBackIn?.(conversationId) || [];
   const stuck = settled && Boolean(store.mls?.gapIn?.(conversationId));
 
   const repairHistory = useCallback(() => {
@@ -275,6 +276,14 @@ export function DmView({ conversationId, mobile = false, onBack, onMore, onOpenN
               <p className="flex items-start gap-1.5 px-2 py-1 text-xs leading-[1.5] text-muted">
                 <LockIcon className="mt-[3px] size-3 shrink-0" />
                 {NOT_YET_READABLE}
+              </p>
+            ) : null}
+            {heldBack.length ? (
+              <p className="flex items-start gap-1.5 px-2 py-1 text-xs leading-[1.5] text-muted">
+                <LockIcon className="mt-[3px] size-3 shrink-0" />
+                {heldBack.some((d) => d.userId === store.me?.user_id)
+                  ? t('chat.encryption.heldBack.own')
+                  : t('chat.encryption.heldBack.other')}
               </p>
             ) : null}
             {stuck && !awaiting && !syncError ? (

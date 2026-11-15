@@ -161,6 +161,8 @@ export class Mls {
     this.replaced = new Set();
     // Newest seq handed to a walk, per conversation: what a rejoin request says this device has seen (`requestRejoin`).
     this.seenTo = new Map();
+    // Devices a group build left out because their identity could not be confirmed, per conversation: shown, and retried once they are (`heldBackIn`).
+    this.heldBack = new Map();
     this.cs = null;
     // Admission hook from Store/Trust: false rejects, null means legacy identity with no root, throwing fails closed.
     this.verifyClaimedPackage = null;
@@ -744,6 +746,7 @@ export class Mls {
     const packages = [];
     const missing = [];
     const rejected = [];
+    const unconfirmed = [];
     const taken = new Set(held || []);
     for (const userId of new Set(userIds)) {
       const answer = await this.home.claimKeyPackages(userId);
@@ -784,6 +787,7 @@ export class Mls {
           );
           if (accepted === false) {
             rejected.push(`${userId} (${entry.device_id})`);
+            unconfirmed.push({ userId, deviceId: entry.device_id });
             continue;
           }
         }
@@ -792,7 +796,21 @@ export class Mls {
         packages.push(message.keyPackage);
       }
     }
-    return { packages, missing, rejected };
+    return { packages, missing, rejected, unconfirmed };
+  }
+
+  /// Devices left out of this conversation's group because their identity could not be confirmed.
+  heldBackIn(conversationId) {
+    return [...(this.heldBack.get(conversationId)?.values() || [])];
+  }
+
+  /// `fresh`: a new group, so earlier ones no longer apply. Devices added since are taken off.
+  noteHeldBack(conversationId, unconfirmed = [], { fresh = false, added = [] } = {}) {
+    const held = fresh ? new Map() : new Map(this.heldBack.get(conversationId) || []);
+    for (const row of unconfirmed || []) held.set(`${row.userId}|${row.deviceId}`, row);
+    for (const row of added || []) held.delete(`${row.userId}|${row.deviceId}`);
+    if (held.size) this.heldBack.set(conversationId, held);
+    else this.heldBack.delete(conversationId);
   }
 
   /// The group id is the conversation id. `from` is the seq the group begins after (0 for new; the newest frame when starting over). `policy` goes in only if every added device supports the extension; the result says whether it did.
@@ -824,9 +842,11 @@ export class Mls {
       );
 
       // Claimed first because policy placement depends on device support. Seed with our own key, since earlier sign-ins share it.
-      const { packages, missing, rejected } = await this.claim(
+      const { packages, missing, rejected, unconfirmed } = await this.claim(
         memberIds, [encode64(self.publicPackage.leafNode.signaturePublicKey)],
       );
+      // A staged group may lose its start-over; the caller records it on install.
+      if (!stage) this.noteHeldBack(conversationId, unconfirmed, { fresh: true });
       const placed = !!wanted && packages.every(supportsPolicy);
       let state = await createGroup(
         te.encode(conversationId), self.publicPackage, self.privatePackage,
@@ -834,7 +854,7 @@ export class Mls {
       );
       if (!packages.length) {
         const entry = await keep(state);
-        return { welcome: null, missing, rejected, policy: placed, ...(stage ? { entry } : {}) };
+        return { welcome: null, missing, rejected, unconfirmed, policy: placed, ...(stage ? { entry } : {}) };
       }
 
       const commit = await createCommit({ state, cipherSuite: this.cs }, {
@@ -849,6 +869,7 @@ export class Mls {
         epoch: Number(state.groupContext.epoch),
         missing,
         rejected,
+        unconfirmed,
         policy: placed,
         ...(stage ? { entry } : {}),
       };
@@ -1045,6 +1066,9 @@ export class Mls {
       }
       const claimed = await this.claim(asked, held);
       const { missing } = claimed;
+      this.noteHeldBack(conversationId, claimed.unconfirmed, {
+        added: claimed.packages.map((p) => identityOf(p.leafNode?.credential)).filter(Boolean),
+      });
       let { packages, rejected } = claimed;
       if (policy) {
         // A device that can't read the policy can't join a group that has one.

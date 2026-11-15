@@ -450,7 +450,7 @@ export const chat = {
   // Named for what it means rather than for the mechanism. "Key escrowed" is
   // accurate and tells the reader nothing; what they need off a glance is
   // whether anybody else can read this.
-  'chat.encryption.chip.keyChanged': 'Key changed',
+  'chat.encryption.chip.keyChanged': 'New key',
   'chat.encryption.chip.serverCanRead': 'Server can read',
   'chat.encryption.chip.endToEnd': 'End-to-end',
   'chat.encryption.chip.encrypted': 'Encrypted',
@@ -472,7 +472,7 @@ export const chat = {
   // one string. One entry rather than the banner's two joined by a space: the
   // order of a headline and its explanation is a thing a language gets to
   // decide, and joining them in JavaScript decides it for them.
-  'chat.encryption.chip.keyChangedTooltip': 'Someone here is using a different account key. A key reset looks like this; so does an impersonation. Verify them again before trusting it.',
+  'chat.encryption.chip.keyChangedTooltip': 'Someone here has a new account key, which usually means they set their account up again. Messages stay encrypted. To be sure it’s them, compare keys from their profile.',
 
   // --------------------------------------------------------- the banners
   //
@@ -513,8 +513,8 @@ export const chat = {
   // and refuses to choose between them, which is the honest position -- this
   // client cannot tell them apart, and a sentence that picked one would be
   // either crying wolf or covering for an attacker.
-  'chat.encryption.changedIdentity.title': 'Someone here is using a different account key.',
-  'chat.encryption.changedIdentity.body': 'A key reset looks like this; so does an impersonation. Verify them again before trusting it.',
+  'chat.encryption.changedIdentity.title': 'Someone here has a new account key.',
+  'chat.encryption.changedIdentity.body': 'That usually means they set their account up again. Messages stay encrypted. To be sure it’s them, compare keys from their profile.',
 
   'chat.encryption.vaultLocked.title': 'Your older messages are locked on this device.',
   'chat.encryption.vaultLocked.body': 'Enter your recovery passphrase under Settings → {pane} to get them back.',
@@ -534,6 +534,8 @@ export const chat = {
   // Messages are being held back on purpose. The body says so rather than
   // leaving the reader to conclude that messages are being lost, which is the
   // fear this banner exists to answer.
+  'chat.encryption.heldBack.own': 'Your other device isn’t in this chat yet. It joins by itself once it’s confirmed as yours.',
+  'chat.encryption.heldBack.other': 'One of their devices isn’t in this chat yet. It joins by itself once it’s confirmed as theirs.',
   'chat.encryption.syncFailed.title': 'Encryption is out of sync on this device.',
   'chat.encryption.syncFailed.body': 'Newer messages are held back while Telium retries the MLS key schedule.',
 
