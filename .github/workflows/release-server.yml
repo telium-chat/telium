@@ -767,9 +767,14 @@ jobs:
               # container inherits the files either way, but the cache does not.
               chown -R "$HOST_UID:$HOST_GID" /src/.native /usr/local/cargo/registry /target
             '
-          # Two members at the root, no wrapper directory: the updater unpacks
+          # Three members at the root, no wrapper directory: the updater unpacks
           # into a staging directory it created for the purpose, and a name it
           # does not have to guess at is one less thing to get wrong. The
+          # third, update-native.sh, is the updater itself: an installed box
+          # replaces its copy with this one after the release is healthy, so
+          # an updater fix ships the way a server fix does -- under the
+          # tarball sha256 the signed manifest pins. Updaters from before it
+          # existed unpack the first two by name and never see it. The
           # checksum file is in `sha256sum -c` format, so an operator can
           # verify a manual download with the tool they already have.
           #
@@ -780,7 +785,8 @@ jobs:
           # mirror it with `--clobber` and lets the docs name one path.
           ASSET="telium-server-linux-${ARCH}.tar.gz"
           cp server/telium.example.toml ".native/stage/$ARCH/"
-          tar -C ".native/stage/$ARCH" -czf ".native/$ASSET" telium-server telium.example.toml
+          install -m644 deploy/update-native.sh ".native/stage/$ARCH/update-native.sh"
+          tar -C ".native/stage/$ARCH" -czf ".native/$ASSET" telium-server telium.example.toml update-native.sh
           ( cd .native && sha256sum "$ASSET" > "$ASSET.sha256" )
           rm -rf .native/stage
 
@@ -789,7 +795,7 @@ jobs:
       # binary runs before anything is published, on a runner of the very
       # architecture that will run it. Four assertions, cheapest first:
       #
-      #   * the tarball carries the two members the updater unpacks by name.
+      #   * the tarball carries the members the updater unpacks by name.
       #     `tar -xzf ... telium-server telium.example.toml` is not a fuzzy
       #     match; a renamed or nested member is an update that fails on
       #     every box at the same minute.
@@ -827,9 +833,15 @@ jobs:
           SMOKE="$(mktemp -d)"
           trap 'rm -rf "$SMOKE"' EXIT
 
-          tar -xzf ".native/$ASSET" -C "$SMOKE" telium-server telium.example.toml
+          tar -xzf ".native/$ASSET" -C "$SMOKE" telium-server telium.example.toml update-native.sh
           test -x "$SMOKE/telium-server"
           test -f "$SMOKE/telium.example.toml"
+          # Every installed box will run this file as root on its next tick
+          # after this release, so a copy that does not parse, or is not the
+          # one in the released commit, stops the release here.
+          test -f "$SMOKE/update-native.sh" && ! test -L "$SMOKE/update-native.sh"
+          bash -n "$SMOKE/update-native.sh"
+          cmp "$SMOKE/update-native.sh" deploy/update-native.sh
 
           # A missing readelf fails loudly rather than counting zero against
           # an error message. The why of readelf over ldd is in the step

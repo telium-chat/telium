@@ -412,12 +412,18 @@ jobs:
                 "/src/.sfu-native/stage/$NATIVE_ARCH/telium-sfu"
               chown -R "$HOST_UID:$HOST_GID" /src/.sfu-native /usr/local/cargo/registry /target
             '
-          # Two members at the root, no wrapper directory: the updater unpacks
-          # into a staging directory it created for the purpose. The checksum
-          # file is in `sha256sum -c` format.
+          # Three members at the root, no wrapper directory: the updater unpacks
+          # into a staging directory it created for the purpose. The third,
+          # update-sfu-native.sh, is the updater itself: an installed relay
+          # replaces its copy with this one after the release is healthy, under
+          # the tarball sha256 the signed manifest pins. Updaters from before
+          # it existed unpack the first two by name and never see it. The
+          # checksum file is in `sha256sum -c` format.
           ASSET="telium-sfu-linux-${ARCH}.tar.gz"
           cp sfu/sfu.example.toml ".sfu-native/stage/$ARCH/"
-          tar -C ".sfu-native/stage/$ARCH" -czf ".sfu-native/$ASSET" telium-sfu sfu.example.toml
+          install -m644 deploy/update-sfu-native.sh ".sfu-native/stage/$ARCH/update-sfu-native.sh"
+          bash -n ".sfu-native/stage/$ARCH/update-sfu-native.sh"
+          tar -C ".sfu-native/stage/$ARCH" -czf ".sfu-native/$ASSET" telium-sfu sfu.example.toml update-sfu-native.sh
           ( cd .sfu-native && sha256sum "$ASSET" > "$ASSET.sha256" )
           rm -rf .sfu-native/stage
 

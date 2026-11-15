@@ -71,6 +71,10 @@ TELIUM_SFU_MANIFEST_URL=
 TELIUM_SFU_USAGE_LEDGER=
 TELIUM_SFU_EXAMPLE_CONFIG=
 TELIUM_SFU_TRUSTED_NATIVE=0
+# yes: after a healthy install, replace this script with the copy the release
+# shipped (see replace_self). no: keep this copy, for a relay carrying local
+# changes to it; the release's copy is then only reported.
+TELIUM_SFU_UPDATER_SELF_UPDATE=yes
 if [ -r "$CONF" ]; then
   # shellcheck source=/dev/null
   . "$CONF"
@@ -347,7 +351,26 @@ if [ "$(cat "$STATE/staged/commit" 2>/dev/null || true)" != "$after" ] \
     rm -f "$tarball"
     exit 1
   fi
-  rm -f "$tarball"
+  # Releases since this script learned to replace itself also carry it, as
+  # `update-sfu-native.sh` beside the binary, under the same sha256 the
+  # manifest pinned for the whole tarball. Optional, so every older release
+  # keeps installing as it did; unpacked now, while the digest-checked
+  # tarball is still the evidence of where it came from. Whether it is used
+  # is decided after the release has proved healthy -- see replace_self.
+  # Owned by whoever unpacked it and writable by nobody else, whatever the
+  # archive's headers say; a link is refused before chmod, which follows it.
+  if tar -tzf "$tarball" > "$STATE/staged/members" 2>/dev/null \
+     && grep -qx 'update-sfu-native.sh' "$STATE/staged/members"; then
+    if ! tar --no-same-owner -xzf "$tarball" -C "$STATE/staged" update-sfu-native.sh \
+       || [ -L "$STATE/staged/update-sfu-native.sh" ] \
+       || [ ! -f "$STATE/staged/update-sfu-native.sh" ] \
+       || ! chmod 0644 "$STATE/staged/update-sfu-native.sh"; then
+      echo "ERROR: the downloaded artifact lists an updater it cannot unpack; this relay stays on ${before}." >&2
+      rm -rf "$STATE/staged"
+      exit 1
+    fi
+  fi
+  rm -f "$tarball" "$STATE/staged/members"
   # The sha256 proved the bytes are the ones the release published. This
   # proves the published bytes are the release this run aimed at, and -- as a
   # side effect of asking -- that the binary so much as runs on this kernel
@@ -510,6 +533,56 @@ running="$("$TELIUM_SFU_BIN" version | sed -n 's/^commit=//p')"
 if [ "$running" != "$after" ]; then
   echo "WARNING: the unit is active but the binary on disk names ${running:-<unknown>}; it will be running after the next restart." >&2
 fi
+
+# The updater travels with the release it installed, so a fix to this script
+# reaches a relay without anyone re-running an installer. The only file this
+# ever installs is the one unpacked above from a tarball whose sha256 the
+# signed manifest published, and only here, once that release is up and
+# healthy; a held, refused or rolled-back release has already exited and
+# leaves this script as it was. A rename(2), never a write: bash reads a
+# script as it runs, and a rename leaves the inode this run is reading alone.
+# The operator's update-sfu.conf is a separate file and is never touched. A
+# failure is a warning: the release itself is installed and healthy.
+replace_self() {
+  local new="$STATE/staged/update-sfu-native.sh" incoming
+  if [ ! -e "$new" ] && [ ! -L "$new" ]; then
+    return 0
+  fi
+  if [ "$TELIUM_SFU_UPDATER_SELF_UPDATE" = no ]; then
+    if ! cmp -s "$new" "$SELF"; then
+      echo "the release ships a different updater; TELIUM_SFU_UPDATER_SELF_UPDATE=no keeps ${SELF}"
+    fi
+    return 0
+  fi
+  case "$SELF" in
+    *.sh)
+      # Installed copies are telium-update-sfu-native (install-full.sh) and
+      # update-sfu (install-portable.sh). A .sh path is a checkout run by
+      # hand, and a source tree is not this script's to rewrite.
+      echo "running from ${SELF}, not an installed updater; leaving it alone"
+      return 0
+      ;;
+  esac
+  if [ -L "$new" ] || [ ! -f "$new" ]; then
+    echo "WARNING: the release's update-sfu-native.sh is not a regular file; keeping ${SELF}" >&2
+    return 0
+  fi
+  if cmp -s "$new" "$SELF"; then
+    return 0
+  fi
+  if ! bash -n "$new" 2>/dev/null; then
+    echo "WARNING: the release's update-sfu-native.sh does not parse; keeping ${SELF}" >&2
+    return 0
+  fi
+  incoming="$(dirname "$SELF")/.${SELF##*/}.incoming"
+  if install -m755 "$new" "$incoming" && mv -f "$incoming" "$SELF"; then
+    echo "updater: ${SELF} replaced with the copy ${after_short} shipped; it takes effect from the next run"
+  else
+    rm -f "$incoming"
+    echo "WARNING: could not replace ${SELF} with the copy ${after_short} shipped; keeping the current one" >&2
+  fi
+}
+replace_self
 
 rm -rf "$STATE/staged"
 rm -f "$STATE/waiting-manual" "$STATE/waiting-window" "$STATE/waiting-breaking" \
