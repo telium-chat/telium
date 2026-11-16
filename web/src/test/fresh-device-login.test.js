@@ -18,9 +18,9 @@ import { IDBFactory } from 'fake-indexeddb';
 import { Mls, wipe } from '../lib/mls.js';
 import { Backup } from '../lib/backup.js';
 import { load as loadVault } from '../lib/vault.js';
-import { loginOpaque, registerOpaque } from '../lib/opaque-auth.js';
 import { Trust } from '../lib/verify.js';
 import { trustMethods } from '../lib/store/trust.js';
+import { sessionMethods } from '../lib/store/session.js';
 import { RealHome, haveServer } from './real-home.js';
 
 const realFetch = globalThis.fetch;
@@ -138,13 +138,34 @@ async function talk(on, alice, bob) {
   return { id, said };
 }
 
+/// The app's own sign-in (lib/store/session.js): what it leaves in memory is all a first start gets.
+async function signIn(user, password, { register = false } = {}) {
+  const store = Object.assign(Object.create(sessionMethods), {
+    cryptoCleanup: Promise.resolve(),
+    disposed: false,
+    me: null,
+    emit() {},
+  });
+  const resp = await store.signIn(server.base, user, password, { register });
+  return {
+    resp,
+    account: server.wrap({ ...resp, access_token: store.session.home.token }),
+    wrappers: {
+      recoveryWrapper: store.authRecoveryWrapper,
+      accountRecoveryWrapper: store.accountRecoveryWrapper,
+    },
+  };
+}
+
 /// A brand-new device: nothing of any other device on disk, only the password typed.
 async function freshDevice(on, userId, password) {
   const label = `fresh-${crypto.randomUUID()}`;
   // A browser storage nobody has used: no MLS state, no held ring, no account key, no pins.
   on(label);
-  const login = await loginOpaque(server.base, userId, password, 'new laptop');
-  return { ...await start(server.wrap(login.session), { recoveryWrapper: login.recoveryWrapper }), label };
+  const { account, wrappers } = await signIn(userId, password);
+  expect(wrappers.recoveryWrapper).toBeTruthy();
+  expect(wrappers.accountRecoveryWrapper).toBeNull();
+  return { ...await start(account, wrappers), label };
 }
 
 /// The release gate itself.
@@ -189,15 +210,14 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
   async function signUp(on) {
     const password = `pw-${crypto.randomUUID()}`;
     on('alice-1');
-    const reg = await registerOpaque(server.base, name('alice'), password, 'web');
-    expect(reg.session.recovery_key_enrolled).toBe(true);
-    return { password, reg, account: server.wrap(reg.session) };
+    const { resp, account, wrappers } = await signIn(name('alice'), password, { register: true });
+    expect(resp.recovery_key).toBeTruthy();
+    expect(wrappers.recoveryWrapper).toBeTruthy();
+    expect(wrappers.accountRecoveryWrapper).toBeTruthy();
+    return { password, reg: wrappers, account };
   }
 
-  const signUpWrappers = (reg) => ({
-    recoveryWrapper: reg.recoveryWrapper,
-    accountRecoveryWrapper: reg.accountRecovery.vaultWrapper,
-  });
+  const signUpWrappers = (reg) => reg;
 
   async function gate(on, alice1, password) {
     alice1.label = 'alice-1';
@@ -261,7 +281,9 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
   // and creates one in `device_custody`, sealed under a throwaway key (vault.js loadOnce, `!vault.exists` branch), and
   // its Trust then seals the root with DEVICE_SEAL because custodyMode() reads `device_custody`. The sign-up tab is
   // closed before its own start runs, so nothing ever wraps the ring under the password. The brand-new device gets
-  // `locked: true, needs_device: true`. Target design: a session with no OPAQUE export key never creates custody.
+  // `locked: true, needs_device: true`. Flips when sign-in creates the vault and the root itself, before it saves the
+  // session (so no restored tab can exist without them), and a session with no OPAQUE export key never creates
+  // custody (docs/custody-design.md, phase 1).
   it.fails('two tabs, and the restored one creates the vault before the sign-up tab is closed', async () => {
     const on = browsers();
     const { password, account } = await signUp(on);
@@ -331,8 +353,9 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
   // Fails at `expect(alice1.trust?.canSign).toBe(true)` in `talk`: the vault write landed but the tab closed before
   // the ring was remembered locally (vault.js only remembers on an unanswered *error*, not on a request that never
   // returns). The restored session holds no OPAQUE wrapper, so the vault loads `locked`, the Trust gets no key to seal
-  // a root with and creates none, and device 1 cannot sign (or DM) until the password is typed again. Target design:
-  // keep the ring locally before the write is sent, as the account key already is (keepPendingSecret).
+  // a root with and creates none, and device 1 cannot sign (or DM) until the password is typed again. Flips when the
+  // ring is kept locally before the write is sent, as the account key already is (keepPendingSecret), or when sign-in
+  // creates custody before saving the session (docs/custody-design.md, phase 1).
   it.fails('the tab is closed while the first vault write is in flight, and reopens from a restored session', async () => {
     const on = browsers();
     const { password, reg, account } = await signUp(on);
@@ -354,19 +377,33 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
     await gate(on, alice1, password);
   });
 
-  // Fails at `expect(alice2.trust.canSign).toBe(true)`: an account from before #70 has its root sealed under a
-  // throwaway key (`device-v1:`). The ring is in opaque custody, so the new device opens history keys, but nothing it
-  // holds opens the root, and the device that holds it has not been reopened since (the heal in #70 runs only then).
-  // Target design: the "seal it properly now" migration step, run by whichever device holds the root, plus the #74
-  // reset for accounts where no device does.
+  // Pre-#70 state: the root re-sealed under a throwaway key (`device-v1:`), as `device_custody` starts did.
+  async function throwawaySealedRoot(account, alice1) {
+    const legacy = new Trust(account.api, { userId: account.userId, deviceId: account.deviceId, recovery: alice1.ring });
+    await legacy.start(alice1.mls.cs, alice1.ring.key, await alice1.mls.leafKey(), 'device_custody');
+    expect(String((await account.api.crossSigning()).sealed_secret)).toMatch(/^device-v1:/);
+  }
+
+  it('a legacy throwaway-sealed root is sealed properly once the device holding it restarts', async () => {
+    const on = browsers();
+    const { password, reg, account } = await signUp(on);
+    await throwawaySealedRoot(account, await start(account, signUpWrappers(reg)));
+    // The holder reopens from a restored session (no password typed) and reseals the root under the ring.
+    const alice1 = await start(account);
+    expect(String((await account.api.crossSigning()).sealed_secret)).toMatch(/^recovery-v1:/);
+    await gate(on, alice1, password);
+  });
+
+  // Fails at `expect(alice2.trust.canSign).toBe(true)`: the root is throwaway-sealed (`device-v1:`) and its only copy
+  // is on device 1, which has not run since. The ring is in opaque custody, so the new device opens the history keys,
+  // but nothing it holds opens the root. No change on the new device alone can fix this state: it needs the holder to
+  // run once (the test above) or, if the holder is gone, the #74 recovery-key reset. Kept as the gate's statement of
+  // that limit; it is not expected to flip.
   it.fails('a legacy account whose root is throwaway-sealed and held only by its first device', async () => {
     const on = browsers();
     const { password, reg, account } = await signUp(on);
     const alice1 = await start(account, signUpWrappers(reg));
-    // Reproduce the pre-#70 state: root re-sealed under a throwaway key, as `device_custody` starts did.
-    const legacy = new Trust(account.api, { userId: account.userId, deviceId: account.deviceId, recovery: alice1.ring });
-    await legacy.start(alice1.mls.cs, alice1.ring.key, await alice1.mls.leafKey(), 'device_custody');
-    expect(String((await account.api.crossSigning()).sealed_secret)).toMatch(/^device-v1:/);
+    await throwawaySealedRoot(account, alice1);
     await gate(on, alice1, password);
   });
 });
