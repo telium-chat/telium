@@ -17,7 +17,8 @@ describe('expiry option arithmetic', () => {
       .toEqual(['1 hour', '1 day', '1 week', '30 days', 'Never']);
     const twoDays = 2 * 24 * 60 * 60;
     expect(expiryOptions(twoDays).map((o) => o.label)).toContain('2 days');
-    expect(expiryOptions(twoDays).some((o) => o.secs === null)).toBe(false);
+    expect(expiryOptions(twoDays).find((o) => o.secs === null).disabled).toBe(true);
+    expect(expiryOptions(twoDays).find((o) => o.secs === twoDays).disabled).toBe(false);
     expect(expiryOptions(hour).map((o) => o.secs)).toContain(hour);
   });
 
@@ -109,7 +110,10 @@ describe('the staged-file tray', () => {
 
     const menu = await openExpiryMenu(user);
     expect(within(menu).getByRole('menuitem', { name: 'Expires in 1 hour' })).toBeTruthy();
-    expect(within(menu).queryByRole('menuitem', { name: 'Keeps forever' })).toBeNull();
+    const forever = within(menu).getByRole('menuitem', { name: /Keeps forever/ });
+    expect(forever.getAttribute('aria-disabled')).toBe('true');
+    expect(within(forever).getByRole('img', { name: 'Why is this unavailable?' })).toBeTruthy();
+    expect(within(menu).getByRole('menuitem', { name: /Expires in 1 week/ }).getAttribute('aria-disabled')).toBe('true');
     expect(within(menu).getByText(/deleted after at most an hour/)).toBeTruthy();
   });
 

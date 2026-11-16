@@ -67,14 +67,21 @@ export function narrowestLimit(...caps) {
 }
 
 export function expiryOptions(limitSecs) {
-  // Under a cap "Never" is dropped; the origin would trim it anyway.
-  const fitting = EXPIRY_PRESETS
-    .filter((p) => limitSecs === null || (p.secs !== null && p.secs <= limitSecs))
-    .map((p) => ({ secs: p.secs, label: p.labelKey ? t(p.labelKey) : describeLimit(p.secs) }));
-  if (limitSecs !== null && !fitting.some((p) => p.secs === limitSecs)) {
-    fitting.push({ secs: limitSecs, label: describeLimit(limitSecs), capped: true });
+  // Over a cap an option stays listed but `disabled`, so people see what the
+  // room rules out instead of wondering where "Never" went.
+  const over = (p) => limitSecs !== null && (p.secs === null || p.secs > limitSecs);
+  const all = EXPIRY_PRESETS.map((p) => ({
+    secs: p.secs,
+    label: p.labelKey ? t(p.labelKey) : describeLimit(p.secs),
+    disabled: over(p),
+  }));
+  if (limitSecs !== null && !all.some((p) => p.secs === limitSecs)) {
+    const at = all.findIndex((p) => p.disabled);
+    all.splice(at === -1 ? all.length : at, 0, {
+      secs: limitSecs, label: describeLimit(limitSecs), capped: true, disabled: false,
+    });
   }
-  return fitting;
+  return all;
 }
 
 /// Uses ICU plurals and `#` so numbers are locale-formatted.
@@ -89,9 +96,10 @@ export function describeLimit(secs) {
 }
 
 export function defaultExpiry(options) {
-  const month = options.find((o) => o.secs === 30 * 24 * 60 * 60);
+  const usable = options.filter((o) => !o.disabled);
+  const month = usable.find((o) => o.secs === 30 * 24 * 60 * 60);
   if (month) return month.secs;
-  return Math.max(...options.map((o) => o.secs));
+  return Math.max(...usable.map((o) => o.secs));
 }
 
 function expiryHeaders(opts = {}) {
