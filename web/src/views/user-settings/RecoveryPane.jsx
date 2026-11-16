@@ -335,9 +335,11 @@ export function RecoveryPane() {
             label={t('auth.encryption.keyFact')}
             value={hasKey
               ? t('auth.encryption.keySaved')
-              : legacyPassphrase
-                ? t('auth.encryption.keyLegacy')
-                : t('auth.encryption.keyMissing')}
+              : copyMissing
+                ? t('auth.encryption.keyCopyMissing')
+                : legacyPassphrase
+                  ? t('auth.encryption.keyLegacy')
+                  : t('auth.encryption.keyMissing')}
           />
           <Fact
             tone={verifiedDevices === null || deviceCount === null

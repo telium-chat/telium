@@ -447,8 +447,13 @@ async function loadOnce(home, passphrase, userId, recoveryWrapper, accountRecove
     await pinOutOfEscrow(userId);
     const ring = { ...keyring(local), mode: 'device_custody', version };
     if (recoveryWrapper) {
+      // Seen right after sign-up when another tab made the vault first: the recovery key the account just enrolled must
+      // get its copy here too, or it resets the password and opens nothing ("Recovery key: Not made yet").
+      const independent = accountRecoveryWrapper
+        ? await recoveryKeyCiphertext(ring, accountRecoveryWrapper)
+        : null;
       return setMode(
-        home, ring, 'opaque_custody', null, userId, recoveryWrapper,
+        home, ring, 'opaque_custody', null, userId, recoveryWrapper, independent,
       );
     }
     return ring;

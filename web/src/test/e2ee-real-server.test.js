@@ -448,6 +448,24 @@ describe.skipIf(!haveServer)('against the real server', () => {
     expect(healed.canSign).toBe(true);
   });
 
+  it('a second tab open during sign-up does not cost the new recovery key its copy', async () => {
+    const password = `pw-${crypto.randomUUID()}`;
+    const reg = await registerOpaque(server.base, name('alice'), password, 'web');
+    expect(reg.session.recovery_key_enrolled).toBe(true);
+    const first = server.wrap(reg.session);
+    // The other tab restores the session (no password, no recovery wrappers) and makes the vault first.
+    const otherTab = await loadVault(first.api, null, first.userId);
+    expect(otherTab.mode).toBe('device_custody');
+
+    const signingUp = await loadVault(
+      first.api, null, first.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper,
+    );
+    expect(signingUp.mode).toBe('opaque_custody');
+    expect(signingUp.recoveryKey).toBe(true);
+    const custody = await first.api.vaultMode();
+    expect(custody.recovery_copy_missing).toBe(false);
+  });
+
   it('two starts at once on a new account leave this device holding the key it published', async () => {
     const password = `pw-${crypto.randomUUID()}`;
     const reg = await registerOpaque(server.base, name('alice'), password, 'web');
