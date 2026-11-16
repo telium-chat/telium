@@ -493,6 +493,14 @@ pub(crate) async fn insert_landed_upload(
     .execute(&mut *tx)
     .await?
     .rows_affected();
+    // Landing onto bytes another account already holds still makes this
+    // account one of their uploaders, so neither can delete them from under
+    // the other. A fresh row gets its owner from the insert trigger.
+    sqlx::query("INSERT OR IGNORE INTO media_uploaders (hash, user_id) VALUES (?, ?)")
+        .bind(&upload.hash)
+        .bind(owner)
+        .execute(&mut *tx)
+        .await?;
     Ok(written > 0)
 }
 

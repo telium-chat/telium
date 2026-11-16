@@ -14,6 +14,7 @@ hands, not which PRs merged.
 
 ## 15 November 2026
 
+- New: **Your uploads** in settings. If your server limits how much you can upload, you can now see which files are using your quota, largest first, see when each one expires, jump to the message it was sent in, and delete the ones you don't need to get the space back. Files that other people have also uploaded identically are shown but can't be deleted from there, and profile pictures and emoji are counted separately since they're still in use.
 - Fixed: "Encryption is out of sync" after someone starts a conversation over. If one of your devices missed the start-over, it used to get stuck: newer messages wouldn't open, and anything you sent was refused. Your device now notices, gets itself back into the conversation, and catches up - nobody has to press anything.
 - Fixed: signing in on a second device now gets your account's keys properly.
 

@@ -174,6 +174,10 @@ async fn store_expression_asset(
     } else {
         sqlx::query("UPDATE media SET purpose = 'expression', mime = ? WHERE hash = ?")
             .bind(normalized.mime).bind(&hash).execute(&state.pool).await?;
+        // The guild now depends on these bytes too, so the row's owner must not
+        // be able to delete them out from under the emoji or sticker.
+        sqlx::query("INSERT OR IGNORE INTO media_uploaders (hash, user_id) VALUES (?, ?)")
+            .bind(&hash).bind(uploader).execute(&state.pool).await?;
     }
     Ok(StoredExpression { hash, animated: normalized.animated, format: normalized.format() })
 }
