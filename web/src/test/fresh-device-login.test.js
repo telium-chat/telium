@@ -377,6 +377,26 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
     await gate(on, alice1, password);
   });
 
+  // Fails at `expect(alice2.trust.canSign).toBe(true)`: device 1 holds the root and restarts once while `GET /vault`
+  // fails (a 503). Its vault is null, so Trust.start gets no ring key, `wantRecovery` is false, and the
+  // `!wantRecovery && !deviceWrapped` branch of verify.js startOnce re-seals the server's `recovery-v1:` root as
+  // `device-v1:`. A brand-new device then opens the ring but not the root. Flips when that branch is removed: the root
+  // is sealed only under AK and never downgraded (docs/custody-design.md, invariant I2).
+  it.fails('a device holding the root restarts while the vault read fails, then a new device signs in', async () => {
+    const on = browsers();
+    const { password, reg, account } = await signUp(on);
+    const alice1 = await start(account, signUpWrappers(reg));
+    const unreadable = new Proxy(account.api, {
+      get(target, key) {
+        if (key !== 'vault') return target[key];
+        return async () => { throw Object.assign(new Error('no answer'), { status: 503 }); };
+      },
+    });
+    const blip = await start(account, { api: unreadable });
+    expect(blip.vaultError).toBeTruthy();
+    await gate(on, alice1, password);
+  });
+
   // Pre-#70 state: the root re-sealed under a throwaway key (`device-v1:`), as `device_custody` starts did.
   async function throwawaySealedRoot(account, alice1) {
     const legacy = new Trust(account.api, { userId: account.userId, deviceId: account.deviceId, recovery: alice1.ring });
