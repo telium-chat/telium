@@ -46,6 +46,22 @@ if (!URL.createObjectURL) {
 if (typeof CSS === 'undefined') globalThis.CSS = {};
 if (!CSS.escape) CSS.escape = (value) => String(value).replace(/[^a-zA-Z0-9_-]/g, (c) => `\\${c}`);
 
+// Node 25+ defines its own `localStorage`/`sessionStorage` globals, which are
+// `undefined` (plus an ExperimentalWarning) unless `--localstorage-file` is
+// passed. Because the name already exists on the global, Vitest's jsdom
+// environment does not install jsdom's Storage over it, and the stand-in below
+// used to take over. That stand-in is a plain object, so `Object.keys()` lists
+// its methods instead of the stored keys -- and any test that snapshots
+// storage that way (mls-revocation's per-device `use()`) silently loses
+// everything when it switches devices. Install jsdom's real Storage instead.
+// CI's runner logs no such warning, so there jsdom's Storage is installed already.
+for (const name of ['localStorage', 'sessionStorage']) {
+  const real = globalThis.jsdom?.window?.[name];
+  if (!globalThis[name] && real) {
+    Object.defineProperty(globalThis, name, { value: real, configurable: true, writable: true });
+  }
+}
+
 if (!globalThis.localStorage) {
   globalThis.localStorage = (() => {
     let data = new Map();
