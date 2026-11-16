@@ -79,6 +79,32 @@ async fn anchor_test_identity(s: &Server, user: &User, key: &SigningKey) -> (Str
 }
 
 #[tokio::test]
+async fn a_first_key_made_twice_at_once_keeps_one_and_refuses_the_other() {
+    let s = start().await;
+    let alice = s.user("identity-first-key").await;
+    let (a, b) = (identity_public(&identity_signing_key()), identity_public(&identity_signing_key()));
+    let create = |key: &str| json!({ "identity_key": key, "sealed_secret": "sealed", "create_only": true });
+
+    let ((status_a, body_a), (status_b, body_b)) = tokio::join!(
+        s.put("/_telium/v1/crosssigning", &alice.home, create(&a)),
+        s.put("/_telium/v1/crosssigning", &alice.home, create(&b)),
+    );
+    let mut statuses = [status_a, status_b];
+    statuses.sort();
+    assert_eq!(statuses, [200, 409], "exactly one create wins: {body_a} / {body_b}");
+    let winner = if status_a == 200 { &a } else { &b };
+
+    let (_, doc) = s.get("/_telium/v1/crosssigning", Some(&alice.home)).await;
+    assert_eq!(doc["identity_key"].as_str(), Some(winner.as_str()), "{doc}");
+
+    // A later create is refused too, and leaves the stored key alone.
+    let (status, _) = s.put("/_telium/v1/crosssigning", &alice.home, create(&a)).await;
+    assert_eq!(status, 409);
+    let (_, doc) = s.get("/_telium/v1/crosssigning", Some(&alice.home)).await;
+    assert_eq!(doc["identity_key"].as_str(), Some(winner.as_str()), "{doc}");
+}
+
+#[tokio::test]
 async fn immutable_identity_blocks_server_style_replacement_and_accepts_authorized_rotation() {
     let s = start().await;
     let alice = s.user("identity-alice").await;

@@ -887,6 +887,10 @@ async fn revoke_session(state: &AppState, user_id: &str, device_id: &str) -> Api
 pub struct CrossSigningUpload {
     pub identity_key: String,
     pub sealed_secret: String,
+    /// Set by a client making the account's first key: refused with 409 if any key is already stored, so two devices
+    /// creating at once cannot silently overwrite each other's root.
+    #[serde(default)]
+    pub create_only: bool,
 }
 
 #[derive(Deserialize)]
@@ -980,12 +984,42 @@ pub async fn put_cross_signing(
             ));
         }
     }
+    let now = now_ms();
+    if body.create_only {
+        // One statement, so the check and the write cannot interleave with another device's create.
+        let created = sqlx::query(
+            "INSERT INTO cross_signing (user_id, identity_key, sealed_secret, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id) DO NOTHING",
+        )
+        .bind(&auth.user_id)
+        .bind(&body.identity_key)
+        .bind(&body.sealed_secret)
+        .bind(now)
+        .bind(now)
+        .execute(&state.pool)
+        .await?
+        .rows_affected();
+        if created == 0 {
+            return Err(ApiError::Conflict(
+                "this account already has a cross-signing key; load it instead of making another".into(),
+            ));
+        }
+        // As for any new root below: nothing signed by an earlier one stands.
+        sqlx::query("UPDATE devices SET cross_sig = NULL WHERE user_id = ?")
+            .bind(&auth.user_id)
+            .execute(&state.pool)
+            .await?;
+        sqlx::query("DELETE FROM user_signatures WHERE signer = ?")
+            .bind(&auth.user_id)
+            .execute(&state.pool)
+            .await?;
+        return Ok(Json(json!({ "ok": true, "identity_key": body.identity_key })));
+    }
     let existing: Option<String> =
         sqlx::query_scalar("SELECT identity_key FROM cross_signing WHERE user_id = ?")
             .bind(&auth.user_id)
             .fetch_optional(&state.pool)
             .await?;
-    let now = now_ms();
     if existing.as_deref() != Some(body.identity_key.as_str()) {
         sqlx::query("UPDATE devices SET cross_sig = NULL WHERE user_id = ?")
             .bind(&auth.user_id)
