@@ -1,1 +1,1 @@
-telium.20plays.com
+homeserver.telium.chat
