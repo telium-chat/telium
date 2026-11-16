@@ -557,6 +557,9 @@ export class Api {
       // A recovery key with no vault copy beside it resets the password and opens nothing.
       recovery_copy_missing: v.mode === 'opaque_custody'
         && Boolean(v.recovery_key_enrolled) && !v.independent_ciphertext,
+      recovery_key_enrolled: Boolean(v.recovery_key_enrolled),
+      // Which recovery key the account holds now, to tell whether the one bound into the identity is still it.
+      recovery_public_key: v.recovery_public_key || null,
       // Backup extent and server readability, reported with custody as one disclosure.
       backup: {
         items: Number(v.backup?.items || 0),

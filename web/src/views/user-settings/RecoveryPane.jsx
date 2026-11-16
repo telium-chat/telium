@@ -91,6 +91,12 @@ export function RecoveryPane() {
   const hasKey = Boolean(vault?.recoveryKey);
   const copyMissing = Boolean(store.custody?.recovery_copy_missing) && !hasKey;
   const legacyPassphrase = Boolean(vault?.legacyIndependent);
+  // The server's flag too: a vault that lost its recovery-key copy still has a key that can replace the account key.
+  const recoveryEnrolled = hasKey || copyMissing || Boolean(store.custody?.recovery_key_enrolled);
+  const accountRecoveryKey = store.custody?.recovery_public_key || null;
+  // Bound, and still the key the account holds: a key replaced since no longer speaks for it.
+  const identityProtected = Boolean(trust?.boundRecoveryKey)
+    && (!accountRecoveryKey || trust.boundRecoveryKey === accountRecoveryKey);
   const locked = Boolean(vault?.locked);
   const canEnroll = mode === 'opaque_custody' && Boolean(vault?.raw) && !locked;
 
@@ -271,7 +277,12 @@ export function RecoveryPane() {
     try { quiet = Boolean(trust?.boundRecoveryKey) && trust.boundRecoveryKey === recoveryPublicKey(identityRecoveryKey); }
     catch { /* malformed: the call below says so */ }
     if (quiet) {
-      replaceIdentity();
+      dialogs.confirm({
+        title: t('auth.identityKey.quietTitle'),
+        body: t('auth.identityKey.quietBody'),
+        confirmLabel: t('auth.identityKey.replaceButton'),
+        onConfirm: replaceIdentity,
+      });
       return;
     }
     dialogs.confirm({
@@ -608,9 +619,9 @@ export function RecoveryPane() {
         )}
       </Section>
 
-      {trust && (hasKey || copyMissing) ? (
+      {trust && recoveryEnrolled ? (
         <Section title={t('auth.identityKey.title')}>
-          {trust.canSign && trust.boundRecoveryKey ? (
+          {trust.canSign && identityProtected ? (
             <Explain>{t('auth.identityKey.boundExplain')}</Explain>
           ) : trust.continuity?.reason === 'immutable-id-changed' ? (
             <Explain>{t('auth.identityKey.resetElsewhere')}</Explain>

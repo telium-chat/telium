@@ -593,7 +593,12 @@ describe.skipIf(!haveServer)('against the real server', () => {
     expect(tb.statusFor(first.userId, second.deviceId, null)).not.toBe('verified');
     await tb.refresh(first.userId);
     expect(tb.statusFor(first.userId, second.deviceId, null)).toBe('changed');
-    await tb.vouchForUser(first.userId, b64(t2.identityKey));
+    // Without a finished comparison the changed identity stays refused.
+    await tb.vouchForUser(first.userId, b64(t2.identityKey)).catch(() => {});
+    tb.peers.clear();
+    await tb.refresh(first.userId);
+    expect(tb.statusFor(first.userId, second.deviceId, null)).toBe('changed');
+    await tb.vouchForUser(first.userId, b64(t2.identityKey), { comparedNow: true });
     tb.peers.clear();
     await tb.refresh(first.userId);
     expect(tb.statusFor(first.userId, second.deviceId, null)).toBe('verified');
@@ -606,6 +611,30 @@ describe.skipIf(!haveServer)('against the real server', () => {
     await back.adoptSecret(t2.signKey, b64(t2.identityKey));
     expect(back.canSign).toBe(true);
     expect(back.identityMismatch).toBe(false);
+  });
+
+  it('a reset whose answer was lost is taken up when the device reopens', async () => {
+    const on = devices();
+    const { reg, second, m2, t2 } = await lostRootAccount(on);
+    on('alice-2');
+    const dropped = new Proxy(second.api, {
+      get(target, key) {
+        if (key !== 'identityResetFinish') return target[key];
+        return async (body) => {
+          await target.identityResetFinish(body);
+          throw new Error('connection dropped');
+        };
+      },
+    });
+    const cut = new Trust(dropped, { userId: second.userId, deviceId: second.deviceId, recovery: t2.recovery });
+    await cut.start(m2.cs, null, await m2.leafKey(), 'device_custody');
+    await expect(cut.recoverWithRecoveryKey(reg.accountRecovery.text, { mlsKey: await m2.leafKey() })).rejects.toThrow();
+
+    const reopened = new Trust(second.api, { userId: second.userId, deviceId: second.deviceId });
+    await reopened.start(m2.cs, null, await m2.leafKey(), 'device_custody');
+    expect(reopened.canSign).toBe(true);
+    expect(reopened.identityMismatch).toBe(false);
+    expect(reopened.continuity.valid).toBe(true);
   });
 
   it('replaces a recovery key so the new one opens the vault, and a failed try keeps the old', async () => {

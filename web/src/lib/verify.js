@@ -223,7 +223,17 @@ export class Trust {
         this.identityHistoryKeys = new Set(
           continuity.keys ? [...continuity.keys.values()] : [],
         );
-        if (continuity.supported && !continuity.valid) {
+        // This device reset the identity but never heard back (or closed before re-pinning): it holds the private half of
+        // the new published root, which only the device that made it can, and that identity checks out on its own.
+        if (
+          continuity.supported && !continuity.valid && continuity.reason === 'immutable-id-changed'
+          && this.signKey && continuity.immutableId && continuity.currentKey === identityKeyText
+        ) {
+          replaceIdentityPin(this.userId, continuity, { verified: true });
+          this.continuity = { ...continuity, valid: true, reason: null };
+          this.immutableId = continuity.immutableId;
+          this.identityHistoryKeys = new Set(continuity.keys ? [...continuity.keys.values()] : []);
+        } else if (continuity.supported && !continuity.valid) {
           this.signKey = null;
           this.identityMismatch = true;
         }
@@ -508,13 +518,15 @@ export class Trust {
     this.peers.delete(this.userId);
   }
 
-  async vouchForUser(userId, identityKey) {
+  /// `comparedNow`: set only by a finished emoji comparison with this person, the one thing allowed to accept a changed identity.
+  async vouchForUser(userId, identityKey, { comparedNow = false } = {}) {
     const key = typeof identityKey === 'string' ? identityKey : b64(identityKey);
     let peer = await this.refresh(userId).catch(() => null);
     // They reset their identity (lost key, recovery key): their pin names the old one. Emoji compared just now against
     // the identity they publish, whose chain checks out, is the confirmation a changed identity needs.
     if (
-      peer?.pinRejected === 'immutable-id-changed'
+      comparedNow
+      && peer?.pinRejected === 'immutable-id-changed'
       && peer.continuity?.valid && peer.continuity.currentKey === key
     ) {
       replaceIdentityPin(userId, peer.continuity, { verified: true });

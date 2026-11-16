@@ -726,6 +726,8 @@ export const auth = {
   'auth.identityKey.bindFailed': 'Could not protect your account key: {detail}',
   'auth.identityKey.lostExplain': 'This device doesn’t hold your account key, so it can’t vouch for your devices. If another of your devices has it, verify this device with that one instead. If none of them has it any more, your recovery key can replace it.',
   'auth.identityKey.replaceButton': 'Replace account key',
+  'auth.identityKey.quietTitle': 'Replace your account key?',
+  'auth.identityKey.quietBody': 'The people you talk to won’t see a change. Any of your devices that still has the old key, or hasn’t been verified yet, must be verified with this one afterwards. If another of your devices still has the key, verify this device with it instead.',
   'auth.identityKey.resetTitle': 'Start a new account key?',
   'auth.identityKey.resetBody': 'Your recovery key isn’t linked to your account key yet, so this starts a new one. The people you talk to will see your account as changed and must verify you again before encrypted messages work, and your other devices must be verified with this one. Only do this if none of your devices still has the old key.',
   'auth.identityKey.resetConfirm': 'Start a new account key',

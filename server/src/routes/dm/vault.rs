@@ -24,16 +24,18 @@ pub async fn get_vault(State(state): State<AppState>, auth: HomeAuth) -> ApiResu
     .bind(&auth.user_id)
     .fetch_one(&state.pool)
     .await?;
-    let recovery_key_enrolled: bool = sqlx::query_scalar(
-        "SELECT recovery_public_key IS NOT NULL FROM accounts WHERE user_id = ?",
+    // The public half is public by nature; a client compares it with what its identity has bound.
+    let recovery_public_key: Option<String> = sqlx::query_scalar(
+        "SELECT recovery_public_key FROM accounts WHERE user_id = ?",
     )
     .bind(&auth.user_id)
     .fetch_optional(&state.pool)
     .await?
-    .unwrap_or(false);
+    .flatten();
     Ok(Json(json!({
         "exists": true,
-        "recovery_key_enrolled": recovery_key_enrolled,
+        "recovery_key_enrolled": recovery_public_key.is_some(),
+        "recovery_public_key": recovery_public_key,
         "mode": mode,
         "ciphertext": ciphertext,
         "version": version,
