@@ -1,10 +1,11 @@
 import { FileArchive, FileAudio, FileCode, FileText, FileVideo } from 'lucide-react';
 import { bytes } from '../../lib/util.js';
 import { useModal } from '../../hooks/useModal.jsx';
+import { Tooltip } from '../../components/Tooltip.jsx';
 import { useT } from '../../lib/i18n/react.jsx';
 import {
   AttachIcon, ClockIcon, CloseIcon, EditIcon, EmojiText, GlobeIcon, IconButton,
-  ImageIcon, MenuButton, MenuItem, PromptDialog, RetryIcon, TrashIcon, VisibilityIcon,
+  ImageIcon, InfoIcon, MenuButton, MenuItem, PromptDialog, RetryIcon, TrashIcon, VisibilityIcon,
 } from '../../components/index.js';
 
 const GLYPHS = [
@@ -220,10 +221,10 @@ function StagedPreview({ item, close }) {
 
 function ExpiryChip({ expiries, chosen, onChange }) {
   const t = useT();
-  const current = expiries.find((o) => o.secs === chosen) || expiries[expiries.length - 1];
-  const clamped = expiries.length > 0 && !expiries.some((o) => o.secs === null);
+  const current = expiries.find((o) => o.secs === chosen && !o.disabled) || expiries.filter((o) => !o.disabled).pop();
+  const clamped = expiries.some((o) => o.disabled);
   const cap = expiries.reduce(
-    (max, o) => (o.secs !== null && (max === null || o.secs > max) ? o.secs : max),
+    (max, o) => (!o.disabled && o.secs !== null && (max === null || o.secs > max) ? o.secs : max),
     null,
   );
 
@@ -238,7 +239,16 @@ function ExpiryChip({ expiries, chosen, onChange }) {
             <MenuItem
               key={option.secs === null ? 'never' : option.secs}
               data-selected={option.secs === current?.secs ? '' : undefined}
-              onAction={() => onChange?.(option.secs)}
+              data-disabled={option.disabled ? '' : undefined}
+              aria-disabled={option.disabled || undefined}
+              hint={option.disabled ? (
+                <Tooltip label={t('chat.staged.overLimit', { duration: describeCap(t, cap) })} side="right" delay={0}>
+                  <span className="upload-info" role="img" aria-label={t('chat.staged.overLimitLabel')}>
+                    <InfoIcon className="size-3.5" />
+                  </span>
+                </Tooltip>
+              ) : undefined}
+              onAction={() => { if (!option.disabled) onChange?.(option.secs); }}
             >
               {option.secs === null
                 ? t('chat.staged.keepsForever')

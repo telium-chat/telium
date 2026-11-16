@@ -782,6 +782,8 @@ export const chat = {
   // Whose rule cut the list short. Worth a sentence rather than a silently
   // shorter menu: policy you have to infer from a missing option is policy
   // nobody knows about until a file disappears.
+  'chat.staged.overLimit': 'This server limits files here to {duration} at most.',
+  'chat.staged.overLimitLabel': 'Why is this unavailable?',
   'chat.staged.cappedNote': 'Files sent here are deleted after at most {duration}.',
 
   // The article forms, for that sentence only.

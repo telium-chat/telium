@@ -4,7 +4,7 @@ import { useModal } from '../../hooks/useModal.jsx';
 import { useMenus } from '../menus.jsx';
 import { shortName } from '../../lib/util.js';
 import { has, PERMISSION_MASKS } from '../../lib/perms.js';
-import { narrowestLimit, uploadAttachment, uploadEncrypted } from '../../lib/upload.js';
+import { mediaAgeCapSecs, narrowestLimit, uploadAttachment, uploadEncrypted } from '../../lib/upload.js';
 import { faceOf } from '../../lib/faces.js';
 import { InfoIcon, MenuItem, MenuSeparator } from '../../components/index.js';
 import { useT } from '../../lib/i18n/react.jsx';
@@ -104,6 +104,7 @@ export function useChannelSurface(channelId) {
     channel?.media_expiry_limit_secs ?? null,
     store.guilds.get(guildId)?.media_expiry_limit_secs ?? null,
     store.caps.get(origin)?.media?.max_expiry_secs || null,
+    mediaAgeCapSecs(store.caps.get(origin)?.media),
   );
   const uploadLimit = narrowestLimit(
     channel?.media_max_file_bytes ?? null,
@@ -232,7 +233,10 @@ export function useDmSurface(convo) {
           : null,
     mayAttach: true,
     stickers: false,
-    expiryCap: store.caps.get(store.session?.home?.domain)?.media?.max_expiry_secs || null,
+    expiryCap: narrowestLimit(
+      store.caps.get(store.session?.home?.domain)?.media?.max_expiry_secs || null,
+      mediaAgeCapSecs(store.caps.get(store.session?.home?.domain)?.media),
+    ),
     uploadLimit: store.caps.get(store.session?.home?.domain)?.media?.max_file_bytes || null,
     mediaTier: 1,
     externalHosts: EMPTY,
