@@ -106,7 +106,7 @@ export function useDeviceTrust(conversationId) {
 
 export function EncryptionChip({ custody, unverified, changed, typing = false, onOpen }) {
   const t = useT();
-  const tone = changed ? 'danger' : (unverified ? 'warn' : (CUSTODY_TONE[custody] || 'default'));
+  const tone = changed || unverified ? 'warn' : (CUSTODY_TONE[custody] || 'default');
   const label = changed
     ? t('chat.encryption.chip.keyChanged')
     : unverified
@@ -216,7 +216,7 @@ export function ConversationNotices({
   return (
     <div className="enc-notices">
       {changedKey ? (
-        <Notice tone="danger"><NoticeText head={CHANGED_IDENTITY} /></Notice>
+        <Notice tone="warn"><NoticeText head={CHANGED_IDENTITY} /></Notice>
       ) : null}
       {needsDevice ? (
         <Notice tone="warn">

@@ -122,12 +122,13 @@ const reply = (body, status = 200) => ({
   text: async () => JSON.stringify(body),
 });
 
-function installNetwork() {
+function installNetwork({ capabilities } = {}) {
   const fetch = vi.fn(async (url) => {
     if (String(url) === DEFAULT_RECOMMENDATION_URL || String(url) === PORTAL_RECOMMENDATION_PATH) {
       return reply(signedFeed());
     }
     const { origin, pathname } = new URL(url);
+    if (capabilities && pathname === '/_telium/v1/capabilities') return reply(capabilities);
     if (pathname === '/.well-known/telium/server') {
       const server = SERVERS.find((s) => s.origin === origin);
       if (server) return reply({ server_name: server.serverName, api: server.api });
@@ -193,7 +194,7 @@ describe('the desktop first screen', () => {
     mount();
     expect(await screen.findByRole('heading', { name: 'Sign in to Telium' })).toBeTruthy();
     const field = await addressField();
-    expect(field.getAttribute('placeholder')).toBe('@you:telium.chat');
+    expect(field.getAttribute('placeholder')).toBe('@you:example.org');
     expect(screen.getByText(/Forgot your server\? Just type your username\./)).toBeTruthy();
     expect(document.querySelector('.auth-host')).toBeNull();
     expect(screen.queryByRole('button', { name: /^Get started/ })).toBeNull();
@@ -256,11 +257,13 @@ describe('the desktop first screen', () => {
   });
 
   it('asks which server a bare name is on when none of the known ones has it', async () => {
+    rememberAccount({ userId: '@ada:atlas.example', host: 'atlas.example', base: 'https://atlas.example' });
     const { user } = mount();
     await enterAddress(user, 'zoe');
     expect(await screen.findByText('Which server is zoe on?')).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: 'telium.chat' }));
-    expect(await screen.findByText(/There's no account called zoe on telium\.chat/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'telium.chat' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'atlas.example' }));
+    expect(await screen.findByText(/There's no account called zoe on atlas\.example/)).toBeTruthy();
   });
 
   it('asks for the username when only a server was given', async () => {
@@ -378,14 +381,12 @@ describe('the desktop first screen', () => {
     expect(document.querySelector('.stage__cur .auth-host').textContent).toContain('example.org');
   });
 
-  it('creates an account on telium.chat, with the way to choose another in sight', async () => {
+  it('asks for a home server directly on signup, like the website, instead of defaulting to telium.chat', async () => {
     const { user } = mount();
     await user.click(await screen.findByRole('button', { name: 'Create an account' }));
-    expect(await screen.findByRole('heading', { name: 'Pick a username' })).toBeTruthy();
-    expect(document.querySelector('.stage__cur .auth-host').textContent).toContain('telium.chat');
-    expect(screen.getByText(/Your account home keeps your profile/)).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: 'Choose a different home' }));
     expect(await screen.findByRole('textbox', { name: 'Home server' })).toBeTruthy();
+    expect(document.querySelector('.stage__cur .auth-host')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Choose a different home' })).toBeNull();
   });
 });
 
@@ -440,6 +441,47 @@ describe('recommending a server, and not having to remember it', () => {
     expect(signIn.mock.calls[0][3]).toMatchObject({ register: true });
   });
 
+  async function toPasswordStep(user) {
+    await user.click(await screen.findByRole('button', { name: 'Create an account' }));
+    await recommended();
+    await user.type(await screen.findByRole('textbox', { name: 'Username' }), 'ada');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await screen.findByLabelText('Password');
+  }
+
+  it('hides the registration code when the home says it needs none, and sends none', async () => {
+    installNetwork({ capabilities: { registration_code_required: false } });
+    const { user, signIn } = mount({ homeRandom: () => 0.9 });
+    await toPasswordStep(user);
+    await waitFor(() => expect(screen.queryByLabelText('Registration code')).toBeNull());
+    await user.type(screen.getByLabelText('Password'), PASSWORD);
+    await user.type(screen.getByLabelText('Confirm password'), PASSWORD);
+    await user.click(screen.getByRole('button', { name: 'Create account' }));
+    await waitFor(() => expect(signIn).toHaveBeenCalled());
+    expect(signIn.mock.calls[0][3]).toMatchObject({ register: true, registrationCode: null });
+  });
+
+  it('keeps the registration code when the home requires one, or cannot say', async () => {
+    installNetwork({ capabilities: { registration_code_required: true } });
+    const { user } = mount({ homeRandom: () => 0.9 });
+    await toPasswordStep(user);
+    await new Promise((resolve) => { setTimeout(resolve, 20); });
+    expect(screen.getByLabelText('Registration code')).toBeTruthy();
+  });
+
+  it('keeps a remembered telium.chat home for a new account', async () => {
+    vi.stubEnv('VITE_TELIUM_RECOMMENDATION_PUBLIC_KEY', '');
+    sessionStorage.setItem('telium.lastHome', 'https://telium.chat');
+    try {
+      const { user } = mount();
+      await user.click(await screen.findByRole('button', { name: 'Create an account' }));
+      expect(await screen.findByRole('heading', { name: 'Pick a username' })).toBeTruthy();
+      expect(document.querySelector('.stage__cur .auth-host').textContent).toContain('telium.chat');
+    } finally {
+      sessionStorage.clear();
+    }
+  });
+
   it('lets somebody choose a different recommended server, or another server entirely', async () => {
     const { user } = mount({ homeRandom: () => 0.9 });
     await user.click(await screen.findByRole('button', { name: 'Create an account' }));
@@ -455,23 +497,21 @@ describe('recommending a server, and not having to remember it', () => {
     expect(await screen.findByRole('textbox', { name: 'Home server' })).toBeTruthy();
   });
 
-  it('falls back to telium.chat, without a word, when the list does not verify', async () => {
+  it('asks for a server, without a word, when the list does not verify', async () => {
     vi.stubEnv('VITE_TELIUM_RECOMMENDATION_PUBLIC_KEY', OTHER_KEY);
     const { user } = mount();
     await user.click(await screen.findByRole('button', { name: 'Create an account' }));
-    await waitFor(() => expect(document.querySelector('.stage__cur .auth-host')).toBeTruthy());
-    expect(document.querySelector('.stage__cur .auth-host').textContent).toContain('telium.chat');
+    expect(await screen.findByRole('textbox', { name: 'Home server' })).toBeTruthy();
     expect(screen.queryByTestId('recommended-home')).toBeNull();
     expect(screen.queryByText(/recommendation/i)).toBeNull();
-    expect(screen.getByRole('button', { name: 'Choose a different home' })).toBeTruthy();
   });
 
-  it('falls back to telium.chat on a build that pinned no key, and asks the list for nothing', async () => {
+  it('asks for a server on a build that pinned no key, and asks the list for nothing', async () => {
     vi.stubEnv('VITE_TELIUM_RECOMMENDATION_PUBLIC_KEY', '');
     const network = installNetwork();
     const { user } = mount();
     await user.click(await screen.findByRole('button', { name: 'Create an account' }));
-    expect(document.querySelector('.stage__cur .auth-host').textContent).toContain('telium.chat');
+    expect(await screen.findByRole('textbox', { name: 'Home server' })).toBeTruthy();
     expect(screen.queryByTestId('recommended-home')).toBeNull();
     expect(network.mock.calls.map(([url]) => String(url))).not.toContain(DEFAULT_RECOMMENDATION_URL);
   });
@@ -530,8 +570,8 @@ describe('recommending a server, and not having to remember it', () => {
     expect(asked).toEqual(expect.arrayContaining([
       'https://api.cascade.example/_telium/v1/users/%40kim%3Acascade.example/status',
       'https://api.ridge.example/_telium/v1/users/%40kim%3Aridge.example/status',
-      'https://telium.chat/_telium/v1/users/%40kim%3Atelium.chat/status',
     ]));
+    expect(asked.some((u) => u.includes('telium.chat'))).toBe(false);
   });
 
   it('falls back to asking which server when no known server has the name', async () => {

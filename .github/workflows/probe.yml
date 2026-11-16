@@ -8,6 +8,14 @@ on:
   # The odd minute avoids the top-of-hour Actions queue spike.
   schedule:
     - cron: '7 * * * *'
+  # A merged listing is probed right away, so a new entry does not sit at
+  # "Unreachable" until the next hourly run. The probe's own commit only touches
+  # data/, so it does not re-trigger this.
+  push:
+    branches: [main]
+    paths:
+      - 'site/registry/servers.json'
+      - 'site/registry/sfus.json'
   workflow_dispatch:
 
 permissions:
@@ -24,8 +32,9 @@ concurrency:
 
 jobs:
   probe:
-    # Manual runs are always allowed for testing. Scheduled runs become active
-    # only when the non-secret repository variable is explicitly enabled.
+    # Manual runs are always allowed for testing. Scheduled and merge-triggered
+    # runs become active only when the non-secret repository variable is
+    # explicitly enabled.
     if: github.event_name == 'workflow_dispatch' || vars.DIRECTORY_PROBE_ENABLED == 'true'
     runs-on: ubuntu-latest
     defaults:

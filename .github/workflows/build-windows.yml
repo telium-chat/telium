@@ -39,7 +39,11 @@ env:
 jobs:
   build:
     name: Windows x86_64 NSIS
-    runs-on: ubuntu-latest
+    # Pinned: `ubuntu-latest` moved to 26.04 (kernel 7.x), where Wine in the
+    # electronuserland/builder:wine container fails with "socket : Function not
+    # implemented" while electron-builder runs the NSIS installer. 24.04 is what
+    # this job last passed on.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: web

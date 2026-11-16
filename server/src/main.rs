@@ -386,7 +386,11 @@ enum StandbyCommand {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    // Logs go to stderr. Stdout belongs to the command's own output -- the
+    // archive path from `backup now`, the key=value answer from `updates
+    // check` -- which scripts read and which a log line must not displace.
     tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,sqlx=warn".into()))
         .init();
 

@@ -1,7 +1,7 @@
 
 use crate::auth::GuildAuth;
 use crate::error::{ApiError, ApiResult};
-use crate::gateway::events::{Event, INTENT_GUILD_VOICE_STATES};
+use crate::gateway::events::{Event, INTENT_GUILD_STRUCTURE, INTENT_GUILD_VOICE_STATES};
 use crate::guildstore;
 use crate::perms;
 use crate::state::AppState;
@@ -434,6 +434,14 @@ pub async fn join(
     };
 
     let (muted, deafened) = server_flags(&state, &ctx.guild_id, &auth.user_id).await?;
+    // The upsert below moves an existing state in place; the room it leaves may now be empty.
+    let previous: Option<String> = sqlx::query_scalar(
+        "SELECT channel_id FROM voice_states WHERE guild_id = ? AND user_id = ?",
+    )
+    .bind(&ctx.guild_id)
+    .bind(&auth.user_id)
+    .fetch_optional(&state.pool)
+    .await?;
     let session_id = ulid();
     let now = now_ms();
     sqlx::query(
@@ -466,6 +474,11 @@ pub async fn join(
     .bind(now)
     .execute(&state.pool)
     .await?;
+    if let Some(previous) = previous.filter(|p| *p != channel_id) {
+        if let Err(err) = clear_status_if_empty(&state, &ctx.guild_id, &previous).await {
+            tracing::warn!(target: crate::logcat::VOICE, %err, channel_id = %previous, "could not clear an emptied channel's status");
+        }
+    }
 
     let e2ee = if sfu {
         settle_group(&state, &ctx.guild_id, &channel_id, Some(&auth.user_id)).await?;
@@ -665,7 +678,40 @@ pub async fn disconnect(state: &AppState, guild_id: &str, user_id: &str) -> ApiR
             json!({ "guild_id": guild_id, "user_id": user_id, "channel_id": Value::Null }),
         ))
         .await;
+    if let Err(err) = clear_status_if_empty(state, guild_id, &channel_id).await {
+        tracing::warn!(target: crate::logcat::VOICE, %err, %channel_id, "could not clear an emptied channel's status");
+    }
     Ok(())
+}
+
+/// A voice channel's status describes the call in it; once the last person leaves there is
+/// no call left to describe, so the status goes with them. Call this wherever a voice state
+/// leaves a channel (leave, switching channels, a moderator move, expiry).
+async fn clear_status_if_empty(state: &AppState, guild_id: &str, channel_id: &str) -> ApiResult<()> {
+    if clear_status_rows(&state.pool, channel_id).await? {
+        let out = crate::routes::guild::channel_json(state, channel_id).await?;
+        state
+            .hub
+            .publish(Event::in_channel("CHANNEL_UPDATE", guild_id, channel_id, INTENT_GUILD_STRUCTURE, out))
+            .await;
+    }
+    Ok(())
+}
+
+/// One statement, so a join landing between "is it empty?" and "clear it" cannot lose a live
+/// call's status. Returns whether a status was cleared.
+async fn clear_status_rows(pool: &sqlx::SqlitePool, channel_id: &str) -> Result<bool, sqlx::Error> {
+    let cleared = sqlx::query(
+        "UPDATE channels SET voice_status = NULL, voice_status_at = NULL, voice_status_author = NULL \
+         WHERE id = ? AND voice_status IS NOT NULL \
+         AND NOT EXISTS (SELECT 1 FROM voice_states WHERE channel_id = ?)",
+    )
+    .bind(channel_id)
+    .bind(channel_id)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    Ok(cleared > 0)
 }
 
 pub async fn disconnect_device(state: &AppState, user_id: &str, device_id: &str) {
@@ -714,6 +760,14 @@ pub async fn mark_unclaimed(
     let now = now_ms();
     let deadline = now + (grace_secs as i64) * 1000;
 
+    // Only the rooms these expired calls were in may lose their status; a status set ahead of
+    // time on some other empty channel stays.
+    let emptied: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT channel_id FROM voice_states WHERE reclaim_until IS NOT NULL AND reclaim_until <= ?",
+    )
+    .bind(now)
+    .fetch_all(pool)
+    .await?;
     let expired = sqlx::query(
         "DELETE FROM voice_states WHERE reclaim_until IS NOT NULL AND reclaim_until <= ?",
     )
@@ -725,6 +779,10 @@ pub async fn mark_unclaimed(
         .bind(now)
         .execute(pool)
         .await?;
+    // Runs before the gateway accepts clients, so READY carries the cleared status.
+    for channel_id in &emptied {
+        clear_status_rows(pool, channel_id).await?;
+    }
 
     let unclaimed = sqlx::query("UPDATE voice_states SET reclaim_until = ? WHERE reclaim_until IS NULL")
         .bind(deadline)
@@ -1131,6 +1189,9 @@ pub async fn moderate(
             .await?;
 
             settle_group(&state, &guild_id, current, None).await?;
+            if let Err(err) = clear_status_if_empty(&state, &guild_id, current).await {
+                tracing::warn!(target: crate::logcat::VOICE, %err, channel_id = %current, "could not clear an emptied channel's status");
+            }
             let payload = voice_state_json(&state, &guild_id, &user_id).await?;
             state.hub.publish(Event::in_channel(
                 "VOICE_STATE_UPDATE",

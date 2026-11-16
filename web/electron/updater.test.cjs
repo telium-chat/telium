@@ -335,6 +335,7 @@ const {
   PENDING_UPDATE_GRACE_MS,
   STAGED_INSTALLER_ARGS,
   launchStagedInstaller,
+  relaunchAppImage,
   readPendingUpdate,
   reconcilePendingUpdate,
   removePendingUpdate,
@@ -635,4 +636,36 @@ test('a pending-update record older than any plausible wait goes stale without t
     rmSync(directory, { recursive: true, force: true });
     rmSync(stagedDirectory, { recursive: true, force: true });
   }
+});
+
+function fakeHelper(event) {
+  const child = new EventEmitter();
+  child.unref = () => { child.unrefed = true; };
+  setImmediate(() => child.emit(event, ...(event === 'error' ? [new Error('EACCES')] : [])));
+  return child;
+}
+
+test('the AppImage relaunch waits for this process to exit and drops the old mount environment', async () => {
+  let call;
+  let child;
+  const ok = await relaunchAppImage({
+    imagePath: '/home/u/Telium.AppImage',
+    pid: 4242,
+    env: { APPIMAGE: '/old', APPDIR: '/tmp/.mount_x', PATH: '/usr/bin' },
+    spawnFn: (...args) => { call = args; child = fakeHelper('spawn'); return child; },
+  });
+  assert.equal(ok, true);
+  assert.equal(child.unrefed, true);
+  assert.equal(call[0], '/bin/sh');
+  assert.deepEqual(call[1].slice(-2), ['4242', '/home/u/Telium.AppImage']);
+  assert.match(call[1][1], /kill -0/);
+  assert.equal(call[2].detached, true);
+  assert.equal(call[2].env.APPIMAGE, undefined);
+  assert.equal(call[2].env.APPDIR, undefined);
+  assert.equal(call[2].env.PATH, '/usr/bin');
+});
+
+test('the AppImage relaunch reports a helper that failed to start, so the caller can fall back', async () => {
+  assert.equal(await relaunchAppImage({ imagePath: '/x', spawnFn: () => fakeHelper('error') }), false);
+  assert.equal(await relaunchAppImage({ imagePath: '/x', spawnFn: () => { throw new Error('nope'); } }), false);
 });

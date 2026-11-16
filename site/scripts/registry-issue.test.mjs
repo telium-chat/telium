@@ -23,7 +23,7 @@ import {
    and a textarea carries whatever the submitter put in it verbatim. */
 
 // Match the actual GitHub issue-form body: markdown blocks are not submitted.
-const serverBody = (entry, { ownership = true, consent = false } = {}) => `### Registry entry
+const serverBody = (entry, { ownership = true } = {}) => `### Registry entry
 
 \`\`\`json
 ${JSON.stringify(entry, null, 2)}
@@ -32,10 +32,6 @@ ${JSON.stringify(entry, null, 2)}
 ### Ownership
 
 - [${ownership ? 'X' : ' '}] I run this server myself — it is not someone else's server.
-
-### Automatic suggestions
-
-- [${consent ? 'X' : ' '}] Also suggest this server automatically to people picking their first server.
 
 ### Notes
 
@@ -83,7 +79,7 @@ test('detectKind reads the JSON identity from a submitted issue, with no markdow
 })
 
 test('rebuildEntry keeps only schema fields and stamps nothing it was not given', () => {
-  const raw = serverEntry({ recommendations: { opt_in: true }, added: '1999-01-01', sneaky: true })
+  const raw = serverEntry({ added: '1999-01-01', sneaky: true })
   const entry = rebuildEntry('server', raw, { added: '2026-11-04', consent: false })
   assert.deepEqual(entry, {
     domain: 'chat.example.org',
@@ -95,12 +91,19 @@ test('rebuildEntry keeps only schema fields and stamps nothing it was not given'
   })
 })
 
-test('consent switches come from the checkbox, never the JSON', () => {
-  const smuggled = rebuildEntry('server', serverEntry({ recommendations: { opt_in: true } }), { added: '2026-11-04', consent: false })
-  assert.equal('recommendations' in smuggled, false)
-  const opted = rebuildEntry('server', serverEntry(), { added: '2026-11-04', consent: true })
+test('homeserver opt-in comes from the wizard JSON and only a literal true counts', () => {
+  const opted = rebuildEntry('server', serverEntry({ recommendations: { opt_in: true } }), { added: '2026-11-04', consent: false })
   assert.deepEqual(opted.recommendations, { opt_in: true })
+  for (const bad of ['true', 1, { opt_in: 'yes' }, { opt_in: false }, null]) {
+    const e = rebuildEntry('server', serverEntry({ recommendations: bad }), { added: '2026-11-04', consent: false })
+    assert.equal('recommendations' in e, false, JSON.stringify(bad))
+  }
+  assert.equal('recommendations' in rebuildEntry('server', serverEntry(), { added: '2026-11-04', consent: false }), false)
+  // extra fields inside the object are not carried over
+  const extra = rebuildEntry('server', serverEntry({ recommendations: { opt_in: true, weight: 9 } }), { added: '2026-11-04', consent: false })
+  assert.deepEqual(extra.recommendations, { opt_in: true })
 
+  // relay consent is still the checkbox, never the JSON
   const feedSmuggled = rebuildEntry('sfu', { url: 'https://sfu.example', feed: { opt_in: true } }, { added: '2026-11-04', consent: false })
   assert.equal('feed' in feedSmuggled, false)
   const feedOpted = rebuildEntry('sfu', { url: 'https://sfu.example', weight: 3, pubkey_hint: 'x' }, { added: '2026-11-04', consent: true })

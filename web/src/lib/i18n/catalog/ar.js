@@ -2904,7 +2904,7 @@ export const messages = {
   // «المفتاح مودَع», which is accurate and tells a reader nothing. «طرف إلى
   // طرف» is the established Arabic for end-to-end and is three short words
   // that set narrower than the English.
-  'chat.encryption.chip.keyChanged': 'تغيّر المفتاح',
+  'chat.encryption.chip.keyChanged': 'مفتاح جديد',
   'chat.encryption.chip.serverCanRead': 'الخادم يقرأ',
   'chat.encryption.chip.endToEnd': 'طرف إلى طرف',
   'chat.encryption.chip.encrypted': 'مشفَّر',
@@ -2935,9 +2935,10 @@ export const messages = {
   'chat.encryption.chip.open': 'تفاصيل التشفير',
 
   // The same two sentences as the banner, as one string, because a `title` is
-  // one string. Neither reading is chosen between: «تبدو هكذا، وكذلك انتحال
-  // الشخصية» keeps both on the table in the English's order of likelihood.
-  'chat.encryption.chip.keyChangedTooltip': 'أحد الموجودين هنا يستخدم مفتاح حساب مختلفًا. إعادة تعيين المفتاح تبدو هكذا، وكذلك انتحال الشخصية. أعد التوثيق قبل أن تثق به.',
+  // one string. Calm and plain: a new key usually just means
+  // the account was set up again, then that messages stay encrypted, then how
+  // to be sure, by comparing keys.
+  'chat.encryption.chip.keyChangedTooltip': 'لدى أحد الموجودين هنا مفتاح حساب جديد، وهذا يعني عادةً أنه أعدّ حسابه من جديد. تبقى الرسائل مشفّرة. وللتأكد من أنه هو، قارن المفاتيح من ملفه الشخصي.',
 
   // ------------------------------------------------------------- اللافتات
 
@@ -2964,8 +2965,8 @@ export const messages = {
   'chat.encryption.rejoinUndeliverable.title': 'لم يُطلَب من أحد إدخال هذا الجهاز.',
   'chat.encryption.rejoinUndeliverable.body': 'الخادم الذي يرتّب هذه المحادثة غير متاح، فلم يغادر الطلب أصلًا. والبدء من جديد يمنح كل من يمكن الوصول إليه مجموعة جديدة.',
 
-  'chat.encryption.changedIdentity.title': 'أحد الموجودين هنا يستخدم مفتاح حساب مختلفًا.',
-  'chat.encryption.changedIdentity.body': 'إعادة تعيين المفتاح تبدو هكذا، وكذلك انتحال الشخصية. أعد التوثيق قبل أن تثق به.',
+  'chat.encryption.changedIdentity.title': 'لدى أحد الموجودين هنا مفتاح حساب جديد.',
+  'chat.encryption.changedIdentity.body': 'هذا يعني عادةً أنه أعدّ حسابه من جديد. تبقى الرسائل مشفّرة. وللتأكد من أنه هو، قارن المفاتيح من ملفه الشخصي.',
 
   'chat.encryption.vaultLocked.title': 'رسائلك الأقدم مقفلة على هذا الجهاز.',
   'chat.encryption.vaultLocked.body': 'أدخل عبارة الاستعادة من الإعدادات ← {pane} لاستعادتها.',
@@ -2980,6 +2981,8 @@ export const messages = {
   'chat.encryption.recoveryFallback.title': 'تسجيل الدخول لم يفتح رسائلك الأقدم.',
   'chat.encryption.recoveryFallback.body': 'أدخل عبارة الاستعادة من الإعدادات ← {pane}، أو وافق على هذا الجهاز من جهاز تستخدمه بالفعل.',
 
+  'chat.encryption.heldBack.own': 'جهازك الآخر ليس في هذه المحادثة بعد. سينضم من تلقاء نفسه حالما يُؤكَّد أنه جهازك.',
+  'chat.encryption.heldBack.other': 'أحد أجهزته ليس في هذه المحادثة بعد. سينضم من تلقاء نفسه حالما يُؤكَّد أنه جهازه.',
   // «محجوزة» -- held back on purpose -- and not «لم تصل», which would be the
   // "messages are being lost" reading this banner exists to refuse.
   'chat.encryption.syncFailed.title': 'التشفير غير متزامن على هذا الجهاز.',
@@ -5556,7 +5559,7 @@ export const messages = {
   'auth.find.forget': 'تجاهل {user} على هذا الجهاز',
   'auth.find.found': 'تم العثور على {user} على {host}',
   'auth.find.foundLabel': 'حسابات باسم {user}',
-  'auth.find.hint': 'اسم المستخدم والخادم، مثل @ada:telium.chat. نسيت خادمك؟ اكتب اسم المستخدم فقط.',
+  'auth.find.hint': 'اسم المستخدم والخادم، مثل @ada:example.org. نسيت خادمك؟ اكتب اسم المستخدم فقط.',
   'auth.find.homeExplainer': 'يحفظ موطن حسابك ملفّك الشخصي وتسجيل دخولك وأصدقاءك ورسائلك. ويمكنك مع ذلك الانضمام إلى مجتمعات مستضافة في مكان آخر.',
   'auth.find.invalid': 'لا يبدو هذا عنوان Telium. جرّب @name:server.',
   'auth.find.label': 'عنوان Telium',
@@ -5565,7 +5568,7 @@ export const messages = {
   'auth.find.newTitle': 'جديد على Telium؟',
   'auth.find.noAccount': 'لا يوجد حساب باسم {user} على {host}. تحقّق من الكتابة، أو <create>أنشئ حسابًا</create>.',
   'auth.find.noSuchAccount': 'لا يوجد حساب باسم {user} على {host}.',
-  'auth.find.placeholder': '@you:telium.chat',
+  'auth.find.placeholder': '@you:example.org',
   'auth.find.recentLabel': 'الحسابات على هذا الجهاز',
   'auth.find.searching': 'جارٍ البحث عن {user}…',
   'auth.find.title': 'تسجيل الدخول إلى Telium',

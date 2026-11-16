@@ -7,6 +7,7 @@ import { roomFace } from '../lib/faces.js';
 import { VoiceStatusLine } from './dialogs/VoiceStatusDialog.jsx';
 import { PING_WINDOW, useVoice } from '../hooks/useVoice.jsx';
 import { t } from '../lib/i18n/index.js';
+import { formatCallElapsed } from '../lib/call-elapsed.js';
 import { useT } from '../lib/i18n/react.jsx';
 import { Avatar, EmojiText, IconButton, SpinnerIcon } from '../components/index.js';
 import { Tooltip } from '../components/Tooltip.jsx';
@@ -18,9 +19,7 @@ import {
 function formatElapsed(ms) {
   if (!ms) return '00:00';
   const total = Math.max(0, Math.floor((Date.now() - ms) / 1000));
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return formatCallElapsed(total);
 }
 
 export function connectionLevel(ping) {

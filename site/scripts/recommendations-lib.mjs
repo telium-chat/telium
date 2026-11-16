@@ -10,9 +10,13 @@ export const RECOMMENDATION_KIND = 'telium.account_home_recommendations'
 export const RECOMMENDATION_VERSION = 1
 export const CURRENT_PROTOCOL = 'v1'
 
-export const MAX_PROBE_AGE_MINUTES = 180
+// Both windows must outlast the real gap between probes. probe.yml asks for an hourly
+// run, but GitHub throttles scheduled workflows here to one every 4-8 hours, and the
+// feed is only rebuilt when a probe (or any other change) lands on main. With 3h/2h
+// windows the published list was empty most of the day.
+export const MAX_PROBE_AGE_MINUTES = 12 * 60
 export const MAX_REFERRAL_WEIGHT = 3
-export const DEFAULT_VALIDITY_MINUTES = 120
+export const DEFAULT_VALIDITY_MINUTES = 12 * 60
 
 const MAX_PROBE_AGE_MS = MAX_PROBE_AGE_MINUTES * 60 * 1000
 

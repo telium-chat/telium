@@ -42,13 +42,6 @@ body:
       options:
         - label: I run this server myself — it is not someone else's server.
           required: true
-  - type: checkboxes
-    id: recommendations
-    attributes:
-      label: Automatic suggestions
-      description: Optional. If you tick this, the client may suggest your server automatically to people picking their first server. Your server has to allow it too, and the health rules still apply.
-      options:
-        - label: Also suggest this server automatically to people picking their first server
   - type: textarea
     id: notes
     attributes:

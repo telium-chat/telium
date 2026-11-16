@@ -129,7 +129,8 @@ chmod +x "$work/bin/"*
 export PATH="$work/bin:$PATH"
 
 # The fake binaries exercise the CLI contract, including multi-line backup
-# output and the difference between an old and a new 'check --help'.
+# output with a log line ahead of the path, a check that refuses root, and
+# the difference between an old and a new 'check --help'.
 for version in 1 2 3 4 5; do
   mkdir -p "$work/releases/v$version"
   cat > "$work/releases/v$version/telium-server" <<'MOCK_BINARY'
@@ -154,6 +155,13 @@ case "${1:-}" in
         echo installation >> "$MOCK_WORK/state/check_flags"
         echo "Configuration check passed."
       else
+        # The real audit calls a root process DANGER and exits non-zero, so
+        # an updater that asks it as root can never take a release.
+        if [ "$(id -u)" -eq 0 ]; then
+          echo " DANGER  (process)"
+          echo "         this server is running as root."
+          exit 1
+        fi
         echo "profile: production"
         echo "Nothing dangerous."
       fi
@@ -182,7 +190,7 @@ case "${1:-}" in
       echo "action=update"
       echo "ours=__COMMIT__"
       echo "target_commit=$(printf '%040d' "$MOCK_STAGE")"
-      echo "target_released_at=4000"
+      echo "target_released_at=$((1000 * MOCK_STAGE))"
       echo 'target_version=0.99.0'
       echo "artifact_url=https://mock/server-linux-x86_64.tar.gz"
       echo "artifact_sha256=$(sha256sum "$MOCK_WORK/releases/v$MOCK_STAGE/telium-server-linux-x86_64.tar.gz" | cut -d' ' -f1)"
@@ -200,6 +208,9 @@ case "${1:-}" in
     mkdir -p /var/backups/telium/archives
     archive=/var/backups/telium/archives/snapshot.test
     printf 'backup contents' > "$archive"
+    # Releases up to 0.4.1 log to stdout, ahead of the archive path; the
+    # updater runs the installed (older) binary's backup, so it must cope.
+    echo "2026-11-15T06:10:13.102018Z  INFO telium::startup: voice: no local TURN relay"
     echo "$archive"
     echo 'files: 4'
     echo 'format: telium-backup-v1'
@@ -218,13 +229,43 @@ MOCK_BINARY
     "$work/releases/v$version/telium-server"
   chmod +x "$work/releases/v$version/telium-server"
   printf '# reference for version %s\n' "$version" > "$work/releases/v$version/telium.example.toml"
-  tar -C "$work/releases/v$version" -czf "$work/releases/v$version/telium-server-linux-x86_64.tar.gz" telium-server telium.example.toml
+done
+
+# Releases 6 and 7 are release 5 renumbered, for the updater's own runs.
+for version in 6 7; do
+  mkdir -p "$work/releases/v$version"
+  sed -e "s/$(printf '%040d' 5)/$(printf '%040d' "$version")/g" \
+    -e "s/^    echo \"commit_time=5000\"/    echo \"commit_time=$((1000 * version))\"/" \
+    -e "s/\"5\" -/\"$version\" -/g" \
+    "$work/releases/v5/telium-server" > "$work/releases/v$version/telium-server"
+  chmod +x "$work/releases/v$version/telium-server"
+  printf '# reference for version %s\n' "$version" > "$work/releases/v$version/telium.example.toml"
+done
+
+for version in 1 2 3 4 5 6 7; do
+  members=(telium-server telium.example.toml)
+  # Releases 1 and 2 predate the bundled updater. From 3 on, each carries the
+  # real updater plus a line naming its release, so the installed copy says
+  # which release (if any) it came from; 7's copy does not parse.
+  if [ "$version" -ge 3 ]; then
+    cp /repo/deploy/update-native.sh "$work/releases/v$version/update-native.sh"
+    echo "# smoke: updater bundled with release $version" >> "$work/releases/v$version/update-native.sh"
+    if [ "$version" -eq 7 ]; then
+      echo 'if then; fi' >> "$work/releases/v$version/update-native.sh"
+    fi
+    members+=(update-native.sh)
+  fi
+  tar -C "$work/releases/v$version" -czf "$work/releases/v$version/telium-server-linux-x86_64.tar.gz" "${members[@]}"
 done
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 assert_contains() { grep -Fq "$2" "$1" || fail "$1 missing '$2'"; }
 assert_absent() { if grep -Fq "$2" "$1"; then fail "$1 unexpectedly has '$2'"; fi; }
 binary_commit() { /usr/local/bin/telium-server version | sed -n 's/^commit=//p'; }
+updater=/usr/local/sbin/telium-update-native
+# The installer puts the checkout's copy in place on every run, so after a
+# run that installed nothing, the installed updater must still be that copy.
+assert_updater_unchanged() { cmp -s "$updater" /repo/deploy/update-native.sh || fail "$1 replaced the installed updater"; }
 assert_live_matches_binary() {
   [ "$(cat "$work/state/active_commit")" = "$(binary_commit)" ] || fail "active service does not run installed binary"
 }
@@ -299,6 +340,10 @@ test -s "$work/state/restarts" || fail "upgrader did not restart the active serv
 assert_live_matches_binary
 [ "$(binary_commit)" = "$(printf '%040d' 2)" ] || fail "upgrader did not install release 2"
 test -f /usr/local/bin/telium-server.previous || fail "previous executable was not retained"
+# Release 2 predates the bundled updater: it installs as before, and the
+# updater stays the one the installer put there.
+assert_updater_unchanged "a release with no bundled updater"
+assert_absent "$work/rerun.log" "updater: "
 
 # An explicit breaking hold is respected even on manual installer reruns.
 export MOCK_STAGE=3 MOCK_BREAKING=true
@@ -306,6 +351,7 @@ bash deploy/install-native.sh chat.test > "$work/breaking.log" 2>&1
 assert_contains "$work/breaking.log" "needs a person"
 assert_live_matches_binary
 [ "$(binary_commit)" = "$(printf '%040d' 2)" ] || fail "breaking hold was overridden"
+assert_updater_unchanged "a held release"
 
 # A missing backup is fatal, and does not swap the executable or restart.
 unset MOCK_BREAKING
@@ -316,6 +362,7 @@ fi
 assert_contains "$work/failed-backup.log" "pre-install backup produced no archive"
 assert_live_matches_binary
 [ "$(binary_commit)" = "$(printf '%040d' 2)" ] || fail "binary changed without a backup"
+assert_updater_unchanged "a release refused for want of a backup"
 
 unset MOCK_BACKUP_FAIL
 
@@ -328,6 +375,7 @@ fi
 assert_contains "$work/unhealthy.log" "pre-upgrade backup:"
 assert_contains "$work/unhealthy.log" "inspect: journalctl -u"
 assert_contains "$work/unhealthy.log" "the local health endpoint failed"
+assert_updater_unchanged "an unhealthy release"
 unset MOCK_UNHEALTHY
 
 # A failed systemd restart must print recovery instructions despite set -e.
@@ -338,6 +386,7 @@ fi
 assert_contains "$work/restart-failed.log" "mock restart failure"
 assert_contains "$work/restart-failed.log" "pre-upgrade backup:"
 assert_contains "$work/restart-failed.log" "do NOT swap the old executable"
+assert_updater_unchanged "a release whose restart failed"
 unset MOCK_RESTART_FAIL
 
 # A service that responds but still executes the *old* binary is not healthy.
@@ -346,7 +395,35 @@ if bash deploy/install-native.sh chat.test > "$work/stale-process.log" 2>&1; the
   fail "updater accepted stale service executable"
 fi
 assert_contains "$work/stale-process.log" "the service process is stale"
+assert_updater_unchanged "a release whose process stayed stale"
 unset MOCK_STALE_PROCESS
+
+# The timer's own path, no installer: a healthy release that bundles a
+# different updater ends with that updater installed -- by rename, so the run
+# that replaced it still finishes -- and update.conf exactly as it was.
+export MOCK_STAGE=6
+cp /etc/telium/update.conf "$work/update.conf.before"
+"$updater" --now > "$work/self-update.log" 2>&1 || fail "updater run for release 6 failed"
+assert_contains "$work/self-update.log" "verified live process"
+assert_contains "$work/self-update.log" "updater: $updater replaced"
+assert_contains "$work/self-update.log" "deployed "
+[ "$(binary_commit)" = "$(printf '%040d' 6)" ] || fail "updater did not install release 6"
+cmp -s "$updater" "$work/releases/v6/update-native.sh" || fail "release 6's updater was not installed"
+test -x "$updater" || fail "the replaced updater is not executable"
+[ "$(stat -c '%U %a' "$updater")" = "root 755" ] || fail "the replaced updater is not root-owned 0755"
+test ! -e "/usr/local/sbin/.telium-update-native.incoming" || fail "the replacement left its temporary file"
+cmp -s /etc/telium/update.conf "$work/update.conf.before" || fail "self-update touched update.conf"
+# The replacement is the one the next tick runs, and with nothing new it is quiet.
+"$updater" > "$work/self-update-current.log" 2>&1 || fail "the replaced updater does not run"
+assert_absent "$work/self-update-current.log" "updater: "
+
+# A bundled updater that does not parse is never installed, and does not
+# fail a release that is otherwise installed and healthy.
+export MOCK_STAGE=7
+"$updater" --now > "$work/self-update-broken.log" 2>&1 || fail "a broken bundled updater failed a healthy release"
+assert_contains "$work/self-update-broken.log" "does not parse"
+[ "$(binary_commit)" = "$(printf '%040d' 7)" ] || fail "updater did not install release 7"
+cmp -s "$updater" "$work/releases/v6/update-native.sh" || fail "a bundled updater that does not parse was installed"
 
 # The UI for open registration must not talk about invitation codes.
 rm -rf /etc/telium /var/lib/telium /var/backups/telium /var/lib/telium-update
@@ -455,4 +532,4 @@ fi
 assert_contains "$work/caddy-wrong.log" "is configured as 'https.test'"
 unset TELIUM_HTTPS MOCK_HTTPS
 
-echo 'native installer smoke: registration, storage defaults and overrides, HTTPS, domain, recovery and safe updates passed'
+echo 'native installer smoke: registration, storage defaults and overrides, HTTPS, domain, recovery, safe updates and updater self-update passed'

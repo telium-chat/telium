@@ -10,10 +10,11 @@
  *
  * The issue body is untrusted input, so nothing in it is carried through
  * as-is: the entry is rebuilt from an allowlist of schema fields, the `added`
- * date is stamped here rather than trusted from the submitter, and the two
- * consent switches (`recommendations` / `feed`) are read only from the issue's
- * own checkboxes, never from the JSON. What the submitter could not set, the
- * rebuild cannot smuggle. The existing validators stay the gate — the rules
+ * date is stamped here rather than trusted from the submitter. A homeserver's
+ * `recommendations.opt_in` is carried over from the JSON only when it is
+ * exactly `true` (the wizard asks once, on the website, and writes it there);
+ * a relay's `feed` consent is still read only from the issue's own checkbox.
+ * Nothing else the submitter could not set can be smuggled through. The existing validators stay the gate — the rules
  * live in one place.
  *
  * Exit codes: 0 ok · 2 no entry or unparseable · 3 duplicate · 4 ownership not
@@ -133,7 +134,8 @@ export const rebuildEntry = (kind, raw, { added, consent }) => {
     pickStrings(raw, ['domain', 'name', 'description'], entry)
     pickObject(raw, 'region', ['label', 'code'], entry)
     pickObject(raw, 'operator', ['name', 'contact'], entry)
-    if (consent) entry.recommendations = { opt_in: true }
+    // The wizard already asked; only a literal boolean true counts.
+    if (raw.recommendations?.opt_in === true) entry.recommendations = { opt_in: true }
   } else {
     // A relay's URL is its identity, so a trailing slash — invisible in a
     // browser, fatal to the validator's duplicate check — is removed here
@@ -144,8 +146,8 @@ export const rebuildEntry = (kind, raw, { added, consent }) => {
     pickObject(raw, 'operator', ['name', 'contact'], entry)
     if (consent) entry.feed = { opt_in: true }
   }
-  // Consent switches exist only as the issue's checkboxes, and the date is
-  // stamped by the machine that merges: neither arrives through the JSON.
+  // The relay consent switch exists only as the issue's checkbox, and the date
+  // is stamped by the machine that merges: neither arrives through the JSON.
   entry.added = added
   return entry
 }
@@ -248,10 +250,9 @@ const main = async () => {
     process.exit(2)
   }
 
-  const consentOption = kind === 'server'
-    ? 'Also suggest this server automatically'
-    : 'Also let guilds in automatic mode route calls'
-  const consent = checkboxChecked(sectionFor(body, kind === 'server' ? 'Automatic suggestions' : 'Automatic call routing'), consentOption)
+  // Only relays still use an issue checkbox; homeserver consent is in the JSON.
+  const consent = kind === 'sfu'
+    && checkboxChecked(sectionFor(body, 'Automatic call routing'), 'Also let guilds in automatic mode route calls')
 
   let entry
   try {
