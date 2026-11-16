@@ -717,4 +717,20 @@ export const auth = {
   // what the key does, the second what that means for anyone else who finds it.
   'auth.parts.download.body1': 'This key resets your password and reopens your encrypted messages.',
   'auth.parts.download.body2': 'Anyone who has it can do both. Keep it somewhere only you can reach.',
+  // Settings > Recovery: the account key (cross-signing root) and the recovery key that can replace it.
+  'auth.identityKey.title': 'Account key',
+  'auth.identityKey.boundExplain': 'Your recovery key can also replace your account key if every one of your devices loses it, and the people you talk to won’t see a change.',
+  'auth.identityKey.bindExplain': 'Enter your recovery key so it can replace your account key if every one of your devices loses it. Without this, replacing it makes your account look changed to the people you talk to, and each of them has to verify you again.',
+  'auth.identityKey.bindButton': 'Protect account key',
+  'auth.identityKey.bound': 'Your recovery key now protects your account key.',
+  'auth.identityKey.bindFailed': 'Could not protect your account key: {detail}',
+  'auth.identityKey.lostExplain': 'This device doesn’t hold your account key, so it can’t vouch for your devices. If another of your devices has it, verify this device with that one instead. If none of them has it any more, your recovery key can replace it.',
+  'auth.identityKey.replaceButton': 'Replace account key',
+  'auth.identityKey.resetTitle': 'Start a new account key?',
+  'auth.identityKey.resetBody': 'Your recovery key isn’t linked to your account key yet, so this starts a new one. The people you talk to will see your account as changed and must verify you again before encrypted messages work, and your other devices must be verified with this one. Only do this if none of your devices still has the old key.',
+  'auth.identityKey.resetConfirm': 'Start a new account key',
+  'auth.identityKey.replacedQuiet': 'Your account key was replaced. Nobody will see a change.',
+  'auth.identityKey.replacedReset': 'You have a new account key. Ask the people you talk to to verify you again.',
+  'auth.identityKey.replaceFailed': 'Could not replace your account key: {detail}',
+  'auth.identityKey.resetElsewhere': 'Your account key was replaced on another of your devices. Verify this device with that one to use it here.',
 };

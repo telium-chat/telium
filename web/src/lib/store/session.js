@@ -283,6 +283,7 @@ export const sessionMethods = {
     if (typeof sessionStorage !== 'undefined') {
       sessionStorage.removeItem(PENDING_RECOVERY_KEY);
     }
+    await this.bindRecoveryKeyQuietly?.(normalized);
     return normalized;
   },
 
@@ -368,6 +369,7 @@ export const sessionMethods = {
     };
     this.emit('vault', this.vault);
     await this.refreshCustody().catch(() => {});
+    await this.bindRecoveryKeyQuietly?.(key);
     return this.vault;
   },
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAsync, useStore, useStoreEvent } from '../../hooks/useStore.jsx';
 import { toast } from '../../hooks/useToast.jsx';
 import { copyToClipboard } from '../../lib/clipboard.js';
+import { recoveryPublicKey } from '../../lib/account-recovery.js';
 import {
   removeIndependentRecovery, setMode,
 } from '../../lib/vault.js';
@@ -47,6 +48,7 @@ export function RecoveryPane() {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newRecoveryKey, setNewRecoveryKey] = useState('');
   const [replacing, setReplacing] = useState(false);
+  const [identityRecoveryKey, setIdentityRecoveryKey] = useState('');
 
   const trust = store.trust;
   const recoveryPolicy = trust?.recoveryPolicy || null;
@@ -235,6 +237,50 @@ export function RecoveryPane() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const bindIdentity = async () => {
+    setBusy(true);
+    try {
+      await store.bindIdentityRecoveryKey(identityRecoveryKey);
+      setIdentityRecoveryKey('');
+      toast(t('auth.identityKey.bound'));
+    } catch (e) {
+      failed('auth.identityKey.bindFailed', e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const replaceIdentity = async () => {
+    setBusy(true);
+    try {
+      const { reset } = await store.recoverIdentity(identityRecoveryKey);
+      setIdentityRecoveryKey('');
+      toast(t(reset ? 'auth.identityKey.replacedReset' : 'auth.identityKey.replacedQuiet'));
+    } catch (e) {
+      failed('auth.identityKey.replaceFailed', e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // A bound key continues the identity and needs no warning; anything else starts a new one, which contacts will see.
+  const askReplaceIdentity = () => {
+    let quiet = false;
+    try { quiet = Boolean(trust?.boundRecoveryKey) && trust.boundRecoveryKey === recoveryPublicKey(identityRecoveryKey); }
+    catch { /* malformed: the call below says so */ }
+    if (quiet) {
+      replaceIdentity();
+      return;
+    }
+    dialogs.confirm({
+      title: t('auth.identityKey.resetTitle'),
+      body: t('auth.identityKey.resetBody'),
+      confirmLabel: t('auth.identityKey.resetConfirm'),
+      danger: true,
+      onConfirm: replaceIdentity,
+    });
   };
 
   const confirmReplace = () => dialogs.confirm({
@@ -561,6 +607,39 @@ export function RecoveryPane() {
           </Explain>
         )}
       </Section>
+
+      {trust && (hasKey || copyMissing) ? (
+        <Section title={t('auth.identityKey.title')}>
+          {trust.canSign && trust.boundRecoveryKey ? (
+            <Explain>{t('auth.identityKey.boundExplain')}</Explain>
+          ) : trust.continuity?.reason === 'immutable-id-changed' ? (
+            <Explain>{t('auth.identityKey.resetElsewhere')}</Explain>
+          ) : (
+            <>
+              <Explain>
+                {trust.canSign ? t('auth.identityKey.bindExplain') : t('auth.identityKey.lostExplain')}
+              </Explain>
+              <TextInput
+                label={t('auth.recoveryKey.fieldLabel')}
+                type="password"
+                value={identityRecoveryKey}
+                autoComplete="off"
+                placeholder={t('auth.recoveryKey.placeholder')}
+                onChange={(e) => setIdentityRecoveryKey(e.target.value)}
+              />
+              <Button
+                variant={trust.canSign ? 'primary' : 'secondary'}
+                className="self-start"
+                disabled={busy || !identityRecoveryKey.trim()}
+                loading={busy}
+                onClick={trust.canSign ? bindIdentity : askReplaceIdentity}
+              >
+                {trust.canSign ? t('auth.identityKey.bindButton') : t('auth.identityKey.replaceButton')}
+              </Button>
+            </>
+          )}
+        </Section>
+      ) : null}
 
       <Section title={t('auth.backup.title')}>
         <Explain>

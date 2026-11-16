@@ -1,7 +1,46 @@
 import * as vault from '../vault.js';
-import { verification } from './shared.js';
+import { PENDING_RECOVERY_KEY, verification } from './shared.js';
 
 export const trustMethods = {
+  /// Binds the recovery key into the identity when this device can sign, so a later loss of the root on every device can
+  /// be repaired without contacts seeing a change. Never throws: it is an extra, and the next chance will try again.
+  async bindRecoveryKeyQuietly(recoveryKey) {
+    const trust = this.trust;
+    if (!recoveryKey || !trust?.canSign || !trust.continuity?.valid) return false;
+    try {
+      const bound = await trust.bindRecoveryKey(recoveryKey);
+      if (bound) this.emit('verify', {});
+      return bound;
+    } catch (e) {
+      console.warn('could not bind the recovery key to the account identity', e);
+      return false;
+    }
+  },
+
+  /// Settings: the user typed their recovery key to protect the account key with it.
+  async bindIdentityRecoveryKey(recoveryKey) {
+    const trust = await this.startTrust();
+    if (!trust) throw new Error('encryption is not available on this device');
+    const bound = await trust.bindRecoveryKey(recoveryKey);
+    this.emit('verify', {});
+    return bound;
+  },
+
+  /// The account key is lost on every device: replace it with the recovery key. `reset` says whether contacts will see
+  /// the account as changed (no key was bound) or nothing at all (the bound key continued the identity).
+  async recoverIdentity(recoveryKey) {
+    const trust = await this.startTrust();
+    if (!trust) throw new Error('encryption is not available on this device');
+    const mode = this.custodyMode();
+    const sealKey = (mode === 'opaque_custody' || mode === 'self_custody') && this.vault?.key ? this.vault.key : null;
+    const outcome = await trust.recoverWithRecoveryKey(recoveryKey, {
+      mlsKey: await this.mls.leafKey(),
+      sealKey,
+    });
+    this.emit('verify', { ready: true });
+    return outcome;
+  },
+
   /// How this account's keys are kept, for sealing the identity secret. The server says "none" before the vault exists, and
   /// the first custody read is sent before this device creates it: taking that answer sealed a new account's identity under a
   /// throwaway key, so every device signed in later could never sign itself. A real mode only.
@@ -34,6 +73,9 @@ export const trustMethods = {
           this.custodyMode(),
         );
         this.trust = trust;
+        // Signed up a moment ago: the new recovery key is still in hand, so bind it while this device holds the root.
+        const pending = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(PENDING_RECOVERY_KEY) : null;
+        if (pending) this.bindRecoveryKeyQuietly(pending);
 
         trust.onRecoveryAdopted = async (ring) => {
           const mode = this.custodyMode();
