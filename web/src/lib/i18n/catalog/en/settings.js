@@ -294,7 +294,7 @@ export const settings = {
   'settings.uploads.deleteNone': 'Delete selected',
   'settings.uploads.deleteSelected': 'Delete {count} selected ({size})',
   'settings.uploads.inMessages': '{count, plural, one {In # message} other {In # messages}}',
-  'settings.uploads.shared': 'Same file uploaded more than once, so it can\'t be deleted from here',
+  'settings.uploads.shared': 'Another account uploaded the same file, so it can\'t be deleted from here',
   'settings.uploads.unsupported': '{home} is running a version that can\'t list uploads yet. Ask its operator to update.',
   'settings.uploads.closed': '{used} stored on {home}. New uploads are turned off for your account, so there is no quota to free up, but you can still delete what is here.',
   'settings.uploads.encrypted': 'Encrypted file (direct message)',

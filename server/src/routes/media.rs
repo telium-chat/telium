@@ -497,6 +497,13 @@ async fn store_payload(
                 .bind(hash)
                 .execute(&state.pool)
                 .await?;
+            // Who holds the bytes, not how many times: an owner re-sending
+            // its own file must not lock itself out of deleting it.
+            sqlx::query("INSERT OR IGNORE INTO media_uploaders (hash, user_id) VALUES (?, ?)")
+                .bind(hash)
+                .bind(user_id)
+                .execute(&state.pool)
+                .await?;
             // One row backs every upload of the same bytes, so attachment
             // policy must not reach bytes a profile asset or expression also
             // uses. Re-uploading an attachment's bytes as one takes the row
@@ -1874,12 +1881,15 @@ pub async fn delete(
     if !valid_hash(&hash) {
         return Err(ApiError::NotFound("no such media".into()));
     }
-    let row: Option<(String, i64)> =
-        sqlx::query_as("SELECT owner_user_id, refcount FROM media WHERE hash = ?")
-            .bind(&hash)
-            .fetch_optional(&state.pool)
-            .await?;
-    let (owner, refcount) = row.ok_or_else(|| ApiError::NotFound("no such media".into()))?;
+    let row: Option<(String, i64)> = sqlx::query_as(
+        "SELECT owner_user_id, (SELECT COUNT(*) FROM media_uploaders u \
+         WHERE u.hash = media.hash AND u.user_id <> media.owner_user_id) \
+         FROM media WHERE hash = ?",
+    )
+    .bind(&hash)
+    .fetch_optional(&state.pool)
+    .await?;
+    let (owner, others) = row.ok_or_else(|| ApiError::NotFound("no such media".into()))?;
     let is_admin: i64 = sqlx::query_scalar("SELECT admin FROM accounts WHERE user_id = ?")
         .bind(&auth.user_id)
         .fetch_optional(&state.pool)
@@ -1888,17 +1898,16 @@ pub async fn delete(
     if owner != auth.user_id && is_admin == 0 {
         return Err(ApiError::Forbidden("only the uploader may delete this object".into()));
     }
-    // Identical bytes are stored once and claimed by every upload of them, so
-    // the object under this hash is not the requester's alone. An owner's
-    // delete stops here rather than breaking someone else's messages; an
-    // operator's takedown does not ask.
-    if refcount > 1 && is_admin == 0 {
+    // Identical bytes are stored once and claimed by every account that
+    // uploads them, so while another account holds them the object is not the
+    // requester's alone. An owner's delete stops here rather than breaking
+    // someone else's messages; the owner's own repeat uploads do not count;
+    // an operator's takedown does not ask.
+    if others > 0 && is_admin == 0 {
         return Err(ApiError::Conflict(format!(
-            "this file's bytes are shared with {} other upload{} of the same content; \
-             deleting it here would break their messages. Each uploader can delete \
-             their own; an operator can remove it outright.",
-            refcount - 1,
-            if refcount > 2 { "s" } else { "" },
+            "this file's bytes are shared: {others} other account{} uploaded the same content; \
+             deleting it here would break their messages. An operator can remove it outright.",
+            if others > 1 { "s" } else { "" },
         )));
     }
 
@@ -1918,7 +1927,7 @@ pub struct OwnMediaParams {
 /// spent on and hand space back. Only attachments are listed: avatars, banners
 /// and emoji are charged to the same quota but are in use by the profile or
 /// guild that shows them, so they appear in `breakdown` and nowhere to delete.
-/// `deletable` is false while other uploaders share the bytes; the delete
+/// `deletable` is false while other accounts uploaded the same bytes; the delete
 /// endpoint would answer 409 for those, and an operator's takedown power is
 /// deliberately not offered from here.
 pub async fn list_own(
@@ -1945,7 +1954,9 @@ pub async fn list_own(
 
     #[allow(clippy::type_complexity)]
     let rows: Vec<(String, String, String, i64, i64, Option<i64>, i64, i64)> = sqlx::query_as(
-        "SELECT hash, filename, mime, size, created_at, expires_at, refcount, refs FROM media \
+        "SELECT hash, filename, mime, size, created_at, expires_at, \
+         (SELECT COUNT(*) FROM media_uploaders u WHERE u.hash = media.hash \
+          AND u.user_id <> media.owner_user_id), refs FROM media \
          WHERE owner_user_id = ? AND purpose = 'attachment' \
          ORDER BY size DESC, created_at DESC, hash LIMIT ? OFFSET ?",
     )
@@ -1958,7 +1969,7 @@ pub async fn list_own(
     let files = rows
         .into_iter()
         .take(limit as usize)
-        .map(|(hash, filename, mime, size, created_at, expires_at, refcount, refs)| {
+        .map(|(hash, filename, mime, size, created_at, expires_at, others, refs)| {
             json!({
                 "hash": hash,
                 "filename": filename,
@@ -1967,8 +1978,8 @@ pub async fn list_own(
                 "created_at": created_at,
                 "expires_at": expires_at,
                 "in_messages": refs,
-                "shared": refcount > 1,
-                "deletable": refcount <= 1,
+                "shared": others > 0,
+                "deletable": others == 0,
             })
         })
         .collect::<Vec<_>>();
@@ -1986,8 +1997,8 @@ pub async fn list_own(
 }
 
 /// Where one of the caller's own uploads was sent: the newest live message
-/// they authored that carries it. Looked up on demand rather than with the
-/// list, since finding it scans message attachments. Direct messages are
+/// they authored that carries it, read from the `message_media` index the
+/// message triggers maintain. Direct messages are
 /// end-to-end encrypted, so the server cannot see them here and answers 404.
 pub async fn own_message(
     State(state): State<AppState>,
@@ -2006,13 +2017,13 @@ pub async fn own_message(
         return Err(ApiError::NotFound("no such media".into()));
     }
     let row: Option<(String, String, String)> = sqlx::query_as(
-        "SELECT m.id, m.channel_id, m.guild_id FROM messages m, json_each(m.attachments) j \
-         WHERE m.author_id = ? AND m.deleted = 0 AND json_valid(m.attachments) \
-         AND json_type(j.value) = 'object' AND json_extract(j.value, '$.hash') = ? \
+        "SELECT m.id, m.channel_id, m.guild_id FROM message_media mm \
+         JOIN messages m ON m.id = mm.message_id \
+         WHERE mm.hash = ? AND m.author_id = ? AND m.deleted = 0 \
          ORDER BY m.id DESC LIMIT 1",
     )
-    .bind(&auth.user_id)
     .bind(&hash)
+    .bind(&auth.user_id)
     .fetch_optional(&state.pool)
     .await?;
     let (message_id, channel_id, guild_id) =

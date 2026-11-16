@@ -1509,17 +1509,40 @@ async fn the_list_says_when_uploads_are_closed_and_when_they_are_merely_unlimite
 }
 
 #[tokio::test]
-async fn re_uploading_your_own_bytes_leaves_the_row_undeletable_by_you() {
-    // Documents a limit of the refuse-while-shared rule: refcount counts
-    // uploads, not uploaders, so the same account sending a file twice holds
-    // it against its own delete. The list reports it as not deletable.
+async fn re_uploading_your_own_bytes_keeps_the_row_yours_to_delete() {
+    // Shared means another account uploaded the bytes, not that the same
+    // account sent them twice.
     let s = start().await;
-    let alice = s.user("alice").await;
-    upload_attachment(&s, &alice, None, "sent twice").await;
-    upload_attachment(&s, &alice, None, "sent twice").await;
-    let (_, list) = s.get("/_telium/v1/account/media", Some(&alice.home)).await;
+    // Not the first account: that one is the operator and may delete anything.
+    let _operator = s.user("alice").await;
+    let bob = s.user("bob").await;
+    let first = upload_attachment(&s, &bob, None, "sent twice").await;
+    upload_attachment(&s, &bob, None, "sent twice").await;
+    let (_, list) = s.get("/_telium/v1/account/media", Some(&bob.home)).await;
     assert_eq!(list["files"].as_array().unwrap().len(), 1);
-    assert_eq!(list["files"][0]["deletable"], false);
+    assert_eq!(list["files"][0]["shared"], false, "{list}");
+    assert_eq!(list["files"][0]["deletable"], true, "{list}");
+    let hash = first["hash"].as_str().unwrap();
+    let (status, gone) = s.delete(&format!("/_telium/v1/media/{hash}"), &bob.home).await;
+    assert_eq!(status, 200, "{gone}");
+}
+
+#[tokio::test]
+async fn another_accounts_upload_of_the_same_bytes_still_blocks_the_owners_delete() {
+    let s = start().await;
+    // The first account on a fresh server is its operator, whose takedown
+    // skips the shared check, so the owner here is the second account.
+    let _operator = s.user("alice").await;
+    let bob = s.user("bob").await;
+    let carol = s.user("carol").await;
+    let first = upload_attachment(&s, &bob, None, "identical again").await;
+    upload_attachment(&s, &bob, None, "identical again").await;
+    upload_attachment(&s, &carol, None, "identical again").await;
+    let (_, list) = s.get("/_telium/v1/account/media", Some(&bob.home)).await;
+    assert_eq!(list["files"][0]["deletable"], false, "{list}");
+    let hash = first["hash"].as_str().unwrap();
+    let (status, refused) = s.delete(&format!("/_telium/v1/media/{hash}"), &bob.home).await;
+    assert_eq!(status, 409, "{refused}");
 }
 
 #[tokio::test]
@@ -1546,6 +1569,13 @@ async fn an_upload_can_be_traced_to_the_message_that_carries_it() {
     // Only the uploader may ask.
     let (status, _) = s.get(&path, Some(&bob.home)).await;
     assert_eq!(status, 404);
+
+    // Deleting the message takes it out of the lookup.
+    let mid = msg["id"].as_str().unwrap();
+    let (status, _) = s.delete(&format!("/_telium/v1/channels/{cid}/messages/{mid}"), &alice.token).await;
+    assert!(status == 200 || status == 204, "{status}");
+    let (status, _) = s.get(&path, Some(&alice.home)).await;
+    assert_eq!(status, 404, "a deleted message is not where the file lives");
 }
 
 #[tokio::test]
