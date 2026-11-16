@@ -11,6 +11,7 @@ import { trustMethods } from '../lib/store/trust.js';
 import { recoveryVaultWrapper } from '../lib/account-recovery.js';
 import { sessionMethods } from '../lib/store/session.js';
 import { RealHome, haveServer, lossy } from './real-home.js';
+import { b64 } from '../lib/util.js';
 
 const realFetch = globalThis.fetch;
 
@@ -496,6 +497,115 @@ describe.skipIf(!haveServer)('against the real server', () => {
     await later.start(m1.cs, ring.key, leaf, 'opaque_custody');
     expect(later.identityMismatch).toBeFalsy();
     expect(later.canSign).toBe(true);
+  });
+
+  // Each simulated device keeps its own IndexedDB and localStorage (pins live there).
+  function devices() {
+    const saved = new Map();
+    let current = null;
+    const snapshot = () => Object.fromEntries(
+      Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).map((k) => [k, localStorage.getItem(k)]),
+    );
+    return (label) => {
+      if (current) saved.set(current, { db: globalThis.indexedDB, storage: snapshot() });
+      current = label;
+      const next = saved.get(label);
+      globalThis.indexedDB = next?.db || new IDBFactory();
+      localStorage.clear();
+      for (const [k, v] of Object.entries(next?.storage || {})) localStorage.setItem(k, v);
+    };
+  }
+
+  // An OPAQUE account whose root lives only on its first device (device custody), plus a contact who verified it.
+  async function lostRootAccount(on) {
+    const password = `pw-${crypto.randomUUID()}`;
+    on('alice-1');
+    const reg = await registerOpaque(server.base, name('alice'), password, 'web');
+    const first = server.wrap(reg.session);
+    const ring = await loadVault(first.api, null, first.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper);
+    const m1 = await engine(first, first.api, ring.key);
+    const t1 = new Trust(first.api, { userId: first.userId, deviceId: first.deviceId, recovery: ring });
+    await t1.start(m1.cs, ring.key, await m1.leafKey(), 'device_custody');
+    expect(t1.canSign).toBe(true);
+
+    on('bob');
+    const bob = await server.register(name('bob'));
+    const bm = await engine(bob);
+    const tb = new Trust(bob.api, { userId: bob.userId, deviceId: bob.deviceId });
+    await tb.start(bm.cs, crypto.getRandomValues(new Uint8Array(32)), await bm.leafKey(), 'device_custody');
+    await tb.vouchForUser(first.userId, b64(t1.identityKey));
+    tb.peers.clear();
+    await tb.refresh(first.userId);
+    expect(tb.statusFor(first.userId, first.deviceId, null)).toBe('verified');
+
+    // Alice's only device is gone; she signs in somewhere new.
+    on('alice-2');
+    const login = await loginOpaque(server.base, first.userId, password, 'desktop');
+    const second = server.wrap(login.session);
+    const again = await loadVault(second.api, null, second.userId, login.recoveryWrapper);
+    const m2 = await engine(second, second.api, again.key);
+    const t2 = new Trust(second.api, { userId: second.userId, deviceId: second.deviceId, recovery: again });
+    await t2.start(m2.cs, again.key, await m2.leafKey(), 'device_custody');
+    expect(t2.canSign).toBe(false);
+    return { reg, first, m1, t1, bob, bm, tb, second, m2, t2 };
+  }
+
+  it('a bound recovery key replaces a root lost everywhere, and contacts see no change', async () => {
+    const on = devices();
+    const { reg, first, t1, tb, second, m2, t2 } = await lostRootAccount(on);
+    // Bound while a device still held the root (in the app: at sign-up, or when the key is made or reconnected).
+    on('alice-1');
+    expect(await t1.bindRecoveryKey(reg.accountRecovery.text)).toBe(true);
+    expect(t1.boundRecoveryKey).toBeTruthy();
+
+    on('alice-2');
+    const fresh = new Trust(second.api, { userId: second.userId, deviceId: second.deviceId, recovery: t2.recovery });
+    await fresh.start(m2.cs, null, await m2.leafKey(), 'device_custody');
+    const outcome = await fresh.recoverWithRecoveryKey(reg.accountRecovery.text, { mlsKey: await m2.leafKey() });
+    expect(outcome.reset).toBe(false);
+    expect(fresh.canSign).toBe(true);
+
+    on('bob');
+    tb.peers.clear();
+    const peer = await tb.refresh(first.userId);
+    expect(peer.continuityValid).toBe(true);
+    expect(tb.statusFor(first.userId, second.deviceId, null)).toBe('verified');
+  });
+
+  it('with no bound key a reset starts a new identity that contacts must verify again', async () => {
+    const on = devices();
+    const { reg, first, m1, tb, second, m2, t2 } = await lostRootAccount(on);
+
+    on('alice-2');
+    const outcome = await t2.recoverWithRecoveryKey(reg.accountRecovery.text, { mlsKey: await m2.leafKey() });
+    expect(outcome.reset).toBe(true);
+    expect(t2.canSign).toBe(true);
+    expect(t2.boundRecoveryKey).toBeTruthy();
+    // The next start on this device takes the new identity as its own.
+    const reopened = new Trust(second.api, { userId: second.userId, deviceId: second.deviceId });
+    await reopened.start(m2.cs, null, await m2.leafKey(), 'device_custody');
+    expect(reopened.canSign).toBe(true);
+    expect(reopened.identityMismatch).toBe(false);
+
+    // Bob pinned the old identity: changed, until he compares emoji with Alice again.
+    on('bob');
+    tb.peers.clear();
+    expect(tb.statusFor(first.userId, second.deviceId, null)).not.toBe('verified');
+    await tb.refresh(first.userId);
+    expect(tb.statusFor(first.userId, second.deviceId, null)).toBe('changed');
+    await tb.vouchForUser(first.userId, b64(t2.identityKey));
+    tb.peers.clear();
+    await tb.refresh(first.userId);
+    expect(tb.statusFor(first.userId, second.deviceId, null)).toBe('verified');
+
+    // Alice's old device comes back: changed for itself too, until it takes the key from the device that reset.
+    on('alice-1');
+    const back = new Trust(first.api, { userId: first.userId, deviceId: first.deviceId });
+    await back.start(m1.cs, null, await m1.leafKey(), 'device_custody');
+    expect(back.identityMismatch).toBe(true);
+    await back.adoptSecret(t2.signKey, b64(t2.identityKey));
+    expect(back.canSign).toBe(true);
+    expect(back.identityMismatch).toBe(false);
   });
 
   it('replaces a recovery key so the new one opens the vault, and a failed try keeps the old', async () => {

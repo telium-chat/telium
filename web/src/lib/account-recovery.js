@@ -98,6 +98,11 @@ export function signRecoveryCopyRestore(recoveryKey, userId, attemptId, challeng
   ));
 }
 
+/// For statements whose payload already carries its own domain string (identity rotation and reset).
+export function signWithRecoveryKey(recoveryKey, payload) {
+  return b64url(ed25519.sign(payload, signingSeed(recoveryKey)));
+}
+
 export function normalizeRecoveryKey(value) {
   const seed = seedBytes(value);
   return PREFIX + b64url(seed);

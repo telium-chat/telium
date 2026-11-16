@@ -5,10 +5,12 @@ import {
   identityAnchorPayload,
   identityRotationPayload,
   pinIdentity,
+  recoveryKeyBindingPayload,
   recoveryPolicyPayload,
   verifyIdentityDocument,
 } from '../lib/identity-continuity.js';
 import { b64url } from '../lib/util.js';
+import { generateAccountRecovery, signWithRecoveryKey } from '../lib/account-recovery.js';
 
 const SUITE = 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519';
 
@@ -538,5 +540,79 @@ describe('immutable identity continuity', () => {
     const accepted = await verifyIdentityDocument(cs, await makeDoc(2));
     expect(accepted.valid).toBe(true);
     expect(accepted.currentKey).toBe(recovered.public);
+  });
+});
+
+describe('recovery key bound into the identity', () => {
+  const user = '@alice:example.test';
+
+  // Root 0 binds `bound` (and, if given, `later` as version 2); root 0 is then lost and root 1 takes over, signed by `signer`.
+  async function recovered({ bound, later = null, signer, dropLatest = false }) {
+    const first = await root();
+    const second = await root();
+    const immutable = immutableIdentityId(first.public);
+    const binding = async (version, key) => ({
+      version,
+      identity_sequence: 0,
+      recovery_key: key.publicKey,
+      signature: await sign(first.secret, recoveryKeyBindingPayload(immutable, version, 0, key.publicKey)),
+    });
+    const bindings = [await binding(1, bound)];
+    if (later) bindings.push(await binding(2, later));
+    const payload = identityRotationPayload(immutable, 1, first.public, second.public);
+    const shown = dropLatest ? bindings.slice(0, 1) : bindings;
+    return verifyIdentityDocument(cs, {
+      exists: true,
+      user_id: user,
+      immutable_id: immutable,
+      genesis_key: first.public,
+      anchor_signature: await anchorSignature(user, first, immutable),
+      current_key: second.public,
+      sequence: 1,
+      current_policy_version: 0,
+      recovery_policies: [],
+      current_recovery_key_version: shown.length,
+      recovery_keys: shown,
+      transitions: [{
+        sequence: 1,
+        previous_key: first.public,
+        new_key: second.public,
+        new_key_signature: await sign(second.secret, payload),
+        authorization_kind: 'recovery_key',
+        authorization: {
+          kind: 'recovery_key',
+          binding_version: shown.length,
+          signature: signWithRecoveryKey(signer.text, payload),
+        },
+      }],
+    });
+  }
+
+  it('continues the identity when the bound recovery key signs the rotation', async () => {
+    const key = generateAccountRecovery();
+    const verified = await recovered({ bound: key, signer: key });
+    expect(verified.valid).toBe(true);
+    expect(verified.recoveryKey).toBe(key.publicKey);
+    expect(verified.recoveryKeyVersion).toBe(1);
+  });
+
+  it('refuses a rotation signed by any other key, whatever the server says', async () => {
+    const verified = await recovered({ bound: generateAccountRecovery(), signer: generateAccountRecovery() });
+    expect(verified.valid).toBe(false);
+    expect(verified.reason).toBe('bad-recovery-key-signature');
+  });
+
+  it('refuses a replaced key, and a server dropping the replacement is caught by the pin', async () => {
+    const old = generateAccountRecovery();
+    const replacement = generateAccountRecovery();
+    // The old key may not sign once a newer binding exists.
+    const stale = await recovered({ bound: old, later: replacement, signer: old });
+    expect(stale.valid).toBe(false);
+    expect(stale.reason).toBe('bad-recovery-key-signature');
+
+    // A device that saw version 2 refuses a document showing only version 1.
+    expect(pinIdentity(user, { immutableId: 'tid:x', sequence: 0, recoveryKeyVersion: 2 }).ok).toBe(true);
+    expect(pinIdentity(user, { immutableId: 'tid:x', sequence: 0, recoveryKeyVersion: 1 }).reason)
+      .toBe('recovery-key-rollback');
   });
 });

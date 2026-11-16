@@ -321,6 +321,9 @@ export class Api {
     return this.put('/_telium/v1/identity/recovery-policy', body);
   }
   rotateIdentity(body) { return this.post('/_telium/v1/identity/rotate', body); }
+  bindIdentityRecoveryKey(body) { return this.put('/_telium/v1/identity/recovery-key', body); }
+  identityResetStart() { return this.post('/_telium/v1/identity/reset/start', {}); }
+  identityResetFinish(body) { return this.post('/_telium/v1/identity/reset/finish', body); }
   identityDocument(userId) {
     return request(
       this.base,

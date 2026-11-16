@@ -33,6 +33,7 @@ export function sanitizePin(raw) {
     currentKey: typeof raw.currentKey === 'string' ? raw.currentKey : null,
     policyVersion: count(raw.policyVersion),
     policySignature: typeof raw.policySignature === 'string' ? raw.policySignature : null,
+    ...(count(raw.recoveryKeyVersion) != null ? { recoveryKeyVersion: count(raw.recoveryKeyVersion) } : {}),
     verified: raw.verified === true,
   };
 }
@@ -85,6 +86,10 @@ export function mergePin(local, remote) {
     policy = remote;
   }
 
+  // Only ever moves forward, so the higher of the two.
+  const bindingVersions = [local.recoveryKeyVersion, remote.recoveryKeyVersion].filter((v) => v != null);
+  const recoveryKeyVersion = bindingVersions.length ? Math.max(...bindingVersions) : null;
+
   return {
     pin: {
       immutableId: local.immutableId,
@@ -92,6 +97,7 @@ export function mergePin(local, remote) {
       currentKey,
       policyVersion: policy.policyVersion,
       policySignature: policy.policySignature || local.policySignature || remote.policySignature,
+      ...(recoveryKeyVersion != null ? { recoveryKeyVersion } : {}),
       verified: local.verified || remote.verified,
     },
     conflict: false,

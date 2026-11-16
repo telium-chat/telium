@@ -9,6 +9,8 @@ const ANCHOR_DOMAIN = 'telium-identity-anchor:v1';
 const POLICY_DOMAIN = 'telium-identity-recovery-policy:v1';
 const ROTATE_DOMAIN = 'telium-identity-rotate:v1';
 const REVOKE_DOMAIN = 'telium-device-revoke:v1';
+const RECOVERY_KEY_DOMAIN = 'telium-identity-recovery-key:v1';
+const RESET_DOMAIN = 'telium-identity-reset:v1';
 const ID_DOMAIN = te.encode('telium-identity-id:v1\0');
 
 function concat(a, b) {
@@ -66,6 +68,17 @@ export function identityRotationPayload(
 }
 
 /// Names the immutable identity as well as the address, so a statement can't be replayed against another identity that later holds the address.
+/// The root vouching for the account recovery key, so a rotation that key signs is checkable without the server.
+export function recoveryKeyBindingPayload(immutableId, version, identitySequence, recoveryKey) {
+  return te.encode(`${RECOVERY_KEY_DOMAIN}|${immutableId}|${version}|${identitySequence}|${recoveryKey}`);
+}
+
+/// Signed with the recovery key to start a new identity in place of a lost one; the server checks it, contacts never
+/// see it, since to them a reset is a changed identity whoever asked for it.
+export function identityResetPayload(userId, attemptId, challenge, immutableId, identityKey) {
+  return te.encode(`${RESET_DOMAIN}|${userId}|${attemptId}|${challenge}|${immutableId}|${identityKey}`);
+}
+
 export function deviceRevocationPayload(userId, immutableId, deviceId, mlsKey) {
   return te.encode(`${REVOKE_DOMAIN}|${userId}|${immutableId}|${deviceId}|${mlsKey}`);
 }
@@ -213,6 +226,30 @@ export async function verifyIdentityDocument(cs, document, expectedUserId = null
     return verified;
   };
 
+  const bindingRows = [...(document.recovery_keys || [])];
+  const bindings = new Map(bindingRows.map((b) => [Number(b.version), b]));
+  if (bindings.size !== bindingRows.length) {
+    return { exists: true, valid: false, reason: 'duplicate-recovery-key-version', keys: new Map() };
+  }
+  const validBindings = new Map();
+  // Signed by the root current when it was made, so `keys` must already reach its sequence.
+  const verifyBinding = async (version) => {
+    if (validBindings.has(version)) return validBindings.get(version);
+    const binding = bindings.get(Number(version));
+    if (!binding) return null;
+    const bindingSequence = Number(binding.identity_sequence);
+    if (!Number.isSafeInteger(bindingSequence) || bindingSequence < 0 || !binding.recovery_key) return null;
+    const signer = keys.get(bindingSequence);
+    if (!signer) return null;
+    let raw;
+    try { raw = unb64(binding.recovery_key); } catch { return null; }
+    if (raw.length !== 32) return null;
+    const payload = recoveryKeyBindingPayload(immutableId, Number(version), bindingSequence, binding.recovery_key);
+    if (!(await verifies(cs, signer, payload, binding.signature))) return null;
+    validBindings.set(Number(version), binding);
+    return binding;
+  };
+
   for (const transition of transitions) {
     const next = sequence + 1;
     if (
@@ -270,6 +307,21 @@ export async function verifyIdentityDocument(cs, document, expectedUserId = null
       if (approved.size < policy.threshold) {
         return { exists: true, valid: false, reason: 'insufficient-guardians', keys };
       }
+    } else if (auth.kind === 'recovery_key') {
+      // The latest binding made before this transition; a newer one replaced any older, so it alone may sign.
+      const active = [...bindings.values()]
+        .filter((b) => Number(b.identity_sequence) <= sequence)
+        .sort((a, b) => Number(b.version) - Number(a.version))[0] || null;
+      if (!active || Number(auth.binding_version) !== Number(active.version)) {
+        return { exists: true, valid: false, reason: 'superseded-recovery-key', keys };
+      }
+      const binding = await verifyBinding(Number(auth.binding_version));
+      if (!binding) {
+        return { exists: true, valid: false, reason: 'bad-recovery-key-binding', keys };
+      }
+      if (!(await verifies(cs, binding.recovery_key, payload, auth.signature))) {
+        return { exists: true, valid: false, reason: 'bad-recovery-key-signature', keys };
+      }
     } else {
       return { exists: true, valid: false, reason: 'unknown-authorization', keys };
     }
@@ -305,6 +357,23 @@ export async function verifyIdentityDocument(cs, document, expectedUserId = null
     return { exists: true, valid: false, reason: 'policy-head-mismatch', keys };
   }
 
+  for (const version of [...bindings.keys()].sort((a, b) => a - b)) {
+    if (!(await verifyBinding(version))) {
+      return { exists: true, valid: false, reason: 'bad-recovery-key-binding', keys };
+    }
+  }
+  // Append-only, like policies: a server must not drop a newer binding to bring back a replaced key.
+  const bindingVersions = [...validBindings.keys()].sort((a, b) => a - b);
+  const currentBindingVersion = Number(document.current_recovery_key_version || 0);
+  if (
+    !Number.isSafeInteger(currentBindingVersion)
+    || bindingVersions.some((version, index) => version !== index + 1)
+    || currentBindingVersion !== (bindingVersions.at(-1) || 0)
+  ) {
+    return { exists: true, valid: false, reason: 'recovery-key-head-mismatch', keys };
+  }
+  const currentBinding = validBindings.get(currentBindingVersion) || null;
+
   return {
     exists: true,
     valid: true,
@@ -315,6 +384,8 @@ export async function verifyIdentityDocument(cs, document, expectedUserId = null
     keys,
     recoveryPolicies: validPolicies,
     currentPolicyVersion,
+    recoveryKeyVersion: currentBindingVersion,
+    recoveryKey: currentBinding?.recovery_key || null,
   };
 }
 
@@ -358,6 +429,10 @@ function checkpoint(identity) {
       ? policyVersion
       : null,
     policySignature: currentPolicy?.signature || null,
+    recoveryKeyVersion: Number.isSafeInteger(Number(identity?.recoveryKeyVersion))
+      && identity?.recoveryKeyVersion != null
+      ? Number(identity.recoveryKeyVersion)
+      : null,
   };
 }
 
@@ -425,6 +500,13 @@ export function pinIdentity(userId, identity) {
     }
   }
 
+  if (
+    pinned?.recoveryKeyVersion != null && next.recoveryKeyVersion != null
+    && next.recoveryKeyVersion < pinned.recoveryKeyVersion
+  ) {
+    return { ok: false, reason: 'recovery-key-rollback', pinned, received: next };
+  }
+
   // Don't discard a richer checkpoint when an old caller supplies only a bare id.
   const merged = {
     immutableId: next.immutableId,
@@ -432,12 +514,26 @@ export function pinIdentity(userId, identity) {
     currentKey: next.currentKey ?? pinned?.currentKey ?? null,
     policyVersion: next.policyVersion ?? pinned?.policyVersion ?? null,
     policySignature: next.policySignature ?? pinned?.policySignature ?? null,
+    ...((next.recoveryKeyVersion ?? pinned?.recoveryKeyVersion) != null
+      ? { recoveryKeyVersion: next.recoveryKeyVersion ?? pinned.recoveryKeyVersion }
+      : {}),
     verified: pinned?.verified === true,
   };
   const before = storage.get(key, null);
   storage.set(key, merged);
   if (JSON.stringify(before) !== JSON.stringify(merged)) pinsChanged();
   return { ok: true, pinned: merged.immutableId, checkpoint: merged };
+}
+
+/// Replaces a pin with a different identity. Only for a change a human confirmed (comparing emoji with that person or
+/// with one of your own devices) or that this device made itself with the recovery key: anything else is exactly the
+/// swap a pin exists to refuse.
+export function replaceIdentityPin(userId, identity, { verified = false } = {}) {
+  const next = checkpoint(identity);
+  if (!next.immutableId) return false;
+  storage.set(PIN_PREFIX + userId, { ...next, verified });
+  pinsChanged();
+  return true;
 }
 
 export function pinnedIdentity(userId) {
