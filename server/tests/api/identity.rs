@@ -104,6 +104,119 @@ async fn a_first_key_made_twice_at_once_keeps_one_and_refuses_the_other() {
     assert_eq!(doc["identity_key"].as_str(), Some(winner.as_str()), "{doc}");
 }
 
+async fn give_recovery_key(s: &Server, user: &User, key: &SigningKey) {
+    sqlx::query("UPDATE accounts SET recovery_public_key = ? WHERE user_id = ?")
+        .bind(identity_public(key))
+        .bind(&user.user_id)
+        .execute(&s.state.pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_root_bound_recovery_key_can_rotate_a_lost_root_until_it_is_replaced() {
+    let s = start().await;
+    let alice = s.user("identity-recovery-rotate").await;
+    let root0 = identity_signing_key();
+    let (immutable, public0) = anchor_test_identity(&s, &alice, &root0).await;
+    let recovery = identity_signing_key();
+    give_recovery_key(&s, &alice, &recovery).await;
+    let bind = |signer: &SigningKey, key: &str| {
+        let payload = format!("telium-identity-recovery-key:v1|{immutable}|1|0|{key}");
+        json!({ "version": 1, "identity_sequence": 0, "recovery_key": key, "signature": identity_signature(signer, &payload) })
+    };
+
+    // Only this account's recovery key, and only signed by the root.
+    let stranger = identity_public(&identity_signing_key());
+    let (status, body) = s.put("/_telium/v1/identity/recovery-key", &alice.home, bind(&root0, &stranger)).await;
+    assert_eq!(status, 409, "{body}");
+    let (status, body) = s
+        .put("/_telium/v1/identity/recovery-key", &alice.home, bind(&identity_signing_key(), &identity_public(&recovery)))
+        .await;
+    assert_eq!(status, 401, "{body}");
+    let (status, bound) = s
+        .put("/_telium/v1/identity/recovery-key", &alice.home, bind(&root0, &identity_public(&recovery)))
+        .await;
+    assert_eq!(status, 200, "{bound}");
+    assert_eq!(bound["current_recovery_key_version"], 1);
+    assert_eq!(bound["recovery_keys"][0]["recovery_key"], identity_public(&recovery));
+
+    let root1 = identity_signing_key();
+    let public1 = identity_public(&root1);
+    let payload = identity_rotation_payload(&immutable, 1, &public0, &public1);
+    let rotate = |signer: &SigningKey| json!({
+        "sequence": 1,
+        "previous_key": public0,
+        "new_key": public1,
+        "sealed_secret": "sealed-new-root",
+        "new_key_signature": identity_signature(&root1, &payload),
+        "authorization": { "kind": "recovery_key", "binding_version": 1, "signature": identity_signature(signer, &payload) },
+    });
+    let (status, body) = s.post("/_telium/v1/identity/rotate", Some(&alice.home), rotate(&identity_signing_key())).await;
+    assert_eq!(status, 401, "a key that is not the bound one: {body}");
+
+    // Replaced on the account (it leaked, say): the bound copy no longer speaks for it.
+    let replacement = identity_signing_key();
+    give_recovery_key(&s, &alice, &replacement).await;
+    let (status, body) = s.post("/_telium/v1/identity/rotate", Some(&alice.home), rotate(&recovery)).await;
+    assert_eq!(status, 401, "a replaced recovery key: {body}");
+
+    give_recovery_key(&s, &alice, &recovery).await;
+    let (status, rotated) = s.post("/_telium/v1/identity/rotate", Some(&alice.home), rotate(&recovery)).await;
+    assert_eq!(status, 200, "{rotated}");
+    assert_eq!(rotated["immutable_id"], immutable, "the identity continues");
+    assert_eq!(rotated["current_key"], public1);
+    assert_eq!(rotated["transitions"][0]["authorization_kind"], "recovery_key");
+}
+
+#[tokio::test]
+async fn a_recovery_key_resets_a_lost_identity_to_a_new_one_and_only_once_per_challenge() {
+    let s = start().await;
+    let alice = s.user("identity-reset").await;
+    let root0 = identity_signing_key();
+    let (immutable0, _) = anchor_test_identity(&s, &alice, &root0).await;
+
+    let (status, _) = s.post("/_telium/v1/identity/reset/start", Some(&alice.home), json!({})).await;
+    assert_eq!(status, 409, "no recovery key, no reset");
+    let recovery = identity_signing_key();
+    give_recovery_key(&s, &alice, &recovery).await;
+
+    let root1 = identity_signing_key();
+    let public1 = identity_public(&root1);
+    let immutable1 = identity_id(&public1);
+    let finish = |attempt: &Value, signer: &SigningKey| {
+        let attempt_id = attempt["attempt_id"].as_str().unwrap();
+        let challenge = attempt["challenge"].as_str().unwrap();
+        let payload = format!(
+            "telium-identity-reset:v1|{}|{attempt_id}|{challenge}|{immutable1}|{public1}",
+            alice.user_id
+        );
+        json!({
+            "attempt_id": attempt_id,
+            "immutable_id": immutable1,
+            "identity_key": public1,
+            "anchor_signature": identity_signature(&root1, &identity_anchor_payload(&alice.user_id, &immutable1, &public1)),
+            "sealed_secret": "sealed-reset-root",
+            "signature": identity_signature(signer, &payload),
+        })
+    };
+
+    let (_, attempt) = s.post("/_telium/v1/identity/reset/start", Some(&alice.home), json!({})).await;
+    let (status, body) = s.post("/_telium/v1/identity/reset/finish", Some(&alice.home), finish(&attempt, &identity_signing_key())).await;
+    assert_eq!(status, 401, "not the recovery key: {body}");
+    let (status, _) = s.post("/_telium/v1/identity/reset/finish", Some(&alice.home), finish(&attempt, &recovery)).await;
+    assert_eq!(status, 401, "a challenge is spent by its first answer");
+
+    let (_, attempt) = s.post("/_telium/v1/identity/reset/start", Some(&alice.home), json!({})).await;
+    let (status, reset) = s.post("/_telium/v1/identity/reset/finish", Some(&alice.home), finish(&attempt, &recovery)).await;
+    assert_eq!(status, 200, "{reset}");
+    assert_eq!(reset["immutable_id"], immutable1.as_str());
+    assert_ne!(reset["immutable_id"], immutable0.as_str(), "a reset is a new identity, never a continuation");
+    assert_eq!(reset["sequence"], 0);
+    let (_, cross) = s.get("/_telium/v1/crosssigning", Some(&alice.home)).await;
+    assert_eq!(cross["identity_key"].as_str(), Some(public1.as_str()), "{cross}");
+}
+
 #[tokio::test]
 async fn immutable_identity_blocks_server_style_replacement_and_accepts_authorized_rotation() {
     let s = start().await;

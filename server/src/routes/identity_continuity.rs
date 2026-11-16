@@ -3,7 +3,7 @@ use crate::auth::HomeAuth;
 use crate::crypto;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
-use crate::util::{now_ms, split_user_id};
+use crate::util::{now_ms, random_token, split_user_id};
 use axum::extract::{Path, State};
 use axum::Json;
 use base64::engine::general_purpose::{
@@ -21,6 +21,9 @@ const POLICY_DOMAIN: &str = "telium-identity-recovery-policy:v1";
 const ROTATE_DOMAIN: &str = "telium-identity-rotate:v1";
 const REVOKE_DOMAIN: &str = "telium-device-revoke:v1";
 const DEVICE_DOMAIN: &str = "telium-device-sig:v1";
+const RECOVERY_KEY_DOMAIN: &str = "telium-identity-recovery-key:v1";
+const RESET_DOMAIN: &str = "telium-identity-reset:v1";
+const RESET_TTL_MS: i64 = 10 * 60 * 1000;
 const ID_DOMAIN: &[u8] = b"telium-identity-id:v1\0";
 const MAX_GUARDIANS: usize = 5;
 
@@ -63,6 +66,31 @@ pub enum RotationAuthorization {
         policy_version: i64,
         approvals: Vec<GuardianApproval>,
     },
+    /// Signed by the account recovery key the root bound into the identity (`identity_recovery_keys`).
+    RecoveryKey {
+        binding_version: i64,
+        signature: String,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RecoveryKeyBinding {
+    pub version: i64,
+    pub identity_sequence: i64,
+    pub recovery_key: String,
+    pub signature: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct IdentityResetFinish {
+    pub attempt_id: String,
+    pub immutable_id: String,
+    pub identity_key: String,
+    pub anchor_signature: String,
+    pub sealed_secret: String,
+    pub signature: String,
+    #[serde(default)]
+    pub device_signatures: Vec<DeviceResign>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -167,6 +195,40 @@ pub fn rotation_payload(
         "{ROTATE_DOMAIN}|{immutable_id}|{sequence}|{previous_key}|{new_key}"
     )
     .into_bytes()
+}
+
+pub fn recovery_key_binding_payload(
+    immutable_id: &str,
+    version: i64,
+    identity_sequence: i64,
+    recovery_key: &str,
+) -> Vec<u8> {
+    format!("{RECOVERY_KEY_DOMAIN}|{immutable_id}|{version}|{identity_sequence}|{recovery_key}")
+        .into_bytes()
+}
+
+pub fn identity_reset_payload(
+    user_id: &str,
+    attempt_id: &str,
+    challenge: &str,
+    immutable_id: &str,
+    identity_key: &str,
+) -> Vec<u8> {
+    format!("{RESET_DOMAIN}|{user_id}|{attempt_id}|{challenge}|{immutable_id}|{identity_key}")
+        .into_bytes()
+}
+
+/// Two encodings of one key compare equal; the account row is base64url, a client may send either.
+fn same_key(a: &str, b: &str) -> bool {
+    matches!((decode_any_b64(a), decode_any_b64(b)), (Some(x), Some(y)) if x.len() == 32 && x == y)
+}
+
+async fn account_recovery_key(state: &AppState, user_id: &str) -> ApiResult<Option<String>> {
+    Ok(sqlx::query_scalar("SELECT recovery_public_key FROM accounts WHERE user_id = ?")
+        .bind(user_id)
+        .fetch_optional(&state.pool)
+        .await?
+        .flatten())
 }
 
 pub fn revocation_payload(
@@ -294,6 +356,20 @@ async fn local_document(state: &AppState, user_id: &str) -> ApiResult<Value> {
     .fetch_all(&state.pool)
     .await?;
 
+    let recovery_keys: Vec<(i64, i64, String, String, i64)> = sqlx::query_as(
+        "SELECT version, identity_sequence, recovery_key, signature, created_at \
+         FROM identity_recovery_keys WHERE user_id = ? ORDER BY version",
+    )
+    .bind(user_id)
+    .fetch_all(&state.pool)
+    .await?;
+    let current_recovery_key_version: i64 = sqlx::query_scalar(
+        "SELECT current_recovery_key_version FROM identity_roots WHERE user_id = ?",
+    )
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await?;
+
     Ok(json!({
         "exists": true,
         "user_id": user_id,
@@ -303,6 +379,16 @@ async fn local_document(state: &AppState, user_id: &str) -> ApiResult<Value> {
         "current_key": current_key,
         "sequence": sequence,
         "current_policy_version": current_policy_version,
+        "current_recovery_key_version": current_recovery_key_version,
+        "recovery_keys": recovery_keys.into_iter().map(
+            |(version, identity_sequence, recovery_key, signature, created_at)| json!({
+                "version": version,
+                "identity_sequence": identity_sequence,
+                "recovery_key": recovery_key,
+                "signature": signature,
+                "created_at": created_at,
+            })
+        ).collect::<Vec<_>>(),
         "created_at": created_at,
         "updated_at": updated_at,
         "transitions": transitions.into_iter().map(
@@ -713,6 +799,47 @@ pub async fn rotate(
             .await?;
             ("guardians", Some(*policy_version))
         }
+        RotationAuthorization::RecoveryKey {
+            binding_version,
+            signature,
+        } => {
+            let current_binding: i64 = sqlx::query_scalar(
+                "SELECT current_recovery_key_version FROM identity_roots WHERE user_id = ?",
+            )
+            .bind(&auth.user_id)
+            .fetch_one(&state.pool)
+            .await?;
+            if *binding_version != current_binding || current_binding == 0 {
+                return Err(ApiError::Unauthorized(
+                    "recovery-key rotation must use the identity's current recovery key".into(),
+                ));
+            }
+            let bound: Option<String> = sqlx::query_scalar(
+                "SELECT recovery_key FROM identity_recovery_keys WHERE user_id = ? AND version = ?",
+            )
+            .bind(&auth.user_id)
+            .bind(binding_version)
+            .fetch_optional(&state.pool)
+            .await?;
+            let Some(bound) = bound else {
+                return Err(ApiError::Unauthorized("no recovery key is bound to this identity".into()));
+            };
+            // A key the account has since replaced (because it leaked, say) no longer speaks for it.
+            match account_recovery_key(&state, &auth.user_id).await? {
+                Some(account) if same_key(&account, &bound) => {}
+                _ => {
+                    return Err(ApiError::Unauthorized(
+                        "the recovery key bound to this identity has been replaced; bind the new one first".into(),
+                    ))
+                }
+            }
+            if !verify_signature(&bound, &payload, signature) {
+                return Err(ApiError::Unauthorized(
+                    "identity rotation is not signed by the bound recovery key".into(),
+                ));
+            }
+            ("recovery_key", None)
+        }
     };
 
     // The new key must sign too, or a stolen old root could point the account at someone else's key.
@@ -813,5 +940,254 @@ pub async fn rotate(
     .await?;
     tx.commit().await?;
 
+    Ok(Json(local_document(&state, &auth.user_id).await?))
+}
+
+/// The root vouches for the account recovery key, so a later rotation it signs is checkable by every contact.
+pub async fn bind_recovery_key(
+    State(state): State<AppState>,
+    auth: HomeAuth,
+    Json(body): Json<RecoveryKeyBinding>,
+) -> ApiResult<Json<Value>> {
+    let Some((immutable_id, _, _, current_key, sequence, ..)) =
+        load_root(&state, &auth.user_id).await?
+    else {
+        return Err(ApiError::Conflict(
+            "anchor the immutable identity before binding a recovery key".into(),
+        ));
+    };
+    let current: i64 = sqlx::query_scalar(
+        "SELECT current_recovery_key_version FROM identity_roots WHERE user_id = ?",
+    )
+    .bind(&auth.user_id)
+    .fetch_one(&state.pool)
+    .await?;
+    if body.version != current + 1 {
+        return Err(ApiError::Conflict(format!(
+            "next recovery key version is {}",
+            current + 1
+        )));
+    }
+    if body.identity_sequence != sequence {
+        return Err(ApiError::Conflict(
+            "recovery key was bound by a stale identity root".into(),
+        ));
+    }
+    key_bytes(&body.recovery_key)?;
+    // Only the key that also resets this account's password: one recovery key, not two.
+    match account_recovery_key(&state, &auth.user_id).await? {
+        Some(account) if same_key(&account, &body.recovery_key) => {}
+        _ => {
+            return Err(ApiError::Conflict(
+                "that is not this account's current recovery key".into(),
+            ))
+        }
+    }
+    let payload = recovery_key_binding_payload(
+        &immutable_id,
+        body.version,
+        body.identity_sequence,
+        &body.recovery_key,
+    );
+    if !verify_signature(&current_key, &payload, &body.signature) {
+        return Err(ApiError::Unauthorized(
+            "recovery key binding is not signed by the current identity root".into(),
+        ));
+    }
+
+    let now = now_ms();
+    let mut tx = state.pool.begin().await?;
+    sqlx::query(
+        "INSERT INTO identity_recovery_keys \
+         (user_id, version, identity_sequence, recovery_key, signature, created_at) \
+         VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&auth.user_id)
+    .bind(body.version)
+    .bind(body.identity_sequence)
+    .bind(&body.recovery_key)
+    .bind(&body.signature)
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+    let moved = sqlx::query(
+        "UPDATE identity_roots SET current_recovery_key_version = ?, updated_at = ? \
+         WHERE user_id = ? AND current_recovery_key_version = ?",
+    )
+    .bind(body.version)
+    .bind(now)
+    .bind(&auth.user_id)
+    .bind(current)
+    .execute(&mut *tx)
+    .await?;
+    if moved.rows_affected() != 1 {
+        return Err(ApiError::Conflict("the recovery key changed on another device".into()));
+    }
+    tx.commit().await?;
+    Ok(Json(local_document(&state, &auth.user_id).await?))
+}
+
+pub async fn reset_start(
+    State(state): State<AppState>,
+    auth: HomeAuth,
+) -> ApiResult<Json<Value>> {
+    let now = now_ms();
+    let _ = sqlx::query("DELETE FROM identity_reset_attempts WHERE expires_at < ?")
+        .bind(now)
+        .execute(&state.pool)
+        .await;
+    if account_recovery_key(&state, &auth.user_id).await?.is_none() {
+        return Err(ApiError::Conflict("this account has no recovery key".into()));
+    }
+    let attempt_id = random_token(24);
+    let challenge = random_token(32);
+    sqlx::query(
+        "INSERT INTO identity_reset_attempts (id, user_id, challenge, expires_at) VALUES (?, ?, ?, ?)",
+    )
+    .bind(&attempt_id)
+    .bind(&auth.user_id)
+    .bind(&challenge)
+    .bind(now + RESET_TTL_MS)
+    .execute(&state.pool)
+    .await?;
+    Ok(Json(json!({
+        "user_id": auth.user_id,
+        "attempt_id": attempt_id,
+        "challenge": challenge,
+    })))
+}
+
+/// Starts a new immutable identity in place of one whose root is lost. Contacts' pins name the old id, so they see the
+/// account as changed and must verify again; that warning is the point, because a server could do this too.
+pub async fn reset_finish(
+    State(state): State<AppState>,
+    auth: HomeAuth,
+    Json(body): Json<IdentityResetFinish>,
+) -> ApiResult<Json<Value>> {
+    let attempt: Option<(String, String, i64)> = sqlx::query_as(
+        "DELETE FROM identity_reset_attempts WHERE id = ? RETURNING user_id, challenge, expires_at",
+    )
+    .bind(&body.attempt_id)
+    .fetch_optional(&state.pool)
+    .await?;
+    let invalid = || ApiError::Unauthorized("invalid recovery proof".into());
+    let (attempt_user, challenge, expires_at) = attempt.ok_or_else(invalid)?;
+    if attempt_user != auth.user_id || expires_at < now_ms() {
+        return Err(invalid());
+    }
+    let Some(recovery) = account_recovery_key(&state, &auth.user_id).await? else {
+        return Err(invalid());
+    };
+    let payload = identity_reset_payload(
+        &auth.user_id,
+        &body.attempt_id,
+        &challenge,
+        &body.immutable_id,
+        &body.identity_key,
+    );
+    if !verify_signature(&recovery, &payload, &body.signature) {
+        return Err(invalid());
+    }
+
+    if body.immutable_id != immutable_id_for_key(&body.identity_key)? {
+        return Err(ApiError::BadRequest(
+            "immutable identity id does not match the genesis key".into(),
+        ));
+    }
+    if !verify_signature(
+        &body.identity_key,
+        &anchor_payload(&auth.user_id, &body.immutable_id, &body.identity_key),
+        &body.anchor_signature,
+    ) {
+        return Err(ApiError::Unauthorized(
+            "identity anchor proof is not signed by the genesis key".into(),
+        ));
+    }
+    if body.sealed_secret.trim().is_empty() {
+        return Err(ApiError::BadRequest("new identity root needs its sealed secret".into()));
+    }
+    if let Some((old_immutable, ..)) = load_root(&state, &auth.user_id).await? {
+        if old_immutable == body.immutable_id {
+            return Err(ApiError::BadRequest("a reset must start a new identity".into()));
+        }
+    }
+    for d in &body.device_signatures {
+        if !verify_signature(
+            &body.identity_key,
+            &device_payload(&auth.user_id, &d.device_id, &d.mls_key),
+            &d.signature,
+        ) {
+            return Err(ApiError::Unauthorized(format!(
+                "device {} is not signed by the new root",
+                d.device_id
+            )));
+        }
+        if is_revoked_key(&state, &auth.user_id, &d.mls_key).await? {
+            return Err(ApiError::Forbidden(format!("device {} has been revoked", d.device_id)));
+        }
+    }
+
+    let now = now_ms();
+    let mut tx = state.pool.begin().await?;
+    for table in [
+        "identity_transitions",
+        "identity_recovery_policies",
+        "identity_recovery_keys",
+        "identity_roots",
+    ] {
+        sqlx::query(&format!("DELETE FROM {table} WHERE user_id = ?"))
+            .bind(&auth.user_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    sqlx::query(
+        "INSERT INTO cross_signing (user_id, identity_key, sealed_secret, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET \
+         identity_key = excluded.identity_key, sealed_secret = excluded.sealed_secret, \
+         updated_at = excluded.updated_at",
+    )
+    .bind(&auth.user_id)
+    .bind(&body.identity_key)
+    .bind(&body.sealed_secret)
+    .bind(now)
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+    // Nothing the old root signed stands for the new identity.
+    sqlx::query("UPDATE devices SET cross_sig = NULL WHERE user_id = ?")
+        .bind(&auth.user_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM user_signatures WHERE signer = ?")
+        .bind(&auth.user_id)
+        .execute(&mut *tx)
+        .await?;
+    for d in &body.device_signatures {
+        sqlx::query(
+            "UPDATE devices SET mls_key = ?, cross_sig = ? \
+             WHERE device_id = ? AND user_id = ? AND active = 1",
+        )
+        .bind(&d.mls_key)
+        .bind(&d.signature)
+        .bind(&d.device_id)
+        .bind(&auth.user_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    sqlx::query(
+        "INSERT INTO identity_roots \
+         (user_id, immutable_id, genesis_key, anchor_signature, current_key, sequence, current_policy_version, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?)",
+    )
+    .bind(&auth.user_id)
+    .bind(&body.immutable_id)
+    .bind(&body.identity_key)
+    .bind(&body.anchor_signature)
+    .bind(&body.identity_key)
+    .bind(now)
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
     Ok(Json(local_document(&state, &auth.user_id).await?))
 }

@@ -29,6 +29,7 @@ pub const DELETION_TABLES: &[(&str, &str)] = &[
     ("identity_transitions", "user_id"),
     ("device_revocations", "user_id"),
     ("identity_recovery_policies", "user_id"),
+    ("identity_recovery_keys", "user_id"),
     ("identity_roots", "user_id"),
     ("cross_signing", "user_id"),
     // Signatures this account issued; those issued about it belong to the residue.
@@ -67,6 +68,7 @@ pub const RESIDUE_TABLES: &[(&str, &str)] = &[
     ("imported_identities", "user_id"),
     ("password_reset_attempts", "user_id"),
     ("recovery_copy_attempts", "user_id"),
+    ("identity_reset_attempts", "user_id"),
     // Per-user guild state: reads, voice presence, join answers, emoji entitlements, upload vouchers.
     ("read_state", "user_id"),
     ("voice_states", "user_id"),
