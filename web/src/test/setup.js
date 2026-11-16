@@ -54,7 +54,7 @@ if (!CSS.escape) CSS.escape = (value) => String(value).replace(/[^a-zA-Z0-9_-]/g
 // its methods instead of the stored keys -- and any test that snapshots
 // storage that way (mls-revocation's per-device `use()`) silently loses
 // everything when it switches devices. Install jsdom's real Storage instead.
-// This is the environment CI's older Node already gives the suite.
+// CI's runner logs no such warning, so there jsdom's Storage is installed already.
 for (const name of ['localStorage', 'sessionStorage']) {
   const real = globalThis.jsdom?.window?.[name];
   if (!globalThis[name] && real) {
