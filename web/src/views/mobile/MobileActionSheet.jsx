@@ -4,7 +4,9 @@ import { cn } from '../../lib/cn.js';
 import { EmojiText, extractMenuItemProps } from '../../components/index.js';
 import { useMobileBackDismiss } from '../../hooks/useMobileBackDismiss.js';
 
-export function MobileContextMenu({ children, content, isDisabled = false, title }) {
+export function MobileContextMenu({ children, content, isDisabled: disabledProp = false, title }) {
+  // No menu to show: a long-press must not open an empty sheet that calls undefined().
+  const isDisabled = disabledProp || typeof content !== 'function';
   const [open, setOpen] = useState(false);
   const timerRef = useRef(null);
   const startPos = useRef(null);
@@ -85,7 +87,7 @@ export function MobileContextMenu({ children, content, isDisabled = false, title
       {child}
       {open ? (
         <MobileActionSheet title={title} onClose={() => setOpen(false)}>
-          {content()}
+          {isDisabled ? null : content()}
         </MobileActionSheet>
       ) : null}
     </>

@@ -67,6 +67,9 @@ export function ContextMenu({ children, content, isDisabled = false, opensOn }) 
     <BaseContextMenu.Root
       open={open}
       onOpenChange={(next) => {
+        // No menu to show (e.g. a call tile with no camera and no actions, issue #59).
+        // Keep the wrapper mounted so toggling content doesn't remount the child.
+        if (next && typeof content !== 'function') return;
         setOpen(next);
         if (next) setRenderContent(true);
       }}
@@ -83,7 +86,7 @@ export function ContextMenu({ children, content, isDisabled = false, opensOn }) 
       <BaseContextMenu.Portal>
         <BaseContextMenu.Positioner collisionPadding={8}>
           <BaseContextMenu.Popup className={POPUP}>
-            {renderContent ? content() : null}
+            {renderContent && typeof content === 'function' ? content() : null}
           </BaseContextMenu.Popup>
         </BaseContextMenu.Positioner>
       </BaseContextMenu.Portal>
