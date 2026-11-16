@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
-import { wipe } from '../lib/mls.js';
+import { keepSecret, wipe } from '../lib/mls.js';
 import { Trust, Verification } from '../lib/verify.js';
 import { seal as sealVault } from '../lib/vault.js';
 import { FakeHome, device } from './mls-home.js';
@@ -137,6 +137,61 @@ describe('verification', () => {
     expect(reloaded.canSign).toBe(false);
     expect(reloaded.identityMismatch).toBe(true);
     expect(await reloaded.authorizedRejoinDevice('@a:h', 'd-1')).toBe(false);
+  });
+
+  it('a held key that is not the account\'s does not hide a sealed copy that is', async () => {
+    const home = new FakeHome();
+    const key = await recoveryKey();
+    const alice = await device(home, '@a:h', 'd-1', key);
+    const ring = { key, raw: key, retired: [], openers: [key], mode: 'opaque_custody' };
+    const first = new Trust(home.for('@a:h', 'd-1'), { userId: '@a:h', deviceId: 'd-1', recovery: ring });
+    await first.start(alice.cs, key, await alice.leafKey(), 'opaque_custody');
+    expect(first.canSign).toBe(true);
+
+    const stray = await alice.cs.signature.keygen();
+    await keepSecret('@a:h', stray.signKey);
+    const again = new Trust(home.for('@a:h', 'd-1'), { userId: '@a:h', deviceId: 'd-1', recovery: ring });
+    await again.start(alice.cs, key, await alice.leafKey(), 'opaque_custody');
+    expect(again.canSign).toBe(true);
+    expect(again.identityMismatch).toBe(false);
+    expect(again.signKey).toEqual(first.signKey);
+  });
+
+  it('refuses a handed-over key that is not the one the account publishes', async () => {
+    const home = new FakeHome();
+    const key = await recoveryKey();
+    const alice = await device(home, '@a:h', 'd-1', key);
+    await trustFor(home, alice, '@a:h', 'd-1', key);
+    await freshDisk();
+    const second = await device(home, '@a:h', 'd-2');
+    const locked = await trustFor(home, second, '@a:h', 'd-2', null);
+    const stray = await second.cs.signature.keygen();
+    await expect(locked.adoptSecret(stray.signKey, null)).rejects.toThrow();
+    expect(locked.canSign).toBe(false);
+  });
+
+  it('does not report your own devices verified when neither holds the account key', async () => {
+    const home = new FakeHome();
+    const key = await recoveryKey();
+    const first = await device(home, '@a:h', 'd-1', key);
+    const firstLeaf = await first.leafKey();
+    await trustFor(home, first, '@a:h', 'd-1', key);
+    // The broken state: this device keeps a key that is not the published one, sealed only under a throwaway.
+    await keepSecret('@a:h', (await first.cs.signature.keygen()).signKey);
+    const stuck = await trustFor(home, first, '@a:h', 'd-1', key);
+    expect(stuck.canSign).toBe(false);
+
+    await freshDisk();
+    const second = await device(home, '@a:h', 'd-2', key);
+    const other = await trustFor(home, second, '@a:h', 'd-2', key);
+    expect(other.canSign).toBe(false);
+
+    const ends = exchange(stuck, other, { keys: { a: firstLeaf, b: await second.leafKey() } });
+    await ends.a.begin();
+    await ends.a.confirm();
+    await ends.b.confirm();
+    expect(ends.a.state).not.toBe('done');
+    expect(ends.b.state).not.toBe('done');
   });
 
   it('approves a fresh sibling once and transfers signing plus DM recovery', async () => {

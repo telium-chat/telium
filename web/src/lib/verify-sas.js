@@ -343,6 +343,13 @@ export class Verification {
           this.reason = 'neither device holds this account\'s encrypted-DM recovery material yet';
           return true;
         }
+        // Verifying your own devices is signing them with the account key; with no device holding it, a green tick
+        // would claim a signature nobody made.
+        if (!this.trust.canSign && !this.peerKeys.can_sign) {
+          this.state = 'cancelled';
+          this.reason = 'neither device holds this account\'s signing key, so neither can vouch for the other';
+          return true;
+        }
         if (this.trust.canSign && this.peerKeys.mls_key) {
           await this.trust.vouchForOwnDevice(this.peerDevice, this.peerKeys.mls_key);
         }
@@ -350,6 +357,7 @@ export class Verification {
           await this.handOverSecret();
         }
         if (this.pendingSecret) await this.onSecret(this.pendingSecret);
+        if (this.state === 'cancelled') return true;
       } else {
         if (!this.peerKeys.identity_key || !this.peerKeys.identity_proof_valid) {
           this.state = 'cancelled';
@@ -399,10 +407,16 @@ export class Verification {
     const key = await this.wrapKey();
 
     if (!this.trust.canSign && payload.sealed) {
-      await this.trust.adoptSecret(
-        await unseal(key, payload.sealed),
-        payload.identity_key,
-      );
+      try {
+        await this.trust.adoptSecret(
+          await unseal(key, payload.sealed),
+          payload.identity_key,
+        );
+      } catch (e) {
+        this.state = 'cancelled';
+        this.reason = e.message || 'could not take the account key the other device sent';
+        return true;
+      }
     }
 
     if (!this.trust.recovery?.key && payload.sealed_recovery) {

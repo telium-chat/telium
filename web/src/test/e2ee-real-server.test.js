@@ -448,6 +448,38 @@ describe.skipIf(!haveServer)('against the real server', () => {
     expect(healed.canSign).toBe(true);
   });
 
+  it('two starts at once on a new account leave this device holding the key it published', async () => {
+    const password = `pw-${crypto.randomUUID()}`;
+    const reg = await registerOpaque(server.base, name('alice'), password, 'web');
+    const first = server.wrap(reg.session);
+    const ring = await loadVault(
+      first.api, null, first.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper,
+    );
+    const m1 = await engine(first, first.api, ring.key);
+    const leaf = await m1.leafKey();
+    const make = (api = first.api) => new Trust(api, { userId: first.userId, deviceId: first.deviceId, recovery: ring });
+    // The second start's requests are slower, as a second tab's can be.
+    const slow = new Proxy(first.api, {
+      get(target, key) {
+        const v = target[key];
+        if (typeof v !== 'function') return v;
+        return async (...args) => {
+          if (key !== 'crossSigning') await new Promise((r) => setTimeout(r, 30));
+          return v.apply(target, args);
+        };
+      },
+    });
+    const [a, b] = [make(), make(slow)];
+    await Promise.allSettled([
+      a.start(m1.cs, ring.key, leaf, 'opaque_custody'),
+      b.start(m1.cs, ring.key, leaf, 'opaque_custody'),
+    ]);
+    const later = make();
+    await later.start(m1.cs, ring.key, leaf, 'opaque_custody');
+    expect(later.identityMismatch).toBeFalsy();
+    expect(later.canSign).toBe(true);
+  });
+
   it('replaces a recovery key so the new one opens the vault, and a failed try keeps the old', async () => {
     const password = `pw-${crypto.randomUUID()}`;
     const reg = await registerOpaque(server.base, name('alice'), password, 'test');
