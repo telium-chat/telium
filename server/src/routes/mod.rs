@@ -838,6 +838,8 @@ fn media_routes(state: &AppState) -> Router<AppState> {
             "/_telium/v1/media",
             post(media::upload).layer(DefaultBodyLimit::max(state.cfg.media_policy.max_file_bytes)),
         )
+        .route("/_telium/v1/account/media", get(media::list_own))
+        .route("/_telium/v1/account/media/{hash}/message", get(media::own_message))
         .route("/_telium/v1/media/{hash}", get(media::fetch).delete(media::delete))
         .route("/_telium/v1/media/{hash}/meta", get(media::meta))
 }

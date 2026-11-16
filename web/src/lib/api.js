@@ -435,6 +435,8 @@ export class Api {
     return this.patch(`/_telium/v1/channels/${channelId}/messages/${id}`, { content });
   }
   deleteMessage(channelId, id) { return this.del(`/_telium/v1/channels/${channelId}/messages/${id}`); }
+  listOwnMedia(query) { return this.get('/_telium/v1/account/media', query); }
+  ownMediaMessage(hash) { return this.get(`/_telium/v1/account/media/${encodeURIComponent(hash)}/message`); }
   deleteMedia(hash) { return this.del(`/_telium/v1/media/${encodeURIComponent(hash)}`); }
   typing(channelId) { return this.post(`/_telium/v1/channels/${channelId}/typing`, {}); }
 

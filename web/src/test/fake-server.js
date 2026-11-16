@@ -186,6 +186,7 @@ export function createFakeServer(overrides = {}) {
     uploadGate: null,
     mediaUploads: [],
     storedMedia: new Map(),
+    ownMedia: [],
     blackhole: new Set(),
     expired: new Set(),
     minted: new Map(),
@@ -606,9 +607,24 @@ export function createFakeServer(overrides = {}) {
         member_count: 1,
       });
     }
+    if (path === '/_telium/v1/account/media' && method === 'GET') {
+      const offset = Number(query.get('offset') || 0);
+      const limit = Number(query.get('limit') || 50);
+      const page = state.ownMedia.slice(offset, offset + limit);
+      return json({
+        used_bytes: state.ownMedia.reduce((n, f) => n + f.size, 0),
+        quota_bytes: state.serverQuotaBytes,
+        breakdown: {},
+        files: page,
+        next_offset: offset + limit < state.ownMedia.length ? offset + limit : null,
+      });
+    }
     const mediaDelete = path.match(/^\/_telium\/v1\/media\/([\w-]+)$/);
     if (mediaDelete && method === 'DELETE') {
-      if (!state.storedMedia.delete(mediaDelete[1])) return json({ error: 'not_found', message: 'no such media' }, 404);
+      const owned = state.ownMedia.find((f) => f.hash === mediaDelete[1]);
+      if (owned && !owned.deletable) return json({ error: 'conflict', message: 'shared bytes' }, 409);
+      if (owned) state.ownMedia = state.ownMedia.filter((f) => f !== owned);
+      if (!state.storedMedia.delete(mediaDelete[1]) && !owned) return json({ error: 'not_found', message: 'no such media' }, 404);
       return json({ ok: true, hash: mediaDelete[1] });
     }
     if (path === '/_telium/v1/media/preference') {

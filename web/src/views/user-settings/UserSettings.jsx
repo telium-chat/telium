@@ -1,7 +1,7 @@
 import { useStore } from '../../hooks/useStore.jsx';
 import { useT } from '../../lib/i18n/react.jsx';
 import {
-  AdvancedIcon, BellIcon, GlobeIcon, HelpIcon, HomeIcon, KeyIcon, MembersIcon, MessageIcon, MicIcon,
+  AdvancedIcon, BellIcon, FolderIcon, GlobeIcon, HelpIcon, HomeIcon, KeyIcon, MembersIcon, MessageIcon, MicIcon,
   PlayIcon, ScreenIcon, ServerIcon, SettingsIcon, SettingsLayout, ShieldIcon, SunIcon, UserIcon,
 } from '../../components/index.js';
 import { isElectronRuntime } from '../../lib/platform.js';
@@ -17,6 +17,7 @@ import { DesktopPane } from './DesktopPane.jsx';
 import { ConversationSignalsPane } from './ConversationSignalsPane.jsx';
 import { ProfileLookupsPane } from './ProfileLookupsPane.jsx';
 import { AccountPane } from './AccountPane.jsx';
+import { UploadsPane } from './UploadsPane.jsx';
 import { RecoveryPane } from './RecoveryPane.jsx';
 import { SecurityPane } from './SecurityPane.jsx';
 import { DeveloperPane } from './DeveloperPane.jsx';
@@ -44,6 +45,16 @@ const BASE_PANES = {
     group: 'Account',
     icon: HomeIcon,
     keywords: ['email', 'password', 'storage', 'move', 'migrate', 'delete', 'deactivate'],
+  },
+  uploads: {
+    label: 'Your uploads',
+    component: UploadsPane,
+    group: 'Account',
+    icon: FolderIcon,
+    keywords: [
+      'quota', 'storage', 'files', 'uploads', 'attachments', 'space', 'free up', 'delete files',
+      'reclaim', 'disk', 'usage',
+    ],
   },
   developer: {
     label: 'Developer',

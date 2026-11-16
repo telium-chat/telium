@@ -177,7 +177,7 @@ Every item in the original assessment, line by line:
 2. *No cancel; no way to reclaim space.* → **U2, done** (bcb141fe) and **U3, done** (705f373c).
    Removing an in-flight card aborts the request on every leg (home, vouched, external) and
    charges nothing; "Delete file" on your own attachments reaches the previously unreachable
-   DELETE endpoint through the home session. Scope as agreed: per-attachment, not a "My files" pane.
+   DELETE endpoint through the home session. Scope as agreed at the time: per-attachment, not a "My files" pane — since superseded by the "Your uploads" settings pane (`GET /_telium/v1/account/media`), which lists every attachment largest-first with bulk delete.
 3. *No retry.* → **U4, done** (4717d296). Failed uploads stay as cards carrying the server's
    sentence, with Retry.
 4. *Serial uploads.* → **U5, done** (bc2defca). Bounded at three in flight, per-entry progress

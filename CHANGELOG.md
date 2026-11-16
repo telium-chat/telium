@@ -12,6 +12,10 @@ Write for the people using the app, not the repo: what changed in their
 hands, not which PRs merged.
 -->
 
+## 15 November 2026
+
+- New: **Your uploads** in settings. If your server limits how much you can upload, you can now see which files are using your quota, largest first, see when each one expires, jump to the message it was sent in, and delete the ones you don't need to get the space back. Files that other people have also uploaded identically are shown but can't be deleted from there, and profile pictures and emoji are counted separately since they're still in use.
+
 ## 26 October 2026
 
 - Fixed: calls in a voice channel now stay up through server trouble. If a server the call runs on goes down or restarts for a few minutes, the call waits for it and rejoins on its own when it's back, instead of ending and taking everyone out of the voice channel. And a call that drops twice in a row now pauses briefly and tries again, instead of removing you from the channel.

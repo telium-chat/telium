@@ -1908,6 +1908,122 @@ pub async fn delete(
     Ok(Json(json!({ "ok": true, "hash": hash })))
 }
 
+#[derive(Deserialize)]
+pub struct OwnMediaParams {
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+/// The caller's own uploads, largest first, so they can see what their quota is
+/// spent on and hand space back. Only attachments are listed: avatars, banners
+/// and emoji are charged to the same quota but are in use by the profile or
+/// guild that shows them, so they appear in `breakdown` and nowhere to delete.
+/// `deletable` is false while other uploaders share the bytes; the delete
+/// endpoint would answer 409 for those, and an operator's takedown power is
+/// deliberately not offered from here.
+pub async fn list_own(
+    State(state): State<AppState>,
+    auth: HomeAuth,
+    Query(params): Query<OwnMediaParams>,
+) -> ApiResult<Json<Value>> {
+    let limit = params.limit.unwrap_or(50).clamp(1, 200);
+    let offset = params.offset.unwrap_or(0).max(0);
+
+    let totals: Vec<(String, i64, i64)> = sqlx::query_as(
+        "SELECT purpose, COUNT(*), COALESCE(SUM(size), 0) FROM media \
+         WHERE owner_user_id = ? GROUP BY purpose",
+    )
+    .bind(&auth.user_id)
+    .fetch_all(&state.pool)
+    .await?;
+    let mut breakdown = serde_json::Map::new();
+    let mut used = 0i64;
+    for (purpose, count, bytes) in totals {
+        used += bytes;
+        breakdown.insert(purpose, json!({ "count": count, "bytes": bytes }));
+    }
+
+    #[allow(clippy::type_complexity)]
+    let rows: Vec<(String, String, String, i64, i64, Option<i64>, i64, i64)> = sqlx::query_as(
+        "SELECT hash, filename, mime, size, created_at, expires_at, refcount, refs FROM media \
+         WHERE owner_user_id = ? AND purpose = 'attachment' \
+         ORDER BY size DESC, created_at DESC, hash LIMIT ? OFFSET ?",
+    )
+    .bind(&auth.user_id)
+    .bind(limit + 1)
+    .bind(offset)
+    .fetch_all(&state.pool)
+    .await?;
+    let more = rows.len() as i64 > limit;
+    let files = rows
+        .into_iter()
+        .take(limit as usize)
+        .map(|(hash, filename, mime, size, created_at, expires_at, refcount, refs)| {
+            json!({
+                "hash": hash,
+                "filename": filename,
+                "mime": mime,
+                "size": size,
+                "created_at": created_at,
+                "expires_at": expires_at,
+                "in_messages": refs,
+                "shared": refcount > 1,
+                "deletable": refcount <= 1,
+            })
+        })
+        .collect::<Vec<_>>();
+    let quota = state.cfg.media_quota_for(&auth.user_id);
+    Ok(Json(json!({
+        "used_bytes": used,
+        // Mirrors capabilities: no quota at all means new uploads are closed to
+        // this account, which is different from an unlimited one (null bytes).
+        "tier1_upload": quota.is_some(),
+        "quota_bytes": quota.filter(|q| *q != i64::MAX),
+        "breakdown": Value::Object(breakdown),
+        "files": files,
+        "next_offset": if more { Some(offset + limit) } else { None },
+    })))
+}
+
+/// Where one of the caller's own uploads was sent: the newest live message
+/// they authored that carries it. Looked up on demand rather than with the
+/// list, since finding it scans message attachments. Direct messages are
+/// end-to-end encrypted, so the server cannot see them here and answers 404.
+pub async fn own_message(
+    State(state): State<AppState>,
+    auth: HomeAuth,
+    Path(hash): Path<String>,
+) -> ApiResult<Json<Value>> {
+    if !valid_hash(&hash) {
+        return Err(ApiError::NotFound("no such media".into()));
+    }
+    let owner: Option<String> =
+        sqlx::query_scalar("SELECT owner_user_id FROM media WHERE hash = ?")
+            .bind(&hash)
+            .fetch_optional(&state.pool)
+            .await?;
+    if owner.as_deref() != Some(auth.user_id.as_str()) {
+        return Err(ApiError::NotFound("no such media".into()));
+    }
+    let row: Option<(String, String, String)> = sqlx::query_as(
+        "SELECT m.id, m.channel_id, m.guild_id FROM messages m, json_each(m.attachments) j \
+         WHERE m.author_id = ? AND m.deleted = 0 AND json_valid(m.attachments) \
+         AND json_type(j.value) = 'object' AND json_extract(j.value, '$.hash') = ? \
+         ORDER BY m.id DESC LIMIT 1",
+    )
+    .bind(&auth.user_id)
+    .bind(&hash)
+    .fetch_optional(&state.pool)
+    .await?;
+    let (message_id, channel_id, guild_id) =
+        row.ok_or_else(|| ApiError::NotFound("no message of yours carries this file".into()))?;
+    Ok(Json(json!({
+        "message_id": message_id,
+        "channel_id": channel_id,
+        "guild_id": guild_id,
+    })))
+}
+
 pub async fn capabilities(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Json<Value>> {
     let user_media = match headers
         .get(header::AUTHORIZATION)
