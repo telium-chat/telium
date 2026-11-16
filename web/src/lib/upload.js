@@ -66,6 +66,12 @@ export function narrowestLimit(...caps) {
   return set.length ? Math.min(...set) : null;
 }
 
+/// `attachment_max_age_days` sweeps attachments even when `max_expiry_secs` is unset, so it bounds how long a file can live just the same.
+export function mediaAgeCapSecs(media) {
+  const days = media?.attachment_max_age_days;
+  return typeof days === 'number' && days > 0 ? days * 24 * 60 * 60 : null;
+}
+
 export function expiryOptions(limitSecs) {
   // Over a cap an option stays listed but `disabled`, so people see what the
   // room rules out instead of wondering where "Never" went.

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { defaultExpiry, describeLimit, expiryOptions, narrowestLimit } from '../lib/upload.js';
+import { defaultExpiry, describeLimit, expiryOptions, mediaAgeCapSecs, narrowestLimit } from '../lib/upload.js';
 import { createFakeServer } from './fake-server.js';
 import { signedInApp } from './harness.jsx';
 
@@ -20,6 +20,12 @@ describe('expiry option arithmetic', () => {
     expect(expiryOptions(twoDays).find((o) => o.secs === null).disabled).toBe(true);
     expect(expiryOptions(twoDays).find((o) => o.secs === twoDays).disabled).toBe(false);
     expect(expiryOptions(hour).map((o) => o.secs)).toContain(hour);
+  });
+
+  it('treats the server-wide attachment age ceiling as a cap', () => {
+    expect(mediaAgeCapSecs({ attachment_max_age_days: 30 })).toBe(30 * 24 * 60 * 60);
+    expect(mediaAgeCapSecs({ attachment_max_age_days: 0 })).toBeNull();
+    expect(mediaAgeCapSecs(undefined)).toBeNull();
   });
 
   it('defaults to 30 days when allowed, else to the cap itself', () => {
