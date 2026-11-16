@@ -468,6 +468,8 @@ export const auth = {
   'auth.encryption.keySaved': 'Saved',
   'auth.encryption.keyLegacy': 'Old passphrase',
   'auth.encryption.keyMissing': 'Not made yet',
+  // A recovery key is on file but its copy of the message keys is gone: it resets the password and opens nothing.
+  'auth.encryption.keyCopyMissing': 'Needs reconnecting',
   'auth.encryption.devicesFact': 'Devices',
   // While the server's device list is still in flight.
   'auth.encryption.devicesCounting': 'Counting',

@@ -37,26 +37,24 @@ export const trustMethods = {
 
         trust.onRecoveryAdopted = async (ring) => {
           const mode = this.custodyMode();
+          // What this device read about the second copy stands whichever way the ring arrived; dropping it made Settings
+          // say "Recovery key: Not made yet" on a device that took its keys from a sibling.
+          const held = this.vault || {};
           let recovered = {
             ...ring,
             mode,
+            independent: Boolean(held.independent),
+            recoveryKey: Boolean(held.recoveryKey),
+            legacyIndependent: Boolean(held.legacyIndependent),
+            independentCiphertext: held.independentCiphertext || null,
             locked: false,
             needs_device: false,
           };
           await vault.rememberDeviceRecovery(userId, recovered).catch(() => {});
           if (this.authRecoveryWrapper) {
-            // Carry over what this device read about the second copy.
-            const held = this.vault || {};
             recovered = await vault.setMode(
               this.home,
-              {
-                ...recovered,
-                mode: recovered.mode || 'device_custody',
-                independent: Boolean(held.independent),
-                recoveryKey: Boolean(held.recoveryKey),
-                legacyIndependent: Boolean(held.legacyIndependent),
-                independentCiphertext: held.independentCiphertext || null,
-              },
+              { ...recovered, mode: recovered.mode || 'device_custody' },
               'opaque_custody',
               null,
               userId,

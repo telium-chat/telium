@@ -32,7 +32,9 @@ import {
   supportsPolicy, usersInTree,
 } from './mls-policy.js';
 
-export { keepSecret, heldSecret, wipe, wipeScope } from './mls-store.js';
+export {
+  keepSecret, heldSecret, keepPendingSecret, pendingSecret, dropPendingSecret, wipe, wipeScope,
+} from './mls-store.js';
 export { POLICY_RULES, POLICY_EXTENSION, normalisePolicy, policyAllows, judgeCommit } from './mls-policy.js';
 export { encodeBody, decodeBody } from './mls-wire.js';
 export { capabilities, decodeMessage, encode64, identityOf, wire };

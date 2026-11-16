@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
-import { wipe } from '../lib/mls.js';
+import { heldSecret, keepSecret, wipe } from '../lib/mls.js';
 import { Trust, Verification } from '../lib/verify.js';
 import { seal as sealVault } from '../lib/vault.js';
 import { FakeHome, device } from './mls-home.js';
@@ -137,6 +137,176 @@ describe('verification', () => {
     expect(reloaded.canSign).toBe(false);
     expect(reloaded.identityMismatch).toBe(true);
     expect(await reloaded.authorizedRejoinDevice('@a:h', 'd-1')).toBe(false);
+  });
+
+  it('a held key that is not the account\'s does not hide a sealed copy that is', async () => {
+    const home = new FakeHome();
+    const key = await recoveryKey();
+    const alice = await device(home, '@a:h', 'd-1', key);
+    const ring = { key, raw: key, retired: [], openers: [key], mode: 'opaque_custody' };
+    const first = new Trust(home.for('@a:h', 'd-1'), { userId: '@a:h', deviceId: 'd-1', recovery: ring });
+    await first.start(alice.cs, key, await alice.leafKey(), 'opaque_custody');
+    expect(first.canSign).toBe(true);
+
+    const stray = await alice.cs.signature.keygen();
+    await keepSecret('@a:h', stray.signKey);
+    const again = new Trust(home.for('@a:h', 'd-1'), { userId: '@a:h', deviceId: 'd-1', recovery: ring });
+    await again.start(alice.cs, key, await alice.leafKey(), 'opaque_custody');
+    expect(again.canSign).toBe(true);
+    expect(again.identityMismatch).toBe(false);
+    expect(again.signKey).toEqual(first.signKey);
+  });
+
+  it('refuses a handed-over key that is not the one the account publishes', async () => {
+    const home = new FakeHome();
+    const key = await recoveryKey();
+    const alice = await device(home, '@a:h', 'd-1', key);
+    await trustFor(home, alice, '@a:h', 'd-1', key);
+    await freshDisk();
+    const second = await device(home, '@a:h', 'd-2');
+    const locked = await trustFor(home, second, '@a:h', 'd-2', null);
+    const stray = await second.cs.signature.keygen();
+    await expect(locked.adoptSecret(stray.signKey, null)).rejects.toThrow();
+    expect(locked.canSign).toBe(false);
+  });
+
+  it('does not report your own devices verified when neither holds the account key', async () => {
+    const home = new FakeHome();
+    const key = await recoveryKey();
+    const first = await device(home, '@a:h', 'd-1', key);
+    const firstLeaf = await first.leafKey();
+    await trustFor(home, first, '@a:h', 'd-1', key);
+    // The broken state: this device keeps a key that is not the published one, sealed only under a throwaway.
+    await keepSecret('@a:h', (await first.cs.signature.keygen()).signKey);
+    const stuck = await trustFor(home, first, '@a:h', 'd-1', key);
+    expect(stuck.canSign).toBe(false);
+
+    await freshDisk();
+    const second = await device(home, '@a:h', 'd-2', key);
+    const other = await trustFor(home, second, '@a:h', 'd-2', key);
+    expect(other.canSign).toBe(false);
+
+    const ends = exchange(stuck, other, { keys: { a: firstLeaf, b: await second.leafKey() } });
+    await ends.a.begin();
+    await ends.a.confirm();
+    await ends.b.confirm();
+    expect(ends.a.state).not.toBe('done');
+    expect(ends.b.state).not.toBe('done');
+  });
+
+  it('still hands over DM history when neither device holds the account key', async () => {
+    const home = new FakeHome();
+    const key = await recoveryKey();
+    const first = await device(home, '@a:h', 'd-1', key);
+    const firstLeaf = await first.leafKey();
+    await trustFor(home, first, '@a:h', 'd-1', key);
+    await keepSecret('@a:h', (await first.cs.signature.keygen()).signKey);
+    const stuck = await trustFor(home, first, '@a:h', 'd-1', key);
+    expect(stuck.canSign).toBe(false);
+
+    await freshDisk();
+    const second = await device(home, '@a:h', 'd-2');
+    const bare = await trustFor(home, second, '@a:h', 'd-2', null);
+    expect(bare.canSign).toBe(false);
+    expect(bare.recovery).toBe(null);
+
+    const ends = exchange(stuck, bare, { keys: { a: firstLeaf, b: await second.leafKey() } });
+    await ends.a.begin();
+    await ends.a.confirm();
+    await ends.b.confirm();
+    expect(bare.recovery?.raw).toEqual(key);
+    expect(ends.a.state).toBe('cancelled');
+    expect(ends.b.state).toBe('cancelled');
+    expect(ends.b.reason).toMatch(/history was shared/);
+  });
+
+  it('waits for DM history that lands after its own half settled', async () => {
+    const home = new FakeHome();
+    const key = await recoveryKey();
+    const first = await device(home, '@a:h', 'd-1', key);
+    const firstLeaf = await first.leafKey();
+    await trustFor(home, first, '@a:h', 'd-1', key);
+    await keepSecret('@a:h', (await first.cs.signature.keygen()).signKey);
+    const stuck = await trustFor(home, first, '@a:h', 'd-1', key);
+
+    await freshDisk();
+    const second = await device(home, '@a:h', 'd-2');
+    const bare = await trustFor(home, second, '@a:h', 'd-2', null);
+
+    // Hold the history frame until the receiving side has settled.
+    let held = null;
+    const ends = exchange(stuck, bare, {
+      keys: { a: firstLeaf, b: await second.leafKey() },
+      tamper: (e) => {
+        if (e.payload.step === 'secret' && !held) { held = e; return { ...e, payload: { ...e.payload, txn: 'x' } }; }
+        return e;
+      },
+    });
+    await ends.a.begin();
+    await ends.b.confirm();
+    await ends.a.confirm();
+    expect(held).not.toBe(null);
+    expect(ends.b.state).toBe('waiting');
+    await ends.b.handle(held);
+    expect(bare.recovery?.raw).toEqual(key);
+    expect(ends.b.state).toBe('cancelled');
+    expect(ends.b.reason).toMatch(/history was shared/);
+  });
+
+  it('a create that reached the server but was never stored is found again', async () => {
+    const home = new FakeHome();
+    const key = await recoveryKey();
+    const alice = await device(home, '@a:h', 'd-1', key);
+    const api = home.for('@a:h', 'd-1');
+    // The tab closes after the server took the key but before this device filed it.
+    const lost = new Proxy(api, {
+      get(target, name) {
+        if (name !== 'putCrossSigning') return target[name];
+        return async (body) => {
+          await target.putCrossSigning(body);
+          throw new Error('connection dropped');
+        };
+      },
+    });
+    const first = new Trust(lost, { userId: '@a:h', deviceId: 'd-1' });
+    await expect(first.start(alice.cs, key, await alice.leafKey(), 'device_custody')).rejects.toThrow();
+    expect(await heldSecret('@a:h')).toBe(null);
+
+    const again = new Trust(api, { userId: '@a:h', deviceId: 'd-1' });
+    await again.start(alice.cs, key, await alice.leafKey(), 'device_custody');
+    expect(again.canSign).toBe(true);
+    expect(again.identityMismatch).toBe(false);
+  });
+
+  it('a refused create keeps nothing of its own and takes the account key', async () => {
+    const home = new FakeHome();
+    const key = await recoveryKey();
+    const alice = await device(home, '@a:h', 'd-1', key);
+    const api = home.for('@a:h', 'd-1');
+    const winner = new Trust(home.for('@a:h', 'd-9'), { userId: '@a:h', deviceId: 'd-9' });
+    // Another device creates between this one's read and its write.
+    let raced = false;
+    const racing = new Proxy(api, {
+      get(target, name) {
+        if (name !== 'putCrossSigning') return target[name];
+        return async (body) => {
+          if (!raced) {
+            raced = true;
+            const saved = globalThis.indexedDB;
+            globalThis.indexedDB = new IDBFactory();
+            await winner.start(alice.cs, key, null, 'opaque_custody');
+            globalThis.indexedDB = saved;
+          }
+          return target.putCrossSigning(body);
+        };
+      },
+    });
+    const ring = { key, raw: key, retired: [], openers: [key], mode: 'opaque_custody' };
+    const loser = new Trust(racing, { userId: '@a:h', deviceId: 'd-1', recovery: ring });
+    await loser.start(alice.cs, key, await alice.leafKey(), 'opaque_custody');
+    expect(loser.identityKey).toEqual(winner.identityKey);
+    expect(loser.canSign).toBe(true);
+    expect(await heldSecret('@a:h')).toEqual(winner.signKey);
   });
 
   it('approves a fresh sibling once and transfers signing plus DM recovery', async () => {

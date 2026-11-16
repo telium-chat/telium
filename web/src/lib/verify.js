@@ -1,6 +1,9 @@
 // Cross-signing: one key per account, with domain-separated payloads (`telium-device-sig` vs `telium-user-sig`), signing MLS leaf keys. Device-held by default; verifying a person covers all their devices. The SAS can't be steered: the responder commits before seeing the initiator's contribution.
 
-import { heldSecret, keepSecret } from './mls.js';
+import {
+  dropPendingSecret, heldSecret, keepPendingSecret, keepSecret, pendingSecret,
+} from './mls.js';
+import { exclusive } from './mls-store.js';
 import {
   deviceRevocationPayload,
   ensureOwnIdentityContinuity,
@@ -84,8 +87,26 @@ export class Trust {
     ) || null;
   }
 
-  /// Creates the key on first use; legacy unprefixed rows are opened once and moved to the current form.
+  /// Whether `secret` is the private half of `publicKey`, by default the published account key.
+  async binds(secret, publicKey = this.identityKey) {
+    if (!publicKey || !secret) return false;
+    const probe = te.encode(`telium-crosssign-key-binding:v1|${this.userId}`);
+    try {
+      const proof = await this.cs.signature.sign(secret, probe);
+      return await this.cs.signature.verify(publicKey, probe, proof);
+    } catch {
+      return false;
+    }
+  }
+
+  /// Creates the key on first use; legacy unprefixed rows are opened once and moved to the current form. One start per
+  /// account at a time across tabs: two tabs creating at once each made a key, and the one the server refused had already
+  /// stored its own, leaving that browser holding a key its account does not publish.
   async start(cs, recoveryKey, mlsKey, mode = 'device_custody') {
+    return exclusive(`telium-crosssign:${this.userId}`, () => this.startOnce(cs, recoveryKey, mlsKey, mode));
+  }
+
+  async startOnce(cs, recoveryKey, mlsKey, mode, retried = false) {
     this.cs = cs;
     const doc = await this.home.crossSigning();
     for (const d of doc.devices || []) this.own.set(d.device_id, d);
@@ -115,30 +136,28 @@ export class Trust {
       const deviceWrapped = stored.startsWith(DEVICE_SEAL);
       const recoveryWrapped = stored.startsWith(RECOVERY_SEAL);
 
-      if (held) {
-        this.signKey = held;
-      } else if (recoveryWrapped && recoveryKeys.length) {
-        this.signKey = await openWithRecovery(stored.slice(RECOVERY_SEAL.length));
+      // A homeserver can swap the public identity row but not make our secret match; check the pair. A held key that does
+      // not match does not hide a sealed copy that does.
+      let tried = false;
+      const take = async (secret) => {
+        if (!secret || this.signKey) return;
+        tried = true;
+        if (await this.binds(secret)) this.signKey = secret;
+      };
+      await take(held);
+      // A create this device made but never heard back about: the server may have kept it.
+      await take(await pendingSecret(this.userId, doc.identity_key));
+      if (recoveryWrapped && recoveryKeys.length) {
+        await take(await openWithRecovery(stored.slice(RECOVERY_SEAL.length)));
       } else if (!deviceWrapped && !recoveryWrapped && recoveryKeys.length) {
         // The original format used the MLS recovery key; try the whole ring in case it rotated.
-        this.signKey = await openWithRecovery(stored);
+        await take(await openWithRecovery(stored));
       }
-
-      if (this.signKey) {
-        // A homeserver can swap the public identity row but not make our secret match; check the pair.
-        const probe = te.encode(`telium-crosssign-key-binding:v1|${this.userId}`);
-        const proof = await this.cs.signature.sign(this.signKey, probe);
-        const matches = await this.cs.signature.verify(
-          this.identityKey, probe, proof,
-        ).catch(() => false);
-        if (!matches) {
-          this.signKey = null;
-          this.identityMismatch = true;
-        }
-      }
+      if (!this.signKey && tried) this.identityMismatch = true;
 
       if (this.signKey) {
         await keepSecret(this.userId, this.signKey);
+        await dropPendingSecret(this.userId, doc.identity_key);
         const wantRecovery = (mode === 'opaque_custody' || mode === 'self_custody') && recoveryKey;
         if (wantRecovery && !recoveryWrapped) {
           await this.home.putCrossSigning({
@@ -155,23 +174,34 @@ export class Trust {
       }
     } else if (recoveryKey) {
       const pair = await cs.signature.keygen();
+      identityKeyText = b64(pair.publicKey);
+      const sealed = mode === 'opaque_custody' || mode === 'self_custody'
+        ? RECOVERY_SEAL + await seal(recoveryKey, pair.signKey)
+        : DEVICE_SEAL + await seal(crypto.getRandomValues(new Uint8Array(32)), pair.signKey);
+      // Kept aside before it is sent, so closing the tab mid-request cannot leave a published key held nowhere, and
+      // outside the account-key slot, so a refused create never displaces the key the account does publish.
+      await keepPendingSecret(this.userId, identityKeyText, pair.signKey);
+      try {
+        // `create_only`: the server refuses if any key exists, so another device creating at the same moment (a desktop
+        // client beside this browser, where no lock reaches) cannot be overwritten, nor overwrite us.
+        await this.home.putCrossSigning({ identity_key: identityKeyText, sealed_secret: sealed, create_only: true });
+      } catch (e) {
+        if (e?.status === 409) {
+          // Another device made the account's key first: take that one as it stands, and keep nothing of ours.
+          await dropPendingSecret(this.userId, identityKeyText);
+          if (!retried) {
+            this.own.clear();
+            this.requests.clear();
+            return this.startOnce(cs, recoveryKey, mlsKey, mode, true);
+          }
+        }
+        // Anything else may have reached the server; the next start finds the pending copy if it did.
+        throw e;
+      }
+      await keepSecret(this.userId, pair.signKey);
+      await dropPendingSecret(this.userId, identityKeyText);
       this.identityKey = pair.publicKey;
       this.signKey = pair.signKey;
-      await keepSecret(this.userId, pair.signKey);
-      if (mode === 'opaque_custody' || mode === 'self_custody') {
-        identityKeyText = b64(pair.publicKey);
-        await this.home.putCrossSigning({
-          identity_key: identityKeyText,
-          sealed_secret: RECOVERY_SEAL + await seal(recoveryKey, pair.signKey),
-        });
-      } else {
-        const throwaway = crypto.getRandomValues(new Uint8Array(32));
-        identityKeyText = b64(pair.publicKey);
-        await this.home.putCrossSigning({
-          identity_key: identityKeyText,
-          sealed_secret: DEVICE_SEAL + await seal(throwaway, pair.signKey),
-        });
-      }
     }
 
     if (this.identityKey && identityKeyText) {
@@ -315,9 +345,19 @@ export class Trust {
     return verified;
   }
 
+  /// A handed-over key is kept only if it is the private half of the key this account publishes.
   async adoptSecret(secret, identityKey) {
+    if (identityKey && this.identityKey && identityKey !== b64(this.identityKey)) {
+      throw new Error('the other device holds a different account key from the one this account publishes');
+    }
+    const published = this.identityKey || (identityKey ? unb64(identityKey) : null);
+    if (!await this.binds(secret, published)) {
+      throw new Error('the account key the other device sent does not match the one this account publishes');
+    }
+    this.identityKey = published;
     this.signKey = secret;
-    if (identityKey) this.identityKey = unb64(identityKey);
+    // Only a mismatch from a wrong held key clears; one set because continuity failed or could not be checked stays.
+    if (this.continuity?.valid) this.identityMismatch = false;
     await keepSecret(this.userId, secret);
     await this.onSecretAdopted?.(secret);
   }
