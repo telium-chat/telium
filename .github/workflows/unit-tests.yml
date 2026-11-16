@@ -130,6 +130,9 @@ jobs:
           # to the gate are validated by the gate.
           grep -qE '^(server|sfu|telium-protocol)/' <<<"$changed" && rust=true
           grep -qE '^(web/|sdk/bot/js/)'            <<<"$changed" && web=true
+          # The web suite also runs the client against a real server build
+          # (e2ee-real-server.test.js), so a server change can break it too.
+          grep -qE '^server/'                       <<<"$changed" && web=true
           grep -qxF '.github/workflows/unit-tests.yml' <<<"$changed" && { rust=true; web=true; }
 
           echo "rust=$rust" >> "$GITHUB_OUTPUT"
@@ -272,6 +275,23 @@ jobs:
         working-directory: web
         run: bun install --frozen-lockfile
 
+      # e2ee-real-server.test.js skips itself when there is no server binary,
+      # which it silently did here until this step existed: build one so the
+      # client is tested against the real routes, not only the fake homeserver.
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch @ 2026-09-03
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: server
+          cache-on-failure: true
+
+      - name: Build server for the real-server tests
+        run: |
+          cargo build --manifest-path server/Cargo.toml --bin telium-server
+          test -x server/target/debug/telium-server
+
       # Development mode is enough here: this catches unresolved/untransformable
       # modules without paying for a production minification pass.
       - name: Build
@@ -282,6 +302,9 @@ jobs:
       # as the stable ceiling; keep that behavior unchanged.
       - name: Unit suite
         working-directory: web
+        env:
+          # Turns the real-server suite's skip into a failure if the binary is missing.
+          TELIUM_REQUIRE_SERVER: '1'
         run: bunx vitest run --maxWorkers=4
 
       - name: Bot SDK suite
