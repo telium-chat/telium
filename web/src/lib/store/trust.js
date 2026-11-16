@@ -2,6 +2,21 @@ import * as vault from '../vault.js';
 import { verification } from './shared.js';
 
 export const trustMethods = {
+  /// The account key is lost on every device: start a new one with the recovery key. Contacts see the account as changed
+  /// and must compare emoji again.
+  async recoverIdentity(recoveryKey) {
+    const trust = await this.startTrust();
+    if (!trust) throw new Error('encryption is not available on this device');
+    const mode = this.custodyMode();
+    const sealKey = (mode === 'opaque_custody' || mode === 'self_custody') && this.vault?.key ? this.vault.key : null;
+    const outcome = await trust.recoverWithRecoveryKey(recoveryKey, {
+      mlsKey: await this.mls.leafKey(),
+      sealKey,
+    });
+    this.emit('verify', { ready: true });
+    return outcome;
+  },
+
   /// How this account's keys are kept, for sealing the identity secret. The server says "none" before the vault exists, and
   /// the first custody read is sent before this device creates it: taking that answer sealed a new account's identity under a
   /// throwaway key, so every device signed in later could never sign itself. A real mode only.
@@ -37,26 +52,24 @@ export const trustMethods = {
 
         trust.onRecoveryAdopted = async (ring) => {
           const mode = this.custodyMode();
+          // What this device read about the second copy stands whichever way the ring arrived; dropping it made Settings
+          // say "Recovery key: Not made yet" on a device that took its keys from a sibling.
+          const held = this.vault || {};
           let recovered = {
             ...ring,
             mode,
+            independent: Boolean(held.independent),
+            recoveryKey: Boolean(held.recoveryKey),
+            legacyIndependent: Boolean(held.legacyIndependent),
+            independentCiphertext: held.independentCiphertext || null,
             locked: false,
             needs_device: false,
           };
           await vault.rememberDeviceRecovery(userId, recovered).catch(() => {});
           if (this.authRecoveryWrapper) {
-            // Carry over what this device read about the second copy.
-            const held = this.vault || {};
             recovered = await vault.setMode(
               this.home,
-              {
-                ...recovered,
-                mode: recovered.mode || 'device_custody',
-                independent: Boolean(held.independent),
-                recoveryKey: Boolean(held.recoveryKey),
-                legacyIndependent: Boolean(held.legacyIndependent),
-                independentCiphertext: held.independentCiphertext || null,
-              },
+              { ...recovered, mode: recovered.mode || 'device_custody' },
               'opaque_custody',
               null,
               userId,

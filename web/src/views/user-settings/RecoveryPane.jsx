@@ -47,6 +47,7 @@ export function RecoveryPane() {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newRecoveryKey, setNewRecoveryKey] = useState('');
   const [replacing, setReplacing] = useState(false);
+  const [identityRecoveryKey, setIdentityRecoveryKey] = useState('');
 
   const trust = store.trust;
   const recoveryPolicy = trust?.recoveryPolicy || null;
@@ -89,6 +90,8 @@ export function RecoveryPane() {
   const hasKey = Boolean(vault?.recoveryKey);
   const copyMissing = Boolean(store.custody?.recovery_copy_missing) && !hasKey;
   const legacyPassphrase = Boolean(vault?.legacyIndependent);
+  // The server's flag too: a vault that lost its recovery-key copy still has a key that can replace the account key.
+  const recoveryEnrolled = hasKey || copyMissing || Boolean(store.custody?.recovery_key_enrolled);
   const locked = Boolean(vault?.locked);
   const canEnroll = mode === 'opaque_custody' && Boolean(vault?.raw) && !locked;
 
@@ -237,6 +240,30 @@ export function RecoveryPane() {
     }
   };
 
+  const replaceIdentity = async () => {
+    setBusy(true);
+    try {
+      await store.recoverIdentity(identityRecoveryKey);
+      setIdentityRecoveryKey('');
+      toast(t('auth.identityKey.replacedReset'));
+    } catch (e) {
+      failed('auth.identityKey.replaceFailed', e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // A reset starts a new identity, which contacts will see: always warn.
+  const askReplaceIdentity = () => {
+    dialogs.confirm({
+      title: t('auth.identityKey.resetTitle'),
+      body: t('auth.identityKey.resetBody'),
+      confirmLabel: t('auth.identityKey.resetConfirm'),
+      danger: true,
+      onConfirm: replaceIdentity,
+    });
+  };
+
   const confirmReplace = () => dialogs.confirm({
     title: t('auth.recoveryKey.replaceTitle'),
     body: t('auth.recoveryKey.replaceBody'),
@@ -335,9 +362,11 @@ export function RecoveryPane() {
             label={t('auth.encryption.keyFact')}
             value={hasKey
               ? t('auth.encryption.keySaved')
-              : legacyPassphrase
-                ? t('auth.encryption.keyLegacy')
-                : t('auth.encryption.keyMissing')}
+              : copyMissing
+                ? t('auth.encryption.keyCopyMissing')
+                : legacyPassphrase
+                  ? t('auth.encryption.keyLegacy')
+                  : t('auth.encryption.keyMissing')}
           />
           <Fact
             tone={verifiedDevices === null || deviceCount === null
@@ -559,6 +588,36 @@ export function RecoveryPane() {
           </Explain>
         )}
       </Section>
+
+      {/* Only for a device that does not hold the account key: one that does has nothing to replace. */}
+      {trust && recoveryEnrolled && !trust.canSign ? (
+        <Section title={t('auth.identityKey.title')}>
+          {trust.continuity?.reason === 'immutable-id-changed' ? (
+            <Explain>{t('auth.identityKey.resetElsewhere')}</Explain>
+          ) : (
+            <>
+              <Explain>{t('auth.identityKey.lostExplain')}</Explain>
+              <TextInput
+                label={t('auth.recoveryKey.fieldLabel')}
+                type="password"
+                value={identityRecoveryKey}
+                autoComplete="off"
+                placeholder={t('auth.recoveryKey.placeholder')}
+                onChange={(e) => setIdentityRecoveryKey(e.target.value)}
+              />
+              <Button
+                variant="secondary"
+                className="self-start"
+                disabled={busy || !identityRecoveryKey.trim()}
+                loading={busy}
+                onClick={askReplaceIdentity}
+              >
+                {t('auth.identityKey.replaceButton')}
+              </Button>
+            </>
+          )}
+        </Section>
+      ) : null}
 
       <Section title={t('auth.backup.title')}>
         <Explain>

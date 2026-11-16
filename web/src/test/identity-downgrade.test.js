@@ -124,21 +124,21 @@ describe('a contact whose identity the homeserver withholds', () => {
     expect(await again.verifyClaimedPackage('@b:h', 'd-bob', await bob.leafKey())).toBe(false);
   });
 
-  it('on a remote domain is refused once that domain has served a valid identity', async () => {
+  it('on a remote domain is refused too, never seen before or not, whatever form the strip takes', async () => {
     const home = new AdvertisingHome(ADVERTISES);
     const alice = await session(home, '@a:h', 'd-alice', recoveryKey());
-    await session(home, '@carol:far', 'd-carol', recoveryKey());
-    const dave = await device(home, '@dave:far', 'd-dave');
+    const carol = await session(home, '@carol:far', 'd-carol', recoveryKey());
     const erin = await device(home, '@erin:elsewhere', 'd-erin');
     aliceKnowsNobody();
-    expect(localStorage.getItem('telium.identity.continuity-domain.v1:far')).toBe(null);
 
-    // Never seen: the client has no way to know `elsewhere` publishes continuity.
-    expect(await alice.trust.verifyClaimedPackage('@erin:elsewhere', 'd-erin', await erin.leafKey())).toBe(null);
-    // `far` has now served Carol's valid root, so Dave's missing one is hidden, not legacy.
-    await alice.trust.refresh('@carol:far');
-    expect(alice.trust.peers.get('@carol:far').continuityValid).toBe(true);
-    expect(await alice.trust.verifyClaimedPackage('@dave:far', 'd-dave', await dave.leafKey())).toBe(false);
+    // A remote account with a real root, stripped: 404 identity document and no identity key.
+    home.stripIdentity.add('@carol:far');
+    expect(await alice.trust.verifyClaimedPackage('@carol:far', 'd-carol', await carol.mls.leafKey())).toBe(false);
+    // A remote account on a domain this client has never heard of, with no identity at all (`exists:false`).
+    expect(await alice.trust.verifyClaimedPackage('@erin:elsewhere', 'd-erin', await erin.leafKey())).toBe(false);
+    const claimed = await alice.mls.claim(['@carol:far', '@erin:elsewhere']);
+    expect(claimed.rejected).toEqual(expect.arrayContaining(['@carol:far (d-carol)', '@erin:elsewhere (d-erin)']));
+    expect(claimed.packages).toHaveLength(0);
   });
 });
 
@@ -156,6 +156,8 @@ describe('a legacy homeserver', () => {
       const claimed = await alice.mls.claim(['@b:h']);
       expect(claimed.rejected).toEqual([]);
       expect(claimed.packages).toHaveLength(1);
+      const erin = await device(home, '@erin:elsewhere', 'd-erin');
+      expect(await alice.trust.verifyClaimedPackage('@erin:elsewhere', 'd-erin', await erin.leafKey())).toBe(null);
     }
   });
 });

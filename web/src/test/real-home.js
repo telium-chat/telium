@@ -8,6 +8,10 @@ import { Api, HttpError } from '../lib/api.js';
 
 export const BINARY = resolve(dirname(fileURLToPath(import.meta.url)), '../../../server/target/debug/telium-server');
 export const haveServer = existsSync(BINARY);
+// CI sets this, so a missing build fails loudly instead of skipping every real-server test.
+if (!haveServer && process.env.TELIUM_REQUIRE_SERVER === '1') {
+  throw new Error(`TELIUM_REQUIRE_SERVER is set but no server binary at ${BINARY}`);
+}
 
 function freePort() {
   return new Promise((resolve, reject) => {

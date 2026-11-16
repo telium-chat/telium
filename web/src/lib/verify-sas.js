@@ -349,14 +349,31 @@ export class Verification {
         if (mineCanHelp && (!this.peerKeys.can_sign || !this.peerKeys.can_recover)) {
           await this.handOverSecret();
         }
-        if (this.pendingSecret) await this.onSecret(this.pendingSecret);
+        if (this.pendingSecret) await this.onSecret(this.pendingSecret, true);
+        if (this.state === 'cancelled') return true;
+        // Verifying your own devices is signing them with the account key; with no device holding it, a green tick
+        // would claim a signature nobody made. Checked after the handover, so DM history keys still move.
+        if (!this.trust.canSign && !this.peerKeys.can_sign) {
+          // The other device is sending its DM history keys; stay open for them; closing the dialog on a cancelled
+          // exchange would drop them. `onSecret` settles again once they land.
+          if (this.peerKeys.can_recover && !this.trust.recovery?.key && !this.secretSeen) {
+            this.state = 'waiting';
+            this.awaitingSecret = true;
+            return true;
+          }
+          this.state = 'cancelled';
+          this.reason = mineCanHelp || peerCanHelp
+            ? 'encrypted-DM history was shared, but neither device holds this account\'s signing key, so neither can vouch for the other'
+            : 'neither device holds this account\'s signing key, so neither can vouch for the other';
+          return true;
+        }
       } else {
         if (!this.peerKeys.identity_key || !this.peerKeys.identity_proof_valid) {
           this.state = 'cancelled';
           this.reason = 'the other account did not prove an account identity key';
           return true;
         }
-        await this.trust.vouchForUser(this.peerUser, this.peerKeys.identity_key);
+        await this.trust.vouchForUser(this.peerUser, this.peerKeys.identity_key, { comparedNow: true });
       }
     } catch (e) {
       this.state = 'cancelled';
@@ -388,7 +405,7 @@ export class Verification {
     }, this.peerDevice);
   }
 
-  async onSecret(payload) {
+  async onSecret(payload, fromSettle = false) {
     if (!this.isSelf) return false;
     // The handover can arrive before our own half finishes; hold it.
     if (!this.confirmed || !this.peerKeys) {
@@ -396,13 +413,20 @@ export class Verification {
       return false;
     }
     this.pendingSecret = null;
+    this.secretSeen = true;
     const key = await this.wrapKey();
 
+    // A refused account key does not stop the DM history keys below: the SAS authenticated both.
+    let refused = null;
     if (!this.trust.canSign && payload.sealed) {
-      await this.trust.adoptSecret(
-        await unseal(key, payload.sealed),
-        payload.identity_key,
-      );
+      try {
+        await this.trust.adoptSecret(
+          await unseal(key, payload.sealed),
+          payload.identity_key,
+        );
+      } catch (e) {
+        refused = e.message || 'could not take the account key the other device sent';
+      }
     }
 
     if (!this.trust.recovery?.key && payload.sealed_recovery) {
@@ -413,8 +437,19 @@ export class Verification {
       await this.trust.onRecoveryAdopted?.(this.trust.recovery);
     }
 
+    if (refused) {
+      this.state = 'cancelled';
+      this.reason = refused;
+      return true;
+    }
+
     if (this.trust.canSign && this.mlsKey) {
       await this.trust.vouchForOwnDevice(this.trust.deviceId, this.mlsKey);
+    }
+    // Arrived after our own half settled into waiting for it: finish now.
+    if (!fromSettle && this.awaitingSecret) {
+      this.awaitingSecret = false;
+      await this.settle();
     }
     return true;
   }

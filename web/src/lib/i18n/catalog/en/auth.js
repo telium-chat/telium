@@ -468,6 +468,8 @@ export const auth = {
   'auth.encryption.keySaved': 'Saved',
   'auth.encryption.keyLegacy': 'Old passphrase',
   'auth.encryption.keyMissing': 'Not made yet',
+  // A recovery key is on file but its copy of the message keys is gone: it resets the password and opens nothing.
+  'auth.encryption.keyCopyMissing': 'Needs reconnecting',
   'auth.encryption.devicesFact': 'Devices',
   // While the server's device list is still in flight.
   'auth.encryption.devicesCounting': 'Counting',
@@ -715,4 +717,14 @@ export const auth = {
   // what the key does, the second what that means for anyone else who finds it.
   'auth.parts.download.body1': 'This key resets your password and reopens your encrypted messages.',
   'auth.parts.download.body2': 'Anyone who has it can do both. Keep it somewhere only you can reach.',
+  // Settings > Recovery: the account key (cross-signing root), and the recovery key that can start a new one.
+  'auth.identityKey.title': 'Account key',
+  'auth.identityKey.lostExplain': 'This device doesn’t hold your account key, so it can’t vouch for your devices. If another of your devices has it, verify this device with that one instead. If none of them has it any more, your recovery key can replace it.',
+  'auth.identityKey.replaceButton': 'Replace account key',
+  'auth.identityKey.resetTitle': 'Start a new account key?',
+  'auth.identityKey.resetBody': 'This starts a new account key. The people you talk to will see your account as changed and must verify you again before encrypted messages work, and your other devices must be verified with this one. Only do this if none of your devices still has the old key.',
+  'auth.identityKey.resetConfirm': 'Start a new account key',
+  'auth.identityKey.replacedReset': 'You have a new account key. Ask the people you talk to to verify you again.',
+  'auth.identityKey.replaceFailed': 'Could not replace your account key: {detail}',
+  'auth.identityKey.resetElsewhere': 'Your account key was replaced on another of your devices. Verify this device with that one to use it here.',
 };

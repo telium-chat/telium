@@ -79,6 +79,89 @@ async fn anchor_test_identity(s: &Server, user: &User, key: &SigningKey) -> (Str
 }
 
 #[tokio::test]
+async fn a_first_key_made_twice_at_once_keeps_one_and_refuses_the_other() {
+    let s = start().await;
+    let alice = s.user("identity-first-key").await;
+    let (a, b) = (identity_public(&identity_signing_key()), identity_public(&identity_signing_key()));
+    let create = |key: &str| json!({ "identity_key": key, "sealed_secret": "sealed", "create_only": true });
+
+    let ((status_a, body_a), (status_b, body_b)) = tokio::join!(
+        s.put("/_telium/v1/crosssigning", &alice.home, create(&a)),
+        s.put("/_telium/v1/crosssigning", &alice.home, create(&b)),
+    );
+    let mut statuses = [status_a, status_b];
+    statuses.sort();
+    assert_eq!(statuses, [200, 409], "exactly one create wins: {body_a} / {body_b}");
+    let winner = if status_a == 200 { &a } else { &b };
+
+    let (_, doc) = s.get("/_telium/v1/crosssigning", Some(&alice.home)).await;
+    assert_eq!(doc["identity_key"].as_str(), Some(winner.as_str()), "{doc}");
+
+    // A later create is refused too, and leaves the stored key alone.
+    let (status, _) = s.put("/_telium/v1/crosssigning", &alice.home, create(&a)).await;
+    assert_eq!(status, 409);
+    let (_, doc) = s.get("/_telium/v1/crosssigning", Some(&alice.home)).await;
+    assert_eq!(doc["identity_key"].as_str(), Some(winner.as_str()), "{doc}");
+}
+
+async fn give_recovery_key(s: &Server, user: &User, key: &SigningKey) {
+    sqlx::query("UPDATE accounts SET recovery_public_key = ? WHERE user_id = ?")
+        .bind(identity_public(key))
+        .bind(&user.user_id)
+        .execute(&s.state.pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_recovery_key_resets_a_lost_identity_to_a_new_one_and_only_once_per_challenge() {
+    let s = start().await;
+    let alice = s.user("identity-reset").await;
+    let root0 = identity_signing_key();
+    let (immutable0, _) = anchor_test_identity(&s, &alice, &root0).await;
+
+    let (status, _) = s.post("/_telium/v1/identity/reset/start", Some(&alice.home), json!({})).await;
+    assert_eq!(status, 409, "no recovery key, no reset");
+    let recovery = identity_signing_key();
+    give_recovery_key(&s, &alice, &recovery).await;
+
+    let root1 = identity_signing_key();
+    let public1 = identity_public(&root1);
+    let immutable1 = identity_id(&public1);
+    let finish = |attempt: &Value, signer: &SigningKey| {
+        let attempt_id = attempt["attempt_id"].as_str().unwrap();
+        let challenge = attempt["challenge"].as_str().unwrap();
+        let payload = format!(
+            "telium-identity-reset:v1|{}|{attempt_id}|{challenge}|{immutable1}|{public1}",
+            alice.user_id
+        );
+        json!({
+            "attempt_id": attempt_id,
+            "immutable_id": immutable1,
+            "identity_key": public1,
+            "anchor_signature": identity_signature(&root1, &identity_anchor_payload(&alice.user_id, &immutable1, &public1)),
+            "sealed_secret": "sealed-reset-root",
+            "signature": identity_signature(signer, &payload),
+        })
+    };
+
+    let (_, attempt) = s.post("/_telium/v1/identity/reset/start", Some(&alice.home), json!({})).await;
+    let (status, body) = s.post("/_telium/v1/identity/reset/finish", Some(&alice.home), finish(&attempt, &identity_signing_key())).await;
+    assert_eq!(status, 401, "not the recovery key: {body}");
+    let (status, _) = s.post("/_telium/v1/identity/reset/finish", Some(&alice.home), finish(&attempt, &recovery)).await;
+    assert_eq!(status, 401, "a challenge is spent by its first answer");
+
+    let (_, attempt) = s.post("/_telium/v1/identity/reset/start", Some(&alice.home), json!({})).await;
+    let (status, reset) = s.post("/_telium/v1/identity/reset/finish", Some(&alice.home), finish(&attempt, &recovery)).await;
+    assert_eq!(status, 200, "{reset}");
+    assert_eq!(reset["immutable_id"], immutable1.as_str());
+    assert_ne!(reset["immutable_id"], immutable0.as_str(), "a reset is a new identity, never a continuation");
+    assert_eq!(reset["sequence"], 0);
+    let (_, cross) = s.get("/_telium/v1/crosssigning", Some(&alice.home)).await;
+    assert_eq!(cross["identity_key"].as_str(), Some(public1.as_str()), "{cross}");
+}
+
+#[tokio::test]
 async fn immutable_identity_blocks_server_style_replacement_and_accepts_authorized_rotation() {
     let s = start().await;
     let alice = s.user("identity-alice").await;

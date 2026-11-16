@@ -11,6 +11,7 @@ import { trustMethods } from '../lib/store/trust.js';
 import { recoveryVaultWrapper } from '../lib/account-recovery.js';
 import { sessionMethods } from '../lib/store/session.js';
 import { RealHome, haveServer, lossy } from './real-home.js';
+import { b64 } from '../lib/util.js';
 
 const realFetch = globalThis.fetch;
 
@@ -420,6 +421,218 @@ describe.skipIf(!haveServer)('against the real server', () => {
     const claimed = await am.claim([bob.userId]);
     expect(claimed.rejected).toContain(`${bob.userId} (${bob.deviceId})`);
     expect(claimed.packages).toHaveLength(0);
+  });
+
+  it('an account made before the custody fix heals once the device that made it opens again', async () => {
+    const password = `pw-${crypto.randomUUID()}`;
+    const reg = await registerOpaque(server.base, name('alice'), password, 'web');
+    const first = server.wrap(reg.session);
+    const ring = await loadVault(
+      first.api, null, first.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper,
+    );
+    // The old bug: identity sealed under a throwaway key.
+    const m1 = await engine(first, first.api, ring.key);
+    const t1 = new Trust(first.api, { userId: first.userId, deviceId: first.deviceId, recovery: ring });
+    await t1.start(m1.cs, ring.key, await m1.leafKey(), 'device_custody');
+    expect(String((await first.api.crossSigning()).sealed_secret)).toMatch(/^device-v1:/);
+
+    // The second device signs in while the account is broken.
+    const firstDb = globalThis.indexedDB;
+    const firstStorage = Object.fromEntries(
+      Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).map((k) => [k, localStorage.getItem(k)]),
+    );
+    globalThis.indexedDB = new IDBFactory();
+    localStorage.clear();
+    const login = await loginOpaque(server.base, first.userId, password, 'desktop');
+    const second = server.wrap(login.session);
+    const again = await loadVault(second.api, null, second.userId, login.recoveryWrapper);
+    const m2 = await engine(second, second.api, again.key);
+    const broken = new Trust(second.api, { userId: second.userId, deviceId: second.deviceId, recovery: again });
+    await broken.start(m2.cs, again.key, await m2.leafKey(), trustMethods.custodyMode.call({ vault: again }));
+    expect(broken.canSign).toBe(false);
+    const secondDb = globalThis.indexedDB;
+
+    // The making device reopens on new code from a restored session: no password typed.
+    globalThis.indexedDB = firstDb;
+    localStorage.clear();
+    for (const [k, v] of Object.entries(firstStorage)) localStorage.setItem(k, v);
+    const reopened = await loadVault(first.api, null, first.userId);
+    const mode = trustMethods.custodyMode.call({ custody: { mode: reopened.mode }, vault: reopened });
+    const t1b = new Trust(first.api, { userId: first.userId, deviceId: first.deviceId, recovery: reopened });
+    await t1b.start(m1.cs, reopened.key, await m1.leafKey(), mode);
+    expect(t1b.canSign).toBe(true);
+
+    // The second device restarts and can now sign itself.
+    globalThis.indexedDB = secondDb;
+    const healed = new Trust(second.api, { userId: second.userId, deviceId: second.deviceId, recovery: again });
+    await healed.start(m2.cs, again.key, await m2.leafKey(), trustMethods.custodyMode.call({ vault: again }));
+    expect(healed.canSign).toBe(true);
+  });
+
+  it('a second tab open during sign-up does not cost the new recovery key its copy', async () => {
+    const password = `pw-${crypto.randomUUID()}`;
+    const reg = await registerOpaque(server.base, name('alice'), password, 'web');
+    expect(reg.session.recovery_key_enrolled).toBe(true);
+    const first = server.wrap(reg.session);
+    // The other tab restores the session (no password, no recovery wrappers) and makes the vault first.
+    const otherTab = await loadVault(first.api, null, first.userId);
+    expect(otherTab.mode).toBe('device_custody');
+
+    const signingUp = await loadVault(
+      first.api, null, first.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper,
+    );
+    expect(signingUp.mode).toBe('opaque_custody');
+    expect(signingUp.recoveryKey).toBe(true);
+    const custody = await first.api.vaultMode();
+    expect(custody.recovery_copy_missing).toBe(false);
+  });
+
+  it('two starts at once on a new account leave this device holding the key it published', async () => {
+    const password = `pw-${crypto.randomUUID()}`;
+    const reg = await registerOpaque(server.base, name('alice'), password, 'web');
+    const first = server.wrap(reg.session);
+    const ring = await loadVault(
+      first.api, null, first.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper,
+    );
+    const m1 = await engine(first, first.api, ring.key);
+    const leaf = await m1.leafKey();
+    const make = (api = first.api) => new Trust(api, { userId: first.userId, deviceId: first.deviceId, recovery: ring });
+    // The second start's requests are slower, as a second tab's can be.
+    const slow = new Proxy(first.api, {
+      get(target, key) {
+        const v = target[key];
+        if (typeof v !== 'function') return v;
+        return async (...args) => {
+          if (key !== 'crossSigning') await new Promise((r) => setTimeout(r, 30));
+          return v.apply(target, args);
+        };
+      },
+    });
+    const [a, b] = [make(), make(slow)];
+    await Promise.allSettled([
+      a.start(m1.cs, ring.key, leaf, 'opaque_custody'),
+      b.start(m1.cs, ring.key, leaf, 'opaque_custody'),
+    ]);
+    const later = make();
+    await later.start(m1.cs, ring.key, leaf, 'opaque_custody');
+    expect(later.identityMismatch).toBeFalsy();
+    expect(later.canSign).toBe(true);
+  });
+
+  // Each simulated device keeps its own IndexedDB and localStorage (pins live there).
+  function devices() {
+    const saved = new Map();
+    let current = null;
+    const snapshot = () => Object.fromEntries(
+      Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).map((k) => [k, localStorage.getItem(k)]),
+    );
+    return (label) => {
+      if (current) saved.set(current, { db: globalThis.indexedDB, storage: snapshot() });
+      current = label;
+      const next = saved.get(label);
+      globalThis.indexedDB = next?.db || new IDBFactory();
+      localStorage.clear();
+      for (const [k, v] of Object.entries(next?.storage || {})) localStorage.setItem(k, v);
+    };
+  }
+
+  // An OPAQUE account whose root lives only on its first device (device custody), plus a contact who verified it.
+  async function lostRootAccount(on) {
+    const password = `pw-${crypto.randomUUID()}`;
+    on('alice-1');
+    const reg = await registerOpaque(server.base, name('alice'), password, 'web');
+    const first = server.wrap(reg.session);
+    const ring = await loadVault(first.api, null, first.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper);
+    const m1 = await engine(first, first.api, ring.key);
+    const t1 = new Trust(first.api, { userId: first.userId, deviceId: first.deviceId, recovery: ring });
+    await t1.start(m1.cs, ring.key, await m1.leafKey(), 'device_custody');
+    expect(t1.canSign).toBe(true);
+
+    on('bob');
+    const bob = await server.register(name('bob'));
+    const bm = await engine(bob);
+    const tb = new Trust(bob.api, { userId: bob.userId, deviceId: bob.deviceId });
+    await tb.start(bm.cs, crypto.getRandomValues(new Uint8Array(32)), await bm.leafKey(), 'device_custody');
+    await tb.vouchForUser(first.userId, b64(t1.identityKey));
+    tb.peers.clear();
+    await tb.refresh(first.userId);
+    expect(tb.statusFor(first.userId, first.deviceId, null)).toBe('verified');
+
+    // Alice's only device is gone; she signs in somewhere new.
+    on('alice-2');
+    const login = await loginOpaque(server.base, first.userId, password, 'desktop');
+    const second = server.wrap(login.session);
+    const again = await loadVault(second.api, null, second.userId, login.recoveryWrapper);
+    const m2 = await engine(second, second.api, again.key);
+    const t2 = new Trust(second.api, { userId: second.userId, deviceId: second.deviceId, recovery: again });
+    await t2.start(m2.cs, again.key, await m2.leafKey(), 'device_custody');
+    expect(t2.canSign).toBe(false);
+    return { reg, first, m1, t1, bob, bm, tb, second, m2, t2 };
+  }
+
+  it('a recovery-key reset starts a new identity that contacts must verify again', async () => {
+    const on = devices();
+    const { reg, first, m1, tb, second, m2, t2 } = await lostRootAccount(on);
+
+    on('alice-2');
+    const outcome = await t2.recoverWithRecoveryKey(reg.accountRecovery.text, { mlsKey: await m2.leafKey() });
+    expect(outcome.reset).toBe(true);
+    expect(t2.canSign).toBe(true);
+    expect(t2.continuity.valid).toBe(true);
+    // The next start on this device takes the new identity as its own.
+    const reopened = new Trust(second.api, { userId: second.userId, deviceId: second.deviceId });
+    await reopened.start(m2.cs, null, await m2.leafKey(), 'device_custody');
+    expect(reopened.canSign).toBe(true);
+    expect(reopened.identityMismatch).toBe(false);
+
+    // Bob pinned the old identity: changed, until he compares emoji with Alice again.
+    on('bob');
+    tb.peers.clear();
+    expect(tb.statusFor(first.userId, second.deviceId, null)).not.toBe('verified');
+    await tb.refresh(first.userId);
+    expect(tb.statusFor(first.userId, second.deviceId, null)).toBe('changed');
+    // Without a finished comparison the changed identity stays refused.
+    await tb.vouchForUser(first.userId, b64(t2.identityKey)).catch(() => {});
+    tb.peers.clear();
+    await tb.refresh(first.userId);
+    expect(tb.statusFor(first.userId, second.deviceId, null)).toBe('changed');
+    await tb.vouchForUser(first.userId, b64(t2.identityKey), { comparedNow: true });
+    tb.peers.clear();
+    await tb.refresh(first.userId);
+    expect(tb.statusFor(first.userId, second.deviceId, null)).toBe('verified');
+
+    // Alice's old device comes back: changed for itself too, until it takes the key from the device that reset.
+    on('alice-1');
+    const back = new Trust(first.api, { userId: first.userId, deviceId: first.deviceId });
+    await back.start(m1.cs, null, await m1.leafKey(), 'device_custody');
+    expect(back.identityMismatch).toBe(true);
+    await back.adoptSecret(t2.signKey, b64(t2.identityKey));
+    expect(back.canSign).toBe(true);
+    expect(back.identityMismatch).toBe(false);
+  });
+
+  it('a reset whose answer was lost is taken up when the device reopens', async () => {
+    const on = devices();
+    const { reg, second, m2, t2 } = await lostRootAccount(on);
+    on('alice-2');
+    const dropped = new Proxy(second.api, {
+      get(target, key) {
+        if (key !== 'identityResetFinish') return target[key];
+        return async (body) => {
+          await target.identityResetFinish(body);
+          throw new Error('connection dropped');
+        };
+      },
+    });
+    const cut = new Trust(dropped, { userId: second.userId, deviceId: second.deviceId, recovery: t2.recovery });
+    await cut.start(m2.cs, null, await m2.leafKey(), 'device_custody');
+    await expect(cut.recoverWithRecoveryKey(reg.accountRecovery.text, { mlsKey: await m2.leafKey() })).rejects.toThrow();
+
+    const reopened = new Trust(second.api, { userId: second.userId, deviceId: second.deviceId });
+    await reopened.start(m2.cs, null, await m2.leafKey(), 'device_custody');
+    expect(reopened.canSign).toBe(true);
+    expect(reopened.identityMismatch).toBe(false);
+    expect(reopened.continuity.valid).toBe(true);
   });
 
   it('replaces a recovery key so the new one opens the vault, and a failed try keeps the old', async () => {

@@ -321,6 +321,8 @@ export class Api {
     return this.put('/_telium/v1/identity/recovery-policy', body);
   }
   rotateIdentity(body) { return this.post('/_telium/v1/identity/rotate', body); }
+  identityResetStart() { return this.post('/_telium/v1/identity/reset/start', {}); }
+  identityResetFinish(body) { return this.post('/_telium/v1/identity/reset/finish', body); }
   identityDocument(userId) {
     return request(
       this.base,
@@ -554,6 +556,8 @@ export class Api {
       // A recovery key with no vault copy beside it resets the password and opens nothing.
       recovery_copy_missing: v.mode === 'opaque_custody'
         && Boolean(v.recovery_key_enrolled) && !v.independent_ciphertext,
+      // Whether the account holds a recovery key at all: the one thing that can replace a lost account key.
+      recovery_key_enrolled: Boolean(v.recovery_key_enrolled),
       // Backup extent and server readability, reported with custody as one disclosure.
       backup: {
         items: Number(v.backup?.items || 0),
