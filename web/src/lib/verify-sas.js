@@ -373,7 +373,7 @@ export class Verification {
           this.reason = 'the other account did not prove an account identity key';
           return true;
         }
-        await this.trust.vouchForUser(this.peerUser, this.peerKeys.identity_key);
+        await this.trust.vouchForUser(this.peerUser, this.peerKeys.identity_key, { comparedNow: true });
       }
     } catch (e) {
       this.state = 'cancelled';

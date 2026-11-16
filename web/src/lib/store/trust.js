@@ -2,6 +2,21 @@ import * as vault from '../vault.js';
 import { verification } from './shared.js';
 
 export const trustMethods = {
+  /// The account key is lost on every device: start a new one with the recovery key. Contacts see the account as changed
+  /// and must compare emoji again.
+  async recoverIdentity(recoveryKey) {
+    const trust = await this.startTrust();
+    if (!trust) throw new Error('encryption is not available on this device');
+    const mode = this.custodyMode();
+    const sealKey = (mode === 'opaque_custody' || mode === 'self_custody') && this.vault?.key ? this.vault.key : null;
+    const outcome = await trust.recoverWithRecoveryKey(recoveryKey, {
+      mlsKey: await this.mls.leafKey(),
+      sealKey,
+    });
+    this.emit('verify', { ready: true });
+    return outcome;
+  },
+
   /// How this account's keys are kept, for sealing the identity secret. The server says "none" before the vault exists, and
   /// the first custody read is sent before this device creates it: taking that answer sealed a new account's identity under a
   /// throwaway key, so every device signed in later could never sign itself. A real mode only.

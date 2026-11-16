@@ -651,6 +651,14 @@ fn identity_routes() -> Router<AppState> {
             "/_telium/v1/identity/rotate",
             post(identity_continuity::rotate),
         )
+        .route(
+            "/_telium/v1/identity/reset/start",
+            post(identity_continuity::reset_start),
+        )
+        .route(
+            "/_telium/v1/identity/reset/finish",
+            post(identity_continuity::reset_finish),
+        )
         .route("/_telium/v1/profile", patch(identity::patch_profile))
         .route("/_telium/v1/profile/update", post(identity::inbound_profile))
         .route("/_telium/v1/assertions", post(identity::issue_assertion))
