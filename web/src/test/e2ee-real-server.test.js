@@ -402,6 +402,26 @@ describe.skipIf(!haveServer)('against the real server', () => {
     expect(await tb.verifyClaimedPackage(second.userId, second.deviceId, await m2.leafKey())).toBe(true);
   });
 
+  it('refuses a KeyPackage with no identity behind it, because this server advertises continuity', async () => {
+    expect((await (await realFetch(`${server.base}/_telium/v1/capabilities`)).json()).identity?.continuity).toBe(true);
+    const alice = await server.register(name('alice'));
+    const am = await engine(alice, alice.api, crypto.getRandomValues(new Uint8Array(32)));
+    const ta = new Trust(alice.api, { userId: alice.userId, deviceId: alice.deviceId });
+    await ta.start(am.cs, null, await am.leafKey(), 'device_custody');
+    am.verifyClaimedPackage = (u, d, sig) => ta.verifyClaimedPackage(u, d, sig);
+
+    // KeyPackages published, but no identity key and no anchored root: what a stripped account looks like.
+    const bob = await server.register(name('bob'));
+    const bm = await engine(bob);
+    expect((await alice.api.identityDocument(bob.userId)).exists).toBe(false);
+    expect((await alice.api.deviceList(bob.userId)).identity_key ?? null).toBe(null);
+
+    expect(await ta.verifyClaimedPackage(bob.userId, bob.deviceId, await bm.leafKey())).toBe(false);
+    const claimed = await am.claim([bob.userId]);
+    expect(claimed.rejected).toContain(`${bob.userId} (${bob.deviceId})`);
+    expect(claimed.packages).toHaveLength(0);
+  });
+
   it('replaces a recovery key so the new one opens the vault, and a failed try keeps the old', async () => {
     const password = `pw-${crypto.randomUUID()}`;
     const reg = await registerOpaque(server.base, name('alice'), password, 'test');
