@@ -726,5 +726,5 @@ export const auth = {
   'auth.identityKey.resetConfirm': 'Start a new account key',
   'auth.identityKey.replacedReset': 'You have a new account key. Ask the people you talk to to verify you again.',
   'auth.identityKey.replaceFailed': 'Could not replace your account key: {detail}',
-  'auth.identityKey.resetElsewhere': 'Your account key was replaced on another of your devices. Verify this device with that one to use it here.',
+  'auth.identityKey.resetElsewhere': 'Your account key was replaced on another of your devices. A device that holds the new key picks it up on its own; this one does not have it yet, so take it from a device that does.',
 };

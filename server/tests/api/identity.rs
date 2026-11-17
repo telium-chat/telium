@@ -162,6 +162,41 @@ async fn a_recovery_key_resets_a_lost_identity_to_a_new_one_and_only_once_per_ch
 }
 
 #[tokio::test]
+async fn another_account_cannot_spend_a_reset_attempt_it_does_not_own() {
+    let s = start().await;
+    let alice = s.user("identity-reset-owner").await;
+    let mallory = s.user("identity-reset-other").await;
+    let root0 = identity_signing_key();
+    anchor_test_identity(&s, &alice, &root0).await;
+    let recovery = identity_signing_key();
+    give_recovery_key(&s, &alice, &recovery).await;
+    let (_, attempt) = s.post("/_telium/v1/identity/reset/start", Some(&alice.home), json!({})).await;
+    let attempt_id = attempt["attempt_id"].as_str().unwrap();
+
+    let (status, _) = s
+        .post(
+            "/_telium/v1/identity/reset/finish",
+            Some(&mallory.home),
+            json!({
+                "attempt_id": attempt_id,
+                "immutable_id": "x",
+                "identity_key": "x",
+                "anchor_signature": "x",
+                "sealed_secret": "x",
+                "signature": "x",
+            }),
+        )
+        .await;
+    assert_eq!(status, 401);
+    let still: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM identity_reset_attempts WHERE id = ?")
+        .bind(attempt_id)
+        .fetch_one(&s.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(still.0, 1, "someone else's finish must not delete the owner's attempt");
+}
+
+#[tokio::test]
 async fn immutable_identity_blocks_server_style_replacement_and_accepts_authorized_rotation() {
     let s = start().await;
     let alice = s.user("identity-alice").await;

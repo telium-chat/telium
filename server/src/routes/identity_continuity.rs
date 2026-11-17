@@ -887,9 +887,10 @@ pub async fn reset_finish(
     Json(body): Json<IdentityResetFinish>,
 ) -> ApiResult<Json<Value>> {
     let attempt: Option<(String, String, i64)> = sqlx::query_as(
-        "DELETE FROM identity_reset_attempts WHERE id = ? RETURNING user_id, challenge, expires_at",
+        "DELETE FROM identity_reset_attempts WHERE id = ? AND user_id = ? RETURNING user_id, challenge, expires_at",
     )
     .bind(&body.attempt_id)
+    .bind(&auth.user_id)
     .fetch_optional(&state.pool)
     .await?;
     let invalid = || ApiError::Unauthorized("invalid recovery proof".into());
