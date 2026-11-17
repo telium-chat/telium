@@ -12,6 +12,22 @@ Write for the people using the app, not the repo: what changed in their
 hands, not which PRs merged.
 -->
 
+## 17 November 2026
+
+Telium Desktop 0.4.0 and Telium Server 0.5.0 go together: the app and the server it talks to have to be updated as a pair. The SFU is unchanged.
+
+### Breaking
+
+- Breaking: there is now exactly one way of keeping your encrypted-message key, the one tied to your account password. The older ways (an extra passphrase, server-assisted recovery, devices only) are retired, and a server on 0.5.0 refuses them.
+- Breaking: an older app talking to a 0.5.0 server gets an "update Telium" error when it tries to use encrypted direct messages. Update the app, and update your server to 0.5.0 if you run one.
+- Breaking: an account that was still on one of the retired ways shows as locked until you unlock it with your recovery key, or choose **Start a new vault** in Settings → Encryption key. Starting a new vault means older encrypted messages stay locked and new ones are encrypted again.
+- Breaking: for server operators, this release adds migrations 0097 to 0099. Migration 0099 archives every legacy key vault row, whole, into a table nothing reads, and then withdraws the server-held escrow key and passphrase copies from the live rows. As with any release that adds a migration, going back to the previous server version means restoring the backup taken before the upgrade. Take one first.
+
+### What's new
+
+- New: if your account key is lost on every device, you can now reset it with your recovery key. This starts a new identity, so your contacts see it as changed and have to verify you again; nobody, including the server, can continue the old one.
+- Changed: changing your password now signs you out of your other devices. Sign in again on each of them with the new password.
+
 ## 15 November 2026
 
 - New: **Change password** in account settings. Your encrypted-message key is re-sealed under the new password in the same step, so signing in on a new device with the new password still brings your history. Resetting a forgotten password with your recovery key now does the same.
