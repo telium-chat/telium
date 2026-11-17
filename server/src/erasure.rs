@@ -67,6 +67,7 @@ pub const RESIDUE_TABLES: &[(&str, &str)] = &[
     ("imported_identities", "user_id"),
     ("password_reset_attempts", "user_id"),
     ("recovery_copy_attempts", "user_id"),
+    ("identity_reset_attempts", "user_id"),
     // Per-user guild state: reads, voice presence, join answers, emoji entitlements, upload vouchers.
     ("read_state", "user_id"),
     ("voice_states", "user_id"),
