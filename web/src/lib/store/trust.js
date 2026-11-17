@@ -80,6 +80,11 @@ export const trustMethods = {
           }
           this.vault = recovered;
           trust.recovery = recovered;
+          // A root this device took from a sibling is sealed under the ring it took with it (I4).
+          if (recovered.key && (recovered.mode === 'opaque_custody' || recovered.mode === 'self_custody')) {
+            await trust.sealRootProperly(recovered.key)
+              .catch((e) => console.warn('could not seal the account key under the recovery key', e));
+          }
           this.sync.adoptKeyring(recovered).catch(() => {});
           await this.mls.adoptRecoveryKey(recovered);
           this.emit('vault', recovered);

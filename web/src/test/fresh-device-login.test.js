@@ -12,13 +12,14 @@
 //
 // Scenarios that fail today are `it.fails`, each with the assertion that fails and why. They are the custody bugs the
 // single-path design removes; when one starts passing, vitest reports it and the marker comes off.
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { Mls, wipe } from '../lib/mls.js';
 import { Backup } from '../lib/backup.js';
 import { load as loadVault, seal } from '../lib/vault.js';
 import { Trust } from '../lib/verify.js';
+import { b64 } from '../lib/util.js';
 import { trustMethods } from '../lib/store/trust.js';
 import { sessionMethods } from '../lib/store/session.js';
 import { RealHome, haveServer } from './real-home.js';
@@ -430,5 +431,109 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
     const alice1 = await start(account, signUpWrappers(reg));
     await throwawaySealedRoot(account, alice1);
     await gate(on, alice1, password);
+  });
+
+  // Phase 2 (key-custody-design docs page): held roots are sealed under the account key, and sign-up does not finish until
+  // the recovery copy is on the server.
+
+  const recoveryCopyOpens = async (api) => {
+    const served = await api.vault();
+    expect(served.independent_ciphertext).toMatch(/^k1\./);
+    return served;
+  };
+
+  it('sign-up leaves a recovery copy on the server that opens to the ring', async () => {
+    const on = browsers();
+    const { account, reg } = await signUp(on);
+    const alice1 = await start(account, reg);
+    await recoveryCopyOpens(account.api);
+    expect(alice1.ring.recoveryKey).toBe(true);
+  });
+
+  /// Rewrites vault requests on their way to the server: `change(body)` returns the body to send, or null to drop the write
+  /// with a 503 that never reaches it.
+  function vaultWrites(change) {
+    const before = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      const method = String(init?.method || input?.method || 'GET').toUpperCase();
+      const url = String(input?.url || input);
+      if (method === 'PUT' && url.endsWith('/_telium/v1/vault') || method === 'PUT' && url.endsWith('/vault/mode')) {
+        const sent = change(JSON.parse(init.body), url);
+        if (!sent) {
+          return new Response(JSON.stringify({ message: 'unavailable' }), {
+            status: 503, headers: { 'content-type': 'application/json' },
+          });
+        }
+        return before(input, { ...init, body: JSON.stringify(sent) });
+      }
+      return before(input, init);
+    };
+    return () => { globalThis.fetch = before; };
+  }
+
+  it('sign-up writes the recovery copy again when the first vault write left it out', async () => {
+    const on = browsers();
+    on('alice-1');
+    let stripped = false;
+    const restore = vaultWrites((body) => {
+      if (stripped) return body;
+      stripped = true;
+      const { independent_ciphertext: _dropped, ...rest } = body;
+      return rest;
+    });
+    let signedUp;
+    try { signedUp = await signIn(name('alice'), `pw-${crypto.randomUUID()}`, { register: true }); } finally { restore(); }
+    expect(stripped).toBe(true);
+    const alice1 = await start(signedUp.account, signedUp.wrappers);
+    await recoveryCopyOpens(signedUp.account.api);
+    expect(alice1.ring.recoveryKey).toBe(true);
+  });
+
+  it('sign-up fails, and saves no session, when the recovery copy can never be written', async () => {
+    const on = browsers();
+    on('alice-1');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const restore = vaultWrites(() => null);
+    try {
+      await expect(signIn(name('alice'), `pw-${crypto.randomUUID()}`, { register: true }))
+        .rejects.toMatchObject({ code: 'recovery_copy_unconfirmed' });
+    } finally { restore(); warn.mockRestore(); }
+    expect(localStorage.getItem('telium.session.v1')).toBeNull();
+  });
+
+  it('a device given the root by a sibling seals it under the ring, so the next new device can sign', async () => {
+    const on = browsers();
+    const { password, reg, account } = await signUp(on);
+    const alice1 = await start(account, signUpWrappers(reg));
+    await throwawaySealedRoot(account, alice1);
+    // Device 2 signs in with the password: it holds the ring but cannot open the root.
+    const alice2 = await freshDevice(on, alice1.userId, password);
+    expect(alice2.trust.canSign).toBe(false);
+    expect(String((await account.api.crossSigning()).sealed_secret)).toMatch(/^device-v1:/);
+    // Emoji approval hands it the root (verify-sas.js adoptSecret).
+    await alice2.trust.adoptSecret(alice1.trust.signKey, b64(alice1.trust.identityKey));
+    expect(String((await account.api.crossSigning()).sealed_secret)).toMatch(/^recovery-v1:/);
+    // Device 1 never runs again, and a third device with only the password signs.
+    const alice3 = await freshDevice(on, alice1.userId, password);
+    expect(alice3.trust.canSign).toBe(true);
+  });
+
+  it('a root handed over before the ring arrives is sealed when the ring does (onRecoveryAdopted)', async () => {
+    const on = browsers();
+    const { password, reg, account } = await signUp(on);
+    const alice1 = await start(account, signUpWrappers(reg));
+    await throwawaySealedRoot(account, alice1);
+    // A restored session on a new device holding nothing: no ring, so nothing to seal under yet.
+    const label = `sibling-${crypto.randomUUID()}`;
+    on(label);
+    const bare = await start(account);
+    expect(bare.ring?.key).toBeFalsy();
+    await bare.trust.adoptSecret(alice1.trust.signKey, b64(alice1.trust.identityKey));
+    expect(String((await account.api.crossSigning()).sealed_secret)).toMatch(/^device-v1:/);
+    // The ring then arrives from the sibling.
+    await bare.trust.onRecoveryAdopted(alice1.ring);
+    expect(String((await account.api.crossSigning()).sealed_secret)).toMatch(/^recovery-v1:/);
+    const alice3 = await freshDevice(on, alice1.userId, password);
+    expect(alice3.trust.canSign).toBe(true);
   });
 });

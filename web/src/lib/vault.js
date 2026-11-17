@@ -662,6 +662,40 @@ export async function setMode(
   return { ...next, mode, version: versionOf(answer) };
 }
 
+/// The recovery copy `R` is on the server and opens, under the recovery key, to the ring this device holds (invariant I3).
+/// Read back from the server, not taken from what was sent. A missing or mismatched copy is written (one compare-and-swap
+/// write, which keeps the live key) and read back again; returns the ring with the new version, or throws when it still
+/// is not there. Sign-up does not finish until this holds.
+export async function confirmRecoveryCopy(home, ring, recoveryWrapper, accountRecoveryWrapper, userId = null) {
+  if (!ring?.raw) throw new Error('the recovery vault is not unlocked');
+  const confirmed = async () => {
+    const served = await home.vault();
+    if (!served?.exists || served.mode !== 'opaque_custody' || !isRecoveryKeyCiphertext(served.independent_ciphertext)) {
+      return null;
+    }
+    try {
+      const copy = decodePayload(await openRecoveryKey(accountRecoveryWrapper, served.independent_ciphertext));
+      return sameKey(copy.raw, ring.raw) ? served : null;
+    } catch {
+      return null;
+    }
+  };
+  let served = await confirmed();
+  if (served) return { ...ring, version: typeof served.version === 'number' ? served.version : ring.version };
+  const written = await setMode(
+    home,
+    { ...ring, mode: 'opaque_custody' },
+    'opaque_custody',
+    null,
+    userId,
+    recoveryWrapper,
+    await recoveryKeyCiphertext(ring, accountRecoveryWrapper),
+  );
+  served = await confirmed();
+  if (!served) throw new Error('the homeserver did not keep the recovery copy');
+  return written;
+}
+
 export async function recoveryKeyCiphertext(current, wrapper) {
   if (!current?.raw) throw new Error('the current recovery key is not loaded');
   return sealRecoveryKey(wrapper, encodePayload(keyring(current)));

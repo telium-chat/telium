@@ -30,6 +30,8 @@ const te = new TextEncoder();
 const CONTINUITY_DOMAIN = 'telium.identity.continuity-domain.v1:';
 const DEVICE_SEAL = 'device-v1:';
 const RECOVERY_SEAL = 'recovery-v1:';
+/// Modes in which the ring is the account key (not a throwaway or server-readable one), so a root may be sealed under it.
+const ringIsAccountKey = (mode) => mode === 'opaque_custody' || mode === 'self_custody';
 
 // Every signature is over a string that says what it means (domain separation).
 
@@ -151,6 +153,24 @@ export class Trust {
     });
   }
 
+  /// I4 for a root that arrived after start (sibling approval, or the ring arriving after the root): if this device holds
+  /// the root and the account key and the server's copy is not `recovery-v1:`, seal it under the account key. Changes
+  /// nothing otherwise; the only custody write allowed without the password.
+  async sealRootProperly(recoveryKey) {
+    if (!recoveryKey || !this.signKey || !this.identityKey) return false;
+    return exclusive(`telium-crosssign:${this.userId}`, async () => {
+      const doc = await this.home.crossSigning();
+      if (!doc.exists || doc.identity_key !== b64(this.identityKey)) return false;
+      if (String(doc.sealed_secret || '').startsWith(RECOVERY_SEAL)) return false;
+      if (!await this.binds(this.signKey)) return false;
+      await this.home.putCrossSigning({
+        identity_key: doc.identity_key,
+        sealed_secret: RECOVERY_SEAL + await seal(recoveryKey, this.signKey),
+      });
+      return true;
+    });
+  }
+
   async startOnce(cs, recoveryKey, mlsKey, mode, retried = false) {
     this.cs = cs;
     const doc = await this.home.crossSigning();
@@ -207,6 +227,9 @@ export class Trust {
       if (this.signKey) {
         await keepSecret(this.userId, this.signKey);
         // The pending copy is what proves this device made a reset; it goes only once the identity is accepted (below).
+        // "Seal it properly now" (I4): a held root the server keeps in any other form is sealed under the account key
+        // as soon as a device that holds both is running in a custody whose ring is the account key. Needs no password,
+        // only the token.
         const wantRecovery = (mode === 'opaque_custody' || mode === 'self_custody') && recoveryKey;
         if (wantRecovery && !recoveryWrapped) {
           await this.home.putCrossSigning({
@@ -496,6 +519,11 @@ export class Trust {
     // Only a mismatch from a wrong held key clears; one set because continuity failed or could not be checked stays.
     if (this.continuity?.valid) this.identityMismatch = false;
     await keepSecret(this.userId, secret);
+    // The ring may already be here (the password opened it); if it arrives later, onRecoveryAdopted does this.
+    if (this.recovery?.key && ringIsAccountKey(this.recovery.mode)) {
+      await this.sealRootProperly(this.recovery.key)
+        .catch((e) => console.warn('could not seal the account key under the recovery key', e));
+    }
     await this.onSecretAdopted?.(secret);
   }
 
