@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { Backup } from '../lib/backup.js';
+import { heldRecoveryKeyring } from '../lib/device-secrets.js';
 import {
   load, open, recoveryKeyCiphertext, removeIndependentRecovery, seal,
   setIndependentRecovery, setMode,
@@ -480,6 +481,32 @@ describe('a vault two devices write', () => {
     expect(home.writes.at(-1).expected_version).toBe(0);
     globalThis.indexedDB = new IDBFactory();
     expect(sameRaw((await here()).raw, first.raw)).toBe(true);
+  });
+
+  it('refuses to mint a vault over an account that already has an account key (vault_missing)', async () => {
+    home.crossSigning = async () => ({ exists: true, identity_key: 'published-key' });
+    // A brand-new device: no held ring, no vault on the server, but the account's identity key exists.
+    await expect(here()).rejects.toMatchObject({ code: 'vault_missing' });
+    expect(home.held).toBeNull();
+    expect(home.writes).toHaveLength(0);
+    expect(await heldRecoveryKeyring(USER)).toBeNull();
+  });
+
+  it('still creates the vault when the account has no account key yet', async () => {
+    home.crossSigning = async () => ({ exists: false });
+    const made = await here();
+    expect(made.created).toBe(true);
+    expect(home.held).not.toBeNull();
+  });
+
+  it('does not refuse a device that holds a ring, which uploads it rather than minting one', async () => {
+    const first = await here();
+    home.held = null;
+    home.version = 0;
+    home.crossSigning = async () => ({ exists: true, identity_key: 'published-key' });
+    const again = await here();
+    expect(again.created).toBe(false);
+    expect(sameRaw(again.raw, first.raw)).toBe(true);
   });
 
   it('does not let two first devices each create a vault', async () => {

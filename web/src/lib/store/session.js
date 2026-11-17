@@ -30,6 +30,17 @@ function authError(code, message, extra = {}) {
   return error;
 }
 
+/// Sign-in waits on custody for at most this long; a hung request then costs the setup, never the sign-in.
+export const CUSTODY_TIMEOUT_MS = 15_000;
+
+function withTimeout(work, ms, label) {
+  let timer;
+  const expired = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms} ms`)), ms);
+  });
+  return Promise.race([work, expired]).finally(() => clearTimeout(timer));
+}
+
 export const sessionMethods = {
   save() {
     if (this.disposed) { rememberSession(this.session); return; }
@@ -275,7 +286,7 @@ export const sessionMethods = {
   },
 
   /// Vault first (its ring is kept on this device before the write), then the account key under that ring. Best effort:
-  /// a failure leaves the account without them, which the next sign-in with the password retries (`vault.load` and
+  /// a failure or a request that does not answer in time leaves the account without them, which the next sign-in with the password retries (`vault.load` and
   /// `ensureRoot` both only create what is missing), and never stops the sign-in.
   async createCustody(resp, base, recoveryWrapper, accountRecoveryWrapper) {
     try {
@@ -284,11 +295,19 @@ export const sessionMethods = {
         token: resp.access_token,
         domain: resp.server_name || new URL(base).host,
       });
-      const ring = await vault.load(api, null, resp.user_id, recoveryWrapper, accountRecoveryWrapper);
+      const ring = await withTimeout(
+        vault.load(api, null, resp.user_id, recoveryWrapper, accountRecoveryWrapper),
+        this.custodyTimeoutMs ?? CUSTODY_TIMEOUT_MS,
+        'loading the recovery vault',
+      );
       if (!ring?.key) return;
       const [{ loadCiphersuite }, { Trust }] = await Promise.all([encryption(), verification()]);
       const trust = new Trust(api, { userId: resp.user_id, deviceId: resp.device_id, recovery: ring });
-      await trust.ensureRoot(await loadCiphersuite(), ring.key);
+      await withTimeout(
+        trust.ensureRoot(await loadCiphersuite(), ring.key),
+        this.custodyTimeoutMs ?? CUSTODY_TIMEOUT_MS,
+        'setting up the account key',
+      );
     } catch (e) {
       console.warn('could not set up encrypted-message custody at sign-in', e);
     }
