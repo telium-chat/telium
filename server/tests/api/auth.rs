@@ -224,7 +224,7 @@ async fn opaque_vault_mode_never_stores_a_server_recovery_key() {
             json!({
                 "mode": "opaque_custody",
                 "ciphertext": "client-only-primary-wrapper",
-                "independent_ciphertext": "optional-second-wrapper",
+                "independent_ciphertext": "k1.optional-second-wrapper",
             }),
         )
         .await;
@@ -233,9 +233,8 @@ async fn opaque_vault_mode_never_stores_a_server_recovery_key() {
     let (_, vault) = s.get("/_telium/v1/vault", Some(token)).await;
     assert_eq!(vault["mode"], "opaque_custody");
     assert_eq!(vault["ciphertext"], "client-only-primary-wrapper");
-    assert_eq!(vault["independent_ciphertext"], "optional-second-wrapper");
-    assert_eq!(vault["server_can_recover"], false);
-    assert!(vault["escrow_key"].is_null());
+    assert_eq!(vault["independent_ciphertext"], "k1.optional-second-wrapper");
+    assert!(vault.get("server_can_recover").is_none() && vault.get("escrow_key").is_none());
 
     let (status, refused) = s
         .put(
@@ -359,7 +358,7 @@ async fn vault_mode_keeps_the_independent_copy_unless_told_to_clear_it() {
             json!({
                 "mode": "opaque_custody",
                 "ciphertext": "primary.copy",
-                "independent_ciphertext": "p2.other",
+                "independent_ciphertext": "k1.other",
                 "clear_independent": true,
             }),
         )
@@ -408,18 +407,12 @@ async fn a_recovery_key_is_replaced_in_one_step_or_not_at_all() {
         (Some(old_public.clone()), Some("k1.first.copy".into())),
     );
 
-    let (status, _) = s
-        .post(
-            "/_telium/v1/vault/mode",
-            Some(&token),
-            json!({
-                "mode": "opaque_custody",
-                "ciphertext": "primary.copy",
-                "independent_ciphertext": "p2.legacy.copy",
-            }),
-        )
-        .await;
-    assert_eq!(status, 200);
+    // A legacy passphrase copy can no longer be written through the API; this account carries one from before.
+    sqlx::query("UPDATE key_vault SET independent_ciphertext = 'p2.legacy.copy' WHERE user_id = ?")
+        .bind(&user_id)
+        .execute(&s.state.pool)
+        .await
+        .unwrap();
     let (status, refused) = opaque_reauth_with(
         &s,
         &token,

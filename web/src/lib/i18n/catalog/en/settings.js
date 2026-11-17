@@ -47,9 +47,9 @@ export const settings = {
   // and a name cited in five translated sentences cannot go on living in a
   // file no translator ever opens.
   //
-  // The five are `chat.encryption.custody.escrowed`,
-  // `chat.encryption.escrowedNote`, `chat.encryption.vaultLocked.body`,
-  // `chat.encryption.recoveryFallback.body` and `security.devices.cannotSign`.
+  // The five are `chat.encryption.custody.retired`,
+  // `chat.encryption.retired.body`, `chat.encryption.vaultLocked.body`,
+  // `auth.reset.historyLocked` and `security.devices.cannotSign`.
   // Each interpolates this entry as `{pane}` instead of spelling it out. That
   // is the whole reason the key exists: an instruction that names a control is
   // wrong the instant the two spellings drift, and two spellings in two
@@ -71,7 +71,7 @@ export const settings = {
   // drawn twice, so there is one key and not a `nav` and a `title`.
   //
   // "Key" here is the recovery key that opens your message history -- not a
-  // password, and not the passphrase, which is one of the ways to get at it.
+  // password.
   // The pane is named for what somebody arrives looking for rather than for
   // the machinery behind it (the keyring, the vault, the recovery parts), so
   // a language with a choice between the everyday word for a key and a

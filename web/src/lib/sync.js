@@ -343,7 +343,7 @@ export class SyncStore {
     const same = this.keys?.kid === keys.kid && this.keys.byKid.size === keys.byKid.size;
     this.keys = keys;
     this.keysCurrent = current || (same && this.keysCurrent);
-    this.draftsSync = ring.mode !== 'escrowed';
+    this.draftsSync = true;
     if (!this.api) return true;
     return this.load(this.api);
   }

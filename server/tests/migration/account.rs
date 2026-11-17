@@ -144,6 +144,41 @@ async fn the_vault_moves_as_ciphertext_and_its_escrow_key_does_not() {
 }
 
 #[tokio::test]
+async fn a_passphrase_copy_of_the_vault_does_not_land_but_the_recovery_key_copy_does() {
+    let a = home("a.example").await;
+    let b = home("b.example").await;
+    for (user, copy) in [("old", "p2.salt.iv.ct"), ("older", "iv.ct"), ("current", "k1.iv.ct")] {
+        let id = format!("@{user}:a.example");
+        account(&a.pool, &id, user, "a.example").await;
+        sqlx::query(
+            "INSERT INTO key_vault (user_id, mode, ciphertext, independent_ciphertext, version, updated_at) \
+             VALUES (?, 'opaque_custody', 'VAULT', ?, 2, 5000)",
+        )
+        .bind(&id)
+        .bind(copy)
+        .execute(&a.pool)
+        .await
+        .unwrap();
+        let bundle = migration::export_user(&a, &id).await.unwrap();
+        import_user(&b, &bundle, &format!("@{user}:b.example")).await;
+    }
+    let landed: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT user_id, independent_ciphertext FROM key_vault ORDER BY user_id",
+    )
+    .fetch_all(&b.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        landed,
+        vec![
+            ("@current:b.example".into(), Some("k1.iv.ct".into())),
+            ("@old:b.example".into(), None),
+            ("@older:b.example".into(), None),
+        ],
+    );
+}
+
+#[tokio::test]
 async fn a_landed_vault_keeps_the_modes_a_client_can_open() {
     for (before, after) in [
         ("self_custody", "self_custody"),

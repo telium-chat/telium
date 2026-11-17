@@ -314,7 +314,7 @@ export const sessionMethods = {
         signal: abort.signal,
       });
       const ring = await withTimeout(
-        vault.load(api, null, resp.user_id, recoveryWrapper, accountRecoveryWrapper, { reseal: true }),
+        vault.load(api, resp.user_id, recoveryWrapper, accountRecoveryWrapper, { reseal: true }),
         this.custodyTimeoutMs ?? CUSTODY_TIMEOUT_MS,
         'loading the recovery vault',
         abort,
@@ -350,7 +350,7 @@ export const sessionMethods = {
           signal: abort.signal,
         });
         await withTimeout((async () => {
-          const ring = await vault.load(api, null, resp.user_id, recoveryWrapper, accountRecoveryWrapper, { reseal: true });
+          const ring = await vault.load(api, resp.user_id, recoveryWrapper, accountRecoveryWrapper, { reseal: true });
           if (!ring?.key) throw new Error('the recovery vault did not open');
           await vault.confirmRecoveryCopy(api, ring, recoveryWrapper, accountRecoveryWrapper, resp.user_id);
         })(), this.custodyTimeoutMs ?? CUSTODY_TIMEOUT_MS, 'saving the recovery copy', abort);
@@ -398,11 +398,6 @@ export const sessionMethods = {
     if (this.vault.recoveryKey && !replace) {
       throw new Error('This account already has a generated recovery key.');
     }
-    if (this.vault.legacyIndependent
-      || (this.vault.independent && !this.vault.recoveryKey)) {
-      throw new Error('Remove the legacy independent recovery passphrase before adding a generated recovery key.');
-    }
-
     const { generateAccountRecovery } = await import('../account-recovery.js');
     const { reauthenticateOpaque } = await secureAuth();
     const accountRecovery = generateAccountRecovery();
@@ -424,7 +419,6 @@ export const sessionMethods = {
       ...this.vault,
       independent: true,
       recoveryKey: true,
-      legacyIndependent: false,
       independentCiphertext,
     };
     if (typeof sessionStorage !== 'undefined') {
@@ -463,7 +457,6 @@ export const sessionMethods = {
       ...this.vault,
       independent: true,
       recoveryKey: true,
-      legacyIndependent: false,
       independentCiphertext,
     };
     this.emit('vault', this.vault);
@@ -524,7 +517,9 @@ export const sessionMethods = {
     };
     this.save();
     rememberSession(this.session, { touch: true });
-    return resp;
+    // `vault_unopenable` says the reset went through but the vault's recovery copy did not open under this recovery key (an
+    // account moved here carries the source server's copy), so it was left as it is and stays locked: the caller tells the user.
+    return recovered.vaultUnopenable ? { ...resp, vault_unopenable: true } : resp;
   },
 
   /// Changes the account password and re-wraps the vault under it in one server write, so the OPAQUE record and the vault
@@ -569,12 +564,18 @@ export const sessionMethods = {
   },
 
   /// Moves an account still on an older key-stretching set to the current one, at a sign-in, while the password is in
-  /// hand: the new record and the re-wrapped vault go up in one write. Returns the new wrapper, or null when nothing
-  /// changed. Best effort: the old set still works, so a failure is logged and tried again at the next sign-in.
+  /// hand: the new record and the re-wrapped vault go up in one write. Returns `{ recoveryWrapper }`, the wrapper the
+  /// password makes under the record now in force, or null when nothing changed. Best effort: the old set still works, so
+  /// a failure is logged and tried again at the next sign-in.
+  ///
+  /// A write whose answer is lost may have landed, and then the wrapper this sign-in holds is the old set's: keeping it
+  /// would seal the vault under a key the record no longer makes. So the record in force is read back with the password;
+  /// if that cannot be read either, no wrapper is returned at all (`recoveryWrapper: null`), which leaves this session
+  /// with a locked vault until the next password sign-in rather than one resealed under the wrong key.
   async upgradeKsf(resp, base, password, recoveryWrapper, accountRecoveryWrapper) {
+    const api = new Api({ base, token: resp.access_token, domain: resp.server_name || new URL(base).host });
     try {
-      const api = new Api({ base, token: resp.access_token, domain: resp.server_name || new URL(base).host });
-      const ring = await vault.load(api, null, resp.user_id, recoveryWrapper, accountRecoveryWrapper, { reseal: true });
+      const ring = await vault.load(api, resp.user_id, recoveryWrapper, accountRecoveryWrapper, { reseal: true });
       if (!ring?.raw || ring.mode !== 'opaque_custody') return null;
       const { changePasswordOpaque } = await secureAuth();
       return await changePasswordOpaque(api, password, password, {
@@ -582,7 +583,16 @@ export const sessionMethods = {
       });
     } catch (e) {
       console.warn('could not move the account to the current key-stretching settings', e);
-      return null;
+      // Refused, or failed before the write was sent: nothing changed, and the wrapper in hand is still right.
+      if (!e?.finishUnanswered) return null;
+      try {
+        const { currentWrapperOpaque, KSF_CURRENT } = await secureAuth();
+        const now = await currentWrapperOpaque(api, password);
+        return now.ksfVersion >= KSF_CURRENT ? { recoveryWrapper: now.recoveryWrapper, ksfVersion: now.ksfVersion } : null;
+      } catch (readBack) {
+        console.warn('could not tell whether the key-stretching move landed; using no vault key this session', readBack);
+        return { recoveryWrapper: null, ksfVersion: null };
+      }
     }
   },
 

@@ -432,7 +432,6 @@ export class Verification {
     if (!this.trust.recovery?.key && payload.sealed_recovery) {
       this.trust.recovery = decodeRecoveryTransfer(
         await unseal(key, payload.sealed_recovery),
-        'device_custody',
       );
       await this.trust.onRecoveryAdopted?.(this.trust.recovery);
     }

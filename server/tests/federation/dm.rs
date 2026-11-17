@@ -793,59 +793,6 @@ async fn frames_the_old_sequencer_ordered_before_a_handoff_still_land() {
 }
 
 #[tokio::test]
-async fn switching_the_vault_to_self_custody_destroys_the_escrow_key() {
-    let (a, _b) = pair().await;
-    let alice = register_full(&a, "alice").await;
-
-    let (status, ok) = a
-        .put(
-            "/_telium/v1/vault",
-            &alice.token,
-            json!({ "ciphertext": "vault-v1", "escrow_key": "escrow-secret" }),
-        )
-        .await;
-    assert_eq!(status, 200, "{ok}");
-
-    let (_, vault) = a.get("/_telium/v1/vault", Some(&alice.token)).await;
-    assert_eq!(vault["mode"], "escrowed");
-    assert_eq!(vault["server_can_recover"], true, "escrowed mode is honest about this");
-
-    let (status, refused) = a
-        .post(
-            "/_telium/v1/vault/mode",
-            Some(&alice.token),
-            json!({ "mode": "self_custody", "ciphertext": "vault-v2" }),
-        )
-        .await;
-    assert_eq!(status, 400, "{refused}");
-
-    let (status, switched) = a
-        .post(
-            "/_telium/v1/vault/mode",
-            Some(&alice.token),
-            json!({ "mode": "self_custody", "ciphertext": "vault-v2", "recovery_confirmed": true }),
-        )
-        .await;
-    assert_eq!(status, 200, "{switched}");
-    assert_eq!(switched["escrow_key_destroyed"], true);
-
-    let (_, vault) = a.get("/_telium/v1/vault", Some(&alice.token)).await;
-    assert_eq!(vault["mode"], "self_custody");
-    assert_eq!(vault["escrow_key"], Value::Null);
-    assert_eq!(vault["server_can_recover"], false);
-    assert_eq!(vault["version"], 2);
-
-    let (status, refused) = a
-        .put(
-            "/_telium/v1/vault",
-            &alice.token,
-            json!({ "ciphertext": "v3", "mode": "self_custody", "escrow_key": "oops" }),
-        )
-        .await;
-    assert_eq!(status, 400, "{refused}");
-}
-
-#[tokio::test]
 async fn a_call_in_a_dm_is_kept_by_the_sequencer_and_seen_on_both_sides() {
     let (a, b) = pair().await;
     let alice = register_full(&a, "alice").await;

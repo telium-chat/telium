@@ -28,10 +28,9 @@ export { SAS_EMOJI, VERIFY_TIMEOUT, Verification, emojiFor } from './verify-sas.
 const te = new TextEncoder();
 // Sticky per home domain: once this account's home has advertised identity continuity, it cannot quietly stop.
 const CONTINUITY_DOMAIN = 'telium.identity.continuity-domain.v1:';
-const DEVICE_SEAL = 'device-v1:';
 const RECOVERY_SEAL = 'recovery-v1:';
-/// Modes in which the ring is the account key (not a throwaway or server-readable one), so a root may be sealed under it.
-const ringIsAccountKey = (mode) => mode === 'opaque_custody' || mode === 'self_custody';
+/// The only custody a ring is the account key in (not a throwaway or server-readable one), so a root may be sealed under it.
+const ringIsAccountKey = (mode) => mode === 'opaque_custody';
 
 // Every signature is over a string that says what it means (domain separation).
 
@@ -115,11 +114,12 @@ export class Trust {
     }
   }
 
-  /// Creates the key on first use; legacy unprefixed rows are opened once and moved to the current form. One start per
+  /// Creates the key on first use. `recoveryKey` is the ring the vault opened to, which is the account key: the vault
+  /// yields a ring only in `opaque_custody`, so a key in hand is always one a root may be sealed under. One start per
   /// account at a time across tabs: two tabs creating at once each made a key, and the one the server refused had already
   /// stored its own, leaving that browser holding a key its account does not publish.
-  async start(cs, recoveryKey, mlsKey, mode = 'device_custody') {
-    return exclusive(`telium-crosssign:${this.userId}`, () => this.startOnce(cs, recoveryKey, mlsKey, mode));
+  async start(cs, recoveryKey, mlsKey) {
+    return exclusive(`telium-crosssign:${this.userId}`, () => this.startOnce(cs, recoveryKey, mlsKey));
   }
 
   /// Creates the account's signing key if it has none, sealed under the account key, and nothing else. Run by sign-in
@@ -171,7 +171,26 @@ export class Trust {
     });
   }
 
-  async startOnce(cs, recoveryKey, mlsKey, mode, retried = false) {
+  /// For a device that holds the root after a new vault replaced a retired one (`startNewVault`): the server's copy of the
+  /// root may already say `recovery-v1:`, but under the old ring, which nothing can open now, so the prefix check of
+  /// `sealRootProperly` would leave it. The held root is sealed under the new account key, only if it is the one the
+  /// account publishes. Without this, a new device could never sign and the user would be sent to an identity reset they
+  /// do not need.
+  async resealRoot(recoveryKey) {
+    if (!recoveryKey || !this.signKey || !this.identityKey) return false;
+    return exclusive(`telium-crosssign:${this.userId}`, async () => {
+      const doc = await this.home.crossSigning();
+      if (!doc.exists || doc.identity_key !== b64(this.identityKey)) return false;
+      if (!await this.binds(this.signKey)) return false;
+      await this.home.putCrossSigning({
+        identity_key: doc.identity_key,
+        sealed_secret: RECOVERY_SEAL + await seal(recoveryKey, this.signKey),
+      });
+      return true;
+    });
+  }
+
+  async startOnce(cs, recoveryKey, mlsKey, retried = false) {
     this.cs = cs;
     const doc = await this.home.crossSigning();
     for (const d of doc.devices || []) this.own.set(d.device_id, d);
@@ -199,7 +218,6 @@ export class Trust {
     if (doc.exists) {
       this.identityKey = unb64(doc.identity_key);
       const stored = String(doc.sealed_secret || '');
-      const deviceWrapped = stored.startsWith(DEVICE_SEAL);
       const recoveryWrapped = stored.startsWith(RECOVERY_SEAL);
 
       // A homeserver can swap the public identity row but not make our secret match; check the pair. A held key that does
@@ -216,22 +234,20 @@ export class Trust {
       await take(pending);
       // Only a key this device made itself (filed before it was sent) may stand behind an unconfirmed reset.
       madeHere = Boolean(pending && await this.binds(pending));
+      // Only `recovery-v1:` opens. The throwaway-key seal (`device-v1:`) and the unprefixed original format are retired:
+      // nothing opens them, so a device that does not already hold such a root has none, and #74 starts a new one.
       if (recoveryWrapped && recoveryKeys.length) {
         await take(await openWithRecovery(stored.slice(RECOVERY_SEAL.length)));
-      } else if (!deviceWrapped && !recoveryWrapped && recoveryKeys.length) {
-        // The original format used the MLS recovery key; try the whole ring in case it rotated.
-        await take(await openWithRecovery(stored));
       }
       if (!this.signKey && tried) this.identityMismatch = true;
 
       if (this.signKey) {
         await keepSecret(this.userId, this.signKey);
         // The pending copy is what proves this device made a reset; it goes only once the identity is accepted (below).
-        // "Seal it properly now" (I4): a held root the server keeps in any other form is sealed under the account key
-        // as soon as a device that holds both is running in a custody whose ring is the account key. Needs no password,
-        // only the token.
-        const wantRecovery = (mode === 'opaque_custody' || mode === 'self_custody') && recoveryKey;
-        if (wantRecovery && !recoveryWrapped) {
+        // "Seal it properly now" (I4): a held root the server keeps in any other form (a legacy `device-v1:` or unprefixed
+        // seal) is sealed under the account key as soon as a device that holds both has the account key. Needs no
+        // password, only the token.
+        if (recoveryKey && !recoveryWrapped) {
           await this.home.putCrossSigning({
             identity_key: b64(this.identityKey),
             sealed_secret: RECOVERY_SEAL + await seal(recoveryKey, this.signKey),
@@ -260,7 +276,7 @@ export class Trust {
           if (!retried) {
             this.own.clear();
             this.requests.clear();
-            return this.startOnce(cs, recoveryKey, mlsKey, mode, true);
+            return this.startOnce(cs, recoveryKey, mlsKey, true);
           }
         }
         // Anything else may have reached the server; the next start finds the pending copy if it did.

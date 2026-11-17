@@ -69,7 +69,7 @@ export async function trustFor(home, mls, userId, deviceId, key = null) {
   const trust = new Trust(home.for(userId, deviceId), {
     userId, deviceId, recovery,
   });
-  await trust.start(mls.cs, key, await mls.leafKey(), 'device_custody');
+  await trust.start(mls.cs, key, await mls.leafKey());
   return trust;
 }
 

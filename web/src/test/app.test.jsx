@@ -827,17 +827,19 @@ function seedSession(origins, { expiresAt = Date.now() + 3_600_000 } = {}) {
     expect(await synced(server, store, 'emoji.tone.v1')).toBe('\u{1F3FD}');
   });
 
-  it('knows who holds the key even when the vault itself would not open', async () => {
+  it('knows the custody a vault is stored in even when it will not be opened, and shows it as retired and locked', async () => {
+    // Phase 4: an escrowed vault is refused. The server no longer serves a key for it, and the client never opens it.
     const { store } = await boot({
       vaults: new Map([['@alice:home.example', {
         mode: 'escrowed',
-        escrow_key: btoa(String.fromCharCode(...new Uint8Array(32))),
         ciphertext: 'AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAAAAAAAA',
       }]]),
     });
     await waitFor(() => expect(store.custody?.mode).toBe('escrowed'));
-    expect(store.custody.server_can_recover).toBe(true);
-    expect(store.vault).toBe(null);
+    expect(store.custody.server_can_recover).toBeUndefined();
+    await waitFor(() => expect(store.vault?.retiredMode).toBe('escrowed'));
+    expect(store.vault.locked).toBe(true);
+    expect(store.vault.key).toBeNull();
   });
 
   it('keeps paging past the hot window when cold segments say there is more', async () => {

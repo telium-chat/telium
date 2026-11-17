@@ -967,6 +967,23 @@ pub async fn get_cross_signing(State(state): State<AppState>, auth: HomeAuth) ->
     })))
 }
 
+/// The throwaway-key seal (`device-v1:`) wrapped the identity root under a key nobody kept, so no new device could ever
+/// open it. Retired in phase 4 of the key-custody design: a root is sealed under the account key (`recovery-v1:`)
+/// from the moment it exists. Only an incoming value is refused; a root already stored that way stays readable, and a
+/// device holding it re-seals it properly.
+pub(crate) fn refuse_retired_seal(sealed_secret: &str) -> ApiResult<()> {
+    if sealed_secret.trim_start().starts_with("device-v1:") {
+        return Err(ApiError::BadRequest(
+            "the throwaway-key seal for the identity key is retired; seal it under the account key (recovery-v1:), \
+             or update Telium"
+                .into(),
+        )
+        .with_code(crate::errcodes::CUSTODY_RETIRED)
+        .with_detail("seal", "device-v1"));
+    }
+    Ok(())
+}
+
 pub async fn put_cross_signing(
     State(state): State<AppState>,
     auth: HomeAuth,
@@ -975,6 +992,7 @@ pub async fn put_cross_signing(
     if body.identity_key.trim().is_empty() || body.sealed_secret.trim().is_empty() {
         return Err(ApiError::BadRequest("cross-signing key and sealed secret are required".into()));
     }
+    refuse_retired_seal(&body.sealed_secret)?;
     if let Some(protected) =
         super::identity_continuity::current_key(&state, &auth.user_id).await?
     {

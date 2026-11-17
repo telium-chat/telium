@@ -26,6 +26,8 @@ pub const DELETION_TABLES: &[(&str, &str)] = &[
     ("key_packages", "user_id"),
     ("key_backup", "user_id"),
     ("key_vault", "user_id"),
+    // The copy of a retired custody's key material made when phase 4 withdrew it.
+    ("key_vault_legacy_archive", "user_id"),
     ("identity_transitions", "user_id"),
     ("device_revocations", "user_id"),
     ("identity_recovery_policies", "user_id"),

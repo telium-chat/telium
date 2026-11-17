@@ -18,14 +18,6 @@ export const trustMethods = {
     return outcome;
   },
 
-  /// How this account's keys are kept, for sealing the identity secret. The server says "none" before the vault exists, and
-  /// the first custody read is sent before this device creates it: taking that answer sealed a new account's identity under a
-  /// throwaway key, so every device signed in later could never sign itself. A real mode only.
-  custodyMode() {
-    const real = (mode) => (mode && mode !== 'none' ? mode : null);
-    return real(this.custody?.mode) || real(this.vault?.mode) || 'device_custody';
-  },
-
   /// Fails closed: an outage must not become device trust.
   async startTrust() {
     // No IndexedDB means no local device identity: an expected degraded mode.
@@ -47,32 +39,32 @@ export const trustMethods = {
           this.mls.cs,
           this.vault?.key || null,
           await this.mls.leafKey(),
-          this.custodyMode(),
         );
         this.trust = trust;
 
         trust.onRecoveryAdopted = async (ring) => {
-          const mode = this.custodyMode();
           // What this device read about the second copy stands whichever way the ring arrived; dropping it made Settings
           // say "Recovery key: Not made yet" on a device that took its keys from a sibling.
           const held = this.vault || {};
           let recovered = {
             ...ring,
-            mode,
+            // A ring from a sibling is the account key only once it is in the account's vault under the password.
+            mode: held.mode === 'opaque_custody' ? 'opaque_custody' : null,
             independent: Boolean(held.independent),
             recoveryKey: Boolean(held.recoveryKey),
-            legacyIndependent: Boolean(held.legacyIndependent),
             independentCiphertext: held.independentCiphertext || null,
             locked: false,
             needs_device: false,
           };
           await vault.rememberDeviceRecovery(userId, recovered).catch(() => {});
-          if (this.authRecoveryWrapper) {
-            recovered = await vault.setMode(
+          // With the password in hand the ring is written under it, so the vault is `opaque_custody` and the root can be
+          // sealed under it; a retired `device_custody` vault (L1h) is converted here too. Without the password nothing
+          // is written, and the ring stays local until the next password sign-in.
+          const adoptable = !held.retiredMode || held.retiredMode === 'device_custody';
+          if (this.authRecoveryWrapper && adoptable) {
+            recovered = await vault.writeOpaque(
               this.home,
-              { ...recovered, mode: recovered.mode || 'device_custody' },
-              'opaque_custody',
-              null,
+              { ...recovered, version: held.version },
               userId,
               this.authRecoveryWrapper,
             ).catch(() => recovered);
@@ -81,7 +73,7 @@ export const trustMethods = {
           this.vault = recovered;
           trust.recovery = recovered;
           // A root this device took from a sibling is sealed under the ring it took with it (I4).
-          if (recovered.key && (recovered.mode === 'opaque_custody' || recovered.mode === 'self_custody')) {
+          if (recovered.key && recovered.mode === 'opaque_custody') {
             await trust.sealRootProperly(recovered.key)
               .catch((e) => console.warn('could not seal the account key under the recovery key', e));
           }

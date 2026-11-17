@@ -7,8 +7,8 @@
 //
 // Each device is wired the way lib/store/lifecycle.js and lib/store/trust.js wire it: custody read before the vault
 // load, the vault loaded with whatever wrappers that session holds in memory (a restored session holds none), an MLS
-// engine with the history mirror (Backup), and `trustMethods.startTrust` choosing the seal through `custodyMode()`.
-// Nothing here passes a custody mode by hand.
+// engine with the history mirror (Backup), and `trustMethods.startTrust` starting trust with whatever ring the vault opened to.
+// Nothing here passes a custody mode by hand (the modes are gone: opaque custody is the only one).
 //
 // Scenarios that fail today are `it.fails`, each with the assertion that fails and why. They are the custody bugs the
 // single-path design removes; when one starts passing, vitest reports it and the marker comes off.
@@ -17,11 +17,12 @@ import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { Mls, wipe } from '../lib/mls.js';
 import { Backup } from '../lib/backup.js';
-import { load as loadVault, seal } from '../lib/vault.js';
+import { load as loadVault, replaceRetiredVault, seal } from '../lib/vault.js';
 import { Trust } from '../lib/verify.js';
 import { b64 } from '../lib/util.js';
 import { trustMethods } from '../lib/store/trust.js';
 import { sessionMethods } from '../lib/store/session.js';
+import { dmMethods } from '../lib/store/dms.js';
 import { RealHome, haveServer } from './real-home.js';
 
 const realFetch = globalThis.fetch;
@@ -78,7 +79,7 @@ async function start(account, { api = account.api, recoveryWrapper = null, accou
   let ring = null;
   let vaultError = null;
   try {
-    ring = await loadVault(api, null, account.userId, recoveryWrapper, accountRecoveryWrapper);
+    ring = await loadVault(api, account.userId, recoveryWrapper, accountRecoveryWrapper);
   } catch (e) {
     // lifecycle.js: "key vault unavailable", and the engine starts without a recovery key.
     vaultError = e;
@@ -113,7 +114,7 @@ async function newBob() {
   const mls = new Mls(bob.api, { userId: bob.userId, deviceId: bob.deviceId });
   await mls.start();
   const trust = new Trust(bob.api, { userId: bob.userId, deviceId: bob.deviceId });
-  await trust.start(mls.cs, crypto.getRandomValues(new Uint8Array(32)), await mls.leafKey(), 'device_custody');
+  await trust.start(mls.cs, crypto.getRandomValues(new Uint8Array(32)), await mls.leafKey());
   mls.verifyClaimedPackage = (u, d, k) => trust.verifyClaimedPackage(u, d, k);
   return { ...bob, mls, trust, label: 'bob' };
 }
@@ -400,14 +401,12 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
     await gate(on, alice1, password);
   });
 
-  // Pre-#70 state: the root sealed under a throwaway key (`device-v1:`), as `device_custody` starts did. The client no
-  // longer writes this (phase 1), so the state is put on the server directly, with the key device 1 holds.
+  // Pre-#70 state: the root sealed under a throwaway key (`device-v1:`), as `device_custody` starts did. Neither the client
+  // (phase 1) nor the server (phase 4) writes this any more, so the state is put into the server's database directly, with
+  // the key device 1 holds; the assertions of every test that uses it still go through the API.
   async function throwawaySealedRoot(account, alice1) {
-    const doc = await account.api.crossSigning();
-    await account.api.putCrossSigning({
-      identity_key: doc.identity_key,
-      sealed_secret: `device-v1:${await seal(crypto.getRandomValues(new Uint8Array(32)), alice1.trust.signKey)}`,
-    });
+    const sealed = `device-v1:${await seal(crypto.getRandomValues(new Uint8Array(32)), alice1.trust.signKey)}`;
+    server.sql('UPDATE cross_signing SET sealed_secret = ? WHERE user_id = ?', sealed, account.userId);
     expect(String((await account.api.crossSigning()).sealed_secret)).toMatch(/^device-v1:/);
   }
 
@@ -592,7 +591,7 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
     expect(after.ciphertext).not.toBe(before.ciphertext);
     // The copy under the recovery key is under the account key, which a password change does not touch.
     expect(after.independent_ciphertext).toBe(before.independent_ciphertext);
-    const viaRecoveryKey = await loadVault(account.api, null, alice1.userId, null, reg.accountRecoveryWrapper);
+    const viaRecoveryKey = await loadVault(account.api, alice1.userId, null, reg.accountRecoveryWrapper);
     expect(b64(viaRecoveryKey.raw)).toBe(b64(alice1.ring.raw));
     // The session that made the change keeps working, with the new wrapper in memory.
     expect(store.authRecoveryWrapper).toBeTruthy();
@@ -661,7 +660,7 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
     const second = await signIn(alice1.userId, password);
     second.store.home = second.account.api;
     second.store.opaqueAuth = true;
-    second.store.vault = await loadVault(second.account.api, null, alice1.userId, second.wrappers.recoveryWrapper, null);
+    second.store.vault = await loadVault(second.account.api, alice1.userId, second.wrappers.recoveryWrapper, null);
     const fresh = `new-${crypto.randomUUID()}`;
     await second.store.changePassword(password, fresh);
     const after = await second.account.api.vault();
@@ -671,7 +670,7 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
     // And on a session that is still live, B's stale key and recovery key must not re-seal the vault under the old
     // password: the ring comes back from the recovery copy and nothing is written.
     const stale = await loadVault(
-      second.account.api, null, alice1.userId, reg.recoveryWrapper, reg.accountRecoveryWrapper,
+      second.account.api, alice1.userId, reg.recoveryWrapper, reg.accountRecoveryWrapper,
     );
     expect(b64(stale.raw)).toBe(b64(alice1.ring.raw));
     expect(await second.account.api.vault()).toMatchObject({ version: after.version, ciphertext: after.ciphertext });
@@ -700,6 +699,7 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
     });
     const fresh = `new-${crypto.randomUUID()}`;
     const resp = await resetter.resetPassword(server.base, alice1.userId, recoveryKey, fresh);
+    expect(resp.vault_unopenable).toBe(true);
     const reset = server.wrap({ ...resp, access_token: resetter.session.home.token });
     // The reset went through on the recovery key's say-so and left the vault as it was (it is not openable anyway).
     expect(await reset.api.vault()).toMatchObject({ version: moved.version, ciphertext: moved.ciphertext });
@@ -733,13 +733,14 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
     });
     const fresh = `new-${crypto.randomUUID()}`;
     const resp = await resetter.resetPassword(server.base, alice1.userId, recoveryKey, fresh);
+    expect(resp.vault_unopenable).toBeUndefined();
     const reset = server.wrap({ ...resp, access_token: resetter.session.home.token });
     const after = await reset.api.vault();
     expect(after.version).toBe(before.version + 1);
     expect(after.ciphertext).not.toBe(before.ciphertext);
     expect(after.independent_ciphertext).toBe(before.independent_ciphertext);
     // Opens under the new password's wrapper alone: nothing here uses the recovery copy to repair it afterwards.
-    const ring = await loadVault(reset.api, null, alice1.userId, resetter.authRecoveryWrapper, null);
+    const ring = await loadVault(reset.api, alice1.userId, resetter.authRecoveryWrapper, null);
     expect(b64(ring.raw)).toBe(b64(alice1.ring.raw));
     expect((await reset.api.vault()).version).toBe(after.version);
 
@@ -782,7 +783,9 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
 
   // ---- Trust.sealRootProperly: what it must leave alone ----
 
-  it('sealRootProperly leaves a root alone when the ring is in device custody', async () => {
+  // A ring that is not (yet) the account's vault ring is never the account key: a sibling's, handed over before the
+  // password wrote it into the vault. Used to be spelled "device custody", which no vault can be in any more.
+  it('sealRootProperly leaves a root alone when the ring is not the account key', async () => {
     const on = browsers();
     const { reg, account } = await signUp(on);
     const alice1 = await start(account, signUpWrappers(reg));
@@ -790,7 +793,7 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
     const sealed = (await account.api.crossSigning()).sealed_secret;
     on(`sibling-${crypto.randomUUID()}`);
     const bare = await start(account);
-    bare.trust.recovery = { ...alice1.ring, mode: 'device_custody' };
+    bare.trust.recovery = { ...alice1.ring, mode: null };
     const write = vi.spyOn(bare.trust.home, 'putCrossSigning');
     await bare.trust.adoptSecret(alice1.trust.signKey, b64(alice1.trust.identityKey));
     expect(write).not.toHaveBeenCalled();
@@ -821,5 +824,140 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
     expect(await alice1.trust.sealRootProperly(alice1.ring.key)).toBe(false);
     expect(write).not.toHaveBeenCalled();
     expect((await account.api.crossSigning()).sealed_secret).toBe(sealed);
+  });
+  // ---- Phase 4: the legacy custody modes are refused; what happens to an account that is still in one ----
+
+  /// An account moved into a legacy state the way old clients left it: the vault in a retired mode (its ciphertext is
+  /// whatever it was, since no client opens it) and the root throwaway-sealed.
+  async function intoLegacyState(account, alice1, mode, { keepRecoveryCopy = false } = {}) {
+    server.sql(
+      keepRecoveryCopy
+        ? 'UPDATE key_vault SET mode = ? WHERE user_id = ?'
+        : 'UPDATE key_vault SET mode = ?, independent_ciphertext = NULL WHERE user_id = ?',
+      mode, account.userId,
+    );
+    await throwawaySealedRoot(account, alice1);
+  }
+
+  it('L1h: a device that still holds the keys of a device_custody account converts it when the password is typed', async () => {
+    const on = browsers();
+    const { password, reg, account } = await signUp(on);
+    const alice1 = await start(account, signUpWrappers(reg));
+    await intoLegacyState(account, alice1, 'device_custody');
+    expect((await account.api.vault()).mode).toBe('device_custody');
+    // The same browser signs in again with the password: it holds the ring and the root.
+    on('alice-1');
+    const again = await signIn(alice1.userId, password);
+    const healed = await start(again.account, again.wrappers);
+    expect(healed.ring.mode).toBe('opaque_custody');
+    expect(healed.ring.raw).toEqual(alice1.ring.raw);
+    expect((await account.api.vault()).mode).toBe('opaque_custody');
+    expect(String((await account.api.crossSigning()).sealed_secret)).toMatch(/^recovery-v1:/);
+    // A brand-new device with only the password now works, with the history key that was never rotated.
+    await gate(on, healed, password);
+  });
+
+  it('L1h: a restored session without the password converts nothing and leaves the vault as it is', async () => {
+    const on = browsers();
+    const { reg, account } = await signUp(on);
+    const alice1 = await start(account, signUpWrappers(reg));
+    await intoLegacyState(account, alice1, 'device_custody');
+    const before = await account.api.vault();
+    const restored = await start(account);
+    expect(restored.ring.locked).toBe(true);
+    expect(restored.ring.retiredMode).toBe('device_custody');
+    expect(restored.ring.needs_password).toBe(true);
+    const after = await account.api.vault();
+    expect([after.mode, after.version]).toEqual([before.mode, before.version]);
+    expect(String((await account.api.crossSigning()).sealed_secret)).toMatch(/^device-v1:/);
+  });
+
+  it.each(['self_custody', 'escrowed'])('%s is refused on every device, even one that holds the ring, and nothing is written', async (mode) => {
+    const on = browsers();
+    const { password, reg, account } = await signUp(on);
+    const alice1 = await start(account, signUpWrappers(reg));
+    server.sql('UPDATE key_vault SET mode = ? WHERE user_id = ?', mode, account.userId);
+    const before = await account.api.vault();
+    on('alice-1');
+    const again = await signIn(alice1.userId, password);
+    const refused = await start(again.account, again.wrappers);
+    expect(refused.ring.locked).toBe(true);
+    expect(refused.ring.retiredMode).toBe(mode);
+    expect(refused.ring.key).toBeNull();
+    on(`fresh-${crypto.randomUUID()}`);
+    const fresh = await signIn(alice1.userId, password);
+    const refusedToo = await start(fresh.account, fresh.wrappers);
+    expect(refusedToo.ring.retiredMode).toBe(mode);
+    const after = await account.api.vault();
+    expect([after.mode, after.version, after.ciphertext]).toEqual([before.mode, before.version, before.ciphertext]);
+  });
+
+  /// The store of a started device with every method the settings pane calls, not only the trust ones `start` wires.
+  const wholeStore = (started, wrappers) => Object.assign(
+    Object.create({ ...trustMethods, ...dmMethods, ...sessionMethods }),
+    started.store,
+    { authRecoveryWrapper: wrappers.recoveryWrapper, accountRecoveryWrapper: wrappers.accountRecoveryWrapper },
+  );
+
+  // The owner's account: root lost, vault in a retired mode, no device holds either. The user signs in with the password,
+  // starts a new vault on purpose (the old history is gone for good), and the #74 reset then works, sealed under the new
+  // account key, so a brand-new device with only the password signs. The new vault has no recovery copy until the recovery
+  // key is reconnected, which is the existing "Needs reconnecting" step.
+  it('L1x: a legacy account nothing holds starts a new vault, resets its identity with the recovery key, and a new device then signs', async () => {
+    const on = browsers();
+    const { password, reg, account, recoveryKey } = await signUp(on);
+    const alice1 = await start(account, signUpWrappers(reg));
+    await intoLegacyState(account, alice1, 'device_custody');
+    on(`fresh-${crypto.randomUUID()}`);
+    const signed = await signIn(alice1.userId, password);
+    const locked = await start(signed.account, signed.wrappers);
+    expect(locked.ring.retiredMode).toBe('device_custody');
+    expect(locked.ring.key).toBeNull();
+    // `recoverIdentity` needs an account key: with none it refuses rather than sealing under anything else.
+    await expect(locked.store.recoverIdentity(recoveryKey)).rejects.toThrow(/Unlock your encrypted messages/);
+
+    const store = wholeStore(locked, signed.wrappers);
+    await store.startNewVault();
+    expect(store.vault.mode).toBe('opaque_custody');
+    expect((await account.api.vaultMode()).recovery_copy_missing).toBe(true);
+    const outcome = await store.recoverIdentity(recoveryKey);
+    expect(outcome.reset).toBe(true);
+    expect((await account.api.vault()).mode).toBe('opaque_custody');
+    expect(String((await account.api.crossSigning()).sealed_secret)).toMatch(/^recovery-v1:/);
+
+    // "Needs reconnecting": the signed restore step puts a recovery copy of the new vault back.
+    await store.restoreRecoveryCopy(recoveryKey);
+    expect((await account.api.vaultMode()).recovery_copy_missing).toBe(false);
+
+    const alice3 = await freshDevice(on, alice1.userId, password);
+    expect(alice3.ring.mode).toBe('opaque_custody');
+    expect(alice3.trust.canSign).toBe(true);
+    expect(alice3.trust.identityMismatch).toBeFalsy();
+  });
+
+  // A self_custody account whose root phase 2 had sealed under the old ring, on the device that holds the root. A new vault
+  // replaces the retired one; the held root is sealed under the new key, so no identity reset is needed and the identity is
+  // the same one.
+  it('a device holding the root keeps the same identity when it starts a new vault over a retired one', async () => {
+    const on = browsers();
+    const { password, reg, account } = await signUp(on);
+    const alice1 = await start(account, signUpWrappers(reg));
+    server.sql('UPDATE key_vault SET mode = ?, independent_ciphertext = NULL WHERE user_id = ?', 'self_custody', account.userId);
+    expect(String((await account.api.crossSigning()).sealed_secret)).toMatch(/^recovery-v1:/);
+    on('alice-1');
+    const again = await signIn(alice1.userId, password);
+    const locked = await start(again.account, again.wrappers);
+    expect(locked.ring.retiredMode).toBe('self_custody');
+    expect(locked.trust.canSign).toBe(true);
+    const oldRoot = (await account.api.crossSigning()).sealed_secret;
+
+    const store = wholeStore(locked, again.wrappers);
+    await store.startNewVault();
+    expect((await account.api.crossSigning()).sealed_secret).not.toBe(oldRoot);
+
+    const alice3 = await freshDevice(on, alice1.userId, password);
+    expect(alice3.trust.canSign).toBe(true);
+    expect(alice3.trust.immutableId).toBe(alice1.trust.immutableId);
+    expect(alice3.trust.identityMismatch).toBeFalsy();
   });
 });

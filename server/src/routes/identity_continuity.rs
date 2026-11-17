@@ -704,6 +704,7 @@ pub async fn rotate(
             "new identity root needs its sealed secret".into(),
         ));
     }
+    super::identity::refuse_retired_seal(&body.sealed_secret)?;
 
     let payload = rotation_payload(
         &immutable_id,
@@ -929,6 +930,7 @@ pub async fn reset_finish(
     if body.sealed_secret.trim().is_empty() {
         return Err(ApiError::BadRequest("new identity root needs its sealed secret".into()));
     }
+    super::identity::refuse_retired_seal(&body.sealed_secret)?;
     if let Some((old_immutable, ..)) = load_root(&state, &auth.user_id).await? {
         if old_immutable == body.immutable_id {
             return Err(ApiError::BadRequest("a reset must start a new identity".into()));

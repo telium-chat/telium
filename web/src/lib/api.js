@@ -555,17 +555,15 @@ export class Api {
     return {
       exists: Boolean(v.exists),
       mode: v.mode || 'none',
-      server_can_recover: Boolean(v.server_can_recover),
       // A recovery key with no vault copy beside it resets the password and opens nothing.
       recovery_copy_missing: v.mode === 'opaque_custody'
         && Boolean(v.recovery_key_enrolled) && !v.independent_ciphertext,
       // Whether the account holds a recovery key at all: the one thing that can replace a lost account key.
       recovery_key_enrolled: Boolean(v.recovery_key_enrolled),
-      // Backup extent and server readability, reported with custody as one disclosure.
+      // Backup extent, reported with custody as one disclosure.
       backup: {
         items: Number(v.backup?.items || 0),
         updated_at: v.backup?.updated_at || null,
-        server_can_read: Boolean(v.backup?.server_can_read),
       },
     };
   }

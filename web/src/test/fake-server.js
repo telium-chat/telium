@@ -845,14 +845,21 @@ export function createFakeServer(overrides = {}) {
       const stale = () => json({
         error: 'conflict', code: 'vault_version_conflict', version: held?.version || 0,
       }, 409);
+      const retired = (mode) => json({
+        error: 'bad_request', code: 'custody_retired', mode: mode || '',
+        message: 'this server keeps only the account-password key vault (opaque_custody)',
+      }, 400);
       if (method === 'PUT') {
+        // As the real server (phase 4): only opaque custody, only a recovery-key second copy, never a server key.
+        if (body.mode !== 'opaque_custody') return retired(body.mode);
+        if (body.independent_ciphertext && !String(body.independent_ciphertext).startsWith('k1.')) return retired(body.mode);
+        if (body.escrow_key) return json({ error: 'bad_request', message: 'client-held custody means we must not be given the key' }, 400);
         if (typeof body.expected_version === 'number'
           && body.expected_version !== (held?.version || 0)) return stale();
         state.vaults.set(who, {
           version: (held?.version || 0) + 1,
           ciphertext: body.ciphertext,
-          mode: body.mode || (body.escrow_key ? 'escrowed' : 'device_custody'),
-          escrow_key: body.escrow_key || null,
+          mode: 'opaque_custody',
           independent_ciphertext: body.independent_ciphertext || null,
         });
         return json({ ok: true, version: state.vaults.get(who).version });
@@ -865,13 +872,10 @@ export function createFakeServer(overrides = {}) {
         mode: held.mode,
         version: held.version,
         ciphertext: held.ciphertext,
-        escrow_key: held.escrow_key || undefined,
         independent_ciphertext: held.independent_ciphertext || null,
-        server_can_recover: Boolean(held.escrow_key),
         backup: {
           items: rows.length,
           updated_at: rows.reduce((n, r) => Math.max(n, r.updated_at), 0) || null,
-          server_can_read: Boolean(held.escrow_key) && rows.length > 0,
         },
       });
     }
@@ -884,16 +888,19 @@ export function createFakeServer(overrides = {}) {
           error: 'conflict', code: 'vault_version_conflict', version: held?.version || 0,
         }, 409);
       }
-      const independent = body.mode !== 'opaque_custody'
-        ? held?.independent_ciphertext || null
-        : body.clear_independent
-          ? null
-          : body.independent_ciphertext || held?.independent_ciphertext || null;
+      if (body.mode !== 'opaque_custody') {
+        return json({ error: 'bad_request', code: 'custody_retired', mode: body.mode || '', message: 'retired custody mode' }, 400);
+      }
+      if (body.independent_ciphertext && !String(body.independent_ciphertext).startsWith('k1.')) {
+        return json({ error: 'bad_request', code: 'custody_retired', message: 'passphrase copies are retired' }, 400);
+      }
+      const independent = body.clear_independent
+        ? null
+        : body.independent_ciphertext || held?.independent_ciphertext || null;
       state.vaults.set(who, {
         version: (held?.version || 0) + 1,
         ciphertext: body.ciphertext,
-        mode: body.mode,
-        escrow_key: body.mode === 'escrowed' ? (body.escrow_key || null) : null,
+        mode: 'opaque_custody',
         independent_ciphertext: independent,
       });
       return json({ mode: body.mode, version: state.vaults.get(who).version });

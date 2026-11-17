@@ -130,7 +130,7 @@ describe('createCustody on sign-in', () => {
       { userId: resp.user_id, deviceId: resp.device_id },
     );
     const started = await Promise.race([
-      trust.start({}, null, null, 'device_custody').then(() => 'started'),
+      trust.start({}, null, null).then(() => 'started'),
       new Promise((r) => setTimeout(() => r('blocked'), 1000)),
     ]);
     expect(started).toBe('started');

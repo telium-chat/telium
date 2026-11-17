@@ -94,7 +94,7 @@ async function brokenAccount() {
   const recovery = generateAccountRecovery();
   const home = new FakeRecoveryHome();
   const wrapper = crypto.getRandomValues(new Uint8Array(32));
-  const original = await load(home, null, USER, wrapper, recovery.vaultWrapper);
+  const original = await load(home, USER, wrapper, recovery.vaultWrapper);
   home.publicKey = recovery.publicKey;
   expect(home.held.independent_ciphertext).toMatch(/^k1\./);
   home.held.independent_ciphertext = null;
@@ -103,7 +103,7 @@ async function brokenAccount() {
   store.session = { home: { user_id: USER, device_id: 'd1' } };
   store.home = home;
   store.authRecoveryWrapper = wrapper;
-  store.vault = await load(home, null, USER, wrapper);
+  store.vault = await load(home, USER, wrapper);
   store.custody = await home.vaultMode();
   store.friendsIn = () => [];
   return { recovery, home, store, original };
@@ -140,7 +140,7 @@ describe('a recovery key whose copy of the vault went missing', () => {
     expect(store.custody.recovery_copy_missing).toBe(false);
 
     globalThis.indexedDB = new IDBFactory();
-    const elsewhere = await load(home, null, USER, null, recovery.vaultWrapper);
+    const elsewhere = await load(home, USER, null, recovery.vaultWrapper);
     expect(b64(elsewhere.raw)).toBe(b64(original.raw));
   });
 
@@ -168,7 +168,7 @@ describe('replacing a recovery key', () => {
     const recovery = generateAccountRecovery();
     const home = new FakeRecoveryHome();
     const wrapper = crypto.getRandomValues(new Uint8Array(32));
-    await load(home, null, USER, wrapper, recovery.vaultWrapper);
+    await load(home, USER, wrapper, recovery.vaultWrapper);
     home.publicKey = recovery.publicKey;
     const copy = home.held.independent_ciphertext;
 
@@ -176,7 +176,7 @@ describe('replacing a recovery key', () => {
     store.session = { home: { user_id: USER, device_id: 'd1' } };
     store.home = home;
     store.authRecoveryWrapper = wrapper;
-    store.vault = await load(home, null, USER, wrapper);
+    store.vault = await load(home, USER, wrapper);
     store.custody = await home.vaultMode();
     store.friendsIn = () => [];
     store.enrollRecoveryKey = vi.fn(async () => {

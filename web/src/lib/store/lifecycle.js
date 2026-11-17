@@ -106,14 +106,13 @@ export const lifecycleMethods = {
         this.refreshCustody().catch(() => {});
         return vault.load(
           this.home,
-          null,
           home.user_id,
           this.authRecoveryWrapper,
           this.accountRecoveryWrapper,
         )
           .then(async (loaded) => {
-            // A session without the password never moves custody: an escrowed vault stays escrowed until the next
-            // password sign-in moves it into opaque custody (vault.js loadOnce).
+            // A session without the password never writes custody: a vault in a retired mode stays locked until a
+            // password sign-in converts it, or the user starts a new one (vault.js loadRetired).
             const v = loaded;
             this.vault = v;
             if (v.locked) this.emit('vault', v);
