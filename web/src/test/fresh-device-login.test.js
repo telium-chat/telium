@@ -1,5 +1,5 @@
 // Release gate: "log in with only your password on a brand-new device and everything works". Against the built
-// telium-server binary (see real-home.js). See docs/custody-design.md for the custody model these tests pin down.
+// telium-server binary (see real-home.js). See https://docs.telium.chat/security/key-custody-design/ for the custody model these tests pin down.
 //
 // Every scenario ends in the same assertions (`freshDeviceWorks`): Alice's second device, given nothing but her
 // password (no sibling device, no recovery key), signs itself, is accepted by Bob's continuity check, reads the DM
@@ -283,7 +283,7 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
   // closed before its own start runs, so nothing ever wraps the ring under the password. The brand-new device gets
   // `locked: true, needs_device: true`. Flips when sign-in creates the vault and the root itself, before it saves the
   // session (so no restored tab can exist without them), and a session with no OPAQUE export key never creates
-  // custody (docs/custody-design.md, phase 1).
+  // custody (key-custody-design docs page, phase 1).
   it.fails('two tabs, and the restored one creates the vault before the sign-up tab is closed', async () => {
     const on = browsers();
     const { password, account } = await signUp(on);
@@ -355,7 +355,7 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
   // returns). The restored session holds no OPAQUE wrapper, so the vault loads `locked`, the Trust gets no key to seal
   // a root with and creates none, and device 1 cannot sign (or DM) until the password is typed again. Flips when the
   // ring is kept locally before the write is sent, as the account key already is (keepPendingSecret), or when sign-in
-  // creates custody before saving the session (docs/custody-design.md, phase 1).
+  // creates custody before saving the session (key-custody-design docs page, phase 1).
   it.fails('the tab is closed while the first vault write is in flight, and reopens from a restored session', async () => {
     const on = browsers();
     const { password, reg, account } = await signUp(on);
@@ -381,7 +381,7 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
   // fails (a 503). Its vault is null, so Trust.start gets no ring key, `wantRecovery` is false, and the
   // `!wantRecovery && !deviceWrapped` branch of verify.js startOnce re-seals the server's `recovery-v1:` root as
   // `device-v1:`. A brand-new device then opens the ring but not the root. Flips when that branch is removed: the root
-  // is sealed only under AK and never downgraded (docs/custody-design.md, invariant I2).
+  // is sealed only under AK and never downgraded (key-custody-design docs page, invariant I2).
   it.fails('a device holding the root restarts while the vault read fails, then a new device signs in', async () => {
     const on = browsers();
     const { password, reg, account } = await signUp(on);
