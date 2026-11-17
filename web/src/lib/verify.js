@@ -21,11 +21,13 @@ import {
 } from './identity-continuity.js';
 import { clearPinConflict, markPinVerified, pinConflict } from './identity-pins.js';
 import { open as unseal, seal } from './vault.js';
-import { b64, unb64 } from './util.js';
+import { b64, storage, unb64 } from './util.js';
 
 export { SAS_EMOJI, VERIFY_TIMEOUT, Verification, emojiFor } from './verify-sas.js';
 
 const te = new TextEncoder();
+// Sticky per home domain: once this account's home has advertised identity continuity, it cannot quietly stop.
+const CONTINUITY_DOMAIN = 'telium.identity.continuity-domain.v1:';
 const DEVICE_SEAL = 'device-v1:';
 const RECOVERY_SEAL = 'recovery-v1:';
 
@@ -35,6 +37,11 @@ const RECOVERY_SEAL = 'recovery-v1:';
 function unanswered(e) {
   const status = e?.status;
   return !status || status === 408 || status === 429 || status >= 500;
+}
+
+function domainOf(userId) {
+  const at = String(userId || '').indexOf(':');
+  return at < 0 ? null : String(userId).slice(at + 1) || null;
 }
 
 function devicePayload(userId, deviceId, mlsKey) {
@@ -73,6 +80,8 @@ export class Trust {
     this.onSecretAdopted = null;
     this.onRecoveryAdopted = null;
     this.identityMismatch = false;
+    // Own homeserver's `identity.continuity` capability, once asked this session.
+    this.homeContinuity = null;
   }
 
   get ready() { return !!this.identityKey; }
@@ -567,7 +576,7 @@ export class Trust {
       );
     }
     // A missing key is "legacy" only if never expected; otherwise the server is hiding it.
-    if (!peer?.identityKey) return this.expectsIdentity(userId) ? false : null;
+    if (!peer?.identityKey) return (await this.continuityExpected(userId)) ? false : null;
     if (this.isRevokedKey(userId, signatureKey)) return false;
     const device = peer.devices.get(deviceId);
     return Boolean(
@@ -580,6 +589,54 @@ export class Trust {
   /// So a missing identity key is a change, not legacy.
   expectsIdentity(userId) {
     return this.signed.has(userId) || Boolean(pinnedIdentity(userId));
+  }
+
+  /// Whether `userId` must have an identity: they were signed or pinned, or this account's own home advertises
+  /// `identity.continuity`. That holds for every contact, same-domain or remote: every identity document reaches this
+  /// client through its own home, peers are expected to run continuity-capable releases, and a remote "legacy" answer
+  /// is indistinguishable from a stripped one. Throws `unknown` when the capability itself could not be read, so a
+  /// broken capabilities endpoint is never a way back to legacy.
+  async continuityExpected(userId) {
+    if (this.expectsIdentity(userId)) return true;
+    return this.homeAdvertisesContinuity();
+  }
+
+  /// A peer with no identity document: rejected where one is expected, unknown where that could not be decided.
+  async missingIdentity(userId) {
+    try {
+      return { rejected: await this.continuityExpected(userId), unknown: false };
+    } catch {
+      return { rejected: false, unknown: true };
+    }
+  }
+
+  /// No `capabilities()` (a test fake) or a 404 is a legacy home; any other failure is unknown, never legacy.
+  async homeAdvertisesContinuity() {
+    if (this.homeContinuity != null) return this.homeContinuity;
+    const own = domainOf(this.userId);
+    // Sticky: a home that once advertised continuity cannot quietly stop.
+    if (own && storage.get(CONTINUITY_DOMAIN + own, false) === true) {
+      this.homeContinuity = true;
+      return true;
+    }
+    if (typeof this.home?.capabilities !== 'function') {
+      this.homeContinuity = false;
+      return false;
+    }
+    let caps;
+    try {
+      caps = await this.home.capabilities();
+    } catch (e) {
+      if (e?.status === 404) {
+        this.homeContinuity = false;
+        return false;
+      }
+      throw Object.assign(e ?? new Error('no answer'), { unknown: true });
+    }
+    const advertised = caps?.identity?.continuity === true;
+    if (advertised && own) storage.set(CONTINUITY_DOMAIN + own, true);
+    this.homeContinuity = advertised;
+    return advertised;
   }
 
   /// Each guardian must publish a valid continuity chain; signed with the current root.
@@ -691,8 +748,9 @@ export class Trust {
       } catch (e) {
         // No answer: neither trusted nor changed.
         if (unanswered(e)) continuityUnknown = true;
-        // A legacy homeserver with no continuity endpoint is usable until pinned.
-        else if (e?.status !== 404 || pinnedIdentity(userId)) continuityRejected = true;
+        else if (e?.status !== 404) continuityRejected = true;
+        // A 404 is legacy only where no identity is expected (see `continuityExpected`).
+        else ({ rejected: continuityRejected, unknown: continuityUnknown } = await this.missingIdentity(userId));
       }
       if (fetched) {
         try {
@@ -707,8 +765,8 @@ export class Trust {
             );
             continuityRejected = !continuityValid;
             immutableId = continuity.immutableId || null;
-          } else if (pinnedIdentity(userId)) {
-            continuityRejected = true;
+          } else {
+            ({ rejected: continuityRejected, unknown: continuityUnknown } = await this.missingIdentity(userId));
           }
         } catch {
           // The document came back and does not check out.
