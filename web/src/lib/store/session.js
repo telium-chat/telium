@@ -245,6 +245,11 @@ export const sessionMethods = {
     // is saved a second tab can restore it, and a restored session has no password to make either with.
     if (!handoffOnly && recoveryWrapper) {
       await this.createCustody(resp, normalized, recoveryWrapper, accountRecoveryWrapper);
+      // A new account does not finish signing up until the recovery copy is on the server and read back. The user's
+      // "yes, I saved it" is a separate fact (confirmRecoveryKey) and never stands in for it.
+      if (register && accountRecoveryWrapper) {
+        await this.confirmRecoveryCopyWritten(resp, normalized, recoveryWrapper, accountRecoveryWrapper);
+      }
     }
 
     if (handoffOnly) {
@@ -320,6 +325,41 @@ export const sessionMethods = {
     } catch (e) {
       console.warn('could not set up encrypted-message custody at sign-in', e);
     }
+  },
+
+  /// Sign-up only: the vault write that carries the recovery copy has been accepted and the copy reads back and opens to
+  /// this device's ring. Retried, since a lost answer or a busy server is common; if it still is not there, sign-up fails
+  /// here, before the session is saved or the recovery key is shown, instead of leaving "Recovery key: Not made yet"
+  /// behind a success. The account exists; the user signs in with the password and makes a new recovery key in Settings.
+  async confirmRecoveryCopyWritten(resp, base, recoveryWrapper, accountRecoveryWrapper) {
+    const attempts = this.recoveryCopyAttempts ?? 3;
+    let last = null;
+    for (let i = 0; i < attempts; i += 1) {
+      const abort = new AbortController();
+      try {
+        const api = new Api({
+          base,
+          token: resp.access_token,
+          domain: resp.server_name || new URL(base).host,
+          signal: abort.signal,
+        });
+        await withTimeout((async () => {
+          const ring = await vault.load(api, null, resp.user_id, recoveryWrapper, accountRecoveryWrapper);
+          if (!ring?.key) throw new Error('the recovery vault did not open');
+          await vault.confirmRecoveryCopy(api, ring, recoveryWrapper, accountRecoveryWrapper, resp.user_id);
+        })(), this.custodyTimeoutMs ?? CUSTODY_TIMEOUT_MS, 'saving the recovery copy', abort);
+        return;
+      } catch (e) {
+        last = e;
+        console.warn('recovery copy not confirmed at sign-up', e);
+      }
+    }
+    throw authError(
+      'recovery_copy_unconfirmed',
+      'Your account was created, but the recovery copy of your encrypted-message key could not be saved on the server, so '
+      + 'sign-up did not finish. Sign in with your password, then make a new recovery key in Settings.',
+      { cause: last },
+    );
   },
 
   async confirmRecoveryKey(recoveryKey = null) {
