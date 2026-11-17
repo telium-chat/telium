@@ -164,7 +164,7 @@ export class Trust {
       const pending = await pendingSecret(this.userId, doc.identity_key);
       await take(pending);
       // Only a key this device made itself (filed before it was sent) may stand behind an unconfirmed reset.
-      madeHere = Boolean(this.signKey && pending && this.signKey === pending);
+      madeHere = Boolean(pending && await this.binds(pending));
       if (recoveryWrapped && recoveryKeys.length) {
         await take(await openWithRecovery(stored.slice(RECOVERY_SEAL.length)));
       } else if (!deviceWrapped && !recoveryWrapped && recoveryKeys.length) {
@@ -175,7 +175,7 @@ export class Trust {
 
       if (this.signKey) {
         await keepSecret(this.userId, this.signKey);
-        await dropPendingSecret(this.userId, doc.identity_key);
+        // The pending copy is what proves this device made a reset; it goes only once the identity is accepted (below).
         const wantRecovery = (mode === 'opaque_custody' || mode === 'self_custody') && recoveryKey;
         if (wantRecovery && !recoveryWrapped) {
           await this.home.putCrossSigning({
@@ -259,6 +259,10 @@ export class Trust {
           this.identityMismatch = true;
         }
       }
+    }
+
+    if (doc.exists && this.signKey && !this.identityMismatch && this.continuity?.valid !== false) {
+      await dropPendingSecret(this.userId, doc.identity_key);
     }
 
     // Re-check each stored signature so the homeserver can't invent who we verified; legacy accounts accept only the current key.
