@@ -9,7 +9,7 @@ import {
   readIdentityPin,
   verifyIdentityDocument,
 } from '../lib/identity-continuity.js';
-import { keepSecret } from '../lib/mls-store.js';
+import { keepPendingSecret, keepSecret, pendingSecret } from '../lib/mls-store.js';
 import { Trust } from '../lib/verify.js';
 import { b64, unb64 } from '../lib/util.js';
 
@@ -146,5 +146,32 @@ describe('a changed identity is never accepted on the device\'s say-so unless it
     expect(readIdentityPin(USER).immutableId).toBe(doc.immutable_id);
     expect(readIdentityPin(USER).immutableId).not.toBe(realId);
     expect(trust.continuity.valid).toBe(true);
+  });
+
+  it('startOnce still takes up a reset this device made, even after an interrupted start and with the key now held', async () => {
+    const { realId } = await rotatedAccount();
+    const fresh = await root();
+    const doc = await anchored(fresh);
+    // The reset reached the server and this device filed the key before sending it; then the answer was lost.
+    await keepPendingSecret(USER, fresh.pub, fresh.secret);
+    await keepSecret(USER, fresh.secret);
+
+    const home = homeServing(doc, fresh);
+    let fail = true;
+    const flaky = { ...home, identityContinuity: async () => { if (fail) throw new Error('offline'); return doc; } };
+    const first = new Trust(flaky, { userId: USER, deviceId: 'd1' });
+    await first.start(cs, null, null, 'device_custody');
+    expect(first.identityMismatch).toBe(true);
+    expect(await pendingSecret(USER, fresh.pub)).toBeTruthy();
+    expect(readIdentityPin(USER).immutableId).toBe(realId);
+
+    fail = false;
+    const second = new Trust(flaky, { userId: USER, deviceId: 'd1' });
+    await second.start(cs, null, null, 'device_custody');
+    expect(second.identityMismatch).toBe(false);
+    expect(second.canSign).toBe(true);
+    expect(readIdentityPin(USER).immutableId).toBe(doc.immutable_id);
+    expect(readIdentityPin(USER).verified).toBe(true);
+    expect(await pendingSecret(USER, fresh.pub)).toBeFalsy();
   });
 });
