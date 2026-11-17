@@ -1,5 +1,9 @@
 -- Phase 4 of the key-custody design: the legacy custody modes are refused and their key material is withdrawn.
 --
+-- Every row in a retired state is archived, whole, before anything about it changes: a vault whose mode is not
+-- `opaque_custody` (its `ciphertext` is the sealed ring, which a client's "start a new vault" later overwrites), a row
+-- holding an escrow key, and a row holding a passphrase copy.
+--
 -- What is withdrawn, per row of `key_vault`:
 --   * `escrow_key`, the key the server held for an `escrowed` vault. Nothing reads it any more (the client refuses
 --     escrowed vaults), and a server that holds a usable key for a user's history is what the design removes.
@@ -36,7 +40,8 @@ INSERT INTO key_vault_legacy_archive
 SELECT user_id, mode, ciphertext, escrow_key, independent_ciphertext, version,
        CAST(strftime('%s', 'now') AS INTEGER) * 1000
 FROM key_vault
-WHERE escrow_key IS NOT NULL
+WHERE mode <> 'opaque_custody'
+   OR escrow_key IS NOT NULL
    OR (independent_ciphertext IS NOT NULL AND independent_ciphertext NOT LIKE 'k1.%');
 
 UPDATE key_vault SET escrow_key = NULL WHERE escrow_key IS NOT NULL;

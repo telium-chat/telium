@@ -131,7 +131,8 @@ export function RecoveryPane() {
     setBusy(true);
     try {
       await store.startNewVault();
-      toast(t('auth.retired.done'));
+      // The new vault has no recovery-key copy yet; an account that has a key is pointed at "Needs reconnecting".
+      toast(t(store.custody?.recovery_key_enrolled ? 'auth.retired.doneReconnect' : 'auth.retired.done'));
     } catch (e) {
       failed('auth.retired.failed', e);
     } finally {

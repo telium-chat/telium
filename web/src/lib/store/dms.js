@@ -285,7 +285,13 @@ export const dmMethods = {
       this.home, userId, this.authRecoveryWrapper, this.accountRecoveryWrapper,
     );
     this.vault = created;
-    if (this.trust) this.trust.recovery = created;
+    if (this.trust) {
+      this.trust.recovery = created;
+      // A device that holds the root keeps it usable: sealed under the new account key, so a new device with only the
+      // password signs, and nobody has to reset an identity that is not lost.
+      await this.trust.resealRoot(created.key)
+        .catch((e) => console.warn('could not seal the account key under the new vault', e));
+    }
     this.sync.adoptKeyring(created, { current: true }).catch(() => {});
     await this.mls?.adoptRecoveryKey(created);
     this.emit('vault', created);

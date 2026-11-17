@@ -502,6 +502,9 @@ export const auth = {
   'auth.retired.confirmBody': 'Your older encrypted messages cannot be opened afterwards, by you or by anyone else. New messages work normally.',
   'auth.retired.confirmButton': 'Start a new vault',
   'auth.retired.done': 'Done. New messages are encrypted under your new vault.',
+  // Shown instead of `done` when the account has a recovery key: the new vault has no copy under it yet, so the key
+  // would reset the password but open nothing. The reader is sent to the step that makes the copy.
+  'auth.retired.doneReconnect': 'Done. New messages are encrypted under your new vault. Reconnect your recovery key below so it covers the new vault too.',
   'auth.retired.failed': 'Could not start a new vault: {detail}',
   'auth.retired.signInAgain': 'Sign out and sign in again with your password, then try again.',
 

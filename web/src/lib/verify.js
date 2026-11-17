@@ -171,6 +171,25 @@ export class Trust {
     });
   }
 
+  /// For a device that holds the root after a new vault replaced a retired one (`startNewVault`): the server's copy of the
+  /// root may already say `recovery-v1:`, but under the old ring, which nothing can open now, so the prefix check of
+  /// `sealRootProperly` would leave it. The held root is sealed under the new account key, only if it is the one the
+  /// account publishes. Without this, a new device could never sign and the user would be sent to an identity reset they
+  /// do not need.
+  async resealRoot(recoveryKey) {
+    if (!recoveryKey || !this.signKey || !this.identityKey) return false;
+    return exclusive(`telium-crosssign:${this.userId}`, async () => {
+      const doc = await this.home.crossSigning();
+      if (!doc.exists || doc.identity_key !== b64(this.identityKey)) return false;
+      if (!await this.binds(this.signKey)) return false;
+      await this.home.putCrossSigning({
+        identity_key: doc.identity_key,
+        sealed_secret: RECOVERY_SEAL + await seal(recoveryKey, this.signKey),
+      });
+      return true;
+    });
+  }
+
   async startOnce(cs, recoveryKey, mlsKey, retried = false) {
     this.cs = cs;
     const doc = await this.home.crossSigning();

@@ -1525,6 +1525,8 @@ const IRREPLACEABLE: &[&str] = &[
     "SELECT quote(user_id)||quote(mode)||quote(ciphertext)||quote(escrow_key) FROM key_vault ORDER BY user_id",
     "SELECT quote(user_id)||quote(identity_key)||quote(sealed_secret) FROM cross_signing ORDER BY user_id",
     "SELECT quote(user_id)||quote(scope)||quote(item)||quote(ciphertext) FROM key_backup ORDER BY user_id, scope, item",
+    // What migration 0099 withdrew from the legacy vaults; the only way back, so it has to survive a restore.
+    "SELECT quote(user_id)||quote(mode)||quote(ciphertext)||quote(escrow_key)||quote(independent_ciphertext)||quote(version) FROM key_vault_legacy_archive ORDER BY user_id",
 ];
 
 async fn irreplaceable(pool: &sqlx::SqlitePool) -> Vec<Vec<String>> {
@@ -1557,6 +1559,13 @@ async fn populated_and_backed_up(s: &Server) -> (PathBuf, backup::Key) {
         .execute(&s.state.pool)
         .await
         .unwrap();
+    sqlx::query(
+        "INSERT INTO key_vault_legacy_archive (user_id, mode, ciphertext, escrow_key, independent_ciphertext, version, archived_at) \
+         VALUES ('@legacy:test', 'escrowed', 'esc.ct', 'ARCHIVED-ESCROW-KEY', 'p2.salt.iv.ct', 4, 1)",
+    )
+    .execute(&s.state.pool)
+    .await
+    .unwrap();
     (s.backup().await.path, key)
 }
 

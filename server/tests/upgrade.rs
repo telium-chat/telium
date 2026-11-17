@@ -225,30 +225,48 @@ async fn retiring_legacy_custody_archives_what_it_withdraws_and_keeps_everything
     assert_eq!(
         archived,
         vec![
+            // Retired modes are archived even with nothing to withdraw: their ciphertext is the sealed ring.
+            ("@device:a.test".into(), "dev.ct".into(), None, None),
             ("@escrowed:a.test".into(), "esc.ct".into(), Some("ESCROW-KEY".into()), None),
             ("@opaque-old:a.test".into(), "op2.ct".into(), None, Some("iv.ct".into())),
             ("@opaque-p2:a.test".into(), "op.ct".into(), None, Some("p2.salt.iv.ct".into())),
+            ("@selfcust:a.test".into(), "self.ct".into(), None, None),
         ],
-        "exactly the rows it changed are archived, whole",
+        "every row in a retired state is archived, whole, and no healthy row is",
     );
 
-    // The documented restore puts the withdrawn columns back.
-    sqlx::query(
-        "UPDATE key_vault SET \
-           escrow_key = (SELECT escrow_key FROM key_vault_legacy_archive a WHERE a.user_id = key_vault.user_id), \
-           independent_ciphertext = COALESCE( \
-             (SELECT independent_ciphertext FROM key_vault_legacy_archive a WHERE a.user_id = key_vault.user_id), \
-             independent_ciphertext) \
-         WHERE user_id = '@escrowed:a.test' \
-           AND EXISTS (SELECT 1 FROM key_vault_legacy_archive a WHERE a.user_id = key_vault.user_id)",
+    // A client replaced the retired self_custody vault with a new one; the documented restore puts the old row back whole.
+    sqlx::query("UPDATE key_vault SET mode = 'opaque_custody', ciphertext = 'NEW', version = 4 WHERE user_id = '@selfcust:a.test'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    for user in ["@selfcust:a.test", "@escrowed:a.test"] {
+        sqlx::query(
+            "UPDATE key_vault SET \
+               mode = (SELECT mode FROM key_vault_legacy_archive a WHERE a.user_id = key_vault.user_id), \
+               ciphertext = (SELECT ciphertext FROM key_vault_legacy_archive a WHERE a.user_id = key_vault.user_id), \
+               escrow_key = (SELECT escrow_key FROM key_vault_legacy_archive a WHERE a.user_id = key_vault.user_id), \
+               independent_ciphertext = (SELECT independent_ciphertext FROM key_vault_legacy_archive a WHERE a.user_id = key_vault.user_id), \
+               version = version + 1 \
+             WHERE user_id = ? \
+               AND EXISTS (SELECT 1 FROM key_vault_legacy_archive a WHERE a.user_id = key_vault.user_id)",
+        )
+        .bind(user)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let back: (String, String, Option<String>, i64) = sqlx::query_as(
+        "SELECT mode, ciphertext, escrow_key, version FROM key_vault WHERE user_id = '@escrowed:a.test'",
     )
-    .execute(&pool)
+    .fetch_one(&pool)
     .await
     .unwrap();
-    let back: Option<String> = sqlx::query_scalar("SELECT escrow_key FROM key_vault WHERE user_id = '@escrowed:a.test'")
+    assert_eq!(back, ("escrowed".into(), "esc.ct".into(), Some("ESCROW-KEY".into()), 4));
+    let back: (String, String) = sqlx::query_as("SELECT mode, ciphertext FROM key_vault WHERE user_id = '@selfcust:a.test'")
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(back.as_deref(), Some("ESCROW-KEY"));
+    assert_eq!(back, ("self_custody".into(), "self.ct".into()), "a replaced retired vault comes back from the archive");
     pool.close().await;
 }
