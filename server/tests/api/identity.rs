@@ -889,6 +889,15 @@ async fn a_vault_stored_in_a_retired_mode_is_served_and_converted_only_to_opaque
         .await;
     assert_eq!(status, 200, "{done}");
     assert_eq!(done["version"], 5);
+    // The retired row was copied whole before it was overwritten (it landed after migration 0099, e.g. by import).
+    let archived: (String, String, i64) = sqlx::query_as(
+        "SELECT mode, ciphertext, version FROM key_vault_legacy_archive WHERE user_id = ?",
+    )
+    .bind(&u.user_id)
+    .fetch_one(&s.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(archived, ("device_custody".into(), "throwaway.sealed".into(), 4));
     let (_, v) = s.get("/_telium/v1/vault", Some(&u.home)).await;
     assert_eq!(v["mode"], "opaque_custody");
     assert_eq!(v["ciphertext"], "iv.ct");

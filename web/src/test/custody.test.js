@@ -452,7 +452,11 @@ describe('a vault stored in a retired custody mode', () => {
     const held = { raw: crypto.getRandomValues(new Uint8Array(32)), retired: [] };
     await rememberRecoveryKeyring(USER, held);
     await retiredVault('device_custody');
-    const out = await here();
+    // Not for a wrapper kept in memory from an earlier sign-in: it may be the old password's.
+    const kept = await here();
+    expect(kept.retiredMode).toBe('device_custody');
+    expect(home.held.mode).toBe('device_custody');
+    const out = await load(home, USER, wrapper, null, { reseal: true });
     expect(out.mode).toBe('opaque_custody');
     expect(out.locked).toBeUndefined();
     expect(sameRaw(out.raw, held.raw)).toBe(true);
@@ -468,15 +472,17 @@ describe('a vault stored in a retired custody mode', () => {
     const ring = { raw: crypto.getRandomValues(new Uint8Array(32)), retired: [] };
     const copy = await recoveryKeyCiphertext(ring, accountKey);
     await retiredVault('device_custody', { independent: copy });
-    const out = await load(home, USER, wrapper, accountKey);
+    const out = await load(home, USER, wrapper, accountKey, { reseal: true });
     expect(out.mode).toBe('opaque_custody');
     expect(sameRaw(out.raw, ring.raw)).toBe(true);
+    expect(out.hasRecoveryCopy).toBeUndefined();
     expect(home.held.mode).toBe('opaque_custody');
     expect(home.held.independent_ciphertext).toMatch(/^k1\./);
     const wrong = crypto.getRandomValues(new Uint8Array(32));
     await retiredVault('device_custody', { independent: copy });
     globalThis.indexedDB = new IDBFactory();
-    const refused = await load(home, USER, wrapper, wrong);
+    const refused = await load(home, USER, wrapper, wrong, { reseal: true });
+    expect(refused.hasRecoveryCopy).toBe(true);
     expect(refused.retiredMode).toBe('device_custody');
     expect(refused.key).toBeNull();
   });
@@ -494,6 +500,8 @@ describe('a vault stored in a retired custody mode', () => {
 
     await expect(replaceRetiredVault(home, USER, wrapper)).rejects.toMatchObject({ code: 'vault_not_retired' });
 
+    const held = { raw: crypto.getRandomValues(new Uint8Array(32)), retired: [] };
+    await rememberRecoveryKeyring(USER, held);
     await retiredVault('self_custody');
     const read = home.vault.bind(home);
     let raced = false;
@@ -507,6 +515,8 @@ describe('a vault stored in a retired custody mode', () => {
     };
     await expect(replaceRetiredVault(home, USER, wrapper)).rejects.toMatchObject({ status: 409 });
     expect(home.held.mode).toBe('opaque_custody');
+    // A refused replace leaves the ring this device already held where it was.
+    expect(sameRaw((await heldRecoveryKeyring(USER)).raw, held.raw)).toBe(true);
   });
 
   it('is replaced with a recovery copy under the recovery key when it is in hand', async () => {

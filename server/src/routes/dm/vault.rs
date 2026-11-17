@@ -60,6 +60,22 @@ pub struct PutVault {
     pub expected_version: Option<i64>,
 }
 
+/// Before a write replaces a vault still stored in a retired mode (one that landed by account import after migration
+/// 0099), its row is copied whole into `key_vault_legacy_archive`, once: the first copy is the one kept.
+async fn archive_retired(state: &AppState, user_id: &str) -> ApiResult<()> {
+    sqlx::query(
+        "INSERT OR IGNORE INTO key_vault_legacy_archive \
+         (user_id, mode, ciphertext, escrow_key, independent_ciphertext, version, archived_at) \
+         SELECT user_id, mode, ciphertext, escrow_key, independent_ciphertext, version, ? \
+         FROM key_vault WHERE user_id = ? AND mode <> 'opaque_custody'",
+    )
+    .bind(now_ms())
+    .bind(user_id)
+    .execute(&state.pool)
+    .await?;
+    Ok(())
+}
+
 async fn vault_conflict(state: &AppState, user_id: &str) -> ApiError {
     let stored: i64 = sqlx::query_scalar("SELECT version FROM key_vault WHERE user_id = ?")
         .bind(user_id)
@@ -115,6 +131,7 @@ pub async fn put_vault(
         ));
     }
     let mode = "opaque_custody";
+    archive_retired(&state, &auth.user_id).await?;
     let version: Option<i64> = match req.expected_version {
         None => sqlx::query_scalar(
             "INSERT INTO key_vault \
@@ -205,6 +222,7 @@ pub async fn set_vault_mode(
             "send a new independent copy or clear it, not both".into(),
         ));
     }
+    archive_retired(&state, &auth.user_id).await?;
     let version: Option<i64> = sqlx::query_scalar(
         "UPDATE key_vault SET mode = 'opaque_custody', ciphertext = ?, \
          independent_ciphertext = CASE WHEN ? THEN NULL \

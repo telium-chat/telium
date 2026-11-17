@@ -148,7 +148,7 @@ export function RecoveryPane() {
     }
     dialogs.confirm({
       title: t('auth.retired.confirmTitle'),
-      body: t('auth.retired.confirmBody'),
+      body: t(vault?.hasRecoveryCopy ? 'auth.retired.confirmBodyCopy' : 'auth.retired.confirmBody'),
       confirmLabel: t('auth.retired.confirmButton'),
       danger: true,
       onConfirm: startNewVault,
@@ -332,23 +332,9 @@ export function RecoveryPane() {
         <Hint>{t('auth.encryption.devicesHint')}</Hint>
       </Section>
 
-      {retired ? (
-        <Section title={t('auth.retired.title')}>
-          <Explain>{t('auth.retired.explain')}</Explain>
-          <Button
-            variant="primary"
-            className="self-start"
-            disabled={busy}
-            onClick={askStartNewVault}
-          >
-            {t('auth.retired.button')}
-          </Button>
-        </Section>
-      ) : null}
-
-      {locked && (!retired || vault?.retiredMode === 'device_custody') ? (
+      {locked && (!retired || (vault?.retiredMode === 'device_custody' && vault?.hasRecoveryCopy)) ? (
         <Section title={t('auth.unlock.title')}>
-          {vault?.needs_recovery_key || vault?.retiredMode === 'device_custody' ? (
+          {vault?.needs_recovery_key || (retired && !vault?.needs_password) ? (
             <>
               <TextInput
                 label={t('auth.recoveryKey.fieldLabel')}
@@ -373,7 +359,23 @@ export function RecoveryPane() {
             </>
           ) : null}
 
+          {/* Conversion needs the password's key, which a restored session does not hold. */}
+          {retired && vault?.needs_password ? <Hint>{t('auth.retired.signInAgain')}</Hint> : null}
           {retired ? null : <Hint>{t('auth.unlock.otherDevice')}</Hint>}
+        </Section>
+      ) : null}
+
+      {retired ? (
+        <Section title={t('auth.retired.title')}>
+          <Explain>{t('auth.retired.explain')}</Explain>
+          <Button
+            variant="primary"
+            className="self-start"
+            disabled={busy}
+            onClick={askStartNewVault}
+          >
+            {t('auth.retired.button')}
+          </Button>
         </Section>
       ) : null}
 

@@ -13,18 +13,24 @@
 -- This is the one step in the phase that removes key material, so it is reversible: every row it touches is copied,
 -- whole, into `key_vault_legacy_archive` first, and nothing else is deleted (no `key_vault` row, no column). The
 -- archive is read by nothing. It is removed by erasing the account, and an operator who has confirmed no account
--- still needs it can `DROP TABLE key_vault_legacy_archive` in a later migration. To put one account back:
+-- still needs it can `DROP TABLE key_vault_legacy_archive` in a later migration.
+--
+-- A vault that lands in a retired mode after this migration (an account import) is archived by the server the first
+-- time a write would replace it, so the old row is never overwritten without a copy.
+--
+-- To put one account back exactly as it was (mode, ciphertext, escrow key and passphrase copy; the version is bumped, so
+-- a client that read the vault since re-reads it):
 --
 --   UPDATE key_vault SET
+--     mode = (SELECT mode FROM key_vault_legacy_archive a WHERE a.user_id = key_vault.user_id),
+--     ciphertext = (SELECT ciphertext FROM key_vault_legacy_archive a WHERE a.user_id = key_vault.user_id),
 --     escrow_key = (SELECT escrow_key FROM key_vault_legacy_archive a WHERE a.user_id = key_vault.user_id),
---     independent_ciphertext = COALESCE(
---       (SELECT independent_ciphertext FROM key_vault_legacy_archive a WHERE a.user_id = key_vault.user_id),
---       independent_ciphertext)
+--     independent_ciphertext = (SELECT independent_ciphertext FROM key_vault_legacy_archive a WHERE a.user_id = key_vault.user_id),
+--     version = version + 1
 --   WHERE user_id = '<the account>' AND EXISTS (SELECT 1 FROM key_vault_legacy_archive a WHERE a.user_id = key_vault.user_id);
 --
--- (that restores the withdrawn columns only; if the vault itself was rewritten since, restore `mode` and `ciphertext`
--- from the archive row too). The vault `mode` is left as it was: a vault still in a retired mode is read as locked by
--- the client, and is converted to `opaque_custody` only by a device that still holds its keys.
+-- The vault `mode` is left as it was by this migration: a vault still in a retired mode is read as locked by the client,
+-- and is converted to `opaque_custody` only by a device that still holds its keys, or replaced on purpose.
 CREATE TABLE key_vault_legacy_archive (
     user_id                TEXT PRIMARY KEY,
     mode                   TEXT NOT NULL,

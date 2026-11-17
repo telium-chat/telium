@@ -13,8 +13,8 @@ import { ConversationNotices } from '../views/chat/encryption.jsx';
 const USER = '@alice:test.example';
 
 class Home {
-  constructor(mode) {
-    this.held = { mode, ciphertext: 'AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAAAAAAAA', independent_ciphertext: null, version: 3 };
+  constructor(mode, copy = null) {
+    this.held = { mode, ciphertext: 'AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAAAAAAAA', independent_ciphertext: copy, version: 3 };
     this.writes = [];
   }
 
@@ -29,8 +29,8 @@ class Home {
   }
 }
 
-async function mount({ mode, password = true }) {
-  const home = new Home(mode);
+async function mount({ mode, password = true, copy = null }) {
+  const home = new Home(mode, copy);
   const store = new Store();
   store.session = { home: { user_id: USER, device_id: 'd1' } };
   store.home = home;
@@ -86,13 +86,39 @@ describe('a vault in a retired custody mode', () => {
     expect(home.writes).toEqual([]);
   });
 
+  it('puts Unlock with the recovery key before Start a new vault when a recovery copy exists, and warns that a new vault removes it', async () => {
+    const { home, user } = await mount({ mode: 'device_custody', copy: 'k1.AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAAAAAAAA' });
+    const unlock = screen.getByRole('button', { name: 'Unlock' });
+    const fresh = screen.getByRole('button', { name: 'Start a new vault' });
+    expect(unlock.compareDocumentPosition(fresh) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByLabelText('Recovery key')).toBeTruthy();
+    await user.click(fresh);
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/also removes the recovery-key copy of the old vault/)).toBeTruthy();
+    expect(home.writes).toEqual([]);
+  });
+
+  it('does not offer the recovery key field on a session without the password key, where it could never work', async () => {
+    await mount({ mode: 'device_custody', password: false, copy: 'k1.AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAAAAAAAA' });
+    expect(screen.queryByLabelText('Recovery key')).toBeNull();
+    expect(screen.getByText('Sign out and sign in again with your password, then try again.')).toBeTruthy();
+  });
+
+  it('does not talk about a recovery copy when there is none', async () => {
+    const { user } = await mount({ mode: 'escrowed' });
+    expect(screen.queryByLabelText('Recovery key')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Start a new vault' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).queryByText(/recovery-key copy/)).toBeNull();
+  });
+
   it('says it in the conversation, and not that the passphrase is the way back', async () => {
     const store = {
       mls: {}, vault: { locked: true, retiredMode: 'self_custody', key: null }, rejoinBlocked: new Set(),
     };
     render(<ConversationNotices store={store} conversationId="c1" awaiting={false} changedKey={false} />);
     expect(screen.getByText('This account’s message keys use a setup Telium has retired.')).toBeTruthy();
-    expect(screen.getByText(/start a new vault under Settings → Encryption key/)).toBeTruthy();
+    expect(screen.getByText(/try your recovery key under Settings → Encryption key/)).toBeTruthy();
     expect(screen.queryByText(/passphrase/i)).toBeNull();
     expect(screen.queryByText('Your older messages are locked on this device.')).toBeNull();
   });

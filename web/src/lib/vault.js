@@ -193,7 +193,7 @@ export async function load(
 
 /// What a vault stored in a retired custody mode looks like to the rest of the app: locked, with `retired` naming the
 /// mode so the UI can say so. Nothing is written.
-function retiredVault(mode, version, recoveryWrapper) {
+function retiredVault(mode, version, recoveryWrapper, hasRecoveryCopy = false) {
   return {
     key: null,
     openers: [],
@@ -204,6 +204,8 @@ function retiredVault(mode, version, recoveryWrapper) {
     locked: true,
     needs_password: !recoveryWrapper,
     needs_device: false,
+    // A recovery-key copy of the old ring is on the server: "start a new vault" would remove it, so the UI says so.
+    hasRecoveryCopy,
     version,
   };
 }
@@ -283,7 +285,7 @@ async function loadOnce(home, userId, recoveryWrapper, accountRecoveryWrapper, r
   }
 
   if (vault.mode !== 'opaque_custody') {
-    return loadRetired(home, vault, version, local, userId, recoveryWrapper, accountRecoveryWrapper);
+    return loadRetired(home, vault, version, local, userId, recoveryWrapper, accountRecoveryWrapper, reseal);
   }
 
   const flags = {
@@ -387,8 +389,10 @@ async function loadOnce(home, userId, recoveryWrapper, accountRecoveryWrapper, r
 /// it (or a recovery key that opens the recovery copy) converts it to `opaque_custody` with the same ring, nothing rotated.
 /// `self_custody` (a passphrase one offline guess from its key) and `escrowed` (a key the server held) are refused: a ring
 /// that either could have exposed is not carried forward. Every refusal leaves the vault as it is and is locked.
-async function loadRetired(home, vault, version, local, userId, recoveryWrapper, accountRecoveryWrapper) {
-  if (vault.mode === 'device_custody' && recoveryWrapper) {
+async function loadRetired(home, vault, version, local, userId, recoveryWrapper, accountRecoveryWrapper, reseal) {
+  // The conversion writes under the password's wrapper, so it follows the same rule as the other re-seals: only for a
+  // wrapper made from the password typed in this sign-in (or unlock), never one kept in memory from an earlier one.
+  if (vault.mode === 'device_custody' && recoveryWrapper && reseal) {
     let ring = local ? keyring(local) : null;
     if (!ring && accountRecoveryWrapper && isRecoveryKeyCiphertext(vault.independent_ciphertext)) {
       try {
@@ -405,7 +409,7 @@ async function loadRetired(home, vault, version, local, userId, recoveryWrapper,
       return writeOpaque(home, { ...ring, version }, userId, recoveryWrapper, independent);
     }
   }
-  return retiredVault(vault.mode, version, recoveryWrapper);
+  return retiredVault(vault.mode, version, recoveryWrapper, isRecoveryKeyCiphertext(vault.independent_ciphertext));
 }
 
 /// Writes the ring under the account password's wrapper as `opaque_custody`, with the same live key: nothing rotates. Also
@@ -454,7 +458,10 @@ export async function replaceRetiredVault(home, userId, recoveryWrapper, account
     ? await sealRecoveryKey(accountRecoveryWrapper, encodePayload(ring))
     : null;
   const primaryCiphertext = await opaqueCiphertext(recoveryWrapper, ring);
-  // Kept here first, as at creation, so an answer that never comes leaves the ring findable.
+  // Kept here first, as at creation, so an answer that never comes leaves the ring findable. A ring this device already
+  // held (one a refused self_custody or escrowed vault had) is put back if the write is refused; once the replace
+  // succeeds it is dropped on purpose, since it opens nothing the new vault needs and may have been exposed.
+  const previous = await heldRecoveryKeyring(userId).catch(() => null);
   await rememberRecoveryKeyring(userId, ring).catch(() => {});
   let answer;
   try {
@@ -467,7 +474,10 @@ export async function replaceRetiredVault(home, userId, recoveryWrapper, account
         : { clear_independent: true }),
     }, typeof served.version === 'number' ? served.version : undefined));
   } catch (e) {
-    if (!unanswered(e)) await forgetRecoveryKeyring(userId);
+    if (!unanswered(e)) {
+      if (previous) await rememberRecoveryKeyring(userId, previous).catch(() => {});
+      else await forgetRecoveryKeyring(userId);
+    }
     throw e;
   }
   return {

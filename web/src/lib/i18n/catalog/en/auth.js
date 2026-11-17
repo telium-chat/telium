@@ -496,10 +496,13 @@ export const auth = {
   // good: a translation that softened it into "may be hard to read" would let somebody press the button expecting to
   // get them back.
   'auth.retired.title': 'Start a new encrypted-message vault',
-  'auth.retired.explain': 'This replaces the retired vault with a new one under your password. Your older encrypted messages stay locked for good. Contacts will see a new account key until you replace your identity key below with your recovery key.',
+  'auth.retired.explain': 'This replaces the retired vault with a new one under your password. Your older encrypted messages stay locked for good. Your account identity is not changed by this. If an Unlock section is shown above, try your recovery key there first: it can bring the older messages back.',
   'auth.retired.button': 'Start a new vault',
   'auth.retired.confirmTitle': 'Start a new vault?',
   'auth.retired.confirmBody': 'Your older encrypted messages cannot be opened afterwards, by you or by anyone else. New messages work normally.',
+  // Shown instead of `confirmBody` when the old vault has a recovery-key copy: replacing the vault removes that copy too,
+  // so the key can no longer open the old messages. The reader must learn that here, before pressing, not after.
+  'auth.retired.confirmBodyCopy': 'Your older encrypted messages cannot be opened afterwards, by you or by anyone else. This also removes the recovery-key copy of the old vault, so your recovery key can no longer open them. If you have not tried your recovery key under Unlock, cancel and try it first. New messages work normally.',
   'auth.retired.confirmButton': 'Start a new vault',
   'auth.retired.done': 'Done. New messages are encrypted under your new vault.',
   // Shown instead of `done` when the account has a recovery key: the new vault has no copy under it yet, so the key
@@ -625,8 +628,6 @@ export const auth = {
   // Says "could not be checked" and not "is forged", because those are
   // different claims and the client can only support the first.
   'auth.advanced.identityMismatch': 'This account’s identity history could not be checked.',
-  // The reassurance is the second clause and it is the reason removing it is
-  // safe. Never drop it.
 
   // ------------------------------------------------------- recovery contacts
   //

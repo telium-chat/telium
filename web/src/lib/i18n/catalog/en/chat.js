@@ -521,7 +521,7 @@ export const chat = {
   // second sentence says what is lost and what is not, in that order: the
   // older messages stay locked, and encryption itself can be started again.
   'chat.encryption.retired.title': 'This account’s message keys use a setup Telium has retired.',
-  'chat.encryption.retired.body': 'Sign in with your password and your recovery key, then start a new vault under Settings → {pane}. Your older encrypted messages stay locked.',
+  'chat.encryption.retired.body': 'Sign in with your password, then try your recovery key under Settings → {pane}. Only if that does not open them, start a new vault there; the older encrypted messages then stay locked for good.',
 
   // Messages are being held back on purpose. The body says so rather than
   // leaving the reader to conclude that messages are being lost, which is the
