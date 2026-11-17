@@ -649,6 +649,11 @@ async fn usernames_accept_capitals_but_identity_is_case_insensitive() {
 
 // --- Phase 3 of the key-custody design: password writes re-wrap the vault atomically (I5) ---
 
+/// A password nobody chose: made per test, so no secret-looking literal sits in the source.
+fn test_password() -> String {
+    format!("pw-{:016x}{:016x}", rand::random::<u64>(), rand::random::<u64>())
+}
+
 /// One OPAQUE registration round for a new password; `start` is the route's answer.
 fn registration_record(password: &str, started: ClientRegistrationStartResult<BrowserOpaqueSuite>, start: &Value) -> String {
     let mut rng = OsRng;
@@ -739,8 +744,10 @@ async fn vault_row(s: &Server, user_id: &str) -> (String, String, Option<String>
 #[tokio::test]
 async fn password_reset_replaces_the_record_and_the_vault_in_one_write() {
     let s = start_with(|cfg| cfg.rate_limit.auth_burst = 1_000).await;
-    let old = "correct horse battery staple";
-    let new = "a different horse battery staple";
+    let old = test_password();
+    let old = old.as_str();
+    let new = test_password();
+    let new = new.as_str();
     let (_token, user_id, recovery) = enrolled_account(&s, "resetwrap", old).await;
     let (_, _, copy, version) = vault_row(&s, &user_id).await;
     assert_eq!(copy.as_deref(), Some("k1.first.copy"));
@@ -832,8 +839,10 @@ async fn change_start(s: &Server, token: &str, password: &str) -> (u16, Value, O
 #[tokio::test]
 async fn password_change_replaces_the_record_and_the_vault_in_one_write() {
     let s = start_with(|cfg| cfg.rate_limit.auth_burst = 1_000).await;
-    let old = "correct horse battery staple";
-    let new = "a different horse battery staple";
+    let old = test_password();
+    let old = old.as_str();
+    let new = test_password();
+    let new = new.as_str();
     let (token, user_id, _recovery) = enrolled_account(&s, "changewrap", old).await;
     let (_, _, copy, version) = vault_row(&s, &user_id).await;
 
@@ -899,7 +908,7 @@ async fn password_change_replaces_the_record_and_the_vault_in_one_write() {
 #[tokio::test]
 async fn login_answers_with_the_key_stretching_version() {
     let s = start_with(|cfg| cfg.rate_limit.auth_burst = 1_000).await;
-    let (_token, user_id, _) = enrolled_account(&s, "ksfver", "correct horse battery staple").await;
+    let (_token, user_id, _) = enrolled_account(&s, "ksfver", &test_password()).await;
     let mut rng = OsRng;
     let started = ClientLogin::<BrowserOpaqueSuite>::start(&mut rng, b"whatever").unwrap();
     let ask = |user: String| {
@@ -920,8 +929,9 @@ async fn login_answers_with_the_key_stretching_version() {
     assert_eq!(stranger["ksf_version"], 1, "a stranger is told the same as an account");
 
     // Registering with a version the server does not know is refused.
+    let new_pw = test_password();
     let started =
-        ClientRegistration::<BrowserOpaqueSuite>::start(&mut rng, b"correct horse battery staple").unwrap();
+        ClientRegistration::<BrowserOpaqueSuite>::start(&mut rng, new_pw.as_bytes()).unwrap();
     let request = opaque_b64(started.message.serialize().as_slice());
     let (_, start) = s
         .post(
@@ -930,7 +940,7 @@ async fn login_answers_with_the_key_stretching_version() {
             json!({ "localpart": "ksfnew", "registration_request": request }),
         )
         .await;
-    let record = registration_record("correct horse battery staple", started, &start);
+    let record = registration_record(&new_pw, started, &start);
     let (status, refused) = s
         .post(
             "/_telium/v1/register/opaque/finish",
