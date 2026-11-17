@@ -166,10 +166,11 @@ export const sessionMethods = {
     let recoveryWrapper = null;
     let accountRecoveryWrapper = null;
     let recoveryKey = null;
+    let ksfBehind = false;
 
     if (supportsOpaque) {
       const {
-        enrollOpaque, loginOpaque, registerOpaque,
+        enrollOpaque, KSF_CURRENT, loginOpaque, registerOpaque,
       } = await secureAuth();
       if (register) {
         const min = Number(caps?.registration_min_password_len) || 8;
@@ -224,6 +225,7 @@ export const sessionMethods = {
         } else {
           resp = secure.session;
           recoveryWrapper = secure.recoveryWrapper;
+          ksfBehind = secure.ksfVersion < KSF_CURRENT;
         }
       }
     } else {
@@ -245,6 +247,10 @@ export const sessionMethods = {
     // is saved a second tab can restore it, and a restored session has no password to make either with.
     if (!handoffOnly && recoveryWrapper) {
       await this.createCustody(resp, normalized, recoveryWrapper, accountRecoveryWrapper);
+      if (ksfBehind) {
+        const upgraded = await this.upgradeKsf(resp, normalized, password, recoveryWrapper, accountRecoveryWrapper);
+        if (upgraded) recoveryWrapper = upgraded.recoveryWrapper;
+      }
       // A new account does not finish signing up until the recovery copy is on the server and read back. The user's
       // "yes, I saved it" is a separate fact (confirmRecoveryKey) and never stands in for it.
       if (register && accountRecoveryWrapper) {
@@ -481,8 +487,13 @@ export const sessionMethods = {
     }
 
     const { resetPasswordOpaque } = await secureAuth();
+    // The vault is re-wrapped under the new password in the same request that replaces it (I5); the fallback in
+    // vault.load stays for resets made before this.
     const recovered = await resetPasswordOpaque(
       normalized, user, recoveryKey, newPassword, deviceName,
+      {
+        vaultRewrap: async (wrapper, copy) => (copy ? vault.rewrapFromRecoveryCopy(copy, wrapper) : null),
+      },
     );
     const resp = recovered.session;
     for (const key of pinKeys(normalized, home)) storage.set(key, true);
@@ -505,6 +516,57 @@ export const sessionMethods = {
     this.save();
     rememberSession(this.session, { touch: true });
     return resp;
+  },
+
+  /// Changes the account password and re-wraps the vault under it in one server write, so the OPAQUE record and the vault
+  /// never disagree (I5). Needs the vault open on this device. Other devices keep their sessions; their in-memory wrapper
+  /// is stale, so their next write to the vault loses the version race instead of overwriting it, and they sign in again.
+  async changePassword(currentPassword, newPassword) {
+    if (!currentPassword) throw new Error('Enter your current account password.');
+    if (!this.home || !this.opaqueAuth) {
+      throw new Error('Changing the password requires a current OPAQUE homeserver.');
+    }
+    const caps = await this.home.capabilities().catch(() => null);
+    const min = Number(caps?.registration_min_password_len) || 8;
+    if (!newPassword || newPassword.length < min) {
+      throw new Error(`Password must be at least ${min} characters.`);
+    }
+    const current = this.vault;
+    if (current && (!current.raw || current.mode !== 'opaque_custody')) {
+      throw new Error('The encrypted recovery vault must be unlocked before the password can change.');
+    }
+    const { changePasswordOpaque } = await secureAuth();
+    const changed = await changePasswordOpaque(this.home, currentPassword, newPassword, {
+      vault: current ? { version: current.version, rewrap: (wrapper) => vault.rewrapCiphertext(current, wrapper) } : null,
+    });
+    this.authRecoveryWrapper = changed.recoveryWrapper;
+    if (current) {
+      this.vault = {
+        ...current,
+        primaryCiphertext: changed.ciphertext,
+        version: changed.vaultVersion ?? current.version,
+      };
+      this.emit('vault', this.vault);
+    }
+    return { ksfVersion: changed.ksfVersion };
+  },
+
+  /// Moves an account still on an older key-stretching set to the current one, at a sign-in, while the password is in
+  /// hand: the new record and the re-wrapped vault go up in one write. Returns the new wrapper, or null when nothing
+  /// changed. Best effort: the old set still works, so a failure is logged and tried again at the next sign-in.
+  async upgradeKsf(resp, base, password, recoveryWrapper, accountRecoveryWrapper) {
+    try {
+      const api = new Api({ base, token: resp.access_token, domain: resp.server_name || new URL(base).host });
+      const ring = await vault.load(api, null, resp.user_id, recoveryWrapper, accountRecoveryWrapper);
+      if (!ring?.raw || ring.mode !== 'opaque_custody') return null;
+      const { changePasswordOpaque } = await secureAuth();
+      return await changePasswordOpaque(api, password, password, {
+        vault: { version: ring.version, rewrap: (wrapper) => vault.rewrapCiphertext(ring, wrapper) },
+      });
+    } catch (e) {
+      console.warn('could not move the account to the current key-stretching settings', e);
+      return null;
+    }
   },
 
   signOut() {

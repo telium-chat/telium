@@ -179,6 +179,8 @@ fn is_auth_endpoint(method: &Method, path: &str) -> bool {
             | "/_telium/v1/login/opaque/finish"
             | "/_telium/v1/auth/opaque/reauth/start"
             | "/_telium/v1/auth/opaque/reauth/finish"
+            | "/_telium/v1/auth/opaque/password/change/start"
+            | "/_telium/v1/auth/opaque/password/change/finish"
             | "/_telium/v1/account/reactivate"
             | "/_telium/v1/password-reset/opaque/start"
             | "/_telium/v1/password-reset/opaque/finish"
@@ -420,6 +422,8 @@ mod tests {
             (Method::POST, "/_telium/v1/login/opaque/finish"),
             (Method::POST, "/_telium/v1/auth/opaque/reauth/start"),
             (Method::POST, "/_telium/v1/auth/opaque/reauth/finish"),
+            (Method::POST, "/_telium/v1/auth/opaque/password/change/start"),
+            (Method::POST, "/_telium/v1/auth/opaque/password/change/finish"),
             (Method::POST, "/_telium/v1/register"),
             (Method::POST, "/_telium/v1/register/opaque/start"),
             (Method::POST, "/_telium/v1/register/opaque/finish"),

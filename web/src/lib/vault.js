@@ -696,6 +696,25 @@ export async function confirmRecoveryCopy(home, ring, recoveryWrapper, accountRe
   return written;
 }
 
+/// The ring sealed under a new password wrapper, for a password change (the recovery copy and everything else sealed under
+/// the ring stay as they are).
+export async function rewrapCiphertext(current, wrapper) {
+  if (!current?.raw) throw new Error('the current recovery key is not loaded');
+  return opaqueCiphertext(wrapper, keyring(current));
+}
+
+/// Same, from the server's recovery copy opened with the recovery key: for a reset, where no password is in hand. Throws
+/// when the copy does not open, which stops the reset rather than leaving the vault under a password that is gone.
+export async function rewrapFromRecoveryCopy(copy, wrapper) {
+  let ring;
+  try {
+    ring = decodePayload(await openRecoveryKey(copy.wrapper, copy.ciphertext));
+  } catch {
+    throw new Error('That recovery key does not open this account\'s encrypted-message vault.');
+  }
+  return opaqueCiphertext(wrapper, keyring(ring));
+}
+
 export async function recoveryKeyCiphertext(current, wrapper) {
   if (!current?.raw) throw new Error('the current recovery key is not loaded');
   return sealRecoveryKey(wrapper, encodePayload(keyring(current)));

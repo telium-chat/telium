@@ -176,6 +176,7 @@ async function signIn(user, password, { register = false } = {}) {
   const resp = await store.signIn(server.base, user, password, { register });
   return {
     resp,
+    store,
     account: server.wrap({ ...resp, access_token: store.session.home.token }),
     wrappers: {
       recoveryWrapper: store.authRecoveryWrapper,
@@ -238,14 +239,14 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
     const password = `pw-${crypto.randomUUID()}`;
     on('alice-1');
     const faulty = fault && faultAt(fault.path, fault.mode);
-    let resp; let account; let wrappers;
+    let resp; let account; let wrappers; let store;
     try {
-      ({ resp, account, wrappers } = await signIn(name('alice'), password, { register: true }));
+      ({ resp, account, wrappers, store } = await signIn(name('alice'), password, { register: true }));
     } finally { faulty?.remove(); }
     expect(resp.recovery_key).toBeTruthy();
     expect(wrappers.recoveryWrapper).toBeTruthy();
     expect(wrappers.accountRecoveryWrapper).toBeTruthy();
-    return { password, reg: wrappers, account, fault: faulty };
+    return { password, reg: wrappers, account, fault: faulty, recoveryKey: resp.recovery_key, store, resp };
   }
 
   const signUpWrappers = (reg) => reg;
@@ -535,5 +536,233 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
     expect(String((await account.api.crossSigning()).sealed_secret)).toMatch(/^recovery-v1:/);
     const alice3 = await freshDevice(on, alice1.userId, password);
     expect(alice3.trust.canSign).toBe(true);
+  });
+
+  // ---- Phase 3: password writes re-wrap the vault in the same server write (I5) ----
+
+  /// Sign-up, then the first device started the way the app starts it, with the store the settings pane would call.
+  async function signedUpAlice(on) {
+    const up = await signUp(on);
+    const alice1 = await start(up.account, signUpWrappers(up.reg));
+    alice1.label = 'alice-1';
+    up.store.home = up.account.api;
+    up.store.vault = alice1.ring;
+    up.store.opaqueAuth = true;
+    return { ...up, alice1 };
+  }
+
+  /// Breaks the next POST whose URL ends in `suffix`: 'drop' never sends it, 'lose' sends it and loses the answer.
+  function breakNext(suffix, mode) {
+    const before = globalThis.fetch;
+    const hit = { count: 0 };
+    globalThis.fetch = async (input, init) => {
+      const method = String(init?.method || input?.method || 'GET').toUpperCase();
+      const url = String(input?.url || input);
+      if (!hit.count && method === 'POST' && url.endsWith(suffix)) {
+        hit.count += 1;
+        if (mode === 'drop') throw new TypeError('network down');
+        await before(input, init);
+        return new Response(JSON.stringify({ message: 'the answer was lost' }), {
+          status: 503, headers: { 'content-type': 'application/json' },
+        });
+      }
+      return before(input, init);
+    };
+    return { hit, restore: () => { globalThis.fetch = before; } };
+  }
+
+  const refusedSignIn = async (on, userId, password) => {
+    on(`probe-${crypto.randomUUID()}`);
+    await expect(signIn(userId, password)).rejects.toThrow();
+  };
+
+  it('a password change re-wraps the vault: a brand-new device signs in with the new password and still has its DMs', async () => {
+    const on = browsers();
+    const { password, store, account, reg, alice1 } = await signedUpAlice(on);
+    on('bob');
+    const bob = await newBob();
+    const convo = await talk(on, alice1, bob);
+    const before = await account.api.vault();
+
+    on('alice-1');
+    const fresh = `new-${crypto.randomUUID()}`;
+    await store.changePassword(password, fresh);
+    const after = await account.api.vault();
+    expect(after.version).toBe(before.version + 1);
+    expect(after.ciphertext).not.toBe(before.ciphertext);
+    // The copy under the recovery key is under the account key, which a password change does not touch.
+    expect(after.independent_ciphertext).toBe(before.independent_ciphertext);
+    const viaRecoveryKey = await loadVault(account.api, null, alice1.userId, null, reg.accountRecoveryWrapper);
+    expect(b64(viaRecoveryKey.raw)).toBe(b64(alice1.ring.raw));
+    // The session that made the change keeps working, with the new wrapper in memory.
+    expect(store.authRecoveryWrapper).toBeTruthy();
+    expect(store.vault.version).toBe(after.version);
+
+    await refusedSignIn(on, alice1.userId, password);
+    const alice2 = await freshDevice(on, alice1.userId, fresh);
+    await freshDeviceWorks(on, alice2, bob, convo);
+  });
+
+  it('a password change interrupted at either step leaves the old password and the vault working', async () => {
+    const on = browsers();
+    const { password, store, account, alice1 } = await signedUpAlice(on);
+    on('bob');
+    const bob = await newBob();
+    const convo = await talk(on, alice1, bob);
+    const before = await account.api.vault();
+    const fresh = `new-${crypto.randomUUID()}`;
+
+    for (const step of ['password/change/start', 'password/change/finish']) {
+      on('alice-1');
+      const broken = breakNext(step, 'drop');
+      try { await expect(store.changePassword(password, fresh)).rejects.toThrow(); } finally { broken.restore(); }
+      expect(broken.hit.count).toBe(1);
+      expect(await account.api.vault()).toMatchObject({ version: before.version, ciphertext: before.ciphertext });
+    }
+    // Nothing was spent or changed: the old password still opens everything on a brand-new device.
+    const alice2 = await freshDevice(on, alice1.userId, password);
+    await freshDeviceWorks(on, alice2, bob, convo);
+
+    // And the same change goes through afterwards.
+    on('alice-1');
+    await store.changePassword(password, fresh);
+    await refusedSignIn(on, alice1.userId, password);
+    const alice3 = await freshDevice(on, alice1.userId, fresh);
+    expect(alice3.ring?.raw).toBeTruthy();
+    expect(alice3.trust.canSign).toBe(true);
+  });
+
+  it('a password change whose answer is lost still left the account usable under exactly one password', async () => {
+    const on = browsers();
+    const { password, store, account, alice1 } = await signedUpAlice(on);
+    on('bob');
+    const bob = await newBob();
+    const convo = await talk(on, alice1, bob);
+    const fresh = `new-${crypto.randomUUID()}`;
+
+    on('alice-1');
+    const broken = breakNext('password/change/finish', 'lose');
+    try { await expect(store.changePassword(password, fresh)).rejects.toThrow(); } finally { broken.restore(); }
+    expect(broken.hit.count).toBe(1);
+    // The write landed with its vault: the new password opens everything, the old one is gone.
+    await refusedSignIn(on, alice1.userId, password);
+    const alice2 = await freshDevice(on, alice1.userId, fresh);
+    await freshDeviceWorks(on, alice2, bob, convo);
+    expect((await account.api.vault()).mode).toBe('opaque_custody');
+  });
+
+  it('a password change with the wrong current password changes nothing', async () => {
+    const on = browsers();
+    const { password, store, account, alice1 } = await signedUpAlice(on);
+    const before = await account.api.vault();
+    on('alice-1');
+    await expect(store.changePassword('not the password', `new-${crypto.randomUUID()}`)).rejects.toThrow();
+    expect(await account.api.vault()).toMatchObject({ version: before.version, ciphertext: before.ciphertext });
+    const again = await freshDevice(on, alice1.userId, password);
+    expect(again.ring?.raw).toBeTruthy();
+  });
+
+  it('a password reset with the recovery key re-wraps the vault: a brand-new device signs in with the new password and still has its DMs', async () => {
+    const on = browsers();
+    const { password, account, recoveryKey, alice1 } = await signedUpAlice(on);
+    on('bob');
+    const bob = await newBob();
+    const convo = await talk(on, alice1, bob);
+    const before = await account.api.vault();
+
+    on('reset-device');
+    const resetter = Object.assign(Object.create(sessionMethods), {
+      cryptoCleanup: Promise.resolve(), disposed: false, me: null, emit() {},
+    });
+    const fresh = `new-${crypto.randomUUID()}`;
+    const resp = await resetter.resetPassword(server.base, alice1.userId, recoveryKey, fresh);
+    const reset = server.wrap({ ...resp, access_token: resetter.session.home.token });
+    const after = await reset.api.vault();
+    expect(after.version).toBe(before.version + 1);
+    expect(after.ciphertext).not.toBe(before.ciphertext);
+    expect(after.independent_ciphertext).toBe(before.independent_ciphertext);
+    // Opens under the new password's wrapper alone: nothing here uses the recovery copy to repair it afterwards.
+    const ring = await loadVault(reset.api, null, alice1.userId, resetter.authRecoveryWrapper, null);
+    expect(b64(ring.raw)).toBe(b64(alice1.ring.raw));
+    expect((await reset.api.vault()).version).toBe(after.version);
+
+    await refusedSignIn(on, alice1.userId, password);
+    const alice2 = await freshDevice(on, alice1.userId, fresh);
+    await freshDeviceWorks(on, alice2, bob, convo);
+  });
+
+  it('a password reset with a wrong recovery key changes neither the password nor the vault', async () => {
+    const on = browsers();
+    const { password, account, alice1 } = await signedUpAlice(on);
+    const before = await account.api.vault();
+    on('reset-device');
+    const resetter = Object.assign(Object.create(sessionMethods), {
+      cryptoCleanup: Promise.resolve(), disposed: false, me: null, emit() {},
+    });
+    const { generateAccountRecovery } = await import('../lib/account-recovery.js');
+    await expect(resetter.resetPassword(
+      server.base, alice1.userId, generateAccountRecovery().text, `new-${crypto.randomUUID()}`,
+    )).rejects.toThrow();
+    expect(await account.api.vault()).toMatchObject({ version: before.version, ciphertext: before.ciphertext });
+    const again = await freshDevice(on, alice1.userId, password);
+    expect(again.ring?.raw).toBeTruthy();
+  });
+
+  it('moving an account to the current key-stretching set re-registers it and re-wraps the vault', async () => {
+    const on = browsers();
+    const { password, resp, store, account, reg, alice1 } = await signedUpAlice(on);
+    on('bob');
+    const bob = await newBob();
+    const convo = await talk(on, alice1, bob);
+    const before = await account.api.vault();
+    on('alice-1');
+    const moved = await store.upgradeKsf(resp, server.base, password, reg.recoveryWrapper, reg.accountRecoveryWrapper);
+    expect(moved?.ksfVersion).toBe(1);
+    expect((await account.api.vault()).version).toBe(before.version + 1);
+    const alice2 = await freshDevice(on, alice1.userId, password);
+    await freshDeviceWorks(on, alice2, bob, convo);
+  });
+
+  // ---- Trust.sealRootProperly: what it must leave alone ----
+
+  it('sealRootProperly leaves a root alone when the ring is in device custody', async () => {
+    const on = browsers();
+    const { reg, account } = await signUp(on);
+    const alice1 = await start(account, signUpWrappers(reg));
+    await throwawaySealedRoot(account, alice1);
+    const sealed = (await account.api.crossSigning()).sealed_secret;
+    on(`sibling-${crypto.randomUUID()}`);
+    const bare = await start(account);
+    bare.trust.recovery = { ...alice1.ring, mode: 'device_custody' };
+    const write = vi.spyOn(bare.trust.home, 'putCrossSigning');
+    await bare.trust.adoptSecret(alice1.trust.signKey, b64(alice1.trust.identityKey));
+    expect(write).not.toHaveBeenCalled();
+    expect((await account.api.crossSigning()).sealed_secret).toBe(sealed);
+    expect(sealed).toMatch(/^device-v1:/);
+  });
+
+  it('sealRootProperly leaves a root that is already recovery-v1: sealed untouched', async () => {
+    const on = browsers();
+    const { reg, account } = await signUp(on);
+    const alice1 = await start(account, signUpWrappers(reg));
+    const sealed = (await account.api.crossSigning()).sealed_secret;
+    expect(sealed).toMatch(/^recovery-v1:/);
+    const write = vi.spyOn(alice1.trust.home, 'putCrossSigning');
+    expect(await alice1.trust.sealRootProperly(alice1.ring.key)).toBe(false);
+    expect(write).not.toHaveBeenCalled();
+    expect((await account.api.crossSigning()).sealed_secret).toBe(sealed);
+  });
+
+  it('sealRootProperly writes nothing when the identity it holds is not the one published', async () => {
+    const on = browsers();
+    const { reg, account } = await signUp(on);
+    const alice1 = await start(account, signUpWrappers(reg));
+    await throwawaySealedRoot(account, alice1);
+    const sealed = (await account.api.crossSigning()).sealed_secret;
+    alice1.trust.identityKey = crypto.getRandomValues(new Uint8Array(32));
+    const write = vi.spyOn(alice1.trust.home, 'putCrossSigning');
+    expect(await alice1.trust.sealRootProperly(alice1.ring.key)).toBe(false);
+    expect(write).not.toHaveBeenCalled();
+    expect((await account.api.crossSigning()).sealed_secret).toBe(sealed);
   });
 });
