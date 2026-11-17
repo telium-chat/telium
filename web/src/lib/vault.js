@@ -4,6 +4,7 @@ import { gcm } from '@noble/ciphers/aes.js';
 import { pbkdf2Async } from '@noble/hashes/pbkdf2.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import {
+  forgetRecoveryKeyring,
   heldRecoveryKeyring,
   pinOutOfEscrow,
   pinnedOutOfEscrow,
@@ -252,12 +253,45 @@ async function loadOnce(home, passphrase, userId, recoveryWrapper, accountRecove
       raw: crypto.getRandomValues(new Uint8Array(KEY_BYTES)),
       retired: [],
     });
-    // A write with no answer may have landed, so keep the ring locally; not on a refusal.
+    // A start without the password-derived wrapper never creates custody: a restored session or second tab that wins
+    // the race would make a vault nothing can ever open. It is locked until the password is typed.
+    if (!recoveryWrapper && !passphrase) {
+      return {
+        key: null,
+        openers: [],
+        raw: null,
+        retired: [],
+        mode: 'none',
+        locked: true,
+        needs_device: true,
+        needs_password: true,
+        version,
+      };
+    }
+
+    // No vault but an account key: this device would mint a ring that opens nothing the account already sealed (the root,
+    // the history mirror). Stop with an error instead of creating one over it. A device that holds a ring is the
+    // exception, since it uploads that ring rather than making a new one.
+    if (created && typeof home.crossSigning === 'function') {
+      const root = await home.crossSigning();
+      if (root?.exists) {
+        throw Object.assign(
+          new Error('this account has an identity key but no recovery vault; not creating a new one over it'),
+          { code: 'vault_missing' },
+        );
+      }
+    }
+
+    // The ring is kept on this device before the write is sent, as the account key is (keepPendingSecret): a tab closed
+    // while the request is in flight, or an answer that never comes, then loses nothing. A refusal is different: the
+    // account has another ring, so one this device only just made is dropped.
     const put = async (body) => {
+      if (created) await rememberRecoveryKeyring(userId, ring).catch(() => {});
       try {
         return await home.putVault({ ...body, expected_version: 0 });
       } catch (e) {
         if (unanswered(e)) await remember(userId, ring, body.mode);
+        else if (created) await forgetRecoveryKeyring(userId);
         throw e;
       }
     };
@@ -291,13 +325,8 @@ async function loadOnce(home, passphrase, userId, recoveryWrapper, accountRecove
       return { ...ring, mode: 'self_custody', independent: true, created, version: versionOf(answer) };
     }
 
-    const throwaway = crypto.getRandomValues(new Uint8Array(KEY_BYTES));
-    const answer = await put({
-      mode: 'device_custody',
-      ciphertext: await seal(throwaway, encodePayload(ring)),
-    });
-    await remember(userId, ring, 'device_custody');
-    return { ...ring, mode: 'device_custody', created, version: versionOf(answer) };
+    // Unreachable: a start with neither wrapper returned above.
+    throw new Error('no wrapper to create the recovery vault under');
   }
 
   if (vault.mode === 'opaque_custody') {

@@ -51,6 +51,12 @@ export async function rememberRecoveryKeyring(userId, keyring) {
   }, slot(userId)));
 }
 
+/// Only the ring slot: a ring this device made for a vault create the server then refused is not the account's.
+export async function forgetRecoveryKeyring(userId) {
+  if (!userId || typeof indexedDB === 'undefined') return;
+  await tx('readwrite', (store) => store.delete(slot(userId))).catch(() => {});
+}
+
 export async function heldRecoveryKeyring(userId) {
   if (!userId || typeof indexedDB === 'undefined') return null;
   const row = await tx('readonly', (store) => store.get(slot(userId))).catch(() => null);

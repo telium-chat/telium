@@ -120,6 +120,37 @@ export class Trust {
     return exclusive(`telium-crosssign:${this.userId}`, () => this.startOnce(cs, recoveryKey, mlsKey, mode));
   }
 
+  /// Creates the account's signing key if it has none, sealed under the account key, and nothing else. Run by sign-in
+  /// and sign-up, which hold the password, before the session is saved. Returns whether this call made it. The secret
+  /// is kept here before the request goes out and stays after, so a tab closed mid-request loses nothing, and a key
+  /// another device created first is left alone.
+  async ensureRoot(cs, recoveryKey) {
+    if (!recoveryKey) throw new Error('The account key is needed to create the identity signing key.');
+    return exclusive(`telium-crosssign:${this.userId}`, async () => {
+      const doc = await this.home.crossSigning();
+      if (doc.exists) return false;
+      const pair = await cs.signature.keygen();
+      const identityKeyText = b64(pair.publicKey);
+      await keepPendingSecret(this.userId, identityKeyText, pair.signKey);
+      try {
+        await this.home.putCrossSigning({
+          identity_key: identityKeyText,
+          sealed_secret: RECOVERY_SEAL + await seal(recoveryKey, pair.signKey),
+          create_only: true,
+        });
+      } catch (e) {
+        if (e?.status === 409) {
+          await dropPendingSecret(this.userId, identityKeyText);
+          return false;
+        }
+        throw e;
+      }
+      await keepSecret(this.userId, pair.signKey);
+      await dropPendingSecret(this.userId, identityKeyText);
+      return true;
+    });
+  }
+
   async startOnce(cs, recoveryKey, mlsKey, mode, retried = false) {
     this.cs = cs;
     const doc = await this.home.crossSigning();
@@ -182,20 +213,16 @@ export class Trust {
             identity_key: b64(this.identityKey),
             sealed_secret: RECOVERY_SEAL + await seal(recoveryKey, this.signKey),
           });
-        } else if (!wantRecovery && !deviceWrapped) {
-          const throwaway = crypto.getRandomValues(new Uint8Array(32));
-          await this.home.putCrossSigning({
-            identity_key: b64(this.identityKey),
-            sealed_secret: DEVICE_SEAL + await seal(throwaway, this.signKey),
-          });
         }
+        // Never re-sealed under anything but the account key. A start that could not read the vault (an outage, a
+        // locked vault) has no key in hand and used to re-seal the server's copy under a throwaway key, which no new
+        // device can ever open; it now leaves the server's copy as it is.
       }
     } else if (recoveryKey) {
+      // Created only with the account key in hand, and sealed under it alone.
       const pair = await cs.signature.keygen();
       identityKeyText = b64(pair.publicKey);
-      const sealed = mode === 'opaque_custody' || mode === 'self_custody'
-        ? RECOVERY_SEAL + await seal(recoveryKey, pair.signKey)
-        : DEVICE_SEAL + await seal(crypto.getRandomValues(new Uint8Array(32)), pair.signKey);
+      const sealed = RECOVERY_SEAL + await seal(recoveryKey, pair.signKey);
       // Kept aside before it is sent, so closing the tab mid-request cannot leave a published key held nowhere, and
       // outside the account-key slot, so a refused create never displaces the key the account does publish.
       await keepPendingSecret(this.userId, identityKeyText, pair.signKey);
@@ -325,8 +352,9 @@ export class Trust {
     return { signed: true, mlsKey };
   }
 
-  /// Signed by both old and new roots. Without `recoveryKey` the new secret stays on this device.
+  /// Signed by both old and new roots, and sealed under the account key (`recoveryKey`), which is required.
   async rotateRoot({ recoveryKey = null } = {}) {
+    if (!recoveryKey) throw new Error('The account key is needed to seal a new identity key.');
     if (!this.canSign || !this.continuity?.valid || !this.immutableId) {
       throw new Error('This device does not currently hold your identity signing key.');
     }
@@ -335,9 +363,7 @@ export class Trust {
     const next = b64(pair.publicKey);
     const sequence = Number(this.continuity.sequence || 0) + 1;
     const payload = identityRotationPayload(this.immutableId, sequence, previous, next);
-    const sealed = recoveryKey
-      ? RECOVERY_SEAL + await seal(recoveryKey, pair.signKey)
-      : DEVICE_SEAL + await seal(crypto.getRandomValues(new Uint8Array(32)), pair.signKey);
+    const sealed = RECOVERY_SEAL + await seal(recoveryKey, pair.signKey);
     const deviceSignatures = [];
     for (const [deviceId, d] of this.own) {
       if (!d.mls_key || this.isRevokedKey(this.userId, d.mls_key)) continue;
@@ -396,13 +422,12 @@ export class Trust {
   /// changed and must compare emoji again: from where they stand, a server could have done the same.
   async recoverWithRecoveryKey(recoveryKeyText, { mlsKey = null, sealKey = null } = {}) {
     const { normalizeRecoveryKey, signWithRecoveryKey } = await import('./account-recovery.js');
+    if (!sealKey) throw new Error('The account key is needed to seal a new identity key.');
     const text = normalizeRecoveryKey(recoveryKeyText);
     return exclusive(`telium-crosssign:${this.userId}`, async () => {
       const pair = await this.cs.signature.keygen();
       const next = b64(pair.publicKey);
-      const sealed = sealKey
-        ? RECOVERY_SEAL + await seal(sealKey, pair.signKey)
-        : DEVICE_SEAL + await seal(crypto.getRandomValues(new Uint8Array(32)), pair.signKey);
+      const sealed = RECOVERY_SEAL + await seal(sealKey, pair.signKey);
       const leaf = mlsKey ? (typeof mlsKey === 'string' ? mlsKey : b64(mlsKey)) : null;
       const deviceSignatures = leaf ? [{
         device_id: this.deviceId,

@@ -223,7 +223,8 @@ describe('key custody', () => {
   });
 
   it('rotates the live key while migrating away from legacy server escrow', async () => {
-    const deviceOnly = await load(home, null, USER, null);
+    // Legacy escrow as setup: made from opaque custody now, since a start without the wrapper creates no vault.
+    const deviceOnly = await load(home, null, USER, wrapper);
     const escrowed = await setMode(home, deviceOnly, 'escrowed', null, USER);
     const exposed = new Uint8Array(escrowed.raw);
     expect(home.held.escrow_key).toBeTruthy();
@@ -236,9 +237,14 @@ describe('key custody', () => {
     expect(home.held.escrow_key).toBe(null);
   });
 
-  it('keeps trusted-device custody as the no-OPAQUE compatibility fallback', async () => {
+  it('never creates trusted-device custody without the password-derived wrapper', async () => {
+    // It used to make a `device_custody` vault here (the no-OPAQUE fallback). Now: locked, nothing written.
     const first = await load(home, null, USER, null);
-    expect(first.mode).toBe('device_custody');
+    expect(first.mode).toBe('none');
+    expect(first.locked).toBe(true);
+    expect(first.needs_password).toBe(true);
+    expect(first.key).toBe(null);
+    expect(home.held).toBe(null);
     globalThis.indexedDB = new IDBFactory();
     const fresh = await load(home, null, USER, null);
     expect(fresh.needs_device).toBe(true);

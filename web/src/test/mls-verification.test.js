@@ -5,7 +5,9 @@ import { heldSecret, keepSecret, wipe } from '../lib/mls.js';
 import { Trust, Verification } from '../lib/verify.js';
 import { seal as sealVault } from '../lib/vault.js';
 import { FakeHome, device } from './mls-home.js';
-import { recoveryKey, freshDisk, trustFor, exchange, glyphs } from './mls-helpers.js';
+import {
+  recoveryKey, freshDisk, trustFor, exchange, glyphs, sealRootUnderThrowaway,
+} from './mls-helpers.js';
 
 describe('verification', () => {
   beforeEach(async () => {
@@ -20,9 +22,10 @@ describe('verification', () => {
     const alice = await device(home, '@a:h', 'd-1', nextKey);
     const pair = await alice.cs.signature.keygen();
     const encode = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
+    const legacySealed = await sealVault(oldKey, pair.signKey);
     home.cross.set('@a:h', {
       identity_key: encode(pair.publicKey),
-      sealed_secret: await sealVault(oldKey, pair.signKey),
+      sealed_secret: legacySealed,
     });
 
     const ring = {
@@ -45,7 +48,9 @@ describe('verification', () => {
     );
 
     expect(trust.canSign).toBe(true);
-    expect(home.cross.get('@a:h').sealed_secret.startsWith('device-v1:')).toBe(true);
+    // Phase 1: a start never re-seals the root under a throwaway key (it used to, here, as `device-v1:`); with no
+    // opaque-custody mode in hand it leaves the server's copy exactly as it was.
+    expect(home.cross.get('@a:h').sealed_secret).toBe(legacySealed);
   });
 
   it('does not let a legacy homeserver choose the signer of stored user verification', async () => {
@@ -176,6 +181,8 @@ describe('verification', () => {
     const first = await device(home, '@a:h', 'd-1', key);
     const firstLeaf = await first.leafKey();
     await trustFor(home, first, '@a:h', 'd-1', key);
+    // The state under test: the root sealed only under a throwaway key (as before phase 1), so no ring key opens it.
+    await sealRootUnderThrowaway(home, '@a:h');
     // The broken state: this device keeps a key that is not the published one, sealed only under a throwaway.
     await keepSecret('@a:h', (await first.cs.signature.keygen()).signKey);
     const stuck = await trustFor(home, first, '@a:h', 'd-1', key);
@@ -200,6 +207,8 @@ describe('verification', () => {
     const first = await device(home, '@a:h', 'd-1', key);
     const firstLeaf = await first.leafKey();
     await trustFor(home, first, '@a:h', 'd-1', key);
+    // The state under test: the root sealed only under a throwaway key (as before phase 1), so no ring key opens it.
+    await sealRootUnderThrowaway(home, '@a:h');
     await keepSecret('@a:h', (await first.cs.signature.keygen()).signKey);
     const stuck = await trustFor(home, first, '@a:h', 'd-1', key);
     expect(stuck.canSign).toBe(false);
@@ -226,6 +235,8 @@ describe('verification', () => {
     const first = await device(home, '@a:h', 'd-1', key);
     const firstLeaf = await first.leafKey();
     await trustFor(home, first, '@a:h', 'd-1', key);
+    // The state under test: the root sealed only under a throwaway key (as before phase 1), so no ring key opens it.
+    await sealRootUnderThrowaway(home, '@a:h');
     await keepSecret('@a:h', (await first.cs.signature.keygen()).signKey);
     const stuck = await trustFor(home, first, '@a:h', 'd-1', key);
 

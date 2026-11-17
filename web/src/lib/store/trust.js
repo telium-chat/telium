@@ -7,8 +7,9 @@ export const trustMethods = {
   async recoverIdentity(recoveryKey) {
     const trust = await this.startTrust();
     if (!trust) throw new Error('encryption is not available on this device');
-    const mode = this.custodyMode();
-    const sealKey = (mode === 'opaque_custody' || mode === 'self_custody') && this.vault?.key ? this.vault.key : null;
+    // Always sealed under the account key; with none in hand (a locked vault) there is nothing safe to seal under.
+    const sealKey = this.vault?.key || null;
+    if (!sealKey) throw new Error('Unlock your encrypted messages with your password before resetting your identity.');
     const outcome = await trust.recoverWithRecoveryKey(recoveryKey, {
       mlsKey: await this.mls.leafKey(),
       sealKey,
