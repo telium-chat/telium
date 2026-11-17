@@ -102,7 +102,8 @@ export async function withRetry(method, path, send, { sleep = defaultSleep, body
       return await send();
     } catch (e) {
       const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-      if (!why || offline || attempt >= ATTEMPTS || !transient(e)) throw e;
+      // A request the caller cancelled is not a network fault to try again.
+      if (!why || offline || attempt >= ATTEMPTS || !transient(e) || e?.name === 'AbortError') throw e;
       await sleep(BACKOFF_MS[attempt]);
       attempt += 1;
     }

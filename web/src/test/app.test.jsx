@@ -624,12 +624,13 @@ function seedSession(origins, { expiresAt = Date.now() + 3_600_000 } = {}) {
     expect(receive.textContent).toContain('Nothing has moved yet.');
     expect(receive.textContent).toContain('Now go back to the old server.');
   });
-  it('falls back to trusted-device recovery on a pre-OPAQUE homeserver', async () => {
+  it('creates no recovery vault on a pre-OPAQUE homeserver', async () => {
+    // Used to fall back to a `device_custody` vault. Custody is made only with the password-derived wrapper now, and a
+    // pre-OPAQUE login has none: the vault stays locked and nothing is written.
     const { server, store, user } = await boot({ opaqueAuth: false });
-    await waitFor(() => expect(store.vault?.raw).toBeTruthy());
-    const held = server.state.vaults.get('@alice:home.example');
-    expect(held.mode).toBe('device_custody');
-    expect(held.escrow_key).toBe(null);
+    await waitFor(() => expect(store.vault?.locked).toBe(true));
+    expect(store.vault.needs_password).toBe(true);
+    expect(server.state.vaults.get('@alice:home.example')).toBeUndefined();
 
     await user.click(screen.getByTitle('Settings'));
     const dialog = await screen.findByRole('dialog');
@@ -638,7 +639,8 @@ function seedSession(origins, { expiresAt = Date.now() + 3_600_000 } = {}) {
     ));
 
     const how = await within(dialog).findByText('How this account recovers');
-    expect(how.nextElementSibling.textContent).toMatch(/^Trusted-device recovery\./);
+    // Was /^Trusted-device recovery\./ while the fallback vault existed.
+    expect(how.nextElementSibling.textContent).toBe('Not established yet');
     expect(within(dialog).queryByText(/server-assisted recovery is still active/i)).toBeNull();
   });
 

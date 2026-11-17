@@ -14,7 +14,7 @@ import { shortName, storage } from '../util.js';
 import * as vault from '../vault.js';
 import {
   encryption, LOCAL_DM_DRAFTS_KEY, OPAQUE_PIN_PREFIX,
-  PENDING_RECOVERY_KEY, secureAuth, SESSION_KEY,
+  PENDING_RECOVERY_KEY, secureAuth, SESSION_KEY, verification,
 } from './shared.js';
 
 /// Both keys are read and written, or a pin under the old key would lapse and allow the downgrade.
@@ -28,6 +28,22 @@ function authError(code, message, extra = {}) {
   error.code = code;
   Object.assign(error, extra);
   return error;
+}
+
+/// Sign-in waits on custody for at most this long; a hung request then costs the setup, never the sign-in.
+export const CUSTODY_TIMEOUT_MS = 15_000;
+
+/// Gives up on `work` after `ms`, and cancels the requests behind it (`abort`): a hung one would otherwise keep holding the
+/// account-key lock, and the next `Trust.start` in this tab would wait on it for good.
+function withTimeout(work, ms, label, abort) {
+  let timer;
+  const expired = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${ms} ms`));
+      abort.abort();
+    }, ms);
+  });
+  return Promise.race([work, expired]).finally(() => clearTimeout(timer));
 }
 
 export const sessionMethods = {
@@ -225,6 +241,12 @@ export const sessionMethods = {
           : await Api.login(normalized, user, password, deviceName, mfaCode);
     }
 
+    // The vault and the account key are made here, with the password in hand and before the session is saved: once it
+    // is saved a second tab can restore it, and a restored session has no password to make either with.
+    if (!handoffOnly && recoveryWrapper) {
+      await this.createCustody(resp, normalized, recoveryWrapper, accountRecoveryWrapper);
+    }
+
     if (handoffOnly) {
       // A receiver tab shares telium.chat's localStorage with the source tab.
       // Never install this session into the browser-global active slot: doing
@@ -266,6 +288,38 @@ export const sessionMethods = {
       sessionStorage.setItem(PENDING_RECOVERY_KEY, recoveryKey);
     }
     return recoveryKey ? { ...resp, recovery_key: recoveryKey } : resp;
+  },
+
+  /// Vault first (its ring is kept on this device before the write), then the account key under that ring. Best effort:
+  /// a failure or a request that does not answer in time leaves the account without them, which the next sign-in with the password retries (`vault.load` and
+  /// `ensureRoot` both only create what is missing), and never stops the sign-in.
+  async createCustody(resp, base, recoveryWrapper, accountRecoveryWrapper) {
+    const abort = new AbortController();
+    try {
+      const api = new Api({
+        base,
+        token: resp.access_token,
+        domain: resp.server_name || new URL(base).host,
+        signal: abort.signal,
+      });
+      const ring = await withTimeout(
+        vault.load(api, null, resp.user_id, recoveryWrapper, accountRecoveryWrapper),
+        this.custodyTimeoutMs ?? CUSTODY_TIMEOUT_MS,
+        'loading the recovery vault',
+        abort,
+      );
+      if (!ring?.key) return;
+      const [{ loadCiphersuite }, { Trust }] = await Promise.all([encryption(), verification()]);
+      const trust = new Trust(api, { userId: resp.user_id, deviceId: resp.device_id, recovery: ring });
+      await withTimeout(
+        trust.ensureRoot(await loadCiphersuite(), ring.key),
+        this.custodyTimeoutMs ?? CUSTODY_TIMEOUT_MS,
+        'setting up the account key',
+        abort,
+      );
+    } catch (e) {
+      console.warn('could not set up encrypted-message custody at sign-in', e);
+    }
   },
 
   async confirmRecoveryKey(recoveryKey = null) {

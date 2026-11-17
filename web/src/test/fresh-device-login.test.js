@@ -17,7 +17,7 @@ import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { Mls, wipe } from '../lib/mls.js';
 import { Backup } from '../lib/backup.js';
-import { load as loadVault } from '../lib/vault.js';
+import { load as loadVault, seal } from '../lib/vault.js';
 import { Trust } from '../lib/verify.js';
 import { trustMethods } from '../lib/store/trust.js';
 import { sessionMethods } from '../lib/store/session.js';
@@ -138,6 +138,32 @@ async function talk(on, alice, bob) {
   return { id, said };
 }
 
+/// Sign-in now creates the vault and the account key itself (lib/store/session.js createCustody), through its own client, so
+/// a fault in those writes has to be injected at `fetch`. The write reaches the server first; then either the answer is
+/// lost (503) or never comes (the tab is gone). It fires once, on the first PUT to `path`, and is removed afterwards.
+function faultAt(path, mode) {
+  const fault = { hit: false, mode };
+  fault.reached = new Promise((resolve) => { fault.landed = resolve; });
+  const before = globalThis.fetch;
+  fault.remove = () => { if (globalThis.fetch === wrapped) globalThis.fetch = before; };
+  const wrapped = async (input, init) => {
+    const method = String(init?.method || input?.method || 'GET').toUpperCase();
+    const url = String(input?.url || input);
+    const answer = await before(input, init);
+    if (fault.hit || method !== 'PUT' || !url.endsWith(path)) return answer;
+    fault.hit = true;
+    fault.landed();
+    if (mode === 'lost') {
+      return new Response(JSON.stringify({ message: 'the answer was lost' }), {
+        status: 503, headers: { 'content-type': 'application/json' },
+      });
+    }
+    return new Promise(() => {});
+  };
+  globalThis.fetch = wrapped;
+  return fault;
+}
+
 /// The app's own sign-in (lib/store/session.js): what it leaves in memory is all a first start gets.
 async function signIn(user, password, { register = false } = {}) {
   const store = Object.assign(Object.create(sessionMethods), {
@@ -207,14 +233,18 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
     await wipe();
   });
 
-  async function signUp(on) {
+  async function signUp(on, { fault = null } = {}) {
     const password = `pw-${crypto.randomUUID()}`;
     on('alice-1');
-    const { resp, account, wrappers } = await signIn(name('alice'), password, { register: true });
+    const faulty = fault && faultAt(fault.path, fault.mode);
+    let resp; let account; let wrappers;
+    try {
+      ({ resp, account, wrappers } = await signIn(name('alice'), password, { register: true }));
+    } finally { faulty?.remove(); }
     expect(resp.recovery_key).toBeTruthy();
     expect(wrappers.recoveryWrapper).toBeTruthy();
     expect(wrappers.accountRecoveryWrapper).toBeTruthy();
-    return { password, reg: wrappers, account };
+    return { password, reg: wrappers, account, fault: faulty };
   }
 
   const signUpWrappers = (reg) => reg;
@@ -277,14 +307,11 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
     await gate(on, signingUp, password);
   });
 
-  // Fails at `expect(alice2.ring?.raw).toBeTruthy()`: the restored tab (no OPAQUE wrapper in memory) finds no vault
-  // and creates one in `device_custody`, sealed under a throwaway key (vault.js loadOnce, `!vault.exists` branch), and
-  // its Trust then seals the root with DEVICE_SEAL because custodyMode() reads `device_custody`. The sign-up tab is
-  // closed before its own start runs, so nothing ever wraps the ring under the password. The brand-new device gets
-  // `locked: true, needs_device: true`. Flips when sign-in creates the vault and the root itself, before it saves the
-  // session (so no restored tab can exist without them), and a session with no OPAQUE export key never creates
-  // custody (key-custody-design docs page, phase 1).
-  it.fails('two tabs, and the restored one creates the vault before the sign-up tab is closed', async () => {
+  // Used to fail: the restored tab (no OPAQUE wrapper in memory) found no vault and created one in `device_custody`,
+  // sealed under a throwaway key, with a `device-v1:` root, and the sign-up tab was closed before its own start ran.
+  // Phase 1: sign-in creates the vault and the root before it saves the session, and a session without the OPAQUE
+  // export key never creates custody (key-custody-design docs page, phase 1).
+  it('two tabs, and the restored one creates the vault before the sign-up tab is closed', async () => {
     const on = browsers();
     const { password, account } = await signUp(on);
     const restored = await start(account);
@@ -293,96 +320,70 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
 
   it('the answer to the first vault write is lost, and the device restarts from a restored session', async () => {
     const on = browsers();
-    const { password, reg, account } = await signUp(on);
-    const lost = new Proxy(account.api, {
-      get(target, key) {
-        if (key !== 'putVault') return target[key];
-        return async (body) => {
-          await target.putVault(body);
-          throw Object.assign(new Error('the answer was lost'), { status: 503 });
-        };
-      },
-    });
-    const first = await start(account, { ...signUpWrappers(reg), api: lost });
-    expect(first.vaultError).toBeTruthy();
+    // The write lands and its answer is lost inside sign-in, which now makes the vault. Sign-in still finishes.
+    const { password, reg, account, fault } = await signUp(on, { fault: { path: '/_telium/v1/vault', mode: 'lost' } });
+    expect(fault.hit).toBe(true);
+    const first = await start(account, signUpWrappers(reg));
+    expect(first.vaultError).toBeFalsy();
     const alice1 = await start(account);
     await gate(on, alice1, password);
   });
 
   it('the answer to the account-key create is lost, and the device restarts from a restored session', async () => {
     const on = browsers();
-    const { password, reg, account } = await signUp(on);
-    const lost = new Proxy(account.api, {
-      get(target, key) {
-        if (key !== 'putCrossSigning') return target[key];
-        return async (body) => {
-          await target.putCrossSigning(body);
-          throw Object.assign(new Error('the answer was lost'), { status: 503 });
-        };
-      },
+    // The create lands and its answer is lost inside sign-in; the key was kept aside first, so the next start finds it.
+    const { password, reg, account, fault } = await signUp(on, {
+      fault: { path: '/_telium/v1/crosssigning', mode: 'lost' },
     });
-    const first = await start(account, { ...signUpWrappers(reg), api: lost });
-    expect(first.trust).toBeNull();
+    expect(fault.hit).toBe(true);
+    const first = await start(account, signUpWrappers(reg));
+    expect(first.trust?.canSign).toBe(true);
     const alice1 = await start(account);
     await gate(on, alice1, password);
   });
+
+  // The tab is closed inside sign-in, which now makes the vault and the account key before it saves the session. The write
+  // reaches the server, the answer never comes, and `save()` never runs, so no restored session can exist for this
+  // sign-up: the user reopens by typing the password again on the same browser. That sign-in, and the restored session
+  // it leaves behind, are what the gate runs on.
+  async function closedInsideSignUp(on, path) {
+    const password = `pw-${crypto.randomUUID()}`;
+    const user = name('alice');
+    on('alice-1');
+    const fault = faultAt(path, 'closing');
+    signIn(user, password, { register: true }).catch(() => {});
+    await fault.reached;
+    fault.remove();
+    const { account, wrappers } = await signIn(user, password);
+    return { password, account, wrappers };
+  }
 
   it('the tab is closed while the account-key create is in flight, and reopens from a restored session', async () => {
     const on = browsers();
-    const { password, reg, account } = await signUp(on);
-    let landed;
-    const reached = new Promise((r) => { landed = r; });
-    const closing = new Proxy(account.api, {
-      get(target, key) {
-        if (key !== 'putCrossSigning') return target[key];
-        // The request reaches the server; the tab is gone before the answer, so nothing after it runs.
-        return async (body) => {
-          await target.putCrossSigning(body);
-          landed();
-          return new Promise(() => {});
-        };
-      },
-    });
-    start(account, { ...signUpWrappers(reg), api: closing });
-    await reached;
+    const { password, account, wrappers } = await closedInsideSignUp(on, '/_telium/v1/crosssigning');
     expect((await account.api.crossSigning()).exists).toBe(true);
+    await start(account, wrappers);
     const alice1 = await start(account);
     await gate(on, alice1, password);
   });
 
-  // Fails at `expect(alice1.trust?.canSign).toBe(true)` in `talk`: the vault write landed but the tab closed before
-  // the ring was remembered locally (vault.js only remembers on an unanswered *error*, not on a request that never
-  // returns). The restored session holds no OPAQUE wrapper, so the vault loads `locked`, the Trust gets no key to seal
-  // a root with and creates none, and device 1 cannot sign (or DM) until the password is typed again. Flips when the
-  // ring is kept locally before the write is sent, as the account key already is (keepPendingSecret), or when sign-in
-  // creates custody before saving the session (key-custody-design docs page, phase 1).
-  it.fails('the tab is closed while the first vault write is in flight, and reopens from a restored session', async () => {
+  // Used to fail: the vault write landed but the tab closed before the ring was remembered locally (it was kept only
+  // on an unanswered *error*, not on a request that never returns), so the restored session was locked and device 1
+  // could not sign. Phase 1: the ring is kept locally before the write is sent, as the account key is
+  // (keepPendingSecret), and sign-in creates custody before saving the session (key-custody-design docs page).
+  it('the tab is closed while the first vault write is in flight, and reopens from a restored session', async () => {
     const on = browsers();
-    const { password, reg, account } = await signUp(on);
-    let landed;
-    const reached = new Promise((r) => { landed = r; });
-    const closing = new Proxy(account.api, {
-      get(target, key) {
-        if (key !== 'putVault') return target[key];
-        return async (body) => {
-          await target.putVault(body);
-          landed();
-          return new Promise(() => {});
-        };
-      },
-    });
-    start(account, { ...signUpWrappers(reg), api: closing });
-    await reached;
+    const { password, account, wrappers } = await closedInsideSignUp(on, '/_telium/v1/vault');
+    await start(account, wrappers);
     const alice1 = await start(account);
     await gate(on, alice1, password);
   });
 
-  // Fails at `expect(alice2.trust.canSign).toBe(true)`: device 1 holds the root and restarts once while `GET /vault`
-  // fails (a 503). Its vault is null, so Trust.start gets no ring key, `wantRecovery` is false, and the
-  // `!wantRecovery && !deviceWrapped` branch of verify.js startOnce re-seals the server's `recovery-v1:` root as
-  // `device-v1:`. A brand-new device then opens the ring but not the root. Flips when that branch is removed: the root
-  // is sealed only under AK and never downgraded (key-custody-design docs page, invariant I2).
-  it.fails('a device holding the root restarts while the vault read fails, then a new device signs in', async () => {
+  // Used to fail: device 1 holds the root and restarts once while `GET /vault` fails (a 503). Its vault is null, so
+  // Trust.start got no ring key and the `!wantRecovery && !deviceWrapped` branch of verify.js startOnce re-sealed the
+  // server's `recovery-v1:` root as `device-v1:`, which a brand-new device cannot open. Phase 1 removes that branch:
+  // the root is sealed only under AK and never downgraded (key-custody-design docs page, invariant I2).
+  it('a device holding the root restarts while the vault read fails, then a new device signs in', async () => {
     const on = browsers();
     const { password, reg, account } = await signUp(on);
     const alice1 = await start(account, signUpWrappers(reg));
@@ -397,10 +398,14 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
     await gate(on, alice1, password);
   });
 
-  // Pre-#70 state: the root re-sealed under a throwaway key (`device-v1:`), as `device_custody` starts did.
+  // Pre-#70 state: the root sealed under a throwaway key (`device-v1:`), as `device_custody` starts did. The client no
+  // longer writes this (phase 1), so the state is put on the server directly, with the key device 1 holds.
   async function throwawaySealedRoot(account, alice1) {
-    const legacy = new Trust(account.api, { userId: account.userId, deviceId: account.deviceId, recovery: alice1.ring });
-    await legacy.start(alice1.mls.cs, alice1.ring.key, await alice1.mls.leafKey(), 'device_custody');
+    const doc = await account.api.crossSigning();
+    await account.api.putCrossSigning({
+      identity_key: doc.identity_key,
+      sealed_secret: `device-v1:${await seal(crypto.getRandomValues(new Uint8Array(32)), alice1.trust.signKey)}`,
+    });
     expect(String((await account.api.crossSigning()).sealed_secret)).toMatch(/^device-v1:/);
   }
 

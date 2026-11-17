@@ -112,28 +112,9 @@ export const lifecycleMethods = {
           this.accountRecoveryWrapper,
         )
           .then(async (loaded) => {
-            let v = loaded;
-
-            // Older clients defaulted to homeserver escrow; leave it silently. After a failed upgrade re-read the vault.
-            if (v.mode === 'escrowed' && v.raw && !this.authRecoveryWrapper
-              && !v.downgradeRefused) {
-              try {
-                v = await vault.setMode(
-                  this.home, v, 'device_custody', null, home.user_id,
-                );
-              } catch (e) {
-                console.warn('could not upgrade legacy DM recovery custody; reloading the vault', e);
-                v = await vault.load(
-                  this.home, null, home.user_id,
-                  this.authRecoveryWrapper, this.accountRecoveryWrapper,
-                ).catch((again) => {
-                  console.warn('could not reload the DM recovery vault', again);
-                  return v;
-                });
-              }
-              await this.refreshCustody().catch(() => {});
-            }
-
+            // A session without the password never moves custody: an escrowed vault stays escrowed until the next
+            // password sign-in moves it into opaque custody (vault.js loadOnce).
+            const v = loaded;
             this.vault = v;
             if (v.locked) this.emit('vault', v);
             if (v.created || this.custody?.mode !== v.mode) {

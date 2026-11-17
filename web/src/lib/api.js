@@ -20,7 +20,7 @@ export class HttpError extends Error {
   }
 }
 
-export async function request(base, method, path, { token, body, query } = {}) {
+export async function request(base, method, path, { token, body, query, signal } = {}) {
   let url = `${base}${path}`;
   if (query) {
     const params = new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined && v !== null));
@@ -35,6 +35,7 @@ export async function request(base, method, path, { token, body, query } = {}) {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
+    ...(signal ? { signal } : {}),
   }, { purpose: 'API request' });
   let payload = null;
   try { payload = await resp.json(); } catch { payload = null; }
@@ -237,7 +238,9 @@ export async function discover(domain) {
 
 export class Api {
   /// `renew` mints a new guild session and the refused request retries once; the home connection has none (refused token is a sign-out).
-  constructor({ base, token, domain, gateway, renew = null }) {
+  /// `signal` cancels every request this client sends (a caller that gives up on a slow one, so nothing it started lingers).
+  constructor({ base, token, domain, gateway, renew = null, signal = null }) {
+    this.signal = signal;
     this.base = base;
     this.token = token;
     this.domain = domain;
@@ -249,13 +252,13 @@ export class Api {
     // Inner: 401 session retry, safe because the server did nothing. Outer: network retry, decided per route by `retry.js`.
     return withRetry(method, path, async () => {
       try {
-        return await request(this.base, method, path, { token: this.token, ...opts });
+        return await request(this.base, method, path, { token: this.token, ...(this.signal ? { signal: this.signal } : {}), ...opts });
       } catch (e) {
         if (e.status !== 401 || !this.renew) throw e;
         const token = await this.renew().catch(() => null);
         if (!token || token === this.token) throw e;
         this.token = token;
-        return request(this.base, method, path, { token, ...opts });
+        return request(this.base, method, path, { token, ...(this.signal ? { signal: this.signal } : {}), ...opts });
       }
     }, { body: opts.body });
   }

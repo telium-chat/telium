@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { Backup } from '../lib/backup.js';
+import { heldRecoveryKeyring } from '../lib/device-secrets.js';
 import {
   load, open, recoveryKeyCiphertext, removeIndependentRecovery, seal,
   setIndependentRecovery, setMode,
@@ -223,7 +224,8 @@ describe('key custody', () => {
   });
 
   it('rotates the live key while migrating away from legacy server escrow', async () => {
-    const deviceOnly = await load(home, null, USER, null);
+    // Legacy escrow as setup: made from opaque custody now, since a start without the wrapper creates no vault.
+    const deviceOnly = await load(home, null, USER, wrapper);
     const escrowed = await setMode(home, deviceOnly, 'escrowed', null, USER);
     const exposed = new Uint8Array(escrowed.raw);
     expect(home.held.escrow_key).toBeTruthy();
@@ -236,9 +238,14 @@ describe('key custody', () => {
     expect(home.held.escrow_key).toBe(null);
   });
 
-  it('keeps trusted-device custody as the no-OPAQUE compatibility fallback', async () => {
+  it('never creates trusted-device custody without the password-derived wrapper', async () => {
+    // It used to make a `device_custody` vault here (the no-OPAQUE fallback). Now: locked, nothing written.
     const first = await load(home, null, USER, null);
-    expect(first.mode).toBe('device_custody');
+    expect(first.mode).toBe('none');
+    expect(first.locked).toBe(true);
+    expect(first.needs_password).toBe(true);
+    expect(first.key).toBe(null);
+    expect(home.held).toBe(null);
     globalThis.indexedDB = new IDBFactory();
     const fresh = await load(home, null, USER, null);
     expect(fresh.needs_device).toBe(true);
@@ -474,6 +481,32 @@ describe('a vault two devices write', () => {
     expect(home.writes.at(-1).expected_version).toBe(0);
     globalThis.indexedDB = new IDBFactory();
     expect(sameRaw((await here()).raw, first.raw)).toBe(true);
+  });
+
+  it('refuses to mint a vault over an account that already has an account key (vault_missing)', async () => {
+    home.crossSigning = async () => ({ exists: true, identity_key: 'published-key' });
+    // A brand-new device: no held ring, no vault on the server, but the account's identity key exists.
+    await expect(here()).rejects.toMatchObject({ code: 'vault_missing' });
+    expect(home.held).toBeNull();
+    expect(home.writes).toHaveLength(0);
+    expect(await heldRecoveryKeyring(USER)).toBeNull();
+  });
+
+  it('still creates the vault when the account has no account key yet', async () => {
+    home.crossSigning = async () => ({ exists: false });
+    const made = await here();
+    expect(made.created).toBe(true);
+    expect(home.held).not.toBeNull();
+  });
+
+  it('does not refuse a device that holds a ring, which uploads it rather than minting one', async () => {
+    const first = await here();
+    home.held = null;
+    home.version = 0;
+    home.crossSigning = async () => ({ exists: true, identity_key: 'published-key' });
+    const again = await here();
+    expect(again.created).toBe(false);
+    expect(sameRaw(again.raw, first.raw)).toBe(true);
   });
 
   it('does not let two first devices each create a vault', async () => {

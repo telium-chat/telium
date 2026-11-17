@@ -42,6 +42,9 @@ export { capabilities, decodeMessage, encode64, identityOf, wire };
 /// The mandatory-to-implement ciphersuite.
 const SUITE = 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519';
 
+/// The suite on its own, for code that must sign before an engine exists (sign-in creating the account key).
+export const loadCiphersuite = () => getCiphersuiteImpl(getCiphersuiteFromName(SUITE));
+
 /// Spare KeyPackages kept on the home server; each starts one conversation.
 const STOCK = 12;
 
@@ -220,7 +223,7 @@ export class Mls {
 
   /// Separate from the constructor so failure degrades to "DMs unavailable" instead of failing sign-in.
   async start() {
-    this.cs = await getCiphersuiteImpl(getCiphersuiteFromName(SUITE));
+    this.cs = await loadCiphersuite();
     await this.migrateScope().catch(() => {});
     await this.rememberOwnDevices().catch(() => {});
     await this.replenish().catch(() => {});

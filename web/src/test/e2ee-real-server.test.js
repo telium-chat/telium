@@ -4,7 +4,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { Mls, decodeMessage, wipe } from '../lib/mls.js';
 import { dmMethods } from '../lib/store/dms.js';
 import { forgetDeviceSecrets, heldRecoveryKeyring } from '../lib/device-secrets.js';
-import { load as loadVault, setMode } from '../lib/vault.js';
+import { load as loadVault, seal, setMode } from '../lib/vault.js';
 import { loginOpaque, registerOpaque } from '../lib/opaque-auth.js';
 import { Trust } from '../lib/verify.js';
 import { trustMethods } from '../lib/store/trust.js';
@@ -18,6 +18,16 @@ const realFetch = globalThis.fetch;
 let server;
 let n = 0;
 const name = (who) => `${who}${n += 1}`;
+
+/// The root as clients before phase 1 could leave it: sealed under a throwaway key (`device-v1:`) that only the device
+/// that made it ever held. Clients no longer write this, so the tests that need the state put it on the server.
+async function sealRootUnderThrowaway(api, trust) {
+  const doc = await api.crossSigning();
+  await api.putCrossSigning({
+    identity_key: doc.identity_key,
+    sealed_secret: `device-v1:${await seal(crypto.getRandomValues(new Uint8Array(32)), trust.signKey)}`,
+  });
+}
 
 async function engine(account, api = account.api, recoveryKey = null) {
   const mls = new Mls(api, { userId: account.userId, deviceId: account.deviceId, recoveryKey });
@@ -308,7 +318,9 @@ describe.skipIf(!haveServer)('against the real server', () => {
     const alice = await server.register(name('alice'));
     const api = lossy(alice.api);
     api.lose((method) => method === 'putVault');
-    await expect(loadVault(api, null, alice.userId)).rejects.toMatchObject({ status: 503 });
+    // Creating needs the password-derived wrapper now; the restored session below has none.
+    const wrapper = crypto.getRandomValues(new Uint8Array(32));
+    await expect(loadVault(api, null, alice.userId, wrapper)).rejects.toMatchObject({ status: 503 });
     const { version } = await alice.api.vault();
 
     const loaded = await loadVault(alice.api, null, alice.userId);
@@ -430,10 +442,11 @@ describe.skipIf(!haveServer)('against the real server', () => {
     const ring = await loadVault(
       first.api, null, first.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper,
     );
-    // The old bug: identity sealed under a throwaway key.
+    // The old bug: identity sealed under a throwaway key. Clients no longer write that, so it is put on the server directly.
     const m1 = await engine(first, first.api, ring.key);
     const t1 = new Trust(first.api, { userId: first.userId, deviceId: first.deviceId, recovery: ring });
     await t1.start(m1.cs, ring.key, await m1.leafKey(), 'device_custody');
+    await sealRootUnderThrowaway(first.api, t1);
     expect(String((await first.api.crossSigning()).sealed_secret)).toMatch(/^device-v1:/);
 
     // The second device signs in while the account is broken.
@@ -474,9 +487,12 @@ describe.skipIf(!haveServer)('against the real server', () => {
     const reg = await registerOpaque(server.base, name('alice'), password, 'web');
     expect(reg.session.recovery_key_enrolled).toBe(true);
     const first = server.wrap(reg.session);
-    // The other tab restores the session (no password, no recovery wrappers) and makes the vault first.
+    // The other tab restores the session (no password, no recovery wrappers). It used to make a `device_custody` vault
+    // first; it now makes nothing and is locked until the password is typed.
     const otherTab = await loadVault(first.api, null, first.userId);
-    expect(otherTab.mode).toBe('device_custody');
+    expect(otherTab.locked).toBe(true);
+    expect(otherTab.needs_password).toBe(true);
+    expect((await first.api.vault()).exists).toBe(false);
 
     const signingUp = await loadVault(
       first.api, null, first.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper,
@@ -547,6 +563,8 @@ describe.skipIf(!haveServer)('against the real server', () => {
     const t1 = new Trust(first.api, { userId: first.userId, deviceId: first.deviceId, recovery: ring });
     await t1.start(m1.cs, ring.key, await m1.leafKey(), 'device_custody');
     expect(t1.canSign).toBe(true);
+    // The account key is lost everywhere but device 1: sealed only under a throwaway key (the pre-phase-1 state).
+    await sealRootUnderThrowaway(first.api, t1);
 
     on('bob');
     const bob = await server.register(name('bob'));
@@ -575,7 +593,9 @@ describe.skipIf(!haveServer)('against the real server', () => {
     const { reg, first, m1, tb, second, m2, t2 } = await lostRootAccount(on);
 
     on('alice-2');
-    const outcome = await t2.recoverWithRecoveryKey(reg.accountRecovery.text, { mlsKey: await m2.leafKey() });
+    const outcome = await t2.recoverWithRecoveryKey(reg.accountRecovery.text, {
+      mlsKey: await m2.leafKey(), sealKey: t2.recovery.key,
+    });
     expect(outcome.reset).toBe(true);
     expect(t2.canSign).toBe(true);
     expect(t2.continuity.valid).toBe(true);
@@ -626,7 +646,9 @@ describe.skipIf(!haveServer)('against the real server', () => {
     });
     const cut = new Trust(dropped, { userId: second.userId, deviceId: second.deviceId, recovery: t2.recovery });
     await cut.start(m2.cs, null, await m2.leafKey(), 'device_custody');
-    await expect(cut.recoverWithRecoveryKey(reg.accountRecovery.text, { mlsKey: await m2.leafKey() })).rejects.toThrow();
+    await expect(cut.recoverWithRecoveryKey(reg.accountRecovery.text, {
+      mlsKey: await m2.leafKey(), sealKey: t2.recovery.key,
+    })).rejects.toThrow('connection dropped');
 
     const reopened = new Trust(second.api, { userId: second.userId, deviceId: second.deviceId });
     await reopened.start(m2.cs, null, await m2.leafKey(), 'device_custody');
@@ -673,7 +695,8 @@ describe.skipIf(!haveServer)('against the real server', () => {
   it('lets a new profile of an escrowed account join from the server-held ring', async () => {
     const alice = await server.register(name('alice'));
     const bob = await server.register(name('bob'));
-    const held = await loadVault(alice.api, null, alice.userId);
+    // A legacy escrowed account: made in opaque custody (the only vault a client can still create), then moved to escrow.
+    const held = await loadVault(alice.api, null, alice.userId, crypto.getRandomValues(new Uint8Array(32)));
     const escrowed = await setMode(alice.api, held, 'escrowed', null, alice.userId);
     expect((await alice.api.vault()).escrow_key).toBeTruthy();
     const am = await engine(alice, alice.api, escrowed.raw);
