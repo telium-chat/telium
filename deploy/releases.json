@@ -1,7 +1,29 @@
 {
   "channel": "releases",
-  "generated_at": 1794801545562,
+  "generated_at": 1794950973596,
   "releases": [
+    {
+      "version": "0.5.0",
+      "commit": "a4d4d40c93c0e86ba5be522ece99cec0c16ff7e8",
+      "released_at": 1794948775000,
+      "security": false,
+      "summary": "Release server 0.5.0 and desktop 0.4.0 (custody consolidation) (#81)",
+      "image": "sha256:0c236eda5a3139e28a262a9346e06eb47e1f542f0467767bc83a8c840177c644",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "server-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/server-v0.5.0/telium-server-linux-x86_64.tar.gz",
+          "sha256": "21dbdd65c09ff66be282a6f054d226156718a389729bf403300e525f61c5730a",
+          "size": 13073754
+        },
+        "server-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/server-v0.5.0/telium-server-linux-aarch64.tar.gz",
+          "sha256": "a6de1b3ddebb62b0e7cdc63dc39fd37dffdcd72f33b241cabc090745740b4fcc",
+          "size": 12440606
+        }
+      }
+    },
     {
       "version": "0.4.3",
       "commit": "12c48b316292fc13efc9867df90930ebfaed4a42",
