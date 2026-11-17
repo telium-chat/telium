@@ -32,14 +32,35 @@ const MAX_VAULT_CIPHERTEXT: usize = 128 * 1024;
 pub const KSF_VERSION_CURRENT: i64 = 1;
 const KSF_VERSION_MAX: i64 = 1;
 
+/// A missing field means version 1, the set every account without the field was registered with; it is never "whatever
+/// is current", which would record a set the client did not use.
 fn check_ksf_version(version: Option<i64>) -> ApiResult<i64> {
-    let version = version.unwrap_or(KSF_VERSION_CURRENT);
+    let version = version.unwrap_or(1);
     if !(1..=KSF_VERSION_MAX).contains(&version) {
         return Err(ApiError::BadRequest("unsupported key-stretching version".into())
             .with_code(errcodes::UNSUPPORTED_KSF_VERSION)
             .with_detail("max", KSF_VERSION_MAX));
     }
     Ok(version)
+}
+
+/// A password write may keep or raise the recorded set, never lower it.
+async fn refuse_ksf_downgrade(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    user_id: &str,
+    new: i64,
+) -> ApiResult<()> {
+    let stored: Option<i64> =
+        sqlx::query_scalar("SELECT opaque_ksf_version FROM accounts WHERE user_id = ?")
+            .bind(user_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    if stored.is_some_and(|stored| new < stored) {
+        return Err(ApiError::BadRequest("the key-stretching version cannot be lowered".into())
+            .with_code(errcodes::UNSUPPORTED_KSF_VERSION)
+            .with_detail("max", KSF_VERSION_MAX));
+    }
+    Ok(())
 }
 
 async fn ksf_version_of(state: &AppState, user_id: &str) -> i64 {
@@ -925,12 +946,18 @@ fn recovery_reset_payload(
     challenge: &str,
     registration_record: &str,
     vault: Option<(&str, i64)>,
+    unopenable: Option<i64>,
 ) -> Vec<u8> {
     let mut payload = format!(
         "{RESET_DOMAIN}|{user_id}|{reset_id}|{challenge}|{registration_record}"
     );
     if let Some((ciphertext, version)) = vault {
         payload.push_str(&format!("|{version}|{ciphertext}"));
+    }
+    // The holder of the recovery key says that the copy of vault `version` does not open under it, and accepts that the
+    // reset leaves that vault as it is. Signed, so neither the server nor anyone without the key can say it.
+    if let Some(version) = unopenable {
+        payload.push_str(&format!("|vault-unopenable|{version}"));
     }
     payload.into_bytes()
 }
@@ -1052,6 +1079,10 @@ pub struct PasswordResetFinish {
     pub vault_ciphertext: Option<String>,
     #[serde(default)]
     pub vault_version: Option<i64>,
+    /// Version of a vault whose recovery copy the client could not open (an account moved from another server carries a
+    /// copy made under the source's recovery key). Inside the signature; refused with `vault_ciphertext`.
+    #[serde(default)]
+    pub vault_unopenable: Option<i64>,
     #[serde(default)]
     pub device_name: Option<String>,
     #[serde(default)]
@@ -1074,6 +1105,11 @@ pub async fn password_reset_finish(
     // Shape checks that say nothing about the account come first; everything that does waits for the proof.
     let ksf_version = check_ksf_version(req.ksf_version)?;
     if let Some(ciphertext) = req.vault_ciphertext.as_deref() {
+        if req.vault_unopenable.is_some() {
+            return Err(ApiError::BadRequest(
+                "send a re-wrapped vault or say the copy does not open, not both".into(),
+            ));
+        }
         if ciphertext.len() > MAX_VAULT_CIPHERTEXT || req.vault_version.is_none() {
             return Err(ApiError::BadRequest(
                 "vault_ciphertext needs vault_version and must be under 128 KiB".into(),
@@ -1097,7 +1133,7 @@ pub async fn password_reset_finish(
             .with_code(errcodes::INVALID_RECOVERY_PROOF));
     }
 
-    let mut tx = state.pool.begin().await?;
+    let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
     let account: Option<(Option<String>, Option<i64>, i64)> = sqlx::query_as(
         "SELECT recovery_public_key, deleted_at, deactivated \
          FROM accounts WHERE user_id = ?",
@@ -1117,6 +1153,7 @@ pub async fn password_reset_finish(
         &challenge,
         &req.registration_record,
         req.vault_ciphertext.as_deref().zip(req.vault_version),
+        req.vault_unopenable,
     );
     if !verify_recovery_signature(&public, &payload, &req.signature) {
         return Err(ApiError::Unauthorized("invalid recovery proof".into())
@@ -1138,9 +1175,11 @@ pub async fn password_reset_finish(
         &user_id,
         req.vault_ciphertext.as_deref(),
         req.vault_version,
+        req.vault_unopenable,
         false,
     )
     .await?;
+    refuse_ksf_downgrade(&mut tx, &user_id, ksf_version).await?;
     sqlx::query(
         "UPDATE accounts SET opaque_record = ?, opaque_ksf_version = ?, password_hash = ? WHERE user_id = ?",
     )
@@ -1193,6 +1232,7 @@ async fn rewrap_vault(
     user_id: &str,
     ciphertext: Option<&str>,
     expected_version: Option<i64>,
+    unopenable: Option<i64>,
     strict: bool,
 ) -> ApiResult<Option<i64>> {
     let row: Option<(String, Option<String>, i64)> = sqlx::query_as(
@@ -1206,6 +1246,15 @@ async fn rewrap_vault(
         Some((mode, independent, _)) if mode == "opaque_custody"
             && (strict || independent.as_deref().is_some_and(|c| c.starts_with("k1.")))
     );
+    // A reset the recovery key signed as "the copy does not open": allowed only against the version that was read.
+    if let (Some(said), None, true, Some((_, _, stored))) = (unopenable, ciphertext, wrapped, &row) {
+        if said == *stored {
+            return Ok(None);
+        }
+        return Err(ApiError::Conflict("the key vault changed since it was read".into())
+            .with_code(errcodes::VAULT_VERSION_CONFLICT)
+            .with_detail("version", *stored));
+    }
     match (ciphertext, expected_version, wrapped, &row) {
         (None, _, false, _) => Ok(None),
         (None, _, true, _) => Err(ApiError::BadRequest(
@@ -1294,8 +1343,8 @@ pub struct PasswordChangeFinish {
 }
 
 /// Replaces the OPAQUE record and re-wraps the vault under the new export key in one transaction. The reauth token is
-/// spent in that transaction too, so a refused change (a stale vault version, say) leaves it usable for the retry. Other
-/// sessions stay signed in.
+/// spent in that transaction too, so a refused change (a stale vault version, say) leaves it usable for the retry. Every
+/// other session and every outstanding reauth proof ends with it.
 pub async fn password_change_finish(
     State(state): State<AppState>,
     auth: HomeAuth,
@@ -1334,9 +1383,11 @@ pub async fn password_change_finish(
         &auth.user_id,
         req.vault_ciphertext.as_deref(),
         req.vault_version,
+        None,
         true,
     )
     .await?;
+    refuse_ksf_downgrade(&mut tx, &auth.user_id, ksf_version).await?;
     let done = sqlx::query(
         "UPDATE accounts SET opaque_record = ?, opaque_ksf_version = ?, password_hash = ? \
          WHERE user_id = ? AND opaque_record IS NOT NULL",
@@ -1350,7 +1401,40 @@ pub async fn password_change_finish(
     if done.rows_affected() != 1 {
         return Err(ApiError::Conflict("OPAQUE is not enrolled yet".into()));
     }
+    // Every other session ends with the old password, and every outstanding proof of it; this one stays. A device that
+    // kept the old password's key in memory can then neither call the server nor re-wrap the vault under it.
+    let others: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT device_id FROM home_sessions WHERE user_id = ? AND device_id != ?",
+    )
+    .bind(&auth.user_id)
+    .bind(&auth.device_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    sqlx::query("DELETE FROM home_sessions WHERE user_id = ? AND device_id != ?")
+        .bind(&auth.user_id)
+        .bind(&auth.device_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("UPDATE devices SET active = 0 WHERE user_id = ? AND device_id != ?")
+        .bind(&auth.user_id)
+        .bind(&auth.device_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM opaque_reauth_tokens WHERE user_id = ?")
+        .bind(&auth.user_id)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
+    for device in &others {
+        crate::revocation::announce(
+            &state,
+            &auth.user_id,
+            crate::revocation::DEVICE,
+            Some(device),
+            None,
+        )
+        .await;
+    }
     Ok(Json(json!({ "ok": true, "vault_version": vault_version })))
 }
 

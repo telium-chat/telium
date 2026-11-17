@@ -314,7 +314,7 @@ export const sessionMethods = {
         signal: abort.signal,
       });
       const ring = await withTimeout(
-        vault.load(api, null, resp.user_id, recoveryWrapper, accountRecoveryWrapper),
+        vault.load(api, null, resp.user_id, recoveryWrapper, accountRecoveryWrapper, { reseal: true }),
         this.custodyTimeoutMs ?? CUSTODY_TIMEOUT_MS,
         'loading the recovery vault',
         abort,
@@ -350,7 +350,7 @@ export const sessionMethods = {
           signal: abort.signal,
         });
         await withTimeout((async () => {
-          const ring = await vault.load(api, null, resp.user_id, recoveryWrapper, accountRecoveryWrapper);
+          const ring = await vault.load(api, null, resp.user_id, recoveryWrapper, accountRecoveryWrapper, { reseal: true });
           if (!ring?.key) throw new Error('the recovery vault did not open');
           await vault.confirmRecoveryCopy(api, ring, recoveryWrapper, accountRecoveryWrapper, resp.user_id);
         })(), this.custodyTimeoutMs ?? CUSTODY_TIMEOUT_MS, 'saving the recovery copy', abort);
@@ -492,7 +492,16 @@ export const sessionMethods = {
     const recovered = await resetPasswordOpaque(
       normalized, user, recoveryKey, newPassword, deviceName,
       {
-        vaultRewrap: async (wrapper, copy) => (copy ? vault.rewrapFromRecoveryCopy(copy, wrapper) : null),
+        vaultRewrap: async (wrapper, copy) => {
+          if (!copy) return null;
+          try {
+            return await vault.rewrapFromRecoveryCopy(copy, wrapper);
+          } catch (e) {
+            // A copy made under another recovery key (an account moved here): say so, signed, instead of being locked out.
+            if (e?.code === 'recovery_copy_unopenable') return { unopenable: true };
+            throw e;
+          }
+        },
       },
     );
     const resp = recovered.session;
@@ -519,8 +528,10 @@ export const sessionMethods = {
   },
 
   /// Changes the account password and re-wraps the vault under it in one server write, so the OPAQUE record and the vault
-  /// never disagree (I5). Needs the vault open on this device. Other devices keep their sessions; their in-memory wrapper
-  /// is stale, so their next write to the vault loses the version race instead of overwriting it, and they sign in again.
+  /// never disagree (I5). Needs the vault open on this device. The server ends every other session and every outstanding
+  /// reauth proof with the change, so a device still holding the old password's key can no longer reach the vault; this
+  /// session stays. If the answer to the write is lost the new password may already be in force, so the old key is
+  /// dropped from memory here: nothing may seal the vault under it again.
   async changePassword(currentPassword, newPassword) {
     if (!currentPassword) throw new Error('Enter your current account password.');
     if (!this.home || !this.opaqueAuth) {
@@ -536,9 +547,15 @@ export const sessionMethods = {
       throw new Error('The encrypted recovery vault must be unlocked before the password can change.');
     }
     const { changePasswordOpaque } = await secureAuth();
-    const changed = await changePasswordOpaque(this.home, currentPassword, newPassword, {
-      vault: current ? { version: current.version, rewrap: (wrapper) => vault.rewrapCiphertext(current, wrapper) } : null,
-    });
+    let changed;
+    try {
+      changed = await changePasswordOpaque(this.home, currentPassword, newPassword, {
+        vault: current ? { version: current.version, rewrap: (wrapper) => vault.rewrapCiphertext(current, wrapper) } : null,
+      });
+    } catch (e) {
+      if (e?.finishUnanswered) this.authRecoveryWrapper = null;
+      throw e;
+    }
     this.authRecoveryWrapper = changed.recoveryWrapper;
     if (current) {
       this.vault = {
@@ -557,7 +574,7 @@ export const sessionMethods = {
   async upgradeKsf(resp, base, password, recoveryWrapper, accountRecoveryWrapper) {
     try {
       const api = new Api({ base, token: resp.access_token, domain: resp.server_name || new URL(base).host });
-      const ring = await vault.load(api, null, resp.user_id, recoveryWrapper, accountRecoveryWrapper);
+      const ring = await vault.load(api, null, resp.user_id, recoveryWrapper, accountRecoveryWrapper, { reseal: true });
       if (!ring?.raw || ring.mode !== 'opaque_custody') return null;
       const { changePasswordOpaque } = await secureAuth();
       return await changePasswordOpaque(api, password, password, {

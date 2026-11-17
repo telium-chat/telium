@@ -70,9 +70,13 @@ export function passwordResetPayload(
   challenge,
   registrationRecord,
   vault = null,
+  unopenableVersion = null,
 ) {
-  const base = `${RESET_DOMAIN}|${userId}|${resetId}|${challenge}|${registrationRecord}`;
-  return te.encode(vault ? `${base}|${vault.version}|${vault.ciphertext}` : base);
+  let text = `${RESET_DOMAIN}|${userId}|${resetId}|${challenge}|${registrationRecord}`;
+  if (vault) text += `|${vault.version}|${vault.ciphertext}`;
+  // "The recovery copy of vault `version` does not open under this key; reset anyway." Only the key's holder can say it.
+  if (unopenableVersion != null) text += `|vault-unopenable|${unopenableVersion}`;
+  return te.encode(text);
 }
 
 export function signPasswordReset(
@@ -82,9 +86,10 @@ export function signPasswordReset(
   challenge,
   registrationRecord,
   vault = null,
+  unopenableVersion = null,
 ) {
   return b64url(ed25519.sign(
-    passwordResetPayload(userId, resetId, challenge, registrationRecord, vault),
+    passwordResetPayload(userId, resetId, challenge, registrationRecord, vault, unopenableVersion),
     signingSeed(recoveryKey),
   ));
 }

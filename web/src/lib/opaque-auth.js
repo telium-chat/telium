@@ -183,8 +183,11 @@ export async function reauthenticateOpaque(
 }
 
 /// `vaultRewrap(newWrapper, copy)` is given the new password's wrapper and the recovery copy of the vault (`copy` is
-/// null when the server holds none this key can open) and returns the vault ring sealed under the new wrapper, or null.
-/// It travels in the same request that replaces the password (I5), signed by the recovery key.
+/// null when the server holds none) and returns the vault ring sealed under the new wrapper, null for "nothing to
+/// re-wrap", or `{ unopenable: true }` when the copy does not open under this recovery key (an account moved from
+/// another server carries the source's copy). The first travels in the same request that replaces the password (I5);
+/// the last is signed into that request as "reset anyway, leave the vault as it is", which the server accepts only for
+/// the vault version that was read. All of it is inside the recovery-key signature.
 export async function resetPasswordOpaque(
   base,
   user,
@@ -216,8 +219,10 @@ export async function resetPasswordOpaque(
       ? { ciphertext: server.vault.independent_ciphertext, wrapper: accountRecoveryWrapper }
       : null)
     : null;
-  const vault = rewrapped && typeof server.vault?.version === 'number'
-    ? { vaultCiphertext: rewrapped, vaultVersion: server.vault.version }
+  const served = typeof server.vault?.version === 'number' ? server.vault.version : null;
+  const unopenable = rewrapped?.unopenable && served !== null ? served : null;
+  const vault = typeof rewrapped === 'string' && served !== null
+    ? { vaultCiphertext: rewrapped, vaultVersion: served }
     : null;
   const signature = signPasswordReset(
     recoveryKey,
@@ -226,6 +231,7 @@ export async function resetPasswordOpaque(
     server.challenge,
     finished.registrationRecord,
     vault && { ciphertext: vault.vaultCiphertext, version: vault.vaultVersion },
+    unopenable,
   );
   const session = await request(base, 'POST', '/_telium/v1/password-reset/opaque/finish', {
     body: {
@@ -236,6 +242,7 @@ export async function resetPasswordOpaque(
       signature,
       device_name: deviceName,
       ...(vault ? { vault_ciphertext: vault.vaultCiphertext, vault_version: vault.vaultVersion } : {}),
+      ...(unopenable !== null ? { vault_unopenable: unopenable } : {}),
     },
   });
   return {
@@ -245,6 +252,7 @@ export async function resetPasswordOpaque(
     accountRecoveryWrapper,
     ksfVersion,
     vaultRewrapped: Boolean(vault),
+    vaultUnopenable: unopenable !== null,
   };
 }
 
@@ -274,12 +282,20 @@ export async function changePasswordOpaque(
   });
   const recoveryWrapper = recoveryWrapperFromExportKey(finished.exportKey);
   const vaultCiphertext = vault ? await vault.rewrap(recoveryWrapper) : null;
-  const answer = await home.post('/_telium/v1/auth/opaque/password/change/finish', {
-    reauth_token: reauthToken,
-    registration_record: finished.registrationRecord,
-    ksf_version: ksfVersion,
-    ...(vaultCiphertext ? { vault_ciphertext: vaultCiphertext, vault_version: vault.version } : {}),
-  });
+  let answer;
+  try {
+    answer = await home.post('/_telium/v1/auth/opaque/password/change/finish', {
+      reauth_token: reauthToken,
+      registration_record: finished.registrationRecord,
+      ksf_version: ksfVersion,
+      ...(vaultCiphertext ? { vault_ciphertext: vaultCiphertext, vault_version: vault.version } : {}),
+    });
+  } catch (e) {
+    // No answer is not a refusal: the write may have landed, and then the password this device holds is already gone.
+    const status = e?.status;
+    const unanswered = typeof status !== 'number' || status >= 500 || [408, 425, 429].includes(status);
+    throw Object.assign(e, { finishUnanswered: unanswered });
+  }
   return {
     exportKey: finished.exportKey,
     recoveryWrapper,

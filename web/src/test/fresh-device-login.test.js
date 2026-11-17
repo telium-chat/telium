@@ -644,11 +644,68 @@ describe.skipIf(!haveServer)('fresh device login (release gate)', () => {
     const broken = breakNext('password/change/finish', 'lose');
     try { await expect(store.changePassword(password, fresh)).rejects.toThrow(); } finally { broken.restore(); }
     expect(broken.hit.count).toBe(1);
+    // No answer, so the old password's key is gone from memory: nothing on this device can seal the vault under it.
+    expect(store.authRecoveryWrapper).toBeNull();
     // The write landed with its vault: the new password opens everything, the old one is gone.
     await refusedSignIn(on, alice1.userId, password);
     const alice2 = await freshDevice(on, alice1.userId, fresh);
     await freshDeviceWorks(on, alice2, bob, convo);
     expect((await account.api.vault()).mode).toBe('opaque_custody');
+  });
+
+  it('a device signed in before a password change can neither reach the vault nor seal it back under the old password', async () => {
+    const on = browsers();
+    // Device B is the sign-up device: it holds the old password's wrapper and the recovery-key wrapper in memory.
+    const { password, reg, alice1 } = await signedUpAlice(on);
+    on('device-a');
+    const second = await signIn(alice1.userId, password);
+    second.store.home = second.account.api;
+    second.store.opaqueAuth = true;
+    second.store.vault = await loadVault(second.account.api, null, alice1.userId, second.wrappers.recoveryWrapper, null);
+    const fresh = `new-${crypto.randomUUID()}`;
+    await second.store.changePassword(password, fresh);
+    const after = await second.account.api.vault();
+
+    // B's session ended with the change.
+    await expect(alice1.api.vault()).rejects.toMatchObject({ status: 401 });
+    // And on a session that is still live, B's stale key and recovery key must not re-seal the vault under the old
+    // password: the ring comes back from the recovery copy and nothing is written.
+    const stale = await loadVault(
+      second.account.api, null, alice1.userId, reg.recoveryWrapper, reg.accountRecoveryWrapper,
+    );
+    expect(b64(stale.raw)).toBe(b64(alice1.ring.raw));
+    expect(await second.account.api.vault()).toMatchObject({ version: after.version, ciphertext: after.ciphertext });
+
+    // The new password still opens the vault, and the old one is refused.
+    await refusedSignIn(on, alice1.userId, password);
+    const again = await freshDevice(on, alice1.userId, fresh);
+    expect(again.ring?.raw).toBeTruthy();
+    expect(b64(again.ring.raw)).toBe(b64(alice1.ring.raw));
+  });
+
+  it('a password reset still works when the recovery copy does not open under the recovery key (an account moved here)', async () => {
+    const on = browsers();
+    const { password, account, recoveryKey, alice1 } = await signedUpAlice(on);
+    const before = await account.api.vault();
+    // What an import leaves: the source server's recovery copy, made under a key this server never saw.
+    const foreign = `k1.${await seal(crypto.getRandomValues(new Uint8Array(32)), crypto.getRandomValues(new Uint8Array(40)))}`;
+    await account.api.setVaultMode({
+      mode: 'opaque_custody', ciphertext: before.ciphertext, independent_ciphertext: foreign, expected_version: before.version,
+    });
+    const moved = await account.api.vault();
+
+    on('reset-device');
+    const resetter = Object.assign(Object.create(sessionMethods), {
+      cryptoCleanup: Promise.resolve(), disposed: false, me: null, emit() {},
+    });
+    const fresh = `new-${crypto.randomUUID()}`;
+    const resp = await resetter.resetPassword(server.base, alice1.userId, recoveryKey, fresh);
+    const reset = server.wrap({ ...resp, access_token: resetter.session.home.token });
+    // The reset went through on the recovery key's say-so and left the vault as it was (it is not openable anyway).
+    expect(await reset.api.vault()).toMatchObject({ version: moved.version, ciphertext: moved.ciphertext });
+    await refusedSignIn(on, alice1.userId, password);
+    on('after-reset');
+    await expect(signIn(alice1.userId, fresh)).resolves.toBeTruthy();
   });
 
   it('a password change with the wrong current password changes nothing', async () => {

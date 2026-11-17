@@ -218,7 +218,7 @@ export function ChangePasswordSection({ store }) {
     try {
       await store.changePassword(current, next);
       setCurrent(''); setNext(''); setAgain('');
-      toast('Password changed. Other signed-in devices will ask for the new password.');
+      toast('Password changed. Your other devices were signed out; they sign in again with the new password.');
     } catch (e) { reportError(e, 'Could not change the password'); }
     finally { setBusy(false); }
   };
@@ -226,7 +226,7 @@ export function ChangePasswordSection({ store }) {
     <Section title="Change password">
       <Hint>
         {'Your encrypted-message key is re-sealed under the new password in the same step, so '
-          + 'history and recovery keep working. Other devices stay signed in until they next need the key.'}
+          + 'history and recovery keep working. Your other devices are signed out and sign in again with the new password.'}
       </Hint>
       <Field label="Current password">
         <TextInput type="password" autoComplete="current-password" value={current}

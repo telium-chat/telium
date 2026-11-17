@@ -226,22 +226,28 @@ async function opaqueCiphertext(wrapper, ring) {
 }
 
 // A lost version race restarts the load from the other device's write.
+//
+// `reseal` says `recoveryWrapper` was made from the password typed in this very sign-in. Only then may a vault the wrapper
+// cannot open, but a recovery copy can, be sealed under that wrapper (a reset made before resets re-wrapped the vault).
+// A wrapper kept in memory from an earlier sign-in may be the old password's, and sealing under it would undo a password
+// change, so without `reseal` the ring is returned from the copy and nothing is written.
 export async function load(
   home,
   passphrase = null,
   userId = null,
   recoveryWrapper = null,
   accountRecoveryWrapper = null,
+  { reseal = false } = {},
 ) {
   try {
-    return await loadOnce(home, passphrase, userId, recoveryWrapper, accountRecoveryWrapper);
+    return await loadOnce(home, passphrase, userId, recoveryWrapper, accountRecoveryWrapper, reseal);
   } catch (e) {
     if (!isVaultConflict(e)) throw e;
-    return loadOnce(home, passphrase, userId, recoveryWrapper, accountRecoveryWrapper);
+    return loadOnce(home, passphrase, userId, recoveryWrapper, accountRecoveryWrapper, reseal);
   }
 }
 
-async function loadOnce(home, passphrase, userId, recoveryWrapper, accountRecoveryWrapper) {
+async function loadOnce(home, passphrase, userId, recoveryWrapper, accountRecoveryWrapper, reseal = false) {
   const vault = await home.vault();
   const version = typeof vault.version === 'number' ? vault.version : undefined;
   const local = await heldRecoveryKeyring(userId).catch(() => null);
@@ -380,7 +386,7 @@ async function loadOnce(home, passphrase, userId, recoveryWrapper, accountRecove
       const ring = mergeHeld(decodePayload(recoveryKeyPayload), local);
       let primaryCiphertext = vault.ciphertext;
       let current = version;
-      if (recoveryWrapper) {
+      if (recoveryWrapper && reseal) {
         primaryCiphertext = await opaqueCiphertext(recoveryWrapper, ring);
         current = versionOf(await writeMode(home, {
           mode: 'opaque_custody',
@@ -408,7 +414,7 @@ async function loadOnce(home, passphrase, userId, recoveryWrapper, accountRecove
       let primaryCiphertext = vault.ciphertext;
       let current = version;
       // Independent recovery can heal the primary copy without rotating the key.
-      if (recoveryWrapper) {
+      if (recoveryWrapper && reseal) {
         primaryCiphertext = await opaqueCiphertext(recoveryWrapper, ring);
         current = versionOf(await writeMode(home, {
           mode: 'opaque_custody',
@@ -710,7 +716,10 @@ export async function rewrapFromRecoveryCopy(copy, wrapper) {
   try {
     ring = decodePayload(await openRecoveryKey(copy.wrapper, copy.ciphertext));
   } catch {
-    throw new Error('That recovery key does not open this account\'s encrypted-message vault.');
+    throw Object.assign(
+      new Error('That recovery key does not open this account\'s encrypted-message vault.'),
+      { code: 'recovery_copy_unopenable' },
+    );
   }
   return opaqueCiphertext(wrapper, keyring(ring));
 }
