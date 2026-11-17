@@ -458,6 +458,19 @@ export function replaceIdentityPin(userId, identity, { verified = false } = {}) 
   return true;
 }
 
+/// What a reset leaves and nothing else does: a brand-new identity whose only root is its genesis key, with no
+/// rotations. A chain with transitions can be forged by a homeserver (those up to the pinned sequence skip the new-root
+/// signature), so a changed identity is never taken on this device's say-so unless it has this shape.
+export function isFreshGenesis(identity) {
+  return Boolean(
+    identity?.immutableId
+    && Number(identity.sequence) === 0
+    && identity.genesisKey
+    && identity.genesisKey === identity.currentKey
+    && (identity.keys?.size ?? 1) === 1,
+  );
+}
+
 export function pinnedIdentity(userId) {
   return readIdentityPin(userId)?.immutableId || null;
 }

@@ -11,6 +11,7 @@ import {
   identityResetPayload,
   identityRotationPayload,
   immutableIdentityId,
+  isFreshGenesis,
   pinIdentity,
   pinnedIdentity,
   recoveryPolicyPayload,
@@ -143,6 +144,7 @@ export class Trust {
       return null;
     };
 
+    let madeHere = false;
     if (doc.exists) {
       this.identityKey = unb64(doc.identity_key);
       const stored = String(doc.sealed_secret || '');
@@ -159,7 +161,10 @@ export class Trust {
       };
       await take(held);
       // A create this device made but never heard back about: the server may have kept it.
-      await take(await pendingSecret(this.userId, doc.identity_key));
+      const pending = await pendingSecret(this.userId, doc.identity_key);
+      await take(pending);
+      // Only a key this device made itself (filed before it was sent) may stand behind an unconfirmed reset.
+      madeHere = Boolean(this.signKey && pending && this.signKey === pending);
       if (recoveryWrapped && recoveryKeys.length) {
         await take(await openWithRecovery(stored.slice(RECOVERY_SEAL.length)));
       } else if (!deviceWrapped && !recoveryWrapped && recoveryKeys.length) {
@@ -228,14 +233,16 @@ export class Trust {
         );
         this.continuity = continuity;
         this.immutableId = continuity.immutableId || null;
+        // Keys from a chain that did not check out (or that this device has not accepted) are the server's word only.
         this.identityHistoryKeys = new Set(
-          continuity.keys ? [...continuity.keys.values()] : [],
+          continuity.valid && continuity.keys ? [...continuity.keys.values()] : [],
         );
         // This device reset the identity but never heard back (or closed before re-pinning): it holds the private half of
         // the new published root, which only the device that made it can, and that identity checks out on its own.
         if (
           continuity.supported && !continuity.valid && continuity.reason === 'immutable-id-changed'
-          && this.signKey && continuity.immutableId && continuity.currentKey === identityKeyText
+          && this.signKey && madeHere && continuity.currentKey === identityKeyText
+          && isFreshGenesis(continuity)
         ) {
           replaceIdentityPin(this.userId, continuity, { verified: true });
           this.continuity = { ...continuity, valid: true, reason: null };
@@ -448,7 +455,10 @@ export class Trust {
     // The sibling we just compared emoji with reset the identity with the recovery key: the published identity is new,
     // checks out on its own, and that device holds its root. That comparison is the confirmation the pin waits for.
     const c = this.continuity;
-    if (c && !c.valid && c.reason === 'immutable-id-changed' && c.immutableId && c.currentKey === b64(published)) {
+    if (
+      c && !c.valid && c.reason === 'immutable-id-changed' && c.currentKey === b64(published)
+      && isFreshGenesis(c)
+    ) {
       replaceIdentityPin(this.userId, c, { verified: true });
       this.continuity = { ...c, valid: true, reason: null };
       this.immutableId = c.immutableId;
