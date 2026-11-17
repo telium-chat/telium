@@ -100,7 +100,7 @@ describe('a changed identity is never accepted on the device\'s say-so unless it
     const forged = await rotated(forgedGenesis, current, { signNew: false });
 
     const trust = new Trust(homeServing(forged, current), { userId: USER, deviceId: 'd1' });
-    await trust.start(cs, null, null, 'device_custody');
+    await trust.start(cs, null, null);
 
     expect(trust.identityMismatch).toBe(true);
     expect(trust.canSign).toBe(false);
@@ -114,7 +114,7 @@ describe('a changed identity is never accepted on the device\'s say-so unless it
     await keepSecret(USER, current.secret);
     const fresh = await anchored(current);
     const trust = new Trust(homeServing(fresh, current), { userId: USER, deviceId: 'd1' });
-    await trust.start(cs, null, null, 'device_custody');
+    await trust.start(cs, null, null);
     expect(trust.identityMismatch).toBe(true);
     expect(readIdentityPin(USER).immutableId).toBe(realId);
   });
@@ -125,7 +125,7 @@ describe('a changed identity is never accepted on the device\'s say-so unless it
     const forged = await rotated(forgedGenesis, current, { signNew: false });
 
     const trust = new Trust(homeServing(forged, current), { userId: USER, deviceId: 'd2' });
-    await trust.start(cs, null, null, 'device_custody');
+    await trust.start(cs, null, null);
     expect(trust.continuity.reason).toBe('immutable-id-changed');
     await trust.adoptSecret(current.secret, current.pub);
 
@@ -139,7 +139,7 @@ describe('a changed identity is never accepted on the device\'s say-so unless it
     const fresh = await root();
     const doc = await anchored(fresh);
     const trust = new Trust(homeServing(doc, fresh), { userId: USER, deviceId: 'd2' });
-    await trust.start(cs, null, null, 'device_custody');
+    await trust.start(cs, null, null);
     expect(trust.continuity.reason).toBe('immutable-id-changed');
     await trust.adoptSecret(fresh.secret, fresh.pub);
 
@@ -160,14 +160,14 @@ describe('a changed identity is never accepted on the device\'s say-so unless it
     let fail = true;
     const flaky = { ...home, identityContinuity: async () => { if (fail) throw new Error('offline'); return doc; } };
     const first = new Trust(flaky, { userId: USER, deviceId: 'd1' });
-    await first.start(cs, null, null, 'device_custody');
+    await first.start(cs, null, null);
     expect(first.identityMismatch).toBe(true);
     expect(await pendingSecret(USER, fresh.pub)).toBeTruthy();
     expect(readIdentityPin(USER).immutableId).toBe(realId);
 
     fail = false;
     const second = new Trust(flaky, { userId: USER, deviceId: 'd1' });
-    await second.start(cs, null, null, 'device_custody');
+    await second.start(cs, null, null);
     expect(second.identityMismatch).toBe(false);
     expect(second.canSign).toBe(true);
     expect(readIdentityPin(USER).immutableId).toBe(doc.immutable_id);

@@ -405,13 +405,13 @@ export const chat = {
   // What the servers in the path can see, in every custody mode plus the mode
   // this build does not recognise.
   //
-  // Five whole paragraphs, with the relay sentence written out in each, rather
+  // Three whole paragraphs, with the relay sentence written out in each, rather
   // than one relay key glued to one custody key at run time. The glue was the
   // bug: two sentences joined by a space in JavaScript is an order no
   // translator can change, and here the order genuinely moves -- a language
   // that leads with the consequence and follows with the mechanism has to be
   // able to say "the operator can read these" first. Duplicating the relay
-  // sentence four times is the cheap half of that trade.
+  // sentence is the cheap half of that trade.
   //
   // `unknown` is the mode a newer server named and this client has not met. It
   // says the weaker true thing and stops: claiming end-to-end because the
@@ -419,17 +419,8 @@ export const chat = {
   // reassuring direction, which is the one direction security copy may never
   // guess in.
   'chat.encryption.custody.unknown': 'Messages here are MLS frames. Your home server relays them, and always sees who is talking to whom, and when.',
-  'chat.encryption.custody.escrowed': 'Messages here are MLS frames. Your home server relays them, and always sees who is talking to whom, and when. This account uses legacy server-assisted DM recovery: your home server holds a key that opens the recovery vault and history mirror, so the operator can read these messages. Move recovery to your trusted devices under Settings → {pane}.',
   'chat.encryption.custody.opaque': 'Messages here are MLS frames. Your home server relays them, and always sees who is talking to whom, and when. Your Telium password restores encrypted DMs through OPAQUE. The password is never sent to your home server, and only your client gets the key to the vault and history mirror.',
-  'chat.encryption.custody.device': 'Messages here are MLS frames. Your home server relays them, and always sees who is talking to whom, and when. Your DM recovery keys live on devices you approve. Your home server stores the encrypted history mirror but holds no key that opens it.',
-  'chat.encryption.custody.self': 'Messages here are MLS frames. Your home server relays them, and always sees who is talking to whom, and when. Trusted devices hold your DM keys, and a separate recovery passphrase can restore them if every device is lost. Neither is ever sent to your home server.',
-
-  // The escrow disclosure on its own, for the conversation dialog, which draws
-  // it as a warning of its own rather than as part of the paragraph above.
-  // Identical wording to the second half of `custody.escrowed` on purpose:
-  // the reader may well see both, and two different accounts of the same
-  // arrangement would read as two different arrangements.
-  'chat.encryption.escrowedNote': 'This account uses legacy server-assisted DM recovery: your home server holds a key that opens the recovery vault and history mirror, so the operator can read these messages. Move recovery to your trusted devices under Settings → {pane}.',
+  'chat.encryption.custody.retired': 'Messages here are MLS frames. Your home server relays them, and always sees who is talking to whom, and when. This account’s DM keys are in a setup Telium has retired and no longer opens, so older history here stays locked until you start a new vault under Settings → {pane}.',
 
   // Why the history above this point is closed on this device, drawn with the
   // history rather than as a banner, because it is a fact about what you are
@@ -451,7 +442,6 @@ export const chat = {
   // accurate and tells the reader nothing; what they need off a glance is
   // whether anybody else can read this.
   'chat.encryption.chip.keyChanged': 'New key',
-  'chat.encryption.chip.serverCanRead': 'Server can read',
   'chat.encryption.chip.endToEnd': 'End-to-end',
   'chat.encryption.chip.encrypted': 'Encrypted',
 
@@ -517,7 +507,7 @@ export const chat = {
   'chat.encryption.changedIdentity.body': 'That usually means they set their account up again. Messages stay encrypted. To be sure it’s them, compare keys from their profile.',
 
   'chat.encryption.vaultLocked.title': 'Your older messages are locked on this device.',
-  'chat.encryption.vaultLocked.body': 'Enter your recovery passphrase under Settings → {pane} to get them back.',
+  'chat.encryption.vaultLocked.body': 'Enter your recovery key under Settings → {pane} to get them back.',
 
   'chat.encryption.deviceApproval.title': 'This device does not have your keys yet.',
   // "travel directly between your devices" is a claim about where the keys go
@@ -525,11 +515,13 @@ export const chat = {
   // safe to do. Do not reduce it to "your keys will be copied".
   'chat.encryption.deviceApproval.body': 'Approve it from a device you already use. The keys travel directly between your devices.',
 
-  // Signing in worked and did not unlock the history, which is the state that
-  // most looks like a failure and is not one. Two ways out, both real, in the
-  // order of how much they cost.
-  'chat.encryption.recoveryFallback.title': 'Signing in did not unlock your older messages.',
-  'chat.encryption.recoveryFallback.body': 'Enter your recovery passphrase under Settings → {pane}, or approve this device from one you already use.',
+  // The vault was made under a custody mode Telium has retired, and nothing on
+  // this device can convert it. A banner rather than a line in the history,
+  // because there is one thing to do about it and it is in Settings. The
+  // second sentence says what is lost and what is not, in that order: the
+  // older messages stay locked, and encryption itself can be started again.
+  'chat.encryption.retired.title': 'This account’s message keys use a setup Telium has retired.',
+  'chat.encryption.retired.body': 'Sign in with your password and your recovery key, then start a new vault under Settings → {pane}. Your older encrypted messages stay locked.',
 
   // Messages are being held back on purpose. The body says so rather than
   // leaving the reader to conclude that messages are being lost, which is the

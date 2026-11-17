@@ -3,7 +3,6 @@ import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { heldSecret, keepSecret, wipe } from '../lib/mls.js';
 import { Trust, Verification } from '../lib/verify.js';
-import { seal as sealVault } from '../lib/vault.js';
 import { FakeHome, device } from './mls-home.js';
 import {
   recoveryKey, freshDisk, trustFor, exchange, glyphs, sealRootUnderThrowaway,
@@ -13,44 +12,6 @@ describe('verification', () => {
   beforeEach(async () => {
     globalThis.indexedDB = new IDBFactory();
     await wipe();
-  });
-
-  it('recovers a legacy cross-signing root through a retired escrow key', async () => {
-    const home = new FakeHome();
-    const oldKey = await recoveryKey();
-    const nextKey = await recoveryKey();
-    const alice = await device(home, '@a:h', 'd-1', nextKey);
-    const pair = await alice.cs.signature.keygen();
-    const encode = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
-    const legacySealed = await sealVault(oldKey, pair.signKey);
-    home.cross.set('@a:h', {
-      identity_key: encode(pair.publicKey),
-      sealed_secret: legacySealed,
-    });
-
-    const ring = {
-      key: nextKey,
-      raw: nextKey,
-      retired: [oldKey],
-      openers: [nextKey, oldKey],
-      mode: 'device_custody',
-    };
-    const trust = new Trust(home.for('@a:h', 'd-1'), {
-      userId: '@a:h',
-      deviceId: 'd-1',
-      recovery: ring,
-    });
-    await trust.start(
-      alice.cs,
-      nextKey,
-      await alice.leafKey(),
-      'device_custody',
-    );
-
-    expect(trust.canSign).toBe(true);
-    // Phase 1: a start never re-seals the root under a throwaway key (it used to, here, as `device-v1:`); with no
-    // opaque-custody mode in hand it leaves the server's copy exactly as it was.
-    expect(home.cross.get('@a:h').sealed_secret).toBe(legacySealed);
   });
 
   it('does not let a legacy homeserver choose the signer of stored user verification', async () => {
@@ -111,7 +72,7 @@ describe('verification', () => {
       userId: '@a:h', deviceId: 'd-1', recovery: ring,
     });
     await reloaded.start(
-      alice.cs, key, await alice.leafKey(), 'device_custody',
+      alice.cs, key, await alice.leafKey(),
     );
 
     expect(reloaded.signed.has('@b:h')).toBe(true);
@@ -137,7 +98,7 @@ describe('verification', () => {
       userId: '@a:h', deviceId: 'd-1', recovery: ring,
     });
     await reloaded.start(
-      alice.cs, key, await alice.leafKey(), 'device_custody',
+      alice.cs, key, await alice.leafKey(),
     );
     expect(reloaded.canSign).toBe(false);
     expect(reloaded.identityMismatch).toBe(true);
@@ -280,11 +241,11 @@ describe('verification', () => {
       },
     });
     const first = new Trust(lost, { userId: '@a:h', deviceId: 'd-1' });
-    await expect(first.start(alice.cs, key, await alice.leafKey(), 'device_custody')).rejects.toThrow();
+    await expect(first.start(alice.cs, key, await alice.leafKey())).rejects.toThrow();
     expect(await heldSecret('@a:h')).toBe(null);
 
     const again = new Trust(api, { userId: '@a:h', deviceId: 'd-1' });
-    await again.start(alice.cs, key, await alice.leafKey(), 'device_custody');
+    await again.start(alice.cs, key, await alice.leafKey());
     expect(again.canSign).toBe(true);
     expect(again.identityMismatch).toBe(false);
   });

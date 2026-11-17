@@ -242,10 +242,11 @@ export const dmMethods = {
     const {
       looksLikeRecoveryKey, recoveryVaultWrapper,
     } = await import('../account-recovery.js');
-    const recoveryWrapper = looksLikeRecoveryKey(secret) ? recoveryVaultWrapper(secret) : null;
+    // Only the account recovery key opens a vault now; the old recovery passphrase is retired.
+    if (!looksLikeRecoveryKey(secret)) throw new Error('that is not a recovery key');
+    const recoveryWrapper = recoveryVaultWrapper(secret);
     const opened = await vault.load(
       this.home,
-      recoveryWrapper ? null : secret,
       userId,
       this.authRecoveryWrapper,
       recoveryWrapper,
@@ -254,11 +255,9 @@ export const dmMethods = {
       { reseal: true },
     );
     if (opened.locked || !opened.key) {
-      throw new Error(recoveryWrapper
-        ? 'that recovery key did not open the vault'
-        : 'that recovery passphrase did not open the key');
+      throw new Error('that recovery key did not open the vault');
     }
-    if (recoveryWrapper) this.accountRecoveryWrapper = recoveryWrapper;
+    this.accountRecoveryWrapper = recoveryWrapper;
 
     this.vault = opened;
     this.sync.adoptKeyring(opened, { current: true }).catch(() => {});
@@ -270,6 +269,29 @@ export const dmMethods = {
     const id = this.route.conversationId;
     if (id && this.mls) await this.openConversation(id);
     return opened;
+  },
+
+  /// For a vault left in a retired custody mode (`vault.retiredMode`) that nothing can open: replaces it with a new one under
+  /// the account password. The old history stays locked for good; the caller has said so and asked. Needs the password's
+  /// key, so a session restored without the password signs in again first.
+  async startNewVault() {
+    if (!this.home) throw new Error('sign in before starting a new encrypted-message vault');
+    if (!this.authRecoveryWrapper) {
+      throw new Error('Sign in with your password to start a new encrypted-message vault.');
+    }
+    if (!this.vault?.retiredMode) throw new Error('This account\'s encrypted-message vault is not in a retired mode.');
+    const userId = this.session?.home?.user_id || null;
+    const created = await vault.replaceRetiredVault(
+      this.home, userId, this.authRecoveryWrapper, this.accountRecoveryWrapper,
+    );
+    this.vault = created;
+    if (this.trust) this.trust.recovery = created;
+    this.sync.adoptKeyring(created, { current: true }).catch(() => {});
+    await this.mls?.adoptRecoveryKey(created);
+    this.emit('vault', created);
+    await this.refreshCustody().catch(() => {});
+    await this.startTrust().catch(() => {});
+    return created;
   },
 
   async openConversation(id) {

@@ -2,9 +2,6 @@ import { useEffect, useState } from 'react';
 import { useAsync, useStore, useStoreEvent } from '../../hooks/useStore.jsx';
 import { toast } from '../../hooks/useToast.jsx';
 import { copyToClipboard } from '../../lib/clipboard.js';
-import {
-  removeIndependentRecovery, setMode,
-} from '../../lib/vault.js';
 import { Trans, useT } from '../../lib/i18n/react.jsx';
 import { errorMessage } from '../../lib/i18n/errors.js';
 import { list } from '../../lib/i18n/index.js';
@@ -15,18 +12,17 @@ import {
   Advanced, Detail, Explain, Fact, RecoveryKeyText, Verdict, downloadRecoveryKey,
 } from './RecoveryParts.jsx';
 
+// The three retired modes share one name and note: the reader cannot do anything different about them.
+const RETIRED_MODES = ['device_custody', 'self_custody', 'escrowed'];
+
 const MODE_NOTE_KEY = {
   opaque_custody: 'auth.custody.opaque.note',
-  device_custody: 'auth.custody.device.note',
-  self_custody: 'auth.custody.self.note',
-  escrowed: 'auth.custody.escrowed.note',
+  ...Object.fromEntries(RETIRED_MODES.map((m) => [m, 'auth.custody.retired.note'])),
 };
 
 const MODE_NAME_KEY = {
   opaque_custody: 'auth.custody.opaque.name',
-  device_custody: 'auth.custody.device.name',
-  self_custody: 'auth.custody.self.name',
-  escrowed: 'auth.custody.escrowed.name',
+  ...Object.fromEntries(RETIRED_MODES.map((m) => [m, 'auth.custody.retired.name'])),
 };
 
 export function RecoveryPane() {
@@ -40,7 +36,6 @@ export function RecoveryPane() {
     : vault?.mode || null;
   const backup = store.custody?.backup || null;
 
-  const [passphrase, setPassphrase] = useState('');
   const [recoveryKey, setRecoveryKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [guardianIds, setGuardianIds] = useState(['', '', '']);
@@ -89,38 +84,14 @@ export function RecoveryPane() {
 
   const hasKey = Boolean(vault?.recoveryKey);
   const copyMissing = Boolean(store.custody?.recovery_copy_missing) && !hasKey;
-  const legacyPassphrase = Boolean(vault?.legacyIndependent);
   // The server's flag too: a vault that lost its recovery-key copy still has a key that can replace the account key.
   const recoveryEnrolled = hasKey || copyMissing || Boolean(store.custody?.recovery_key_enrolled);
   const locked = Boolean(vault?.locked);
+  // The vault is in a custody mode Telium no longer reads; a new one is the only way to use encrypted messages again.
+  const retired = Boolean(vault?.retiredMode);
   const canEnroll = mode === 'opaque_custody' && Boolean(vault?.raw) && !locked;
 
-  const clearPhrase = () => {
-    setPassphrase('');
-  };
-
   const failed = (key, e) => toast(t(key, { detail: errorMessage(e) }), { error: true });
-
-  const removeIndependent = async () => {
-    setBusy(true);
-    try {
-      const userId = store.session?.home?.user_id || null;
-      const next = await removeIndependentRecovery(
-        store.home,
-        vault,
-        store.authRecoveryWrapper,
-        userId,
-      );
-      store.vault = next;
-      store.emit('vault', next);
-      await store.refreshCustody().catch(() => {});
-      toast(t('auth.advanced.passphraseRemoved'));
-    } catch (e) {
-      failed('auth.advanced.removeFailed', e);
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const unlockWithRecoveryKey = async () => {
     if (!recoveryKey.trim()) {
@@ -156,55 +127,31 @@ export function RecoveryPane() {
     }
   };
 
-  const unlockLegacy = async () => {
-    if (!passphrase) {
-      toast(t('auth.unlock.enterPassphrase'));
-      return;
-    }
+  const startNewVault = async () => {
     setBusy(true);
     try {
-      await store.unlockVault(passphrase);
-      clearPhrase();
-      toast(store.vault?.mode === 'opaque_custody'
-        ? t('auth.unlock.done')
-        : t('auth.unlock.doneDevice'));
+      await store.startNewVault();
+      toast(t('auth.retired.done'));
     } catch (e) {
-      failed('auth.unlock.failed', e);
+      failed('auth.retired.failed', e);
     } finally {
       setBusy(false);
     }
   };
 
-  const leaveLegacyEscrow = async () => {
-    if (!vault?.raw) return;
-    setBusy(true);
-    try {
-      const userId = store.session?.home?.user_id || null;
-      const next = await setMode(
-        store.home,
-        vault,
-        store.authRecoveryWrapper ? 'opaque_custody' : 'device_custody',
-        null,
-        userId,
-        store.authRecoveryWrapper,
-      );
-      store.vault = next;
-      store.sync.adoptKeyring(next, { current: true }).catch(() => {});
-      const refreshed = await store.mls?.adoptRecoveryKey(next);
-      store.emit('vault', next);
-      await store.refreshCustody().catch(() => {});
-      if (refreshed?.failures?.length) {
-        toast(t('auth.escrow.doneRefresh'));
-      } else {
-        toast(store.authRecoveryWrapper
-          ? t('auth.escrow.doneServer')
-          : t('auth.escrow.doneDevices'));
-      }
-    } catch (e) {
-      failed('auth.escrow.failed', e);
-    } finally {
-      setBusy(false);
+  // Replacing the vault loses the old history for good: always ask.
+  const askStartNewVault = () => {
+    if (!store.authRecoveryWrapper) {
+      toast(t('auth.retired.signInAgain'), { error: true });
+      return;
     }
+    dialogs.confirm({
+      title: t('auth.retired.confirmTitle'),
+      body: t('auth.retired.confirmBody'),
+      confirmLabel: t('auth.retired.confirmButton'),
+      danger: true,
+      onConfirm: startNewVault,
+    });
   };
 
   const enrollAccountRecovery = async () => {
@@ -317,17 +264,17 @@ export function RecoveryPane() {
       title: t('auth.encryption.settingUp.title'),
       note: t('auth.encryption.settingUp.note'),
     }
-    : locked
+    : retired
       ? {
         state: 'attention',
-        title: t('auth.encryption.locked.title'),
-        note: t('auth.encryption.locked.note'),
+        title: t('auth.encryption.retired.title'),
+        note: t('auth.encryption.retired.note'),
       }
-      : mode === 'escrowed'
+      : locked
         ? {
           state: 'attention',
-          title: t('auth.encryption.escrowed.title'),
-          note: t('auth.encryption.escrowed.note'),
+          title: t('auth.encryption.locked.title'),
+          note: t('auth.encryption.locked.note'),
         }
         : {
           state: 'ok',
@@ -364,9 +311,7 @@ export function RecoveryPane() {
               ? t('auth.encryption.keySaved')
               : copyMissing
                 ? t('auth.encryption.keyCopyMissing')
-                : legacyPassphrase
-                  ? t('auth.encryption.keyLegacy')
-                  : t('auth.encryption.keyMissing')}
+                : t('auth.encryption.keyMissing')}
           />
           <Fact
             tone={verifiedDevices === null || deviceCount === null
@@ -386,23 +331,23 @@ export function RecoveryPane() {
         <Hint>{t('auth.encryption.devicesHint')}</Hint>
       </Section>
 
-      {mode === 'escrowed' ? (
-        <Section title={t('auth.escrow.title')}>
-          <Explain>{t('auth.escrow.explain')}</Explain>
+      {retired ? (
+        <Section title={t('auth.retired.title')}>
+          <Explain>{t('auth.retired.explain')}</Explain>
           <Button
             variant="primary"
             className="self-start"
-            disabled={busy || !vault?.raw}
-            onClick={leaveLegacyEscrow}
+            disabled={busy}
+            onClick={askStartNewVault}
           >
-            {t('auth.escrow.button')}
+            {t('auth.retired.button')}
           </Button>
         </Section>
       ) : null}
 
-      {locked ? (
+      {locked && (!retired || vault?.retiredMode === 'device_custody') ? (
         <Section title={t('auth.unlock.title')}>
-          {vault?.needs_recovery_key ? (
+          {vault?.needs_recovery_key || vault?.retiredMode === 'device_custody' ? (
             <>
               <TextInput
                 label={t('auth.recoveryKey.fieldLabel')}
@@ -427,31 +372,7 @@ export function RecoveryPane() {
             </>
           ) : null}
 
-          {vault?.needs_independent ? (
-            <>
-              <TextInput
-                label={t('auth.unlock.passphraseLabel')}
-                type="password"
-                value={passphrase}
-                autoComplete="current-password"
-                hint={t('auth.unlock.passphraseHint')}
-                onChange={(e) => setPassphrase(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !busy) unlockLegacy();
-                }}
-              />
-              <Button
-                variant="primary"
-                className="self-start"
-                disabled={busy || !passphrase}
-                onClick={unlockLegacy}
-              >
-                {t('auth.unlock.button')}
-              </Button>
-            </>
-          ) : null}
-
-          <Hint>{t('auth.unlock.otherDevice')}</Hint>
+          {retired ? null : <Hint>{t('auth.unlock.otherDevice')}</Hint>}
         </Section>
       ) : null}
 
@@ -650,10 +571,7 @@ export function RecoveryPane() {
 
           {backup?.items ? (
             <Detail name={t('auth.backup.detailName')}>
-              {t('auth.backup.detail', {
-                count: backup.items,
-                readable: backup.server_can_read ? 'yes' : 'no',
-              })}
+              {t('auth.backup.detail', { count: backup.items })}
             </Detail>
           ) : null}
 
@@ -668,22 +586,6 @@ export function RecoveryPane() {
 
           {trust?.identityMismatch ? (
             <Notice tone="danger">{t('auth.advanced.identityMismatch')}</Notice>
-          ) : null}
-
-          {legacyPassphrase ? (
-            <div className="ekey-more__group">
-              <Detail name={t('auth.advanced.legacyPassphraseName')}>
-                {t('auth.advanced.legacyPassphraseBody')}
-              </Detail>
-              <Button
-                variant="ghost"
-                className="self-start"
-                disabled={busy || !vault?.raw}
-                onClick={removeIndependent}
-              >
-                {t('auth.advanced.removePassphrase')}
-              </Button>
-            </div>
           ) : null}
 
           {trust?.continuity?.valid && trust?.immutableId ? (

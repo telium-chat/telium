@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -78,6 +79,18 @@ export class RealHome {
       await gone;
     }
     rmSync(this.dir, { recursive: true, force: true });
+  }
+
+  /// Writes straight to the server's database, to put an account in a state the API now refuses to make (a retired
+  /// custody mode, a `device-v1:` root). Only for setup: the assertions of a test still go through the API.
+  sql(statement, ...params) {
+    const db = new DatabaseSync(join(this.dir, 'telium.db'));
+    try {
+      db.exec('PRAGMA busy_timeout = 5000');
+      return db.prepare(statement).run(...params);
+    } finally {
+      db.close();
+    }
   }
 
   api(session) {

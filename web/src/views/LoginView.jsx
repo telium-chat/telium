@@ -750,6 +750,10 @@ export function LoginView({
       );
       if (resp.device_secret) sessionStorage.setItem('telium.deviceSecretShown', '1');
       setStatus('');
+      // The password is reset, but the old encrypted history is not opened by it: say so before the app opens.
+      if (resp.vault_unopenable) {
+        toast(t('auth.reset.historyLocked', { pane: t('settings.nav.recovery') }), { ms: 15000 });
+      }
       onSignedIn();
     } catch (err) {
       setBusy(false);

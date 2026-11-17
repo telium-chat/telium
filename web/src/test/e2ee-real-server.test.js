@@ -4,10 +4,9 @@ import { IDBFactory } from 'fake-indexeddb';
 import { Mls, decodeMessage, wipe } from '../lib/mls.js';
 import { dmMethods } from '../lib/store/dms.js';
 import { forgetDeviceSecrets, heldRecoveryKeyring } from '../lib/device-secrets.js';
-import { load as loadVault, seal, setMode } from '../lib/vault.js';
+import { load as loadVault, seal } from '../lib/vault.js';
 import { loginOpaque, registerOpaque } from '../lib/opaque-auth.js';
 import { Trust } from '../lib/verify.js';
-import { trustMethods } from '../lib/store/trust.js';
 import { recoveryVaultWrapper } from '../lib/account-recovery.js';
 import { sessionMethods } from '../lib/store/session.js';
 import { RealHome, haveServer, lossy } from './real-home.js';
@@ -20,13 +19,11 @@ let n = 0;
 const name = (who) => `${who}${n += 1}`;
 
 /// The root as clients before phase 1 could leave it: sealed under a throwaway key (`device-v1:`) that only the device
-/// that made it ever held. Clients no longer write this, so the tests that need the state put it on the server.
-async function sealRootUnderThrowaway(api, trust) {
-  const doc = await api.crossSigning();
-  await api.putCrossSigning({
-    identity_key: doc.identity_key,
-    sealed_secret: `device-v1:${await seal(crypto.getRandomValues(new Uint8Array(32)), trust.signKey)}`,
-  });
+/// that made it ever held. Neither clients nor the server write this any more, so the tests that need the state put it
+/// into the server's database.
+async function sealRootUnderThrowaway(userId, trust) {
+  const sealed = `device-v1:${await seal(crypto.getRandomValues(new Uint8Array(32)), trust.signKey)}`;
+  server.sql('UPDATE cross_signing SET sealed_secret = ? WHERE user_id = ?', sealed, userId);
 }
 
 async function engine(account, api = account.api, recoveryKey = null) {
@@ -320,25 +317,14 @@ describe.skipIf(!haveServer)('against the real server', () => {
     api.lose((method) => method === 'putVault');
     // Creating needs the password-derived wrapper now; the restored session below has none.
     const wrapper = crypto.getRandomValues(new Uint8Array(32));
-    await expect(loadVault(api, null, alice.userId, wrapper)).rejects.toMatchObject({ status: 503 });
+    await expect(loadVault(api, alice.userId, wrapper)).rejects.toMatchObject({ status: 503 });
     const { version } = await alice.api.vault();
 
-    const loaded = await loadVault(alice.api, null, alice.userId);
+    const loaded = await loadVault(alice.api, alice.userId);
     expect(loaded.locked).toBeFalsy();
     expect(loaded.raw).toEqual((await heldRecoveryKeyring(alice.userId)).raw);
     expect(loaded.created).toBeFalsy();
     expect((await alice.api.vault()).version).toBe(version);
-  });
-
-  it('keeps the ring of a passphrase vault write whose answer was lost', async () => {
-    const alice = await server.register(name('alice'));
-    const passphrase = `pp-${crypto.randomUUID()}`;
-    const api = lossy(alice.api);
-    api.lose((method) => method === 'putVault');
-    await expect(loadVault(api, passphrase, alice.userId)).rejects.toMatchObject({ status: 503 });
-    const loaded = await loadVault(alice.api, passphrase, alice.userId);
-    expect(loaded.locked).toBeFalsy();
-    expect(loaded.raw).toEqual((await heldRecoveryKeyring(alice.userId)).raw);
   });
 
   it('lets a member who left be added back on the same profile', async () => {
@@ -382,15 +368,12 @@ describe.skipIf(!haveServer)('against the real server', () => {
     const reg = await registerOpaque(server.base, name('alice'), password, 'web');
     const first = server.wrap(reg.session);
     const ring = await loadVault(
-      first.api, null, first.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper,
+      first.api, first.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper,
     );
     expect(ring.mode).toBe('opaque_custody');
-    // As at sign-up: custody was read before this device created the vault.
-    const mode = trustMethods.custodyMode.call({ custody: { mode: 'none' }, vault: ring });
-    expect(mode).toBe('opaque_custody');
     const m1 = await engine(first, first.api, ring.key);
     const t1 = new Trust(first.api, { userId: first.userId, deviceId: first.deviceId, recovery: ring });
-    await t1.start(m1.cs, ring.key, await m1.leafKey(), mode);
+    await t1.start(m1.cs, ring.key, await m1.leafKey());
     expect(t1.canSign).toBe(true);
 
     // Another app on another machine: nothing of the first device's on disk.
@@ -400,18 +383,18 @@ describe.skipIf(!haveServer)('against the real server', () => {
     await forgetDeviceSecrets(first.userId);
     const login = await loginOpaque(server.base, first.userId, password, 'desktop');
     const second = server.wrap(login.session);
-    const again = await loadVault(second.api, null, second.userId, login.recoveryWrapper);
+    const again = await loadVault(second.api, second.userId, login.recoveryWrapper);
     expect(again.raw).toEqual(ring.raw);
     const m2 = await engine(second, second.api, again.key);
     const t2 = new Trust(second.api, { userId: second.userId, deviceId: second.deviceId, recovery: again });
-    await t2.start(m2.cs, again.key, await m2.leafKey(), trustMethods.custodyMode.call({ vault: again }));
+    await t2.start(m2.cs, again.key, await m2.leafKey());
     expect(t2.canSign).toBe(true);
     expect(t2.identityMismatch).toBeFalsy();
     // What another person's device checks before adding this one to a group.
     const bob = await server.register(name('bob'));
     const bm = await engine(bob, bob.api, crypto.getRandomValues(new Uint8Array(32)));
     const tb = new Trust(bob.api, { userId: bob.userId, deviceId: bob.deviceId });
-    await tb.start(bm.cs, null, await bm.leafKey(), 'device_custody');
+    await tb.start(bm.cs, null, await bm.leafKey());
     expect(await tb.verifyClaimedPackage(second.userId, second.deviceId, await m2.leafKey())).toBe(true);
   });
 
@@ -420,7 +403,7 @@ describe.skipIf(!haveServer)('against the real server', () => {
     const alice = await server.register(name('alice'));
     const am = await engine(alice, alice.api, crypto.getRandomValues(new Uint8Array(32)));
     const ta = new Trust(alice.api, { userId: alice.userId, deviceId: alice.deviceId });
-    await ta.start(am.cs, null, await am.leafKey(), 'device_custody');
+    await ta.start(am.cs, null, await am.leafKey());
     am.verifyClaimedPackage = (u, d, sig) => ta.verifyClaimedPackage(u, d, sig);
 
     // KeyPackages published, but no identity key and no anchored root: what a stripped account looks like.
@@ -440,13 +423,13 @@ describe.skipIf(!haveServer)('against the real server', () => {
     const reg = await registerOpaque(server.base, name('alice'), password, 'web');
     const first = server.wrap(reg.session);
     const ring = await loadVault(
-      first.api, null, first.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper,
+      first.api, first.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper,
     );
     // The old bug: identity sealed under a throwaway key. Clients no longer write that, so it is put on the server directly.
     const m1 = await engine(first, first.api, ring.key);
     const t1 = new Trust(first.api, { userId: first.userId, deviceId: first.deviceId, recovery: ring });
-    await t1.start(m1.cs, ring.key, await m1.leafKey(), 'device_custody');
-    await sealRootUnderThrowaway(first.api, t1);
+    await t1.start(m1.cs, ring.key, await m1.leafKey());
+    await sealRootUnderThrowaway(first.userId, t1);
     expect(String((await first.api.crossSigning()).sealed_secret)).toMatch(/^device-v1:/);
 
     // The second device signs in while the account is broken.
@@ -458,10 +441,10 @@ describe.skipIf(!haveServer)('against the real server', () => {
     localStorage.clear();
     const login = await loginOpaque(server.base, first.userId, password, 'desktop');
     const second = server.wrap(login.session);
-    const again = await loadVault(second.api, null, second.userId, login.recoveryWrapper);
+    const again = await loadVault(second.api, second.userId, login.recoveryWrapper);
     const m2 = await engine(second, second.api, again.key);
     const broken = new Trust(second.api, { userId: second.userId, deviceId: second.deviceId, recovery: again });
-    await broken.start(m2.cs, again.key, await m2.leafKey(), trustMethods.custodyMode.call({ vault: again }));
+    await broken.start(m2.cs, again.key, await m2.leafKey());
     expect(broken.canSign).toBe(false);
     const secondDb = globalThis.indexedDB;
 
@@ -469,16 +452,15 @@ describe.skipIf(!haveServer)('against the real server', () => {
     globalThis.indexedDB = firstDb;
     localStorage.clear();
     for (const [k, v] of Object.entries(firstStorage)) localStorage.setItem(k, v);
-    const reopened = await loadVault(first.api, null, first.userId);
-    const mode = trustMethods.custodyMode.call({ custody: { mode: reopened.mode }, vault: reopened });
+    const reopened = await loadVault(first.api, first.userId);
     const t1b = new Trust(first.api, { userId: first.userId, deviceId: first.deviceId, recovery: reopened });
-    await t1b.start(m1.cs, reopened.key, await m1.leafKey(), mode);
+    await t1b.start(m1.cs, reopened.key, await m1.leafKey());
     expect(t1b.canSign).toBe(true);
 
     // The second device restarts and can now sign itself.
     globalThis.indexedDB = secondDb;
     const healed = new Trust(second.api, { userId: second.userId, deviceId: second.deviceId, recovery: again });
-    await healed.start(m2.cs, again.key, await m2.leafKey(), trustMethods.custodyMode.call({ vault: again }));
+    await healed.start(m2.cs, again.key, await m2.leafKey());
     expect(healed.canSign).toBe(true);
   });
 
@@ -489,13 +471,13 @@ describe.skipIf(!haveServer)('against the real server', () => {
     const first = server.wrap(reg.session);
     // The other tab restores the session (no password, no recovery wrappers). It used to make a `device_custody` vault
     // first; it now makes nothing and is locked until the password is typed.
-    const otherTab = await loadVault(first.api, null, first.userId);
+    const otherTab = await loadVault(first.api, first.userId);
     expect(otherTab.locked).toBe(true);
     expect(otherTab.needs_password).toBe(true);
     expect((await first.api.vault()).exists).toBe(false);
 
     const signingUp = await loadVault(
-      first.api, null, first.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper,
+      first.api, first.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper,
     );
     expect(signingUp.mode).toBe('opaque_custody');
     expect(signingUp.recoveryKey).toBe(true);
@@ -508,7 +490,7 @@ describe.skipIf(!haveServer)('against the real server', () => {
     const reg = await registerOpaque(server.base, name('alice'), password, 'web');
     const first = server.wrap(reg.session);
     const ring = await loadVault(
-      first.api, null, first.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper,
+      first.api, first.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper,
     );
     const m1 = await engine(first, first.api, ring.key);
     const leaf = await m1.leafKey();
@@ -558,19 +540,19 @@ describe.skipIf(!haveServer)('against the real server', () => {
     on('alice-1');
     const reg = await registerOpaque(server.base, name('alice'), password, 'web');
     const first = server.wrap(reg.session);
-    const ring = await loadVault(first.api, null, first.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper);
+    const ring = await loadVault(first.api, first.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper);
     const m1 = await engine(first, first.api, ring.key);
     const t1 = new Trust(first.api, { userId: first.userId, deviceId: first.deviceId, recovery: ring });
-    await t1.start(m1.cs, ring.key, await m1.leafKey(), 'device_custody');
+    await t1.start(m1.cs, ring.key, await m1.leafKey());
     expect(t1.canSign).toBe(true);
     // The account key is lost everywhere but device 1: sealed only under a throwaway key (the pre-phase-1 state).
-    await sealRootUnderThrowaway(first.api, t1);
+    await sealRootUnderThrowaway(first.userId, t1);
 
     on('bob');
     const bob = await server.register(name('bob'));
     const bm = await engine(bob);
     const tb = new Trust(bob.api, { userId: bob.userId, deviceId: bob.deviceId });
-    await tb.start(bm.cs, crypto.getRandomValues(new Uint8Array(32)), await bm.leafKey(), 'device_custody');
+    await tb.start(bm.cs, crypto.getRandomValues(new Uint8Array(32)), await bm.leafKey());
     await tb.vouchForUser(first.userId, b64(t1.identityKey));
     tb.peers.clear();
     await tb.refresh(first.userId);
@@ -580,10 +562,10 @@ describe.skipIf(!haveServer)('against the real server', () => {
     on('alice-2');
     const login = await loginOpaque(server.base, first.userId, password, 'desktop');
     const second = server.wrap(login.session);
-    const again = await loadVault(second.api, null, second.userId, login.recoveryWrapper);
+    const again = await loadVault(second.api, second.userId, login.recoveryWrapper);
     const m2 = await engine(second, second.api, again.key);
     const t2 = new Trust(second.api, { userId: second.userId, deviceId: second.deviceId, recovery: again });
-    await t2.start(m2.cs, again.key, await m2.leafKey(), 'device_custody');
+    await t2.start(m2.cs, again.key, await m2.leafKey());
     expect(t2.canSign).toBe(false);
     return { reg, first, m1, t1, bob, bm, tb, second, m2, t2 };
   }
@@ -601,7 +583,7 @@ describe.skipIf(!haveServer)('against the real server', () => {
     expect(t2.continuity.valid).toBe(true);
     // The next start on this device takes the new identity as its own.
     const reopened = new Trust(second.api, { userId: second.userId, deviceId: second.deviceId });
-    await reopened.start(m2.cs, null, await m2.leafKey(), 'device_custody');
+    await reopened.start(m2.cs, null, await m2.leafKey());
     expect(reopened.canSign).toBe(true);
     expect(reopened.identityMismatch).toBe(false);
 
@@ -624,7 +606,7 @@ describe.skipIf(!haveServer)('against the real server', () => {
     // Alice's old device comes back: changed for itself too, until it takes the key from the device that reset.
     on('alice-1');
     const back = new Trust(first.api, { userId: first.userId, deviceId: first.deviceId });
-    await back.start(m1.cs, null, await m1.leafKey(), 'device_custody');
+    await back.start(m1.cs, null, await m1.leafKey());
     expect(back.identityMismatch).toBe(true);
     await back.adoptSecret(t2.signKey, b64(t2.identityKey));
     expect(back.canSign).toBe(true);
@@ -645,13 +627,13 @@ describe.skipIf(!haveServer)('against the real server', () => {
       },
     });
     const cut = new Trust(dropped, { userId: second.userId, deviceId: second.deviceId, recovery: t2.recovery });
-    await cut.start(m2.cs, null, await m2.leafKey(), 'device_custody');
+    await cut.start(m2.cs, null, await m2.leafKey());
     await expect(cut.recoverWithRecoveryKey(reg.accountRecovery.text, {
       mlsKey: await m2.leafKey(), sealKey: t2.recovery.key,
     })).rejects.toThrow('connection dropped');
 
     const reopened = new Trust(second.api, { userId: second.userId, deviceId: second.deviceId });
-    await reopened.start(m2.cs, null, await m2.leafKey(), 'device_custody');
+    await reopened.start(m2.cs, null, await m2.leafKey());
     expect(reopened.canSign).toBe(true);
     expect(reopened.identityMismatch).toBe(false);
     expect(reopened.continuity.valid).toBe(true);
@@ -662,7 +644,7 @@ describe.skipIf(!haveServer)('against the real server', () => {
     const reg = await registerOpaque(server.base, name('alice'), password, 'test');
     const account = server.wrap(reg.session);
     const opened = await loadVault(
-      account.api, null, account.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper,
+      account.api, account.userId, reg.recoveryWrapper, reg.accountRecovery.vaultWrapper,
     );
     expect(opened.recoveryKey).toBe(true);
     const store = Object.assign(Object.create(sessionMethods), {
@@ -677,7 +659,7 @@ describe.skipIf(!haveServer)('against the real server', () => {
     const fresh = async (wrapper) => {
       globalThis.indexedDB = new IDBFactory();
       await wipe();
-      return loadVault(account.api, null, account.userId, null, wrapper);
+      return loadVault(account.api, account.userId, null, wrapper);
     };
 
     await expect(store.enrollRecoveryKey(`not-${password}`, { replace: true })).rejects.toThrow();
@@ -690,41 +672,5 @@ describe.skipIf(!haveServer)('against the real server', () => {
     const old = await fresh(reg.accountRecovery.vaultWrapper);
     expect(old.raw).toBeNull();
     expect(old.needs_recovery_key).toBe(true);
-  });
-
-  it('lets a new profile of an escrowed account join from the server-held ring', async () => {
-    const alice = await server.register(name('alice'));
-    const bob = await server.register(name('bob'));
-    // A legacy escrowed account: made in opaque custody (the only vault a client can still create), then moved to escrow.
-    const held = await loadVault(alice.api, null, alice.userId, crypto.getRandomValues(new Uint8Array(32)));
-    const escrowed = await setMode(alice.api, held, 'escrowed', null, alice.userId);
-    expect((await alice.api.vault()).escrow_key).toBeTruthy();
-    const am = await engine(alice, alice.api, escrowed.raw);
-    const bm = await engine(bob);
-    const { id } = await alice.api.createConversation({ kind: 'dm', members: [bob.userId] });
-    const built = await am.establish(id, [bob.userId], { generation: 0 });
-    await alice.api.sendFrame(id, {
-      kind: 'welcome', ciphertext: built.welcome, epoch: built.epoch, start_over: true, generation: 0,
-    });
-    await catchUp(am, alice.api, id);
-    await catchUp(bm, bob.api, id);
-    expect(await says(am, alice.api, bm, bob.api, id, 'before')).toBe('before');
-
-    await am.forget(id);
-    await forgetDeviceSecrets(alice.userId);
-    const again = await server.login(alice.userId);
-    const ring = await loadVault(again.api, null, alice.userId);
-    expect(ring.mode).toBe('escrowed');
-    expect(ring.raw).toEqual(escrowed.raw);
-    const am2 = await engine(again, again.api, ring.raw);
-    await am2.selfJoin(id, await history(again.api, id));
-    await catchUp(am2, again.api, id);
-    expect(am2.joined(id)).toBe(true);
-    expect(am2.errorFor(id)).toBeFalsy();
-
-    await catchUp(bm, bob.api, id);
-    expect(bm.epochOf(id)).toBe(am2.epochOf(id));
-    expect(await says(am2, again.api, bm, bob.api, id, 'from escrow')).toBe('from escrow');
-    expect(await says(bm, bob.api, am2, again.api, id, 'heard')).toBe('heard');
   });
 });

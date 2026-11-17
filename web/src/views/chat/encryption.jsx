@@ -50,9 +50,9 @@ export const DEVICE_APPROVAL = note(
   'chat.encryption.deviceApproval.body',
 );
 
-export const RECOVERY_FALLBACK = note(
-  'chat.encryption.recoveryFallback.title',
-  'chat.encryption.recoveryFallback.body',
+export const RETIRED_CUSTODY = note(
+  'chat.encryption.retired.title',
+  'chat.encryption.retired.body',
   { pane: 'settings.nav.recovery' },
 );
 
@@ -61,30 +61,29 @@ export const SYNC_FAILED = note(
   'chat.encryption.syncFailed.body',
 );
 
-export let ESCROWED_NOTE = '';
 export let NOT_YET_READABLE = '';
 
 function refreshNotes() {
-  ESCROWED_NOTE = t('chat.encryption.escrowedNote', { pane: t('settings.nav.recovery') });
   NOT_YET_READABLE = t('chat.encryption.notYetReadable');
 }
 refreshNotes();
 onLocaleChange(refreshNotes);
 
+// device_custody, self_custody and escrowed are retired: they are named here only so a vault still stored in one says so.
+const RETIRED_MODES = new Set(['device_custody', 'self_custody', 'escrowed']);
+
 export const CUSTODY_TONE = {
-  escrowed: 'warn',
   opaque_custody: 'success',
-  device_custody: 'success',
-  self_custody: 'success',
+  device_custody: 'warn',
+  self_custody: 'warn',
+  escrowed: 'warn',
 };
 
 export function custodyNote(mode) {
-  if (mode === 'escrowed') {
-    return t('chat.encryption.custody.escrowed', { pane: t('settings.nav.recovery') });
-  }
   if (mode === 'opaque_custody') return t('chat.encryption.custody.opaque');
-  if (mode === 'device_custody') return t('chat.encryption.custody.device');
-  if (mode === 'self_custody') return t('chat.encryption.custody.self');
+  if (RETIRED_MODES.has(mode)) {
+    return t('chat.encryption.custody.retired', { pane: t('settings.nav.recovery') });
+  }
   return t('chat.encryption.custody.unknown');
 }
 
@@ -111,12 +110,9 @@ export function EncryptionChip({ custody, unverified, changed, typing = false, o
     ? t('chat.encryption.chip.keyChanged')
     : unverified
       ? t('chat.encryption.chip.unverified', { count: unverified })
-      : custody === 'escrowed' ? t('chat.encryption.chip.serverCanRead')
-        : custody === 'opaque_custody'
-          || custody === 'device_custody'
-          || custody === 'self_custody'
-          ? t('chat.encryption.chip.endToEnd')
-          : t('chat.encryption.chip.encrypted');
+      : custody === 'opaque_custody'
+        ? t('chat.encryption.chip.endToEnd')
+        : t('chat.encryption.chip.encrypted');
   return (
     <button
       type="button"
@@ -208,9 +204,7 @@ export function ConversationNotices({
     );
   }
   const needsDevice = Boolean(store.vault?.needs_device);
-  const hasIndependentFallback = Boolean(
-    needsDevice && store.vault?.needs_independent,
-  );
+  const retired = Boolean(store.vault?.retiredMode);
   const undeliverable = awaiting && !needsDevice
     && store.rejoinBlocked?.has(conversationId);
   return (
@@ -220,7 +214,7 @@ export function ConversationNotices({
       ) : null}
       {needsDevice ? (
         <Notice tone="warn">
-          <NoticeText head={hasIndependentFallback ? RECOVERY_FALLBACK : DEVICE_APPROVAL} />
+          <NoticeText head={DEVICE_APPROVAL} />
         </Notice>
       ) : null}
       {awaiting && !needsDevice ? (
@@ -230,7 +224,8 @@ export function ConversationNotices({
           </NoticeText>
         </Notice>
       ) : null}
-      {store.vault?.locked && !needsDevice
+      {retired ? <Notice tone="warn"><NoticeText head={RETIRED_CUSTODY} /></Notice> : null}
+      {store.vault?.locked && !needsDevice && !retired
         ? <Notice tone="warn"><NoticeText head={VAULT_LOCKED} /></Notice>
         : null}
       {syncError ? (

@@ -330,6 +330,12 @@ export const auth = {
   'auth.reset.mismatch': 'The new passwords do not match.',
   'auth.reset.submit': 'Reset password',
   'auth.reset.failed': 'Password reset failed: {detail}',
+  // Shown once, over the app, after a reset that worked for the password but could not touch the vault: the account was
+  // moved here from another server, so its history is still sealed for the recovery key from that server, which is not
+  // the one just typed. The sentence has to say that nothing is lost and what to do, in that order of worry: the reader's
+  // first fear on seeing locked history after a reset is that the reset destroyed it. `{pane}` is the name of the
+  // settings pane (`settings.nav.recovery`) where the key is entered.
+  'auth.reset.historyLocked': 'Your password is reset. Your older encrypted messages stay locked until you enter the recovery key from your previous server, under Settings → {pane}.',
 
   // -------------------------------------------- the key handed out at signup
 
@@ -407,7 +413,7 @@ export const auth = {
   // nothing.
   'auth.localData.identity.cost1': 'This device’s MLS signing identity. It will be a new device to everyone you talk to, and they will see it as unverified until you verify it again.',
   'auth.localData.identity.cost2': 'The stored group state for every encrypted conversation. Messages already on this device stay readable only if the account’s recovery key can reopen them; anything this device is the last holder of is gone.',
-  'auth.localData.identity.cost3': 'The cached DM recovery keyring, so the next sign-in has to unlock the key vault again — with your recovery key or passphrase, which you will need to have.',
+  'auth.localData.identity.cost3': 'The cached DM recovery keyring, so the next sign-in has to unlock the key vault again — with your recovery key, which you will need to have.',
   'auth.localData.identity.cost4': 'Your session. You will be signed out on this device.',
   // Ends in an ellipsis because pressing it opens the confirmation rather than
   // doing the thing -- the convention every desktop platform shares.
@@ -424,17 +430,11 @@ export const auth = {
 
   'auth.custody.opaque.name': 'Password recovery (OPAQUE export key)',
   'auth.custody.opaque.note': 'Signing in with your password is enough to get your messages back.',
-  'auth.custody.device.name': 'Trusted-device recovery',
-  'auth.custody.device.note': 'Your keys live on the devices you have approved, and nowhere else.',
-  // "(legacy)" marks a mode still supported but no longer offered. It is not
-  // decoration -- it is why the pane elsewhere offers to remove it.
-  'auth.custody.self.name': 'Independent passphrase (legacy)',
-  'auth.custody.self.note': 'Your keys live on your devices, with a passphrase as the way back.',
-  'auth.custody.escrowed.name': 'Server-assisted recovery (legacy)',
-  // Blunt on purpose. This is the one mode where the operator can read the
-  // reader's private messages, and a sentence that said "your server assists
-  // with recovery" would be true and useless.
-  'auth.custody.escrowed.note': 'Your home server holds a key that opens these messages.',
+  // Any of the three custody modes Telium has retired (trusted-device only, independent passphrase, server-assisted).
+  // One name for all three: the reader cannot do anything different about them, and the Advanced block only needs to say
+  // that this is not the current setup.
+  'auth.custody.retired.name': 'Retired setup',
+  'auth.custody.retired.note': 'This account’s keys are kept in a way Telium no longer supports.',
   'auth.custody.unknown': 'Not established yet',
   // Name then sentence, in the Advanced block. One key so a language that puts
   // the explanation first, or separates them with something other than a full
@@ -454,8 +454,8 @@ export const auth = {
   // machine simply cannot open them yet.
   'auth.encryption.locked.title': 'Your older messages are locked on this device.',
   'auth.encryption.locked.note': 'New messages work. To get the older ones back, use your recovery key below, or approve this device from one you already use.',
-  'auth.encryption.escrowed.title': 'Your home server can read your private messages.',
-  'auth.encryption.escrowed.note': 'This account is still on the old recovery setup. Turning it off takes one press and does not need a second password.',
+  'auth.encryption.retired.title': 'Your encrypted-message keys use a setup Telium has retired.',
+  'auth.encryption.retired.note': 'Your older encrypted messages stay locked. You can start a new vault below, so new messages are encrypted again.',
   'auth.encryption.ok.title': 'Your private messages are protected.',
   // Stands in for the custody note when the mode is unknown -- true of every
   // mode this build understands, which is why it is safe as a fallback.
@@ -466,7 +466,6 @@ export const auth = {
   // where a language forces the choice.
   'auth.encryption.keyFact': 'Recovery key',
   'auth.encryption.keySaved': 'Saved',
-  'auth.encryption.keyLegacy': 'Old passphrase',
   'auth.encryption.keyMissing': 'Not made yet',
   // A recovery key is on file but its copy of the message keys is gone: it resets the password and opens nothing.
   'auth.encryption.keyCopyMissing': 'Needs reconnecting',
@@ -489,41 +488,36 @@ export const auth = {
   // pane's name is translated, this must match it.
   'auth.encryption.devicesHint': 'Devices is where you verify a device or sign one out.',
 
-  // ------------------------------------------------ leaving server-assisted recovery
-
-  'auth.escrow.title': 'Turn off server-assisted recovery',
-  // The honest limit on what turning it off achieves: it is forward secrecy,
-  // not amnesia. A sentence that implied the server forgets what it already
-  // holds would be the most damaging kind of wrong on this page.
-  'auth.escrow.explain': 'Your server stops being able to open anything sent after this. What it has already seen, it has already seen.',
-  'auth.escrow.button': 'Turn it off',
-  // Three outcomes, because the honest answer differs. The first is a partial
-  // success and says so; the other two name what is now true, and which one is
-  // shown depends on whether the account has a password-derived wrapper to fall
-  // back on.
-  'auth.escrow.doneRefresh': 'Done, though a few conversations still need a key refresh.',
-  'auth.escrow.doneServer': 'Done. Your server can no longer open new messages.',
-  'auth.escrow.doneDevices': 'Done. Your keys are on your devices now.',
-  'auth.escrow.failed': 'Could not turn off server-assisted recovery: {detail}',
+  // ------------------------------------------------ a vault in a retired setup
+  //
+  // Shown only on an account whose key vault was made under one of the custody modes Telium has retired and that nothing
+  // could convert (the password and a device or recovery key that hold its keys are both needed for that, and both are
+  // gone). The one thing offered is a new vault. The sentence that matters is that the older messages stay locked for
+  // good: a translation that softened it into "may be hard to read" would let somebody press the button expecting to
+  // get them back.
+  'auth.retired.title': 'Start a new encrypted-message vault',
+  'auth.retired.explain': 'This replaces the retired vault with a new one under your password. Your older encrypted messages stay locked for good. Contacts will see a new account key until you replace your identity key below with your recovery key.',
+  'auth.retired.button': 'Start a new vault',
+  'auth.retired.confirmTitle': 'Start a new vault?',
+  'auth.retired.confirmBody': 'Your older encrypted messages cannot be opened afterwards, by you or by anyone else. New messages work normally.',
+  'auth.retired.confirmButton': 'Start a new vault',
+  'auth.retired.done': 'Done. New messages are encrypted under your new vault.',
+  'auth.retired.failed': 'Could not start a new vault: {detail}',
+  'auth.retired.signInAgain': 'Sign out and sign in again with your password, then try again.',
 
   // ------------------------------------------------------------- unlocking
 
   'auth.unlock.title': 'Unlock your older messages',
-  // The hint under each field says where that secret came from, because the
-  // difference between them is exactly what somebody in this state has
-  // forgotten: one was handed to them by Telium, the other they chose.
+  // The hint under the field says where the secret came from, because that is
+  // exactly what somebody in this state has forgotten: it was handed to them
+  // by Telium when the account was made.
   'auth.unlock.keyHint': 'The key you were given when this account was made.',
-  'auth.unlock.passphraseLabel': 'Recovery passphrase',
-  'auth.unlock.passphraseHint': 'The passphrase you added to this account yourself.',
   'auth.unlock.button': 'Unlock',
   'auth.unlock.enterKey': 'Enter your recovery key.',
-  'auth.unlock.enterPassphrase': 'Enter your recovery passphrase.',
   // After unlocking on an OPAQUE account: the password now derives the wrapper,
   // so the key is not needed again on this device. Worth saying, because
   // otherwise the reader expects to be asked every time.
   'auth.unlock.done': 'Unlocked. Your password is enough from now on.',
-  // The same act on an account whose custody mode cannot make that promise.
-  'auth.unlock.doneDevice': 'Unlocked on this device.',
   'auth.unlock.failed': 'Could not unlock your messages: {detail}',
   // The third way in, named because it is the one that needs no secret typed
   // anywhere and is therefore the one to prefer.
@@ -613,7 +607,7 @@ export const auth = {
   // homeserver can open it. One key rather than two so the translator controls
   // the join, and `{readable}` is selected on rather than interpolated because
   // it is a boolean and not a phrase.
-  'auth.backup.detail': '{count, plural, one {# sealed item.} other {# sealed items.}} {readable, select, yes {Your home server can open it.} other {Your home server cannot open it.}}',
+  'auth.backup.detail': '{count, plural, one {# sealed item.} other {# sealed items.}} Your home server cannot open it.',
 
   // ------------------------------------------------------------- advanced
 
@@ -628,13 +622,8 @@ export const auth = {
   // Says "could not be checked" and not "is forged", because those are
   // different claims and the client can only support the first.
   'auth.advanced.identityMismatch': 'This account’s identity history could not be checked.',
-  'auth.advanced.legacyPassphraseName': 'Old recovery passphrase',
-  'auth.advanced.legacyPassphraseBody': 'This account still carries a passphrase from an older version of Telium. Your password already does the same job.',
-  'auth.advanced.removePassphrase': 'Remove the old passphrase',
   // The reassurance is the second clause and it is the reason removing it is
   // safe. Never drop it.
-  'auth.advanced.passphraseRemoved': 'Old passphrase removed. Your password still gets your messages back.',
-  'auth.advanced.removeFailed': 'Could not remove the old recovery passphrase: {detail}',
 
   // ------------------------------------------------------- recovery contacts
   //

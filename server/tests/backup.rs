@@ -1539,7 +1539,7 @@ async fn populated_and_backed_up(s: &Server) -> (PathBuf, backup::Key) {
     let key = s.keygen();
     let alice = s.register("alice").await;
     for (path, body) in [
-        ("/_telium/v1/vault", json!({ "mode": "escrowed", "ciphertext": "sealed-keyring", "escrow_key": "escrowed-half" })),
+        ("/_telium/v1/vault", json!({ "mode": "opaque_custody", "ciphertext": "sealed-keyring" })),
         ("/_telium/v1/vault/backup", json!({ "items": [{ "scope": "c1", "item": "frame-1", "ciphertext": "sealed-item" }] })),
         ("/_telium/v1/crosssigning", json!({ "identity_key": telium_server::util::b64(&[7u8; 32]), "sealed_secret": "sealed-secret" })),
     ] {

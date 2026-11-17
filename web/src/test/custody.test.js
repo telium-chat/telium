@@ -1,17 +1,15 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { Backup } from '../lib/backup.js';
-import { heldRecoveryKeyring } from '../lib/device-secrets.js';
+import { heldRecoveryKeyring, rememberRecoveryKeyring } from '../lib/device-secrets.js';
 import {
-  load, open, recoveryKeyCiphertext, removeIndependentRecovery, seal,
-  setIndependentRecovery, setMode,
+  load, recoveryKeyCiphertext, replaceRetiredVault, seal, writeOpaque,
 } from '../lib/vault.js';
 
 const te = new TextEncoder();
 const td = new TextDecoder();
 const b64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
 const USER = '@alice:test.example';
-const PHRASE = 'correct horse battery staple';
 
 class FakeVaultHome {
   constructor() {
@@ -27,12 +25,12 @@ class FakeVaultHome {
       exists: true,
       mode: this.held.mode,
       ciphertext: this.held.ciphertext,
-      escrow_key: this.held.escrow_key || undefined,
       independent_ciphertext: this.held.independent_ciphertext || null,
     };
   }
 
   async putVault(body) {
+    // Kept as sent, so a test can say the client never sends a server-held key.
     this.held = {
       mode: body.mode,
       ciphertext: body.ciphertext,
@@ -47,10 +45,8 @@ class FakeVaultHome {
     this.held = {
       mode: body.mode,
       ciphertext: body.ciphertext,
-      escrow_key: body.mode === 'escrowed' ? (body.escrow_key || null) : null,
-      independent_ciphertext: body.mode !== 'opaque_custody'
-        ? before
-        : body.clear_independent ? null : body.independent_ciphertext || before,
+      escrow_key: body.escrow_key || null,
+      independent_ciphertext: body.clear_independent ? null : body.independent_ciphertext || before,
     };
   }
 
@@ -82,21 +78,6 @@ class FakeVaultHome {
     }
     return { ok: true };
   }
-
-  async operatorReads(scope, item) {
-    if (!this.held?.escrow_key) return undefined;
-    const wrapper = Uint8Array.from(atob(this.held.escrow_key), (c) => c.charCodeAt(0));
-    const payload = await open(wrapper, this.held.ciphertext);
-    const doc = JSON.parse(td.decode(payload));
-    const row = this.rows.get(`${scope}/${item}`);
-    if (!row) return undefined;
-    for (const raw of [doc.key, ...(doc.retired || [])]) {
-      const key = Uint8Array.from(atob(raw), (c) => c.charCodeAt(0));
-      try { return JSON.parse(td.decode(await open(key, row.ciphertext))); }
-      catch {}
-    }
-    return undefined;
-  }
 }
 
 let home;
@@ -108,8 +89,7 @@ beforeEach(() => {
   wrapper = crypto.getRandomValues(new Uint8Array(32));
 });
 
-const here = (phrase = null, opaqueWrapper = wrapper) =>
-  load(home, phrase, USER, opaqueWrapper);
+const here = (opaqueWrapper = wrapper) => load(home, USER, opaqueWrapper);
 
 async function mirror(backup, scope, item, value) {
   backup.queue(scope, item, value);
@@ -135,120 +115,45 @@ describe('key custody', () => {
     await here();
     globalThis.indexedDB = new IDBFactory();
     const stranger = crypto.getRandomValues(new Uint8Array(32));
-    const fresh = await here(null, stranger);
+    const fresh = await here(stranger);
     expect(fresh.locked).toBe(true);
     expect(fresh.key).toBe(null);
   });
 
   it('uses the generated account recovery key as a second cryptographic wrapper', async () => {
     const recoveryKeyWrapper = crypto.getRandomValues(new Uint8Array(32));
-    const first = await load(home, null, USER, wrapper, recoveryKeyWrapper);
+    const first = await load(home, USER, wrapper, recoveryKeyWrapper);
     expect(first.recoveryKey).toBe(true);
     expect(home.held.independent_ciphertext).toMatch(/^k1\./);
 
     globalThis.indexedDB = new IDBFactory();
     const newPasswordWrapper = crypto.getRandomValues(new Uint8Array(32));
-    const locked = await load(home, null, USER, newPasswordWrapper);
+    const locked = await load(home, USER, newPasswordWrapper);
     expect(locked.locked).toBe(true);
     expect(locked.needs_recovery_key).toBe(true);
 
     // `reseal`: the wrapper is made from the password typed at this sign-in (a stale one is never sealed under).
     const recovered = await load(
-      home, null, USER, newPasswordWrapper, recoveryKeyWrapper, { reseal: true },
+      home, USER, newPasswordWrapper, recoveryKeyWrapper, { reseal: true },
     );
     expect(recovered.recoveryKey).toBe(true);
     expect(b64(recovered.raw)).toBe(b64(first.raw));
 
     globalThis.indexedDB = new IDBFactory();
-    const healed = await load(home, null, USER, newPasswordWrapper);
+    const healed = await load(home, USER, newPasswordWrapper);
     expect(b64(healed.raw)).toBe(b64(first.raw));
-  });
-
-  it('adds an independent passphrase without replacing normal password recovery', async () => {
-    const primary = await here();
-    const withIndependent = await setIndependentRecovery(
-      home, primary, PHRASE, wrapper, USER,
-    );
-    expect(withIndependent.mode).toBe('opaque_custody');
-    expect(withIndependent.independent).toBe(true);
-    expect(home.held.independent_ciphertext).toMatch(/^p2\./);
-    const firstSalt = home.held.independent_ciphertext.split('.')[1];
-
-    await setIndependentRecovery(home, withIndependent, PHRASE, wrapper, USER);
-    expect(home.held.independent_ciphertext.split('.')[1]).not.toBe(firstSalt);
-
-    globalThis.indexedDB = new IDBFactory();
-    const normal = await here();
-    expect(b64(normal.raw)).toBe(b64(primary.raw));
-
-    globalThis.indexedDB = new IDBFactory();
-    const independent = await load(home, PHRASE, USER, null);
-    expect(b64(independent.raw)).toBe(b64(primary.raw));
-  });
-
-  it('repairs a failed primary OPAQUE wrapper through independent recovery', async () => {
-    const primary = await here();
-    await setIndependentRecovery(home, primary, PHRASE, wrapper, USER);
-
-    const current = home.held.ciphertext;
-    const wrong = crypto.getRandomValues(new Uint8Array(32));
-    home.held.ciphertext = await seal(wrong, te.encode('not the recovery keyring'));
-
-    globalThis.indexedDB = new IDBFactory();
-    const locked = await here();
-    expect(locked.locked).toBe(true);
-    expect(locked.needs_independent).toBe(true);
-    expect(locked.needs_device).toBe(true);
-
-    const repaired = await load(home, PHRASE, USER, wrapper, null, { reseal: true });
-    expect(repaired.mode).toBe('opaque_custody');
-    expect(b64(repaired.raw)).toBe(b64(primary.raw));
-    expect(home.held.ciphertext).not.toBe(current);
-
-    globalThis.indexedDB = new IDBFactory();
-    const clean = await here();
-    expect(b64(clean.raw)).toBe(b64(primary.raw));
-  });
-
-  it('migrates legacy self-custody into OPAQUE while retaining the old passphrase as backup', async () => {
-    const legacy = await load(home, PHRASE, USER, null);
-    expect(legacy.mode).toBe('self_custody');
-
-    globalThis.indexedDB = new IDBFactory();
-    const opened = await load(home, PHRASE, USER, wrapper);
-    expect(opened.mode).toBe('opaque_custody');
-    expect(opened.independent).toBe(true);
-    expect(home.held.independent_ciphertext).toBeTruthy();
-
-    globalThis.indexedDB = new IDBFactory();
-    expect(b64((await here()).raw)).toBe(b64(opened.raw));
-  });
-
-  it('rotates the live key while migrating away from legacy server escrow', async () => {
-    // Legacy escrow as setup: made from opaque custody now, since a start without the wrapper creates no vault.
-    const deviceOnly = await load(home, null, USER, wrapper);
-    const escrowed = await setMode(home, deviceOnly, 'escrowed', null, USER);
-    const exposed = new Uint8Array(escrowed.raw);
-    expect(home.held.escrow_key).toBeTruthy();
-
-    globalThis.indexedDB = new IDBFactory();
-    const migrated = await here();
-    expect(migrated.mode).toBe('opaque_custody');
-    expect(b64(migrated.raw)).not.toBe(b64(exposed));
-    expect(b64(migrated.retired[0])).toBe(b64(exposed));
-    expect(home.held.escrow_key).toBe(null);
   });
 
   it('never creates trusted-device custody without the password-derived wrapper', async () => {
     // It used to make a `device_custody` vault here (the no-OPAQUE fallback). Now: locked, nothing written.
-    const first = await load(home, null, USER, null);
+    const first = await load(home, USER, null);
     expect(first.mode).toBe('none');
     expect(first.locked).toBe(true);
     expect(first.needs_password).toBe(true);
     expect(first.key).toBe(null);
     expect(home.held).toBe(null);
     globalThis.indexedDB = new IDBFactory();
-    const fresh = await load(home, null, USER, null);
+    const fresh = await load(home, USER, null);
     expect(fresh.needs_device).toBe(true);
     expect(fresh.key).toBe(null);
   });
@@ -262,48 +167,13 @@ describe('the history mirror', () => {
     await mirror(backup, 'dm1', 'rx', [{ target: 'f1', emoji: '\u{1F44D}' }]);
     await mirror(backup, 'dm2', 'f9', { text: 'elsewhere' });
 
-    expect(await home.operatorReads('dm1', 'f1')).toBeUndefined();
-
-    globalThis.indexedDB = new IDBFactory();
+        globalThis.indexedDB = new IDBFactory();
     const recovered = await here();
     const fresh = new Backup(home, recovered);
     const rows = await fresh.restore('dm1');
     expect(rows.get('f1').text).toBe('hello');
     expect(rows.get('rx')).toHaveLength(1);
     expect(rows.has('f9')).toBe(false);
-  });
-
-  it('lets the operator read rows only in explicit legacy escrow', async () => {
-    const primary = await here();
-    const escrowed = await setMode(home, primary, 'escrowed', null, USER);
-    const backup = new Backup(home, escrowed);
-    await mirror(backup, 'dm1', 'f1', { text: 'legacy escrow can read this' });
-    expect(await home.operatorReads('dm1', 'f1'))
-      .toEqual({ text: 'legacy escrow can read this' });
-  });
-
-  it('closes future mirrored history to a retained legacy recovery key', async () => {
-    const primary = await here();
-    const escrowed = await setMode(home, primary, 'escrowed', null, USER);
-    const backup = new Backup(home, escrowed);
-    await mirror(backup, 'dm1', 'f1', { text: 'said while escrowed' });
-    const oldRecovery = new Uint8Array(escrowed.raw);
-    const oldRow = home.rows.get('dm1/f1');
-
-    const taken = await setMode(
-      home, escrowed, 'opaque_custody', null, USER, wrapper,
-    );
-    backup.rekey(taken);
-    await mirror(backup, 'dm1', 'f2', { text: 'said after leaving escrow' });
-    const newRow = home.rows.get('dm1/f2');
-
-    expect(JSON.parse(td.decode(await open(oldRecovery, oldRow.ciphertext))).text)
-      .toBe('said while escrowed');
-    await expect(open(oldRecovery, newRow.ciphertext)).rejects.toThrow();
-
-    const rows = await new Backup(home, taken).restore('dm1');
-    expect(rows.get('f1').text).toBe('said while escrowed');
-    expect(rows.get('f2').text).toBe('said after leaving escrow');
   });
 
   it('folds repeated writes of one row into a single upload', async () => {
@@ -362,56 +232,30 @@ describe('the history mirror', () => {
 describe('the second copy of the vault', () => {
   it('survives a primary repair that does not mention it', async () => {
     const accountKey = crypto.getRandomValues(new Uint8Array(32));
-    const first = await load(home, null, USER, wrapper, accountKey);
+    const first = await load(home, USER, wrapper, accountKey);
     const copy = home.held.independent_ciphertext;
     expect(copy).toMatch(/^k1\./);
 
-    const handed = { ...first, mode: 'device_custody', independentCiphertext: undefined };
-    const repaired = await setMode(home, handed, 'opaque_custody', null, USER, wrapper);
+    const handed = { ...first, independentCiphertext: undefined };
+    const repaired = await writeOpaque(home, handed, USER, wrapper);
     expect(home.modes.at(-1)).not.toHaveProperty('independent_ciphertext');
     expect(home.modes.at(-1)).not.toHaveProperty('clear_independent');
     expect(home.held.independent_ciphertext).toBe(copy);
     expect(b64(repaired.raw)).toBe(b64(first.raw));
 
     globalThis.indexedDB = new IDBFactory();
-    const elsewhere = await load(home, null, USER, null, accountKey);
+    const elsewhere = await load(home, USER, null, accountKey);
     expect(elsewhere.recoveryKey).toBe(true);
     expect(b64(elsewhere.raw)).toBe(b64(first.raw));
   });
 
   it('keeps the flags the device already had when it was not told about the copy', async () => {
     const ring = await here();
-    const out = await setMode(
-      home, { ...ring, mode: 'device_custody', independent: true, recoveryKey: true },
-      'opaque_custody', null, USER, wrapper,
+    const out = await writeOpaque(
+      home, { ...ring, independent: true, recoveryKey: true }, USER, wrapper,
     );
     expect(out.independent).toBe(true);
     expect(out.recoveryKey).toBe(true);
-  });
-
-  it('clears a copy sealed before leaving escrow, because it holds the escrowed key', async () => {
-    const accountKey = crypto.getRandomValues(new Uint8Array(32));
-    const ring = await here();
-    home.held.independent_ciphertext = await recoveryKeyCiphertext(ring, accountKey);
-    const escrowed = await setMode(home, ring, 'escrowed', null, USER);
-    expect(home.held.independent_ciphertext).toMatch(/^k1\./);
-
-    const out = await setMode(home, escrowed, 'opaque_custody', null, USER, wrapper);
-    expect(home.modes.at(-1).clear_independent).toBe(true);
-    expect(home.held.independent_ciphertext).toBe(null);
-    expect(out.recoveryKey).toBe(false);
-    expect(b64(out.raw)).not.toBe(b64(escrowed.raw));
-  });
-
-  it('is removed only by saying so', async () => {
-    const ring = await here();
-    const withPhrase = await setIndependentRecovery(home, ring, PHRASE, wrapper, USER);
-    expect(home.held.independent_ciphertext).toMatch(/^p2\./);
-    const out = await removeIndependentRecovery(home, withPhrase, wrapper, USER);
-    expect(home.modes.at(-1).clear_independent).toBe(true);
-    expect(home.modes.at(-1)).not.toHaveProperty('independent_ciphertext');
-    expect(home.held.independent_ciphertext).toBe(null);
-    expect(out.independent).toBe(false);
   });
 });
 
@@ -458,7 +302,7 @@ async function planted(target, mode, ring, sealWith) {
   target.held = {
     mode,
     ciphertext: await seal(sealWith, payload),
-    escrow_key: mode === 'escrowed' ? b64(sealWith) : null,
+    escrow_key: null,
     independent_ciphertext: target.held?.independent_ciphertext || null,
   };
   target.version += 1;
@@ -528,17 +372,18 @@ describe('a vault two devices write', () => {
   });
 
   it('refuses a mode write against a version it did not read', async () => {
+    const accountKey = crypto.getRandomValues(new Uint8Array(32));
     const ring = await here();
     await planted(home, 'opaque_custody', ring, wrapper);
-    const out = await setIndependentRecovery(home, ring, PHRASE, wrapper, USER);
+    const out = await writeOpaque(home, ring, USER, wrapper, await recoveryKeyCiphertext(ring, accountKey));
     expect(home.writes.filter((w) => w.independent_ciphertext).length).toBe(2);
     expect(out.version).toBe(home.version);
 
     const other = { raw: crypto.getRandomValues(new Uint8Array(32)), retired: [] };
     await planted(home, 'opaque_custody', other, wrapper);
-    await expect(removeIndependentRecovery(home, out, wrapper, USER))
+    await expect(writeOpaque(home, out, USER, wrapper, await recoveryKeyCiphertext(ring, accountKey)))
       .rejects.toMatchObject({ code: 'vault_changed' });
-    expect(home.held.independent_ciphertext).toMatch(/^p2\./);
+    expect(home.held.independent_ciphertext).toMatch(/^k1\./);
   });
 
   it('keeps a held key a server copy has lost, and puts it back', async () => {
@@ -552,30 +397,123 @@ describe('a vault two devices write', () => {
     const fresh = await here();
     expect(fresh.openers.some((k) => sameRaw(k, first.raw))).toBe(true);
   });
+});
 
-  it('refuses an escrowed ring once this device has left escrow', async () => {
-    const held = await here();
-    const escrow = crypto.getRandomValues(new Uint8Array(32));
-    const served = { raw: crypto.getRandomValues(new Uint8Array(32)), retired: [held.raw] };
-    await planted(home, 'escrowed', served, escrow);
+// Phase 4: device_custody, self_custody and escrowed are retired. A vault still stored in one is never read as a key;
+// the one exception is a device_custody vault whose ring this device holds, or whose recovery copy opens (L1h).
+describe('a vault stored in a retired custody mode', () => {
+  beforeEach(() => {
+    home = new VersionedVaultHome();
+  });
 
+  const writesBefore = () => home.writes.length;
+
+  async function retiredVault(mode, { ring = null, independent = null } = {}) {
+    const served = ring || { raw: crypto.getRandomValues(new Uint8Array(32)), retired: [] };
+    await planted(home, mode, served, crypto.getRandomValues(new Uint8Array(32)));
+    home.held.independent_ciphertext = independent;
+    return served;
+  }
+
+  it.each(['self_custody', 'escrowed'])('refuses %s, locked, and writes nothing, even with a ring held and the password in hand', async (mode) => {
+    const held = { raw: crypto.getRandomValues(new Uint8Array(32)), retired: [] };
+    await rememberRecoveryKeyring(USER, held);
+    await retiredVault(mode);
+    const before = writesBefore();
     const out = await here();
-    expect(out.downgradeRefused).toBe(true);
+    expect(out.locked).toBe(true);
+    expect(out.key).toBeNull();
+    expect(out.retiredMode).toBe(mode);
+    expect(out.needs_password).toBe(false);
+    expect(home.writes.length).toBe(before);
+    expect(home.held.mode).toBe(mode);
+    const tokenOnly = await load(home, USER, null);
+    expect(tokenOnly.retiredMode).toBe(mode);
+    expect(tokenOnly.needs_password).toBe(true);
+    expect(home.writes.length).toBe(before);
+  });
+
+  it('refuses device_custody on a device holding nothing, and with no password, and writes nothing', async () => {
+    await retiredVault('device_custody');
+    const before = writesBefore();
+    const noRing = await here();
+    expect(noRing.locked).toBe(true);
+    expect(noRing.retiredMode).toBe('device_custody');
+    await rememberRecoveryKeyring(USER, { raw: crypto.getRandomValues(new Uint8Array(32)), retired: [] });
+    const noPassword = await load(home, USER, null);
+    expect(noPassword.locked).toBe(true);
+    expect(noPassword.retiredMode).toBe('device_custody');
+    expect(noPassword.key).toBeNull();
+    expect(home.writes.length).toBe(before);
+    expect(home.held.mode).toBe('device_custody');
+  });
+
+  it('converts device_custody (L1h) when this device holds the ring and the password is in hand, without rotating it', async () => {
+    const held = { raw: crypto.getRandomValues(new Uint8Array(32)), retired: [] };
+    await rememberRecoveryKeyring(USER, held);
+    await retiredVault('device_custody');
+    const out = await here();
+    expect(out.mode).toBe('opaque_custody');
+    expect(out.locked).toBeUndefined();
     expect(sameRaw(out.raw, held.raw)).toBe(true);
+    expect(out.retired).toEqual([]);
     expect(home.held.mode).toBe('opaque_custody');
-    expect(home.held.escrow_key).toBe(null);
+    expect(home.writes.at(-1).expected_version).toBe(home.version - 1);
     globalThis.indexedDB = new IDBFactory();
     expect(sameRaw((await here()).raw, held.raw)).toBe(true);
   });
 
-  it('still leaves a legacy escrow the device has never been out of', async () => {
-    const escrow = crypto.getRandomValues(new Uint8Array(32));
-    const served = { raw: crypto.getRandomValues(new Uint8Array(32)), retired: [] };
-    await planted(home, 'escrowed', served, escrow);
-    const out = await here();
-    expect(out.downgradeRefused).toBeUndefined();
+  it('converts device_custody from the recovery copy when the recovery key is in hand, and gives it the same ring', async () => {
+    const accountKey = crypto.getRandomValues(new Uint8Array(32));
+    const ring = { raw: crypto.getRandomValues(new Uint8Array(32)), retired: [] };
+    const copy = await recoveryKeyCiphertext(ring, accountKey);
+    await retiredVault('device_custody', { independent: copy });
+    const out = await load(home, USER, wrapper, accountKey);
     expect(out.mode).toBe('opaque_custody');
-    expect(sameRaw(out.raw, served.raw)).toBe(false);
-    expect(out.retired.some((k) => sameRaw(k, served.raw))).toBe(true);
+    expect(sameRaw(out.raw, ring.raw)).toBe(true);
+    expect(home.held.mode).toBe('opaque_custody');
+    expect(home.held.independent_ciphertext).toMatch(/^k1\./);
+    const wrong = crypto.getRandomValues(new Uint8Array(32));
+    await retiredVault('device_custody', { independent: copy });
+    globalThis.indexedDB = new IDBFactory();
+    const refused = await load(home, USER, wrapper, wrong);
+    expect(refused.retiredMode).toBe('device_custody');
+    expect(refused.key).toBeNull();
+  });
+
+  it('is replaced by a new vault only on purpose, and only at the version that was read', async () => {
+    const old = await retiredVault('escrowed', { independent: 'k1.stale-copy-of-the-old-ring' });
+    const made = await replaceRetiredVault(home, USER, wrapper);
+    expect(made.mode).toBe('opaque_custody');
+    expect(sameRaw(made.raw, old.raw)).toBe(false);
+    expect(home.held.mode).toBe('opaque_custody');
+    expect(home.held.independent_ciphertext).toBeNull();
+    expect(home.writes.at(-1)).toMatchObject({ mode: 'opaque_custody', clear_independent: true });
+    globalThis.indexedDB = new IDBFactory();
+    expect(sameRaw((await here()).raw, made.raw)).toBe(true);
+
+    await expect(replaceRetiredVault(home, USER, wrapper)).rejects.toMatchObject({ code: 'vault_not_retired' });
+
+    await retiredVault('self_custody');
+    const read = home.vault.bind(home);
+    let raced = false;
+    home.vault = async () => {
+      const out = await read();
+      if (!raced) {
+        raced = true;
+        await planted(home, 'opaque_custody', { raw: crypto.getRandomValues(new Uint8Array(32)) }, wrapper);
+      }
+      return out;
+    };
+    await expect(replaceRetiredVault(home, USER, wrapper)).rejects.toMatchObject({ status: 409 });
+    expect(home.held.mode).toBe('opaque_custody');
+  });
+
+  it('is replaced with a recovery copy under the recovery key when it is in hand', async () => {
+    await retiredVault('device_custody');
+    const accountKey = crypto.getRandomValues(new Uint8Array(32));
+    const made = await replaceRetiredVault(home, USER, wrapper, accountKey);
+    expect(made.recoveryKey).toBe(true);
+    expect(home.held.independent_ciphertext).toMatch(/^k1\./);
   });
 });

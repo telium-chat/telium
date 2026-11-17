@@ -1776,7 +1776,7 @@ export class Mls {
     this.tombstones.get(conversationId).add(payload.target);
     this.plaintext.delete(payload.target);
     this.track(del(OPENED, `${this.scope}:${payload.target}`));
-    // Also clear the history mirror (readable in escrowed mode); null so the erasure replicates.
+    // Also clear the history mirror; null so the erasure replicates.
     this.backup?.queue(conversationId, payload.target, null);
     this.reactions.get(conversationId)?.delete(payload.target);
     this.pins.get(conversationId)?.delete(payload.target);

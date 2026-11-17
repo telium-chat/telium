@@ -182,6 +182,31 @@ export async function reauthenticateOpaque(
   return recoveryPublicKey ? proof : proof.reauth_token;
 }
 
+/// What this password makes of the OPAQUE record the server holds right now: the vault wrapper and the key-stretching
+/// version in force. For a device whose answer to a password write was lost and so cannot tell whether the record it
+/// logged in with is still the current one. It is a fresh login on this session (the reauth token it ends with is not
+/// used), so it needs the password and proves it.
+export async function currentWrapperOpaque(home, password) {
+  const api = await client();
+  const first = api.startLogin({ password });
+  const server = await home.post('/_telium/v1/auth/opaque/reauth/start', {
+    start_login_request: first.startLoginRequest,
+  });
+  const ksfVersion = server.ksf_version ?? 1;
+  const finished = api.finishLogin({
+    clientLoginState: first.clientLoginState,
+    loginResponse: server.login_response,
+    password,
+    keyStretching: ksfFor(ksfVersion),
+  });
+  if (!finished) throw new Error('That password was not accepted.');
+  await home.post('/_telium/v1/auth/opaque/reauth/finish', {
+    login_id: server.login_id,
+    finish_login_request: finished.finishLoginRequest,
+  });
+  return { recoveryWrapper: recoveryWrapperFromExportKey(finished.exportKey), ksfVersion };
+}
+
 /// `vaultRewrap(newWrapper, copy)` is given the new password's wrapper and the recovery copy of the vault (`copy` is
 /// null when the server holds none) and returns the vault ring sealed under the new wrapper, null for "nothing to
 /// re-wrap", or `{ unopenable: true }` when the copy does not open under this recovery key (an account moved from

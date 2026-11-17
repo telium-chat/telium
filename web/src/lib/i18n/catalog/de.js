@@ -2828,18 +2828,14 @@ export const messages = {
   // operator" is one company, and German's singular would have forced a choice
   // between „der Betreiber“ and „die Betreiberin“ about a party this sentence
   // knows nothing about.
-  'chat.encryption.custody.escrowed': 'Nachrichten sind hier MLS-Frames. Dein Heimserver leitet sie weiter und sieht dabei immer, wer wann mit wem spricht. Dieses Konto nutzt noch die alte, servergestützte Wiederherstellung für Direktnachrichten: Dein Heimserver hält einen Schlüssel, der den Wiederherstellungstresor und den Verlaufsspiegel öffnet, die Betreiber können diese Nachrichten also mitlesen. Verschieb die Wiederherstellung unter Einstellungen → {pane} auf deine vertrauten Geräte.',
   'chat.encryption.custody.opaque': 'Nachrichten sind hier MLS-Frames. Dein Heimserver leitet sie weiter und sieht dabei immer, wer wann mit wem spricht. Dein Telium-Passwort stellt verschlüsselte Direktnachrichten über OPAQUE wieder her. Das Passwort geht nie an deinen Heimserver, und nur dein Client bekommt den Schlüssel zum Tresor und zum Verlaufsspiegel.',
-  'chat.encryption.custody.device': 'Nachrichten sind hier MLS-Frames. Dein Heimserver leitet sie weiter und sieht dabei immer, wer wann mit wem spricht. Deine Wiederherstellungsschlüssel für Direktnachrichten liegen auf Geräten, die du freigibst. Dein Heimserver speichert den verschlüsselten Verlaufsspiegel, hat aber keinen Schlüssel, der ihn öffnet.',
   // „Keines von beidem“ carries English's "Neither" across a sentence boundary,
   // which German can do because the pronoun declines and points back at two
   // named things (die Schlüssel, die Passphrase) without repeating either.
-  'chat.encryption.custody.self': 'Nachrichten sind hier MLS-Frames. Dein Heimserver leitet sie weiter und sieht dabei immer, wer wann mit wem spricht. Deine vertrauten Geräte halten die Schlüssel für deine Direktnachrichten, und eine eigene Wiederherstellungs-Passphrase kann sie zurückholen, wenn alle Geräte verloren gehen. Keines von beidem geht je an deinen Heimserver.',
 
   // Word for word the second half of `custody.escrowed`, as English is word for
   // word its own second half. The reader may well see both, and two different
   // German accounts of one arrangement would read as two arrangements.
-  'chat.encryption.escrowedNote': 'Dieses Konto nutzt noch die alte, servergestützte Wiederherstellung für Direktnachrichten: Dein Heimserver hält einen Schlüssel, der den Wiederherstellungstresor und den Verlaufsspiegel öffnet, die Betreiber können diese Nachrichten also mitlesen. Verschieb die Wiederherstellung unter Einstellungen → {pane} auf deine vertrauten Geräte.',
 
   // Why the history above is closed. The second clause is the one that stops
   // this reading as a fault, and German keeps it in the present indicative:
@@ -2862,7 +2858,6 @@ export const messages = {
   // spelling, hyphens and all, and is two characters longer than the English.
   // None of them is abbreviated to fit; the pill is what has to give.
   'chat.encryption.chip.keyChanged': 'Neuer Schlüssel',
-  'chat.encryption.chip.serverCanRead': 'Server kann mitlesen',
   'chat.encryption.chip.endToEnd': 'Ende-zu-Ende',
   'chat.encryption.chip.encrypted': 'Verschlüsselt',
 
@@ -2930,7 +2925,6 @@ export const messages = {
   // brings the Tresor with it, which is the metaphor the recovery copy uses
   // everywhere else.
   'chat.encryption.vaultLocked.title': 'Deine älteren Nachrichten sind auf diesem Gerät verschlossen.',
-  'chat.encryption.vaultLocked.body': 'Gib unter Einstellungen → {pane} deine Wiederherstellungs-Passphrase ein, um sie zurückzuholen.',
 
   'chat.encryption.deviceApproval.title': 'Dieses Gerät hat deine Schlüssel noch nicht.',
   // „wandern direkt zwischen deinen Geräten“ is a claim about where the keys go
@@ -2944,8 +2938,6 @@ export const messages = {
   // from `vaultLocked` — what is verschlossen gets aufgeschlossen — and avoids
   // „entsperrt“, which this catalogue has spent on lifting a ban. Two ways out,
   // both real, in the order of what they cost.
-  'chat.encryption.recoveryFallback.title': 'Die Anmeldung hat deine älteren Nachrichten nicht aufgeschlossen.',
-  'chat.encryption.recoveryFallback.body': 'Gib unter Einstellungen → {pane} deine Wiederherstellungs-Passphrase ein, oder gib dieses Gerät von einem frei, das du schon benutzt.',
 
   'chat.encryption.heldBack.own': 'Dein anderes Gerät ist noch nicht in dieser Unterhaltung. Es kommt von selbst dazu, sobald bestätigt ist, dass es deins ist.',
   'chat.encryption.heldBack.other': 'Eines ihrer Geräte ist noch nicht in dieser Unterhaltung. Es kommt von selbst dazu, sobald bestätigt ist, dass es ihr gehört.',
@@ -4973,12 +4965,7 @@ export const messages = {
   // ---- auth
   'auth.advanced.identityMismatch': 'Die Identitätsgeschichte dieses Kontos ließ sich nicht prüfen.',
   'auth.advanced.identityName': 'Kontoidentität',
-  'auth.advanced.legacyPassphraseBody': 'Dieses Konto trägt noch eine Passphrase aus einer älteren Version von Telium mit sich. Dein Passwort erfüllt dieselbe Aufgabe bereits.',
-  'auth.advanced.legacyPassphraseName': 'Alte Wiederherstellungs-Passphrase',
   'auth.advanced.modeName': 'Wie dieses Konto wiederhergestellt wird',
-  'auth.advanced.passphraseRemoved': 'Alte Passphrase entfernt. Dein Passwort holt deine Nachrichten weiterhin zurück.',
-  'auth.advanced.removeFailed': 'Die alte Wiederherstellungs-Passphrase ließ sich nicht entfernen: {detail}',
-  'auth.advanced.removePassphrase': 'Die alte Passphrase entfernen',
   'auth.advanced.rootSequence': ' · Wurzelsequenz {sequence}',
   'auth.backup.delete': 'Die Sicherung löschen',
   'auth.backup.deleteBody': 'Nachrichten, die bereits auf diesem Gerät sind, bleiben. Ein neues Gerät wird die älteren nicht zurückholen können.',
@@ -4986,7 +4973,6 @@ export const messages = {
   'auth.backup.deleted': 'Sicherung gelöscht.',
   'auth.backup.deleteFailed': 'Die Sicherung ließ sich nicht löschen: {detail}',
   'auth.backup.deleteTitle': 'Die Sicherung löschen',
-  'auth.backup.detail': '{count, plural, one {# versiegelter Eintrag.} other {# versiegelte Einträge.}} {readable, select, yes {Dein Heimserver kann sie öffnen.} other {Dein Heimserver kann sie nicht öffnen.}}',
   'auth.backup.detailName': 'Sicherung',
   'auth.backup.empty': 'Es ist noch nichts gespeichert. Ein neues Gerät würde ab heute beginnen.',
   'auth.backup.explain': 'Eine verschlüsselte Kopie wird aufbewahrt, damit ein neues Gerät aufholen kann. Zuletzt geschrieben {at, relative}.',
@@ -4996,15 +4982,9 @@ export const messages = {
   'auth.crumb.recoveryKey': 'Wiederherstellungsschlüssel',
   'auth.crumb.username': 'Benutzername',
   'auth.crumb.welcome': 'Willkommen',
-  'auth.custody.device.name': 'Wiederherstellung über vertraute Geräte',
-  'auth.custody.device.note': 'Deine Schlüssel liegen auf den Geräten, die du freigegeben hast, und nirgendwo sonst.',
-  'auth.custody.escrowed.name': 'Servergestützte Wiederherstellung (alt)',
-  'auth.custody.escrowed.note': 'Dein Heimserver hält einen Schlüssel, der diese Nachrichten öffnet.',
   'auth.custody.line': '{name}. {note}',
   'auth.custody.opaque.name': 'Passwort-Wiederherstellung (OPAQUE-Exportschlüssel)',
   'auth.custody.opaque.note': 'Die Anmeldung mit deinem Passwort genügt, um deine Nachrichten zurückzuholen.',
-  'auth.custody.self.name': 'Eigene Passphrase (alt)',
-  'auth.custody.self.note': 'Deine Schlüssel liegen auf deinen Geräten, mit einer Passphrase als Weg zurück.',
   'auth.custody.unknown': 'Noch nicht eingerichtet',
   'auth.encryption.backupEmpty': 'Nichts gespeichert',
   'auth.encryption.backupFact': 'Sicherung älterer Nachrichten',
@@ -5014,10 +4994,7 @@ export const messages = {
   'auth.encryption.devicesHint': '„Geräte“ ist der Ort, an dem du ein Gerät verifizierst oder abmeldest.',
   'auth.encryption.devicesSignedIn': '{count, plural, one {# angemeldet} other {# angemeldet}}',
   'auth.encryption.devicesVerified': '{total, plural, one {{verified} von # verifiziert} other {{verified} von # verifiziert}}',
-  'auth.encryption.escrowed.note': 'Dieses Konto nutzt noch die alte Wiederherstellungseinrichtung. Sie abzuschalten erfordert nur einen Druck und kein zweites Passwort.',
-  'auth.encryption.escrowed.title': 'Dein Heimserver kann deine privaten Nachrichten lesen.',
   'auth.encryption.keyFact': 'Wiederherstellungsschlüssel',
-  'auth.encryption.keyLegacy': 'Alte Passphrase',
   'auth.encryption.keyMissing': 'Noch nicht erstellt',
   'auth.encryption.keySaved': 'Gespeichert',
   'auth.encryption.locked.note': 'Neue Nachrichten funktionieren. Um die älteren zurückzuholen, verwende unten deinen Wiederherstellungsschlüssel oder gib dieses Gerät von einem frei, das du bereits benutzt.',
@@ -5026,13 +5003,6 @@ export const messages = {
   'auth.encryption.ok.title': 'Deine privaten Nachrichten sind geschützt.',
   'auth.encryption.settingUp.note': 'Das dauert nach der Anmeldung einen Moment.',
   'auth.encryption.settingUp.title': 'Verschlüsselung wird auf diesem Gerät eingerichtet.',
-  'auth.escrow.button': 'Abschalten',
-  'auth.escrow.doneDevices': 'Fertig. Deine Schlüssel liegen jetzt auf deinen Geräten.',
-  'auth.escrow.doneRefresh': 'Fertig, allerdings brauchen ein paar Gespräche noch eine Schlüsselaktualisierung.',
-  'auth.escrow.doneServer': 'Fertig. Dein Server kann keine neuen Nachrichten mehr öffnen.',
-  'auth.escrow.explain': 'Dein Server kann danach nichts mehr öffnen, was nach diesem Zeitpunkt gesendet wird. Was er bereits gesehen hat, hat er bereits gesehen.',
-  'auth.escrow.failed': 'Servergestützte Wiederherstellung ließ sich nicht abschalten: {detail}',
-  'auth.escrow.title': 'Servergestützte Wiederherstellung abschalten',
   'auth.find.afterColon': 'Oder tippe ihn nach einem Doppelpunkt ein, etwa @{user}:dein.server',
   'auth.find.busy': 'Wird gesucht…',
   'auth.find.changeAddress': 'Andere Adresse verwenden',
@@ -5111,7 +5081,6 @@ export const messages = {
   'auth.localData.identity.confirmTitle': 'Das lässt sich nicht rückgängig machen. Du verlierst:',
   'auth.localData.identity.cost1': 'Die MLS-Signieridentität dieses Geräts. Für alle, mit denen du sprichst, wird es ein neues Gerät sein, und sie sehen es als unverifiziert, bis du es erneut verifizierst.',
   'auth.localData.identity.cost2': 'Den gespeicherten Gruppenstatus für jedes verschlüsselte Gespräch. Nachrichten, die bereits auf diesem Gerät sind, bleiben nur lesbar, wenn der Wiederherstellungsschlüssel des Kontos sie wieder öffnen kann; alles, wovon dieses Gerät der letzte Besitzer ist, ist weg.',
-  'auth.localData.identity.cost3': 'Den zwischengespeicherten DM-Wiederherstellungsschlüsselbund, sodass die nächste Anmeldung den Schlüsseltresor erneut entsperren muss — mit deinem Wiederherstellungsschlüssel oder deiner Passphrase, die du dafür zur Hand haben musst.',
   'auth.localData.identity.cost4': 'Deine Sitzung. Du wirst auf diesem Gerät abgemeldet.',
   'auth.localData.identity.open': 'Geräteidentität löschen…',
   'auth.localData.identity.title': 'Identität dieses Geräts löschen',
@@ -5197,14 +5166,10 @@ export const messages = {
   'auth.start.title': 'Willkommen bei Telium',
   'auth.unlock.button': 'Entsperren',
   'auth.unlock.done': 'Entsperrt. Ab jetzt genügt dein Passwort.',
-  'auth.unlock.doneDevice': 'Auf diesem Gerät entsperrt.',
   'auth.unlock.enterKey': 'Gib deinen Wiederherstellungsschlüssel ein.',
-  'auth.unlock.enterPassphrase': 'Gib deine Wiederherstellungs-Passphrase ein.',
   'auth.unlock.failed': 'Deine Nachrichten ließen sich nicht entsperren: {detail}',
   'auth.unlock.keyHint': 'Der Schlüssel, den du bei der Erstellung dieses Kontos bekommen hast.',
   'auth.unlock.otherDevice': 'Du kannst Telium auch auf einem Gerät öffnen, das du bereits benutzt, und dieses von dort freigeben. Es wird nichts eingegeben, und dein Server sieht die Schlüssel nie.',
-  'auth.unlock.passphraseHint': 'Die Passphrase, die du diesem Konto selbst hinzugefügt hast.',
-  'auth.unlock.passphraseLabel': 'Wiederherstellungs-Passphrase',
   'auth.unlock.title': 'Deine älteren Nachrichten entsperren',
 
   // ---- chat

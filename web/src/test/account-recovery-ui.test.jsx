@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ModalHost, ModalProvider } from '../hooks/useModal.jsx';
 import { StoreProvider } from '../hooks/useStore.jsx';
+import { toasts } from '../hooks/useToast.jsx';
 import { LoginView } from '../views/LoginView.jsx';
 import { createFakeServer, freshStore, HOME } from './fake-server.js';
 import { chooseRecovery, signIn } from './sign-in.js';
@@ -93,5 +94,50 @@ describe('account recovery UI', () => {
       { home: 'https://home.example' },
     );
     expect(onSignedIn).toHaveBeenCalledTimes(1);
+  });
+
+  // The reset worked for the password but the vault's recovery copy did not open under this recovery key (an account moved
+  // here), so the old history stays locked: the user is told so before the app opens, instead of finding it locked.
+  it('says the old history stays locked when the reset could not open the vault', async () => {
+    createFakeServer({ recoveryKeyReset: true }).install();
+    const add = vi.spyOn(toasts, 'add');
+    const store = {
+      resetPassword: vi.fn().mockResolvedValue({ user_id: '@alice:home.example', vault_unopenable: true }),
+    };
+    const { user, onSignedIn } = mount(store);
+
+    await user.type(await screen.findByRole('textbox', { name: 'Telium address' }), '@alice:home.example');
+    await chooseRecovery(user);
+    await user.type(screen.getByLabelText('Recovery key'), KEY);
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.type(await screen.findByLabelText('New password'), 'a much newer password');
+    await user.type(screen.getByLabelText('Confirm new password'), 'a much newer password');
+    await user.click(screen.getByRole('button', { name: 'Reset password' }));
+
+    expect(onSignedIn).toHaveBeenCalledTimes(1);
+    const said = add.mock.calls.map(([toast]) => toast.title.props.children);
+    expect(said).toContain(
+      'Your password is reset. Your older encrypted messages stay locked until you enter the recovery key from your previous server, under Settings → Encryption key.',
+    );
+    add.mockRestore();
+  });
+
+  it('says nothing about locked history after an ordinary reset', async () => {
+    createFakeServer({ recoveryKeyReset: true }).install();
+    const add = vi.spyOn(toasts, 'add');
+    const store = { resetPassword: vi.fn().mockResolvedValue({ user_id: '@alice:home.example' }) };
+    const { user, onSignedIn } = mount(store);
+
+    await user.type(await screen.findByRole('textbox', { name: 'Telium address' }), '@alice:home.example');
+    await chooseRecovery(user);
+    await user.type(screen.getByLabelText('Recovery key'), KEY);
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.type(await screen.findByLabelText('New password'), 'a much newer password');
+    await user.type(screen.getByLabelText('Confirm new password'), 'a much newer password');
+    await user.click(screen.getByRole('button', { name: 'Reset password' }));
+
+    expect(onSignedIn).toHaveBeenCalledTimes(1);
+    expect(add).not.toHaveBeenCalled();
+    add.mockRestore();
   });
 });

@@ -905,7 +905,14 @@ pub async fn import_user(
             .bind(target_id)
             .bind(mode)
             .bind(ciphertext)
-            .bind(vault.get("independent_ciphertext").and_then(Value::as_str))
+            // Only the recovery-key copy lands: a passphrase copy (`p2.`, or the unprefixed self-custody form) is retired
+            // custody (key-custody design, phase 4) and is left behind with the account's old server.
+            .bind(
+                vault
+                    .get("independent_ciphertext")
+                    .and_then(Value::as_str)
+                    .filter(|copy| copy.starts_with("k1.")),
+            )
             .bind(int(vault, "version", 1))
             .bind(now)
             .execute(&mut *tx)
