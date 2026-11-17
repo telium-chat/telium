@@ -33,10 +33,15 @@ function authError(code, message, extra = {}) {
 /// Sign-in waits on custody for at most this long; a hung request then costs the setup, never the sign-in.
 export const CUSTODY_TIMEOUT_MS = 15_000;
 
-function withTimeout(work, ms, label) {
+/// Gives up on `work` after `ms`, and cancels the requests behind it (`abort`): a hung one would otherwise keep holding the
+/// account-key lock, and the next `Trust.start` in this tab would wait on it for good.
+function withTimeout(work, ms, label, abort) {
   let timer;
   const expired = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms} ms`)), ms);
+    timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${ms} ms`));
+      abort.abort();
+    }, ms);
   });
   return Promise.race([work, expired]).finally(() => clearTimeout(timer));
 }
@@ -289,16 +294,19 @@ export const sessionMethods = {
   /// a failure or a request that does not answer in time leaves the account without them, which the next sign-in with the password retries (`vault.load` and
   /// `ensureRoot` both only create what is missing), and never stops the sign-in.
   async createCustody(resp, base, recoveryWrapper, accountRecoveryWrapper) {
+    const abort = new AbortController();
     try {
       const api = new Api({
         base,
         token: resp.access_token,
         domain: resp.server_name || new URL(base).host,
+        signal: abort.signal,
       });
       const ring = await withTimeout(
         vault.load(api, null, resp.user_id, recoveryWrapper, accountRecoveryWrapper),
         this.custodyTimeoutMs ?? CUSTODY_TIMEOUT_MS,
         'loading the recovery vault',
+        abort,
       );
       if (!ring?.key) return;
       const [{ loadCiphersuite }, { Trust }] = await Promise.all([encryption(), verification()]);
@@ -307,6 +315,7 @@ export const sessionMethods = {
         trust.ensureRoot(await loadCiphersuite(), ring.key),
         this.custodyTimeoutMs ?? CUSTODY_TIMEOUT_MS,
         'setting up the account key',
+        abort,
       );
     } catch (e) {
       console.warn('could not set up encrypted-message custody at sign-in', e);
