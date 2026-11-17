@@ -205,6 +205,52 @@ export function AccountPane({ onClose }) {
   );
 }
 
+/// The vault is re-wrapped under the new password in the same server write, so a failure leaves the old password working.
+export function ChangePasswordSection({ store }) {
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [again, setAgain] = useState('');
+  const [busy, setBusy] = useState(false);
+  if (!store.opaqueAuth) return null;
+  const mismatch = again !== '' && again !== next;
+  const save = async () => {
+    setBusy(true);
+    try {
+      await store.changePassword(current, next);
+      setCurrent(''); setNext(''); setAgain('');
+      toast('Password changed. Your other devices were signed out; they sign in again with the new password.');
+    } catch (e) { reportError(e, 'Could not change the password'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Section title="Change password">
+      <Hint>
+        {'Your encrypted-message key is re-sealed under the new password in the same step, so '
+          + 'history and recovery keep working. Your other devices are signed out and sign in again with the new password.'}
+      </Hint>
+      <Field label="Current password">
+        <TextInput type="password" autoComplete="current-password" value={current}
+          onChange={(e) => setCurrent(e.target.value)} />
+      </Field>
+      <Field label="New password">
+        <TextInput type="password" autoComplete="new-password" value={next}
+          onChange={(e) => setNext(e.target.value)} />
+      </Field>
+      <Field label="New password again" hint={mismatch ? 'The two do not match.' : undefined}>
+        <TextInput type="password" autoComplete="new-password" value={again}
+          onChange={(e) => setAgain(e.target.value)} />
+      </Field>
+      <Button
+        className="self-start"
+        disabled={busy || !current || !next || next !== again}
+        onClick={save}
+      >
+        Change password
+      </Button>
+    </Section>
+  );
+}
+
 function AccountSafetySections({ store, onClose }) {
   const dialogs = useDialogs();
   const [password, setPassword] = useState('');
@@ -230,6 +276,7 @@ function AccountSafetySections({ store, onClose }) {
 
   return (
     <>
+      <ChangePasswordSection store={store} />
       <RecoveryEmailSection store={store} />
       <MembershipMovesSection store={store} />
 

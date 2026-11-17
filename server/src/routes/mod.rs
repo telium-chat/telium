@@ -602,6 +602,14 @@ fn identity_routes() -> Router<AppState> {
         .route("/_telium/v1/auth/opaque/reauth/start", post(opaque::reauth_start))
         .route("/_telium/v1/auth/opaque/reauth/finish", post(opaque::reauth_finish))
         .route(
+            "/_telium/v1/auth/opaque/password/change/start",
+            post(opaque::password_change_start),
+        )
+        .route(
+            "/_telium/v1/auth/opaque/password/change/finish",
+            post(opaque::password_change_finish),
+        )
+        .route(
             "/_telium/v1/auth/recovery-key/vault-copy/start",
             post(opaque::recovery_copy_start),
         )

@@ -98,7 +98,7 @@ describe('a vault that moved with its account', () => {
     expect(wrong.locked).toBe(true);
     expect(wrong.needs_recovery_key).toBe(true);
 
-    const opened = await load(destination, null, NEW_USER, newWrapper, recovery.vaultWrapper);
+    const opened = await load(destination, null, NEW_USER, newWrapper, recovery.vaultWrapper, { reseal: true });
     expect(opened.locked).toBeFalsy();
     expect(b64(opened.raw)).toBe(b64(original.raw));
     expect(destination.modeChanges).toBe(1);

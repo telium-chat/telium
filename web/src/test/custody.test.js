@@ -152,8 +152,9 @@ describe('key custody', () => {
     expect(locked.locked).toBe(true);
     expect(locked.needs_recovery_key).toBe(true);
 
+    // `reseal`: the wrapper is made from the password typed at this sign-in (a stale one is never sealed under).
     const recovered = await load(
-      home, null, USER, newPasswordWrapper, recoveryKeyWrapper,
+      home, null, USER, newPasswordWrapper, recoveryKeyWrapper, { reseal: true },
     );
     expect(recovered.recoveryKey).toBe(true);
     expect(b64(recovered.raw)).toBe(b64(first.raw));
@@ -199,7 +200,7 @@ describe('key custody', () => {
     expect(locked.needs_independent).toBe(true);
     expect(locked.needs_device).toBe(true);
 
-    const repaired = await here(PHRASE);
+    const repaired = await load(home, PHRASE, USER, wrapper, null, { reseal: true });
     expect(repaired.mode).toBe('opaque_custody');
     expect(b64(repaired.raw)).toBe(b64(primary.raw));
     expect(home.held.ciphertext).not.toBe(current);

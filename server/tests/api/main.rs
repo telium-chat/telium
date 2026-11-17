@@ -6,7 +6,8 @@ use opaque_ke::ciphersuite::CipherSuite;
 use opaque_ke::rand::rngs::OsRng;
 use opaque_ke::{
     ClientLogin, ClientLoginFinishParameters, ClientRegistration,
-    ClientRegistrationFinishParameters, CredentialResponse, RegistrationResponse,
+    ClientRegistrationFinishParameters, ClientRegistrationStartResult, CredentialResponse,
+    RegistrationResponse,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};

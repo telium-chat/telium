@@ -8,6 +8,7 @@ import { b64url, unb64 } from './util.js';
 const PREFIX = 'telium-recovery-v1-';
 export const PENDING_RECOVERY_STORAGE_KEY = 'telium.pending-account-recovery.v1';
 const RESET_DOMAIN = 'telium-password-reset:v1';
+const RESET_START_DOMAIN = 'telium-password-reset-start:v1';
 const COPY_RESTORE_DOMAIN = 'telium-recovery-k1-restore:v1';
 const te = new TextEncoder();
 const SIGN_LABEL = te.encode('telium/account-recovery-sign/v1');
@@ -61,15 +62,21 @@ export function recoveryVaultWrapper(value) {
   return new Uint8Array(hmac(sha256, seedBytes(value), VAULT_LABEL));
 }
 
+/// `vault` ({ ciphertext, version }) is the re-wrapped vault the reset replaces the old one with; it is inside the signature,
+/// so the server cannot swap it, and a reset that carries none signs the shorter form.
 export function passwordResetPayload(
   userId,
   resetId,
   challenge,
   registrationRecord,
+  vault = null,
+  unopenableVersion = null,
 ) {
-  return te.encode(
-    `${RESET_DOMAIN}|${userId}|${resetId}|${challenge}|${registrationRecord}`,
-  );
+  let text = `${RESET_DOMAIN}|${userId}|${resetId}|${challenge}|${registrationRecord}`;
+  if (vault) text += `|${vault.version}|${vault.ciphertext}`;
+  // "The recovery copy of vault `version` does not open under this key; reset anyway." Only the key's holder can say it.
+  if (unopenableVersion != null) text += `|vault-unopenable|${unopenableVersion}`;
+  return te.encode(text);
 }
 
 export function signPasswordReset(
@@ -78,9 +85,24 @@ export function signPasswordReset(
   resetId,
   challenge,
   registrationRecord,
+  vault = null,
+  unopenableVersion = null,
 ) {
   return b64url(ed25519.sign(
-    passwordResetPayload(userId, resetId, challenge, registrationRecord),
+    passwordResetPayload(userId, resetId, challenge, registrationRecord, vault, unopenableVersion),
+    signingSeed(recoveryKey),
+  ));
+}
+
+/// Proves the caller holds the recovery key before the server hands back the recovery copy of the vault. `user` is
+/// exactly what is sent in the request.
+export function passwordResetStartPayload(user, registrationRequest) {
+  return te.encode(`${RESET_START_DOMAIN}|${user}|${registrationRequest}`);
+}
+
+export function signPasswordResetStart(recoveryKey, user, registrationRequest) {
+  return b64url(ed25519.sign(
+    passwordResetStartPayload(user, registrationRequest),
     signingSeed(recoveryKey),
   ));
 }

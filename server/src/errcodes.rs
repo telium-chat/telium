@@ -125,6 +125,12 @@ pub const FRAME_ID_REUSED: &str = "frame_id_reused";
 /// Key vault changed since read; carries stored `version` (0 if none).
 pub const VAULT_VERSION_CONFLICT: &str = "vault_version_conflict";
 
+/// The OPAQUE key-stretching parameter version is not one this server knows; carries `max`.
+pub const UNSUPPORTED_KSF_VERSION: &str = "unsupported_ksf_version";
+
+/// A password write that changes the export key must carry the re-wrapped vault in the same request (I5).
+pub const VAULT_REWRAP_REQUIRED: &str = "vault_rewrap_required";
+
 /// Server doesn't order that conversation; carries `sequencer`.
 pub const NOT_SEQUENCER: &str = "not_sequencer";
 
@@ -152,7 +158,8 @@ mod tests {
         STANDBY_READ_ONLY, SHUT_DOWN, TRY_AGAIN, MIGRATION_IN_PROGRESS, MIGRATION_HANDOFF_INVALID,
         MIGRATION_REFUSED, TOO_LARGE, UNSUPPORTED_MEDIA_TYPE, QUOTA_EXCEEDED, SERVER_STORAGE_FULL,
         EPOCH_CONFLICT, FRAME_ID_REUSED, VAULT_VERSION_CONFLICT, NOT_SEQUENCER,
-        NOT_COMMITTER, HANDOFF_STALE, GENERATION_CONFLICT,
+        NOT_COMMITTER, HANDOFF_STALE, GENERATION_CONFLICT, UNSUPPORTED_KSF_VERSION,
+        VAULT_REWRAP_REQUIRED,
     ];
 
     #[test]

@@ -249,6 +249,9 @@ export const dmMethods = {
       userId,
       this.authRecoveryWrapper,
       recoveryWrapper,
+      // The user typed the recovery key to bring a moved vault under this server's password key. The session that holds
+      // that key is live, so a password change elsewhere has not ended it (a change ends every other session).
+      { reseal: true },
     );
     if (opened.locked || !opened.key) {
       throw new Error(recoveryWrapper
