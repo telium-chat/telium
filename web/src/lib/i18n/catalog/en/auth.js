@@ -201,8 +201,8 @@ export const auth = {
   // Shown under the username field while registering. The server is part of the
   // address, so the preview spells it out. `{address}` is the whole thing, e.g.
   // `@ada:example.org`, and is data.
-  'auth.identity.previewEmpty': 'Your username includes your server: <b>{address}</b>',
-  'auth.identity.preview': 'Your full username will be <b>{address}</b>. The server is part of it.',
+  'auth.identity.previewEmpty': 'Your full username will be <b>{address}</b>',
+  'auth.identity.preview': 'Your full username will be <b>{address}</b>',
 
   // ------------------------------------------------------------- the password
 

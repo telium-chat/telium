@@ -35,7 +35,6 @@ describe('UsernamePreview', () => {
 
     rerender(<UsernamePreview user="Ada" host="example.org" />);
     expect(screen.getByTestId('username-preview').textContent).toContain('@ada:example.org');
-    expect(screen.getByTestId('username-preview').textContent).toContain('The server is part of it');
   });
 
   it('warns instead of previewing a name that cannot be registered', () => {
