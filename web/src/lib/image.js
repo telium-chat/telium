@@ -4,9 +4,9 @@ export const PRESETS = {
   // A still avatar stays small. An animated one gets more room, up to what the origin's profile-asset ceiling
   // allows (`animatedLimit`), because a GIF squeezed to 256 KB loses most of its frames or colour.
   avatar: { size: 256, maxBytes: 256 * 1024, animatedMaxBytes: 512 * 1024 },
-  // Banners share the profile-asset 256 KB ceiling.
+  // Banners stay at 256 KB even though the origin's profile-asset ceiling now allows 512 KB (that room is for animated avatars).
   banner: { width: 600, height: 200, aspect: 3, maxBytes: 256 * 1024 },
-  // Guild icons share the profile-asset ceiling.
+  // Guild icons likewise stay at 256 KB, under the origin's profile-asset ceiling.
   icon: { size: 256, maxBytes: 256 * 1024 },
   emoji: { size: 128, maxBytes: 96 * 1024 },
   // The guild server caps a sticker's pack entry at 256 KB.
