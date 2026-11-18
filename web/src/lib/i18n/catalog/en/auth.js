@@ -198,6 +198,11 @@ export const auth = {
   // is the homeserver this flow is pointed at and is data.
   'auth.identity.placeholderNew': 'ada',
   'auth.identity.placeholder': 'ada or @ada:{host}',
+  // Shown under the username field while registering. The server is part of the
+  // address, so the preview spells it out. `{address}` is the whole thing, e.g.
+  // `@ada:example.org`, and is data.
+  'auth.identity.previewEmpty': 'Your username includes your server: <b>{address}</b>',
+  'auth.identity.preview': 'Your full username will be <b>{address}</b>. The server is part of it.',
 
   // ------------------------------------------------------------- the password
 
