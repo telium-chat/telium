@@ -220,6 +220,7 @@ export class Store extends Emitter {
     const wake = () => {
       this.freshenSessions();
       this.gw.wake();
+      this.retryStartup();
     };
     listen(document, 'visibilitychange', () => {
       if (!document.hidden) wake();
@@ -240,6 +241,7 @@ export class Store extends Emitter {
     for (const off of this.unlisten.splice(0)) off();
     clearInterval(this.renewTimer);
     clearTimeout(this.fallbackTimer);
+    clearTimeout(this.startupTimer);
     clearInterval(this.probeTimer);
     clearTimeout(this.muteSweep);
     clearTimeout(this.membersReread);

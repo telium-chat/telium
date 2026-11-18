@@ -18,6 +18,15 @@ async function discoverRelay(home) {
   };
 }
 
+// Seconds between asks while the homeserver is out of reach; the last wait repeats.
+const STARTUP_RETRY_MS = [3000, 10000, 30000, 60000, 120000];
+
+/// No answer, not a refusal: a 4xx means the homeserver was reached and said no.
+function isUnanswered(e) {
+  const status = e?.status;
+  return typeof status !== 'number' || status >= 500 || [408, 425, 429].includes(status);
+}
+
 export const lifecycleMethods = {
   /// A fast READY can land before IndexedDB answers; `snapshot.apply` refuses a non-empty store.
   /// Must not throw: `Root` shows only a generic outage for a `start` rejection.
@@ -74,9 +83,14 @@ export const lifecycleMethods = {
     } catch (e) {
       if (e instanceof HttpError && e.status === 401) { this.signOut(); throw e; }
       if (!this.me) throw e;
+      // Showing the saved view is all that can be done now. Everything below needs the homeserver, so it is picked up
+      // again by retryStartup() when it answers, rather than staying off until the app is restarted.
+      this.startDegraded = true;
+      this.scheduleStartupRetry();
       this.emit('ready');
       return;
     }
+    this.startDegraded = false;
     this.emit('me', this.me);
 
     this.loadMigrationAlerts();
@@ -87,62 +101,7 @@ export const lifecycleMethods = {
       .catch((e) => console.warn('sync store unavailable', e))
       .then(() => this.adoptDmOutbox());
 
-    // Not awaited, not fatal: failure should cost only DMs. Recovery key first: every sign-in is a new MLS device.
-    encryption()
-      .then(({ Mls }) => {
-        this.backup = new Backup(this.home, null);
-        // Published to `this.mls` only once started, or a half-built engine throws inside the crypto.
-        const engine = new Mls(this.home, {
-          userId: home.user_id,
-          deviceId: home.device_id,
-          backup: this.backup,
-        });
-        engine.verifyClaimedPackage = (userId, deviceId, signatureKey) => (
-          this.verifyClaimedPackage(userId, deviceId, signatureKey)
-        );
-        engine.isRevokedKey = (userId, key) => Boolean(this.trust?.isRevokedKey(userId, key));
-        engine.onGroupName = () => this.emit('conversations');
-        engine.sendsRead = (id) => this.readReceiptsIn(id);
-        engine.sendsDelivered = (id) => this.deliveryAcksIn(id);
-        this.refreshCustody().catch(() => {});
-        return vault.load(
-          this.home,
-          home.user_id,
-          this.authRecoveryWrapper,
-          this.accountRecoveryWrapper,
-        )
-          .then(async (loaded) => {
-            // A session without the password never writes custody: a vault in a retired mode stays locked until a
-            // password sign-in converts it, or the user starts a new one (vault.js loadRetired).
-            const v = loaded;
-            this.vault = v;
-            if (v.locked) this.emit('vault', v);
-            if (v.created || this.custody?.mode !== v.mode) {
-              this.refreshCustody().catch(() => {});
-            }
-            this.sync.adoptKeyring(v, { current: !!v.created || v !== loaded })
-              .catch((e) => console.warn('sync store could not take the key', e));
-            return engine.adoptRecoveryKey(v);
-          })
-          .catch((e) => console.warn('key vault unavailable', e))
-          .then(() => engine.start())
-          // Published only once it can do crypto, so `this.mls` set means usable.
-          .then(() => { this.mls = engine; })
-          // Drain before the ready emit so the first render has them read.
-          .then(() => this.drainStartup().catch((e) => {
-            console.warn('could not walk frames that arrived during startup', e);
-          }))
-          // Cold start: the list was fetched before the engine could walk anything, so the
-          // badges the rail opens with come from this pass.
-          .then(() => this.catchUpDmUnread().catch(() => {}));
-      })
-      .then(() => this.emit('dm', { ready: true }))
-      .then(() => this.startTrust())
-      .catch((e) => {
-        console.warn('encryption unavailable', e);
-        this.mls = null;
-        this.emit('dm', { ready: false });
-      });
+    this.startEncryption();
 
     const known = { ...this.session.servers };
     if (!known[home.domain]) {
@@ -176,5 +135,121 @@ export const lifecycleMethods = {
     this.refreshConversations().catch(() => {});
     this.refreshFriends().catch(() => {});
     this.emit('ready');
+  },
+
+  /// Not awaited, not fatal: failure should cost only DMs. Recovery key first: every sign-in is a new MLS device.
+  /// Safe to call again: it does nothing while an attempt is running or once the engine is up.
+  startEncryption() {
+    if (this.mls || this.disposed || !this.session?.home) return this.encryptionStarting || Promise.resolve();
+    if (this.encryptionStarting) return this.encryptionStarting;
+    const home = this.session.home;
+    this.encryptionStarting = encryption()
+      .then(({ Mls }) => {
+        this.backup = new Backup(this.home, null);
+        // Published to `this.mls` only once started, or a half-built engine throws inside the crypto.
+        const engine = new Mls(this.home, {
+          userId: home.user_id,
+          deviceId: home.device_id,
+          backup: this.backup,
+        });
+        engine.verifyClaimedPackage = (userId, deviceId, signatureKey) => (
+          this.verifyClaimedPackage(userId, deviceId, signatureKey)
+        );
+        engine.isRevokedKey = (userId, key) => Boolean(this.trust?.isRevokedKey(userId, key));
+        engine.onGroupName = () => this.emit('conversations');
+        engine.sendsRead = (id) => this.readReceiptsIn(id);
+        engine.sendsDelivered = (id) => this.deliveryAcksIn(id);
+        this.refreshCustody().catch(() => {});
+        return this.openVault(engine)
+          .catch((e) => this.vaultUnavailable(e))
+          .then(() => engine.start())
+          // Published only once it can do crypto, so `this.mls` set means usable.
+          .then(() => { this.mls = engine; })
+          // Drain before the ready emit so the first render has them read.
+          .then(() => this.drainStartup().catch((e) => {
+            console.warn('could not walk frames that arrived during startup', e);
+          }))
+          // Cold start: the list was fetched before the engine could walk anything, so the
+          // badges the rail opens with come from this pass.
+          .then(() => this.catchUpDmUnread().catch(() => {}));
+      })
+      .then(() => this.emit('dm', { ready: true }))
+      .then(() => this.startTrust())
+      .catch((e) => {
+        console.warn('encryption unavailable', e);
+        this.mls = null;
+        this.emit('dm', { ready: false });
+        this.scheduleStartupRetry();
+      })
+      .finally(() => { this.encryptionStarting = null; });
+    return this.encryptionStarting;
+  },
+
+  /// A session without the password never writes custody: a vault in a retired mode stays locked until a
+  /// password sign-in converts it, or the user starts a new one (vault.js loadRetired).
+  async openVault(engine) {
+    const home = this.session.home;
+    const v = await vault.load(
+      this.home,
+      home.user_id,
+      this.authRecoveryWrapper,
+      this.accountRecoveryWrapper,
+    );
+    this.vault = v;
+    if (v.locked) this.emit('vault', v);
+    if (v.created || this.custody?.mode !== v.mode) {
+      this.refreshCustody().catch(() => {});
+    }
+    this.sync.adoptKeyring(v, { current: !!v.created })
+      .catch((e) => console.warn('sync store could not take the key', e));
+    this.vaultPending = false;
+    return engine.adoptRecoveryKey(v);
+  },
+
+  /// DMs still open without the key, but a homeserver that merely did not answer is asked again later.
+  vaultUnavailable(e) {
+    console.warn('key vault unavailable', e);
+    if (isUnanswered(e)) {
+      this.vaultPending = true;
+      this.scheduleStartupRetry();
+    }
+  },
+
+  /// Whatever a start left undone because the homeserver was out of reach. Called when the network or the window
+  /// comes back and on a timer, so a restart is not the only way back.
+  async retryStartup() {
+    if (this.disposed || !this.session?.home) return;
+    if (this.startingAgain) return;
+    this.startingAgain = true;
+    try {
+      if (this.startDegraded) {
+        await this.start().catch(() => {});
+        return;
+      }
+      if (!this.mls) {
+        await this.startEncryption();
+      } else if (this.vaultPending) {
+        await this.openVault(this.mls).catch((e) => this.vaultUnavailable(e));
+      }
+    } finally {
+      this.startingAgain = false;
+      if (this.startupPending()) this.scheduleStartupRetry();
+      else this.startupAttempts = 0;
+    }
+  },
+
+  startupPending() {
+    return Boolean(this.startDegraded || !this.mls || this.vaultPending);
+  },
+
+  scheduleStartupRetry() {
+    if (this.disposed || this.startupTimer) return;
+    const attempt = this.startupAttempts || 0;
+    this.startupAttempts = attempt + 1;
+    const wait = STARTUP_RETRY_MS[Math.min(attempt, STARTUP_RETRY_MS.length - 1)];
+    this.startupTimer = setTimeout(() => {
+      this.startupTimer = null;
+      this.retryStartup();
+    }, wait);
   },
 };
