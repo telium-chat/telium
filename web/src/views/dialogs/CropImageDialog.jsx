@@ -23,6 +23,8 @@ export function CropImageDialog({ file, preset, kind, title, onDone, close }) {
     : '');
   const [animated, setAnimated] = useState(false);
   const [animatedGif, setAnimatedGif] = useState(false);
+  // "Use image" must not run before this is known, or an animated file would be flattened.
+  const [inspected, setInspected] = useState(false);
   const [busy, setBusy] = useState(false);
   const stage = useRef(null);
   const frame = useRef(null);
@@ -60,7 +62,7 @@ export function CropImageDialog({ file, preset, kind, title, onDone, close }) {
       if (!live) return;
       setAnimated(isAnimated(buf));
       setAnimatedGif(isAnimatedGif(buf));
-    }).catch(() => {});
+    }).catch(() => {}).then(() => { if (live) setInspected(true); });
     return () => { live = false; };
   }, [file]);
 
@@ -185,10 +187,11 @@ export function CropImageDialog({ file, preset, kind, title, onDone, close }) {
     retarget();
   };
 
-  const finish = async (original) => {
+  // An animated image stays animated: there is nothing to choose.
+  const finish = async () => {
     setBusy(true);
     try {
-      const output = original
+      const output = animated
         ? (animatedGif ? await reencodeAnimatedGif(file, crop, preset) : file)
         : await reencode(file, crop, preset);
       if (output.size > preset.maxBytes) {
@@ -211,28 +214,19 @@ export function CropImageDialog({ file, preset, kind, title, onDone, close }) {
       footer={(
         <>
           <Button variant="ghost" onClick={close}>Cancel</Button>
-          {animated ? (
-            <Button variant="secondary" disabled={busy} onClick={() => finish(true)}>
-              {animatedGif ? 'Keep animation (WebP)' : 'Keep animation'}
-            </Button>
-          ) : null}
           <Button
             variant="primary"
-            disabled={busy || !source || (namesExpression && !name)}
-            onClick={() => finish(false)}
+            disabled={busy || !source || !inspected || (namesExpression && !name)}
+            onClick={finish}
           >
             {busy ? 'Processing…' : 'Use image'}
           </Button>
         </>
       )}
     >
-      {animated ? (
-        <Notice tone="warn">
-          {animatedGif
-            ? 'This image is animated. “Use image” keeps the first frame only; '
-              + '“Keep animation” crops and compresses it as an animated WebP.'
-            : 'This image is animated. Cropping it keeps the first frame only — '
-              + 'use “Keep animation” to upload it unchanged instead.'}
+      {animated && !animatedGif ? (
+        <Notice>
+          This image is animated, so it is uploaded as it is and the crop is not applied.
         </Notice>
       ) : null}
 
