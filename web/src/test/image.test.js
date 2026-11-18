@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { decompressFrames, parseGIF } from 'gifuct-js';
-import { encodeAnimation } from 'wasm-webp';
+import { decodeAnimation, encodeAnimation } from 'wasm-webp';
 import {
-  PRESETS, animatedLimit, clampCrop, cropRect, isAnimated, isAnimatedGif, reencode, reencodeAnimatedGif,
+  PRESETS, animatedLimit, canKeepAnimation, clampCrop, cropRect, isAnimated, isAnimatedGif, reencode,
+  reencodeAnimatedGif, reencodeAnimation, webpAnimationInfo,
 } from '../lib/image.js';
 
 vi.mock('gifuct-js', () => ({
@@ -10,7 +11,7 @@ vi.mock('gifuct-js', () => ({
   parseGIF: vi.fn(),
 }));
 
-vi.mock('wasm-webp', () => ({ encodeAnimation: vi.fn() }));
+vi.mock('wasm-webp', () => ({ encodeAnimation: vi.fn(), decodeAnimation: vi.fn() }));
 
 function stubCanvas({ encodings = ['image/webp', 'image/jpeg', 'image/png'], bytes = 1000, alpha = false } = {}) {
   const drawn = [];
@@ -257,3 +258,103 @@ function apng(animated) {
   chunk('IDAT', 4);
   return new Uint8Array(out);
 }
+
+/// A real RIFF layout: VP8X with the animation bit and the canvas size, then one ANMF chunk per frame.
+function animatedWebp(width, height, frames) {
+  const out = [];
+  const tag = (t) => out.push(...[...t].map((c) => c.charCodeAt(0)));
+  const le = (n, bytes) => { for (let i = 0; i < bytes; i += 1) out.push((n >> (8 * i)) & 0xff); };
+  tag('RIFF'); le(0, 4); tag('WEBP');
+  tag('VP8X'); le(10, 4); out.push(0x02, 0, 0, 0); le(width - 1, 3); le(height - 1, 3);
+  tag('ANIM'); le(6, 4); le(0, 6);
+  for (let i = 0; i < frames; i += 1) { tag('ANMF'); le(3, 4); out.push(0, 0, 0, 0); }
+  return new Uint8Array(out);
+}
+
+function stubPixelCanvas() {
+  const drawn = [];
+  vi.stubGlobal('OffscreenCanvas', undefined);
+  vi.stubGlobal('ImageData', undefined);
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({
+    clearRect() {},
+    putImageData() {},
+    drawImage(...args) { drawn.push(args); },
+    createImageData: (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+    getImageData: (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4).fill(255) }),
+  }));
+  return drawn;
+}
+
+describe('animated WebP and APNG', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    encodeAnimation.mockReset();
+    decodeAnimation.mockReset();
+  });
+
+  it('reads the canvas size and frame count from the container', () => {
+    expect(webpAnimationInfo(animatedWebp(300, 200, 4))).toEqual({ width: 300, height: 200, frames: 4 });
+  });
+
+  it('re-encodes an animated WebP through libwebp when the browser has no ImageDecoder, crop applied', async () => {
+    vi.stubGlobal('ImageDecoder', undefined);
+    const drawn = stubPixelCanvas();
+    decodeAnimation.mockResolvedValue([0, 1, 2].map(() => ({
+      data: new Uint8Array(100 * 50 * 4), width: 100, height: 50, duration: 70,
+    })));
+    encodeAnimation.mockResolvedValue(new Uint8Array(100));
+
+    const out = await reencodeAnimation(
+      new File([animatedWebp(100, 50, 3)], 'me.webp', { type: 'image/webp' }),
+      { zoom: 1, cx: 0.5, cy: 0.5 },
+      PRESETS.avatar,
+    );
+
+    expect(out.type).toBe('image/webp');
+    expect(out.name).toBe('me.webp');
+    const [width, height, alpha, frames] = encodeAnimation.mock.calls[0];
+    expect([width, height, alpha]).toEqual([256, 256, false]);
+    expect(frames.map((f) => f.duration)).toEqual([70, 70, 70]);
+    // The square crop of a 100x50 frame is its centred 50x50.
+    expect(drawn[0].slice(1, 5)).toEqual([25, 0, 50, 50]);
+  });
+
+  it('refuses an animated WebP too large to hold in memory instead of decoding it', async () => {
+    vi.stubGlobal('ImageDecoder', undefined);
+    stubPixelCanvas();
+    await expect(reencodeAnimation(
+      new File([animatedWebp(4096, 4096, 10)], 'big.webp', { type: 'image/webp' }), {}, PRESETS.avatar,
+    )).rejects.toThrow(/too large/);
+    expect(decodeAnimation).not.toHaveBeenCalled();
+  });
+
+  it('reads an APNG frame by frame through ImageDecoder, keeping the original speed', async () => {
+    stubPixelCanvas();
+    const closed = [];
+    class FakeDecoder {
+      static isTypeSupported = vi.fn(async (type) => type === 'image/png');
+      constructor({ type }) { this.type = type; this.tracks = { ready: Promise.resolve(), selectedTrack: { frameCount: 4 } }; }
+      async decode({ frameIndex }) {
+        return { image: { displayWidth: 64, displayHeight: 64, duration: 50_000, close: () => closed.push(frameIndex) } };
+      }
+      close() { closed.push('decoder'); }
+    }
+    vi.stubGlobal('ImageDecoder', FakeDecoder);
+    encodeAnimation.mockResolvedValue(new Uint8Array(100));
+
+    const file = new File([apng(true)], 'me.png', { type: 'image/png' });
+    expect(await canKeepAnimation(apng(true))).toBe(true);
+    const out = await reencodeAnimation(file, {}, PRESETS.avatar);
+
+    expect(out.type).toBe('image/webp');
+    expect(encodeAnimation.mock.calls[0][3].map((f) => f.duration)).toEqual([50, 50, 50, 50]);
+    expect(closed).toEqual([0, 1, 2, 3, 'decoder']);
+  });
+
+  it('has nothing to offer for an APNG when the browser has no ImageDecoder', async () => {
+    vi.stubGlobal('ImageDecoder', undefined);
+    expect(await canKeepAnimation(apng(true))).toBe(false);
+    expect(await reencodeAnimation(new File([apng(true)], 'me.png', { type: 'image/png' }), {}, PRESETS.avatar)).toBeNull();
+  });
+});
