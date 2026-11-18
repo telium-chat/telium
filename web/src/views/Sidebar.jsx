@@ -649,8 +649,11 @@ function DmSidebar() {
   const modal = useModal();
   const pending = store.pendingFriendCount();
   const messageRequests = store.pendingMessageRequestCount();
-  const visibleConversations = store.conversations.filter((c) => c.request_state !== 'pending')
-    .sort((a, b) => (b.last_activity_at || b.created_at || 0) - (a.last_activity_at || a.created_at || 0));
+  const visibleConversations = store.orderConversations(
+    store.conversations.filter((c) => c.request_state !== 'pending'),
+  );
+  const pinnedRows = visibleConversations.filter((c) => store.isConversationPinned(c.id));
+  const otherRows = visibleConversations.filter((c) => !store.isConversationPinned(c.id));
   const spoken = new Set();
   for (const c of visibleConversations) {
     if (c.kind !== 'dm') continue;
@@ -689,8 +692,14 @@ function DmSidebar() {
           <span className="min-w-0 flex-1 truncate">Message requests</span>
           <Badge count={messageRequests} />
         </Row>
+        {pinnedRows.length ? (
+          <>
+            <div className="eyebrow px-2 pt-4 pb-1">Pinned</div>
+            {pinnedRows.map((c) => <ConversationRow key={c.id} convo={c} />)}
+          </>
+        ) : null}
         <div className="eyebrow px-2 pt-4 pb-1">Conversations</div>
-        {visibleConversations.map((c) => <ConversationRow key={c.id} convo={c} />)}
+        {otherRows.map((c) => <ConversationRow key={c.id} convo={c} />)}
         {quiet.map((f) => <FriendConversationRow key={f.user_id} friend={f} />)}
         {visibleConversations.length || quiet.length ? null : (
           <p className="px-2 py-6 text-center text-sm leading-[1.6] text-muted">

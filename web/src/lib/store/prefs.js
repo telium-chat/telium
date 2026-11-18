@@ -10,6 +10,9 @@ const MAX_TIMEOUT_MS = 2_147_483_647;
 
 const MAX_RECENT = 50;
 
+/// Synced, so kept to a size a person would actually keep at the top.
+export const MAX_PINNED_CONVERSATIONS = 20;
+
 export const prefsMethods = {
   savePrefs() { this.sync.set(KEYS.prefs, this.prefs); this.emit('prefs'); },
 
@@ -50,6 +53,36 @@ export const prefsMethods = {
     }
     if (lifted) { this.savePrefs(); this.emit('unread'); }
     this.scheduleMuteSweep();
+  },
+
+  pinnedConversationIds() {
+    const list = this.prefs?.pinnedConversations;
+    return Array.isArray(list) ? list.filter((id) => typeof id === 'string') : [];
+  },
+
+  isConversationPinned(id) {
+    return this.pinnedConversationIds().includes(id);
+  },
+
+  /// Returns false when the pin limit is reached.
+  setConversationPinned(id, on) {
+    const list = this.pinnedConversationIds().filter((pinned) => pinned !== id);
+    if (on) {
+      if (list.length >= MAX_PINNED_CONVERSATIONS) return false;
+      list.push(id);
+    }
+    this.prefs.pinnedConversations = list;
+    this.savePrefs();
+    return true;
+  },
+
+  /// Pinned conversations first, each group newest-activity first. Does not mutate `list`.
+  orderConversations(list) {
+    const pinned = new Set(this.pinnedConversationIds());
+    const activity = (c) => c.last_activity_at || c.created_at || 0;
+    return list.slice().sort((a, b) => (
+      (pinned.has(b.id) - pinned.has(a.id)) || (activity(b) - activity(a))
+    ));
   },
 
   draftFor(target) {

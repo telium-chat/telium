@@ -9,7 +9,7 @@ import { AnimatedImage } from '../../components/AnimatedImage.jsx';
 import {
   AddFriendIcon, AdvancedIcon, Avatar, BanIcon, CheckIcon, CloseIcon, CopyIcon, DeafenIcon, EditIcon,
   EmojiIcon, EmojiText, HeadphonesIcon, StatusText, KeyIcon, KickIcon, ListIcon, MentionIcon, MenuItem,
-  MenuSection, MenuSeparator, MenuSub, MessageIcon, MicIcon, MicOffIcon, PrivacyNote, PRESENCE,
+  MenuSection, MenuSeparator, MenuSub, MessageIcon, MicIcon, MicOffIcon, PinIcon, PrivacyNote, PRESENCE,
   PRESENCE_STATES, PlusIcon, ServerIcon, SettingsIcon, SignOutIcon, SwitchAccountIcon, UserIcon,
   botMember,
 } from '../../components/index.js';
@@ -309,6 +309,15 @@ export const conversation = (env, convo) => {
       onAction={() => store.navigate({ view: 'dms', conversationId: convo.id })}
     >
       Open
+    </MenuItem>
+    <MenuItem
+      icon={PinIcon}
+      onAction={() => {
+        const pin = !store.isConversationPinned(convo.id);
+        if (!store.setConversationPinned(convo.id, pin)) toast('You can pin up to 20 conversations.', { error: true });
+      }}
+    >
+      {store.isConversationPinned(convo.id) ? 'Unpin from top' : 'Pin to top'}
     </MenuItem>
     {peerId ? (
       <MenuItem icon={UserIcon} onAction={() => openFullProfile(modal, peerId)}>
