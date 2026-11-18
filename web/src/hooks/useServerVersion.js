@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useStore } from './useStore.jsx';
 
-/// The homeserver's release, read once per signed-in home from the public capabilities document. '' while unknown or if the server doesn't say.
+/// A server's release (the home server by default, or the `api` of any server, such as a guild's host), read once per signed-in home from the public capabilities document. '' while unknown or if the server doesn't say.
 const cache = new Map();
 
 export function cleanServerVersion(caps) {
@@ -9,9 +9,9 @@ export function cleanServerVersion(caps) {
   return /^[\w.+-]{1,32}$/.test(raw) ? raw : '';
 }
 
-export function useServerVersion() {
+export function useServerVersion(api) {
   const store = useStore();
-  const home = store.home;
+  const home = api === undefined ? store.home : api;
   const key = home?.base || '';
   const [version, setVersion] = useState(() => cache.get(key) || '');
 
