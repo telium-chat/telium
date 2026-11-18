@@ -153,3 +153,26 @@ describe('GIF focus behavior on the desktop shell', () => {
     }
   });
 });
+
+describe('GIF focus behavior while the desktop player is still decoding', () => {
+  it('hides the self-animating fallback image while the window is unfocused', async () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    window.teliumDesktop = {
+      runtime: 'electron',
+      onWindowFocusChanged: () => () => {},
+      windowFocus: () => Promise.resolve(false),
+      fetchGifBytes: () => new Promise(() => {}),
+    };
+    try {
+      const { AnimatedImage } = await import('../components/AnimatedImage.jsx');
+      render(<AnimatedImage src="https://media.example/x/loading.gif" alt="slow" animated gif />);
+      const image = screen.getByAltText('slow');
+      window.dispatchEvent(new CustomEvent('telium:native-window-focus', { detail: false }));
+      await waitFor(() => expect(image.style.visibility).toBe('hidden'));
+      window.dispatchEvent(new CustomEvent('telium:native-window-focus', { detail: true }));
+      await waitFor(() => expect(image.style.visibility).not.toBe('hidden'));
+    } finally {
+      delete window.teliumDesktop;
+    }
+  });
+});
