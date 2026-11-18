@@ -2,7 +2,7 @@ import { isElectronRuntime } from './platform.js';
 import {
   encodeRichActivity, normalizeRichActivities, richActivitiesOf,
 } from './activity.js';
-import { PRESETS, reencode } from './image.js';
+import { PRESETS, rasterizeSvg, reencode } from './image.js';
 import { uploadMedia } from './upload.js';
 
 const PRESENCE_ART_TTL_SECS = 6 * 60 * 60;
@@ -87,7 +87,7 @@ function withoutLocalArtwork(activity) {
   return { ...activity, assets: Object.keys(safeAssets).length ? safeAssets : null };
 }
 
-async function artworkFile(payload, encodeImage) {
+async function artworkFile(payload, encodeImage, rasterize) {
   if (!payload?.bytes || typeof payload?.mime !== 'string') return null;
   let bytes;
   if (payload.bytes instanceof ArrayBuffer) {
@@ -98,7 +98,9 @@ async function artworkFile(payload, encodeImage) {
     return null;
   }
   if (!bytes.byteLength) return null;
-  const file = new File([bytes], payload.name || 'album-art', { type: payload.mime });
+  let file = new File([bytes], payload.name || 'album-art', { type: payload.mime });
+  // A program's vector icon is drawn to a raster first; what is uploaded is always the re-encoded raster, never the SVG.
+  if (payload.mime === 'image/svg+xml') file = await rasterize(file);
   // Re-encode local file artwork every time rather than uploading verbatim: strips EXIF and polyglot payloads and downsizes.
   return encodeImage(file, {}, PRESETS.icon);
 }
@@ -135,6 +137,7 @@ export async function rehostLocalPresenceArtwork(
   activity,
   cache = new Map(),
   encodeImage = reencode,
+  rasterize = rasterizeSvg,
 ) {
   const handle = activity?.assets?.local_large_image;
   if (!handle || !store.home || !window.teliumDesktop?.readRichPresenceArtwork) return activity;
@@ -144,7 +147,7 @@ export async function rehostLocalPresenceArtwork(
     entry = { settled: false, media: null, pending: null };
     entry.pending = (async () => {
       const payload = await window.teliumDesktop.readRichPresenceArtwork(handle);
-      const file = await artworkFile(payload, encodeImage);
+      const file = await artworkFile(payload, encodeImage, rasterize);
       if (!file) return null;
       return uploadMedia(store.home, file, 'profile', { ttlSecs: PRESENCE_ART_TTL_SECS });
     })();

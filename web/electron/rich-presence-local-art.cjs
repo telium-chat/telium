@@ -58,10 +58,16 @@ function createLocalArtworkRegistry() {
     },
 
     /// An image already in memory (a program's icon): same opaque handle, no file behind it. PNG only.
-    registerBytes(key, bytes) {
-      if (!bytes || bytes.length < 12 || imageMime(bytes) !== 'image/png') return null;
+    registerBytes(key, bytes, mime = 'image/png') {
+      if (!bytes || bytes.length < 12) return null;
+      if (mime === 'image/svg+xml') {
+        // Only ever drawn by the window through an <img> and re-encoded to a raster before it is shared; see program-icons.cjs.
+        if (!/^\s*(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*(<!DOCTYPE[^>]*>\s*)?<svg[\s>]/i.test(Buffer.from(bytes).subarray(0, 2048).toString('utf8'))) return null;
+      } else if (imageMime(bytes) !== 'image/png') {
+        return null;
+      }
       const handle = `program-icon:${createHash('sha256').update(String(key)).digest('hex').slice(0, 32)}`;
-      touch(handle, { bytes });
+      touch(handle, { bytes, mime });
       return handle;
     },
 
@@ -71,7 +77,7 @@ function createLocalArtworkRegistry() {
       touch(handle, item);
       if (item.bytes) {
         const copy = item.bytes.buffer.slice(item.bytes.byteOffset, item.bytes.byteOffset + item.bytes.byteLength);
-        return { bytes: copy, mime: 'image/png', name: 'program-icon.png' };
+        return { bytes: copy, mime: item.mime, name: item.mime === 'image/svg+xml' ? 'program-icon.svg' : 'program-icon.png' };
       }
       const filename = fileURLToPath(item.url);
       const info = await stat(filename);

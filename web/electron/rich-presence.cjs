@@ -342,8 +342,8 @@ function createRichPresenceService({
   // The icon is looked up after the status is already showing, then the same activity is re-applied with its artwork handle.
   const addProgramIcon = async (key, data, activity) => {
     const executable = exeKey(String(data?.socketId || '').replace(/^custom:/, ''));
-    const png = await programIcons.iconFor(executable, text(data?.programPath, 1024), 128);
-    const handle = png ? localArtwork.registerBytes(executable, png) : null;
+    const icon = await programIcons.iconFor(executable, text(data?.programPath, 1024), 128);
+    const handle = icon ? localArtwork.registerBytes(executable, icon.bytes, icon.mime) : null;
     if (handle) programHandles.set(executable, handle);
     const entry = activities.get(key);
     if (!handle || !entry || entry.activity !== activity || activity.assets?.local_large_image) return;
@@ -513,8 +513,8 @@ function createRichPresenceService({
       await Promise.all(list.map(async (row) => {
         const executable = text(row?.executable, 128);
         if (!executable) return;
-        const png = await programIcons.iconFor(executable, text(row?.path, 1024), 48);
-        if (png) out[executable] = `data:image/png;base64,${Buffer.from(png).toString('base64')}`;
+        const icon = await programIcons.iconFor(executable, text(row?.path, 1024), 48);
+        if (icon) out[executable] = `data:${icon.mime};base64,${Buffer.from(icon.bytes).toString('base64')}`;
       }));
       return out;
     },

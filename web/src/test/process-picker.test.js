@@ -45,3 +45,32 @@ describe('custom programs in prefs', () => {
     expect(customPrograms(store)).toEqual([{ name: 'ok', executable: 'ok' }]);
   });
 });
+
+describe('vector program icons', () => {
+  it('are rasterized before anything is re-encoded or uploaded', async () => {
+    const { rehostLocalPresenceArtwork } = await import('../lib/rich-presence.js');
+    const { vi } = await import('vitest');
+    const svg = new Uint8Array(Array.from('<svg xmlns="http://www.w3.org/2000/svg"/>', (c) => c.charCodeAt(0))).buffer;
+    Object.defineProperty(window, 'teliumDesktop', {
+      configurable: true,
+      value: { readRichPresenceArtwork: vi.fn(async () => ({ bytes: svg, mime: 'image/svg+xml', name: 'program-icon.svg' })) },
+    });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ origin: 'h', hash: 'a'.repeat(64), reference: 'media://h/x', capability: 'c', url: 'https://h/m', filename: 'i.webp', mime: 'image/webp', size: 3 }),
+    });
+    const rasterize = vi.fn(async () => new File([new Uint8Array([9])], 'program-icon.png', { type: 'image/png' }));
+    const encode = vi.fn(async (file) => {
+      expect(file.type).toBe('image/png');
+      return new File([new Uint8Array([1])], 'i.webp', { type: 'image/webp' });
+    });
+    await rehostLocalPresenceArtwork(
+      { home: { base: 'https://h', token: 't' } },
+      { name: 'Blender', assets: { local_large_image: 'program-icon:x' } },
+      new Map(), encode, rasterize,
+    );
+    expect(rasterize).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1].body.type).toBe('image/webp');
+    fetchMock.mockRestore();
+  });
+});

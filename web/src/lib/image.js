@@ -433,3 +433,30 @@ export async function downscaleToFit(file, cap) {
     height = nextHeight;
   }
 }
+
+/// Draws an SVG to a PNG through an <img>, which runs no script and loads nothing outside the file, so an icon from another app is safe to rasterize. `createImageBitmap` can't decode SVG, which is why this is separate from `reencode`.
+export async function rasterizeSvg(file, size = 256) {
+  const url = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.decoding = 'async';
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = () => reject(new Error('could not draw this SVG'));
+      image.src = url;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    const ratio = Math.min(size / (image.naturalWidth || size), size / (image.naturalHeight || size));
+    const w = (image.naturalWidth || size) * ratio;
+    const h = (image.naturalHeight || size) * ratio;
+    ctx.drawImage(image, (size - w) / 2, (size - h) / 2, w, h);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) throw new Error('could not draw this SVG');
+    return new File([blob], 'program-icon.png', { type: 'image/png' });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}

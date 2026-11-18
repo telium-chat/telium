@@ -41,17 +41,30 @@ test('Linux: finds the icon through the desktop entry and the hicolor theme', as
   };
   const icons = createProgramIcons({ platform: 'linux', home: '/h', ...fakeFs(files), toPng: (b, size) => Buffer.concat([b, Buffer.from([size])]) });
   const out = await icons.iconFor('Blender', '/usr/bin/blender', 64);
-  assert.equal(out[out.length - 1], 64);
+  assert.equal(out.mime, 'image/png');
+  assert.equal(out.bytes[out.bytes.length - 1], 64);
   assert.equal(await icons.iconFor('unknown', '/usr/bin/unknown'), null);
 });
 
-test('Linux: a Windows path (Proton) has no icon, and SVG-only themes give none', async () => {
+test('Linux: a Windows path (Proton) has no file to read, but the desktop entry still can', async () => {
   const files = {
     '/h/.local/share/applications/app.desktop': '[Desktop Entry]\nExec=app\nIcon=app\n',
-    '/usr/share/icons/hicolor/scalable/apps/app.svg': '<svg/>',
+    '/usr/share/icons/hicolor/scalable/apps/app.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>',
   };
   const icons = createProgramIcons({ platform: 'linux', home: '/h', ...fakeFs(files) });
-  assert.equal(await icons.iconFor('app', 'S:\\Games\\app.exe'), null);
+  const out = await icons.iconFor('app', 'S:\\Games\\app.exe');
+  assert.equal(out.mime, 'image/svg+xml');
+  assert.equal(out.bytes.toString().startsWith('<svg'), true);
+});
+
+test('Linux: a PNG at a real size wins over the vector', async () => {
+  const files = {
+    '/h/.local/share/applications/app.desktop': '[Desktop Entry]\nExec=app\nIcon=app\n',
+    '/usr/share/icons/hicolor/scalable/apps/app.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>',
+    '/usr/share/icons/hicolor/128x128/apps/app.png': PNG,
+  };
+  const icons = createProgramIcons({ platform: 'linux', home: '/h', ...fakeFs(files) });
+  assert.equal((await icons.iconFor('app', '/usr/bin/app')).mime, 'image/png');
 });
 
 test('Windows: reads the icon from the executable and resizes it', async () => {
@@ -59,8 +72,8 @@ test('Windows: reads the icon from the executable and resizes it', async () => {
   const icons = createProgramIcons({
     platform: 'win32', getFileIcon: async (f) => { seen.push(f); return PNG; }, toPng: (b) => b,
   });
-  assert.equal(await icons.iconFor('app.exe', '/x/app.exe'), PNG);
-  assert.equal(await icons.iconFor('app.exe', '/x/app.exe'), PNG);
+  assert.equal((await icons.iconFor('app.exe', '/x/app.exe')).bytes, PNG);
+  assert.equal((await icons.iconFor('app.exe', '/x/app.exe')).bytes, PNG);
   assert.equal(seen.length, 1);
 });
 
@@ -72,4 +85,7 @@ test('the artwork registry hands out an opaque handle for icon bytes and only ac
   assert.equal(read.mime, 'image/png');
   assert.equal(Buffer.from(read.bytes).equals(PNG), true);
   assert.equal(registry.registerBytes('x', Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>')), null);
+  const vector = registry.registerBytes('v', Buffer.from('<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg"/>'), 'image/svg+xml');
+  assert.equal((await registry.read(vector)).mime, 'image/svg+xml');
+  assert.equal(registry.registerBytes('h', Buffer.from('<html><script>1</script></html>'), 'image/svg+xml'), null);
 });
