@@ -105,7 +105,7 @@ export const displayMedia = () => mediaDevices('getDisplayMedia', 'share a scree
 export const userMedia = () => mediaDevices('getUserMedia', 'open a camera');
 
 /// Dynamic import so model weights load only for those who use the setting; the probe refuses hardware that can't keep up.
-export async function openDenoiser(onOverload) {
+export async function openDenoiser(callbacks) {
   const { DenoiseChain, probeNeural } = await import('./denoise-chain.js');
   const verdict = await probeNeural();
   if (!verdict.ok) {
@@ -113,7 +113,7 @@ export async function openDenoiser(onOverload) {
     error.reason = verdict.reason;
     throw error;
   }
-  return new DenoiseChain({ onOverload });
+  return new DenoiseChain(callbacks);
 }
 
 export function cameraVideoConstraints(facingMode = 'user') {

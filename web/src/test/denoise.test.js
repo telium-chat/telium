@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BENCHMARK_CEILING, DEFAULT_NOISE_MODE, NOISE_MODES, OVERLOAD, benchmarkVerdict, micConstraints,
-  neuralCapability, normalizeNoiseMode, overloadStrike, unavailableBecause,
+  neuralCapability, normalizeNoiseMode, createGovernor, GOVERNOR, judgeSample, PERMANENT_REASONS, unavailableBecause,
 } from '../lib/denoise.js';
 
 const capable = (over = {}) => ({
@@ -109,45 +109,62 @@ describe('warm-up verdict', () => {
   });
 });
 
-describe('giving up mid-call', () => {
+describe('standing aside mid-call', () => {
   const bad = { load: 0.9 };
   const fine = { load: 0.1 };
+  const feed = (governor, sample, times) => {
+    let last = null;
+    for (let i = 0; i < times; i += 1) last = governor.push(sample) || last;
+    return last;
+  };
 
-  it('needs three bad windows in a row, not one', () => {
-    let strikes = 0;
-    for (const expected of [1, 2]) {
-      const step = overloadStrike(strikes, bad);
-      strikes = step.strikes;
-      expect(strikes).toBe(expected);
-      expect(step.bail).toBe(false);
+  it('does not react to a few bad seconds', () => {
+    const governor = createGovernor();
+    expect(feed(governor, bad, GOVERNOR.bad - 1)).toBeNull();
+  });
+
+  it('pauses when enough of the recent windows are bad, not only consecutive ones', () => {
+    const governor = createGovernor();
+    let verdict = null;
+    for (const sample of [bad, fine, bad, bad, fine, bad, bad]) verdict = governor.push(sample) || verdict;
+    expect(verdict).toEqual({ pauseMs: GOVERNOR.pauseMs[0] });
+  });
+
+  it('lets pauses grow, then gives up for the call and only then', () => {
+    const governor = createGovernor();
+    const lengths = [];
+    let verdict = null;
+    for (let round = 0; round < GOVERNOR.pauseMs.length + 1; round += 1) {
+      verdict = feed(governor, bad, GOVERNOR.bad);
+      lengths.push(verdict.pauseMs);
+      governor.resumed();
     }
-    expect(overloadStrike(strikes, bad).bail).toBe(true);
+    expect(lengths.slice(0, -1)).toEqual(GOVERNOR.pauseMs);
+    expect(verdict).toEqual({ giveUp: true });
   });
 
-  it('forgives rather than decrements, so a recovery starts over', () => {
-    let strikes = overloadStrike(0, bad).strikes;
-    strikes = overloadStrike(strikes, bad).strikes;
-    strikes = overloadStrike(strikes, fine).strikes;
-    expect(strikes).toBe(0);
-    expect(overloadStrike(strikes, bad).bail).toBe(false);
+  it('forgets earlier pauses after a long calm', () => {
+    const governor = createGovernor();
+    feed(governor, bad, GOVERNOR.bad);
+    governor.resumed();
+    feed(governor, fine, GOVERNOR.calm);
+    expect(governor.pauses).toBe(0);
+    expect(feed(governor, bad, GOVERNOR.bad)).toEqual({ pauseMs: GOVERNOR.pauseMs[0] });
   });
 
-  it('counts underruns from renderCapacity as well as its own clock', () => {
-    expect(overloadStrike(2, { underrunRatio: OVERLOAD.underruns + 0.01 }).bail).toBe(true);
-    expect(overloadStrike(2, { underrunRatio: 0 }).strikes).toBe(0);
+  it('uses the underrun count only when the model cannot report its own load', () => {
+    expect(judgeSample({ underrunRatio: OVERLOAD.underruns + 0.01 })).toBe(true);
+    expect(judgeSample({ underrunRatio: 0 })).toBe(false);
+    expect(judgeSample({ load: 0.1, underrunRatio: 0.9 })).toBe(false);
   });
 
-  it('holds the count still when a browser reports neither', () => {
-    expect(overloadStrike(2, {})).toEqual({ strikes: 2, bail: false });
-    expect(overloadStrike(2, { load: null, underrunRatio: null }).bail).toBe(false);
+  it('holds still when a browser reports neither', () => {
+    expect(judgeSample({})).toBeNull();
+    expect(createGovernor().push({ load: null, underrunRatio: null })).toBeNull();
   });
-});
 
-describe('explanations', () => {
-  it('has a sentence for every reason the checks can produce', () => {
-    const reasons = ['no-audio-worklet', 'no-audio-context', 'insecure-context', 'no-wasm',
-      'one-core', 'no-48k', 'too-slow', 'load-failed', 'no-measurement'];
-    for (const reason of reasons) expect(unavailableBecause(reason)).toMatch(/\w/);
-    expect(unavailableBecause(null)).toBeNull();
+  it('treats only hard failures as reasons to stop for the call', () => {
+    expect(PERMANENT_REASONS.has('no-wasm')).toBe(true);
+    expect(PERMANENT_REASONS.has('too-slow')).toBe(false);
   });
 });

@@ -1,6 +1,6 @@
 // Main-thread half of neural noise cancellation; only reached via dynamic `import()`.
 
-import { FRAME_SAMPLES, benchmarkVerdict, overloadStrike } from './denoise.js';
+import { FRAME_SAMPLES, benchmarkVerdict, createGovernor } from './denoise.js';
 
 // `?worker&url` (not `?url`) so Vite bundles the worklet's imports.
 import workletUrl from './denoise-worklet.js?worker&url';
@@ -80,14 +80,19 @@ export function probeNeural({ force = false } = {}) {
 
 /// Owns its own 48 kHz `AudioContext`; LiveKit's would not guarantee the rate.
 export class DenoiseChain {
-  /// `onOverload` is called at most once, with a reason.
-  constructor({ onOverload } = {}) {
+  /// `onPause` and `onResume` bracket a stretch where the machine was too busy and the model stood aside; `onOverload` is called at most once, when it has been busy so often that the call should stop asking.
+  constructor({ onOverload, onPause, onResume } = {}) {
     this.context = null;
     this.node = null;
     this.source = null;
     this.destination = null;
     this.onOverload = onOverload || (() => {});
-    this.strikes = 0;
+    this.onPause = onPause || (() => {});
+    this.onResume = onResume || (() => {});
+    this.governor = createGovernor();
+    this.paused = false;
+    this.pauseTimer = null;
+    this.lastLoad = null;
     this.spent = false;
     this.capacity = null;
     this.watching = null;
@@ -157,7 +162,7 @@ export class DenoiseChain {
     if (!capacity?.start) return;
     this.capacity = capacity;
     capacity.addEventListener('update', (event) => {
-      if (this.watching === 'worklet') return;
+      if (this.watching === 'worklet' || this.paused) return;
       this.watching = 'capacity';
       this.strike({ underrunRatio: event.underrunRatio });
     });
@@ -168,24 +173,56 @@ export class DenoiseChain {
     if (message?.type === 'failed') { this.give('load-failed'); return; }
     if (message?.type !== 'stats') return;
     if (!Number.isFinite(message.load)) return;
+    this.lastLoad = message.load;
     // The worklet has a clock, so it wins and the capacity events stand down.
     this.watching = 'worklet';
     this.strike({ load: message.load });
   }
 
   strike(sample) {
-    const { strikes, bail } = overloadStrike(this.strikes, sample);
-    this.strikes = strikes;
-    if (bail) this.give('too-slow');
+    if (this.paused || this.spent) return;
+    const verdict = this.governor.push(sample);
+    if (!verdict) return;
+    if (verdict.giveUp) { this.give('too-slow'); return; }
+    this.pause(verdict.pauseMs, sample);
+  }
+
+  /// Passes the microphone straight through, then tries again. The graph stays up, so coming back is a flag and not a rebuild.
+  pause(ms, sample) {
+    this.paused = true;
+    // Left in the console so a report of "it turned itself off" can say what the machine was doing.
+    console.info('[denoise] paused', { ms, load: sample?.load ?? null, underrunRatio: sample?.underrunRatio ?? null, pauses: this.governor.pauses });
+    this.setBypass(true);
+    try { this.onPause({ reason: 'too-slow', load: sample?.load ?? null, pauses: this.governor.pauses }); } catch { /* a UI callback must not break the call */ }
+    clearTimeout(this.pauseTimer);
+    this.pauseTimer = setTimeout(() => {
+      this.pauseTimer = null;
+      if (this.spent || !this.node) return;
+      this.paused = false;
+      this.governor.resumed();
+      this.setBypass(false);
+      try { this.onResume(); } catch { /* as above */ }
+    }, ms);
+  }
+
+  /// The call has stopped using the model (its own decision, not ours): no timer may switch it back on.
+  retire() {
+    this.spent = true;
+    clearTimeout(this.pauseTimer);
+    this.pauseTimer = null;
+    this.setBypass(true);
   }
 
   give(reason) {
     if (this.spent) return;
     this.spent = true;
+    console.info('[denoise] giving up for this call', { reason, lastLoad: this.lastLoad });
     this.onOverload(reason);
   }
 
   async stop() {
+    clearTimeout(this.pauseTimer);
+    this.pauseTimer = null;
     try { this.capacity?.stop?.(); } catch { /* the context may already be gone */ }
     this.node?.port && (this.node.port.onmessage = null);
     this.source?.disconnect?.();

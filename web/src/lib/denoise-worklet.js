@@ -18,9 +18,10 @@ const PCM = 32768;
 /// About once a second (375 quanta at 48 kHz).
 const REPORT_QUANTA = 375;
 
+/// Chromium does not expose `performance` in this scope, which used to leave the load unmeasured and the decision to a system-wide underrun count. `Date.now()` ticks in whole milliseconds, but a frame takes a fraction of one, so each reading is 0 or 1 with the right odds and a second's worth (about a hundred frames) adds up to the true cost.
 const clock = typeof performance === 'object' && typeof performance?.now === 'function'
   ? () => performance.now()
-  : null;
+  : () => Date.now();
 
 class DenoiseProcessor extends AudioWorkletProcessor {
   constructor() {
@@ -46,7 +47,18 @@ class DenoiseProcessor extends AudioWorkletProcessor {
 
   handle(message) {
     if (!message) return;
-    if (message.type === 'bypass') { this.bypass = Boolean(message.on); return; }
+    if (message.type === 'bypass') {
+      const on = Boolean(message.on);
+      // Coming back starts from silence, not from whatever the ring held when it stopped being fed.
+      if (this.bypass && !on) {
+        this.fill = 0;
+        this.ring.fill(0);
+        this.read = 0;
+        this.write = PREFILL;
+      }
+      this.bypass = on;
+      return;
+    }
     if (message.type !== 'wasm') return;
     // Until instantiation resolves we are a wire: heard un-denoised rather than not heard.
     createRNNWasmModule({ wasmBinary: message.binary })
@@ -85,7 +97,7 @@ class DenoiseProcessor extends AudioWorkletProcessor {
     // Anything that is not a working, wanted model is a straight copy; bypass is one boolean, not a graph edit racing the audio thread.
     if (this.bypass || this.failed || !this.module) { output.set(input); return true; }
 
-    const started = clock ? clock() : 0;
+    const started = clock();
 
     for (let i = 0; i < input.length; i += 1) {
       this.frame[this.fill] = input[i];
@@ -97,19 +109,17 @@ class DenoiseProcessor extends AudioWorkletProcessor {
     }
     this.read = (this.read + output.length) & (RING - 1);
 
-    if (clock) {
-      const spent = clock() - started;
-      this.cpuMs += spent;
-      if (spent > this.worstMs) this.worstMs = spent;
-    }
+    const spent = clock() - started;
+    this.cpuMs += spent;
+    if (spent > this.worstMs) this.worstMs = spent;
     this.quanta += 1;
     if (this.quanta >= REPORT_QUANTA) {
       // `load` is the fraction of wall-clock time spent in this node; past ~0.6 there is no headroom left for resampling, mixing and echo cancellation.
       const wallMs = (this.quanta * QUANTUM * 1000) / sampleRate;
       this.port.postMessage({
         type: 'stats',
-        load: clock ? this.cpuMs / wallMs : null,
-        worstMs: clock ? this.worstMs : null,
+        load: this.cpuMs / wallMs,
+        worstMs: this.worstMs,
         quantumMs: (QUANTUM * 1000) / sampleRate,
       });
       this.quanta = 0;

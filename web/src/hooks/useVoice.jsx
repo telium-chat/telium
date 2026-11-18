@@ -101,6 +101,7 @@ export function VoiceProvider({ children }) {
   const [joinedAt, setJoinedAt] = useState(null);
   const [ping, setPing] = useState(null);
   const [pingHistory, setPingHistory] = useState([]);
+  const [noiseState, setNoiseState] = useState('active');
   const [noiseMode, setNoise] = useState(() => normalizeNoiseMode(store.prefs.micNoise));
 
   const callRef = useRef(null);
@@ -351,12 +352,19 @@ export function VoiceProvider({ children }) {
     return run;
   }, [store]);
 
-  const noteNoiseFallback = useCallback(() => {
+  // `micNoise` is what the person chose and is never rewritten by a call: a busy machine or a failed load is a fact about this call. The next call asks for the model again.
+  const noteNoiseFallback = useCallback((reason) => {
     if (normalizeNoiseMode(store.prefs.micNoise) !== 'neural') return;
-    store.prefs.micNoise = 'browser';
-    store.savePrefs();
-    toast(t('voice.noise.fellBack'));
+    setNoiseState('off');
+    const why = tOrNull(`voice.noise.reason.${reason}`);
+    toast(reason === 'too-slow' || !why
+      ? t('voice.noise.fellBack')
+      : t('voice.noise.fellBackFor', { reason: why }));
   }, [store]);
+
+  const noteNoiseState = useCallback((state) => {
+    setNoiseState(state === 'paused' ? 'paused' : 'active');
+  }, []);
 
   const setNoiseMode = useCallback(async (next) => {
     const mode = normalizeNoiseMode(next);
@@ -387,6 +395,7 @@ export function VoiceProvider({ children }) {
     // A fresh call owes its user a fresh notice: whatever the previous relay
     // said is not this relay's news.
     store.setSfuNotice(null);
+    setNoiseState('active');
     const me = store.me?.user_id;
     const api = store.voiceApi(targetChannelId);
     const onError = (e) => reportError(e, t('voice.error.trouble'));
@@ -412,6 +421,7 @@ export function VoiceProvider({ children }) {
       onError,
       noiseMode: normalizeNoiseMode(store.prefs.micNoise),
       onNoiseFallback: via(noteNoiseFallback),
+      onNoiseState: via(noteNoiseState),
     };
     let call;
 
@@ -656,7 +666,7 @@ export function VoiceProvider({ children }) {
         toast(t('voice.call.shareStoppedOnMove'));
       }
     }
-  }, [store, setScreen, setCamera, settleStreamOff, settleVideoOff, sealMedia, noteNoiseFallback]);
+  }, [store, setScreen, setCamera, settleStreamOff, settleVideoOff, sealMedia, noteNoiseFallback, noteNoiseState]);
 
   const coreLeave = useCallback(async (target) => {
     const targetChannelId = typeof target === 'string' ? target : channelRef.current;
@@ -1367,6 +1377,7 @@ export function VoiceProvider({ children }) {
     privacy,
     noiseMode,
     noiseSupport: neuralCapability(),
+    noiseState,
     setNoiseMode,
     join,
     leave: coreLeave,
