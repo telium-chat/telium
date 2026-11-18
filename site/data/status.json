@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-11-18T21:52:58.305Z",
+  "generated_at": "2026-11-18T23:48:17.897Z",
   "servers": {
     "notdiscord.fyi": {
       "domain": "notdiscord.fyi",
       "ok": true,
-      "checked_at": "2026-11-18T21:52:57.766Z",
+      "checked_at": "2026-11-18T23:48:17.281Z",
       "error": null,
       "server_name": "notdiscord.fyi",
       "api_origin": "https://notdiscord.fyi",
@@ -53,10 +53,72 @@
       },
       "recommendations_accepting": true,
       "recommendations_referral_weight": 1,
-      "probe_ms": 539,
+      "probe_ms": 143,
       "uptime_30d": null,
-      "samples": 14,
+      "samples": 15,
       "first_probe_at": "2026-11-14T19:44:19.000Z",
+      "recommendation": {
+        "eligible": true,
+        "reasons": [],
+        "weight": 1
+      }
+    },
+    "yapper.cloud": {
+      "domain": "yapper.cloud",
+      "ok": true,
+      "checked_at": "2026-11-18T23:48:17.284Z",
+      "error": null,
+      "server_name": "yapper.cloud",
+      "api_origin": "https://yapper.cloud",
+      "protocol_version": "v1",
+      "moved_to": null,
+      "sunset": null,
+      "registration_open": true,
+      "server_version": "0.5.0",
+      "roles": {
+        "guild": true,
+        "identity": true,
+        "media": true,
+        "relay": false
+      },
+      "features": {
+        "archive": false,
+        "automod": true,
+        "dms": true,
+        "embed_proxy": true,
+        "federation": true,
+        "gif_picker": true,
+        "migration": true,
+        "native_notifications": true,
+        "push": true,
+        "rate_limit": true,
+        "reactions": true,
+        "read_state": true,
+        "recovery_email": false,
+        "relay": false,
+        "search": true,
+        "threads": true,
+        "voice": true
+      },
+      "max_file_bytes": 52428800,
+      "upload": {
+        "enabled": true,
+        "default_policy": "quota",
+        "max_file_bytes": 52428800,
+        "quota_bytes": 1073741824,
+        "attachment_max_age_days": 30,
+        "abuse_contact": null
+      },
+      "registration_policy": {
+        "invite_code_required": false,
+        "min_password_len": 8
+      },
+      "recommendations_accepting": true,
+      "recommendations_referral_weight": 1,
+      "probe_ms": 613,
+      "uptime_30d": null,
+      "samples": 1,
+      "first_probe_at": "2026-11-18T23:48:18.000Z",
       "recommendation": {
         "eligible": true,
         "reasons": [],
