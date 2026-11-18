@@ -83,6 +83,16 @@ export const voice = {
   // Said for a direct call, where there is no guild to name underneath.
   'voice.bar.directMessage': 'Direct message',
   'voice.bar.goTo': 'Go to this call',
+  'voice.invite.open': 'Invite to this call',
+  'voice.invite.search': 'Find a member',
+  'voice.invite.none': 'No one to invite',
+  'voice.invite.sent': 'Invited {name}',
+  'voice.invite.failed': 'Could not send the invite',
+  'voice.invite.from': '{named, select, yes {{caller} invited you to a call} other {You are invited to a call}}',
+  'voice.invite.where': '{channel} \u00b7 {guild}',
+  'voice.invite.join': 'Join {channel}',
+  'voice.invite.dismiss': 'Dismiss invite',
+  'voice.invite.joinFailed': 'Could not join the call',
   'voice.bar.goToLabel': 'Go to {name} {where}',
 
   // The two states of the line beside the signal meter. "Voice connected" is

@@ -92,6 +92,11 @@
   pointer-events: none;
 }
 
+.ringing-calls--invites {
+  top: auto;
+  bottom: 12px;
+}
+
 .ringing-call {
   border-radius: var(--radius-card);
   pointer-events: auto;

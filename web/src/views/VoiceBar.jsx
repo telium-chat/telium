@@ -13,6 +13,7 @@ import { useT } from '../lib/i18n/react.jsx';
 import { Avatar, EmojiText, IconButton, SpinnerIcon } from '../components/index.js';
 import { Tooltip } from '../components/Tooltip.jsx';
 import { AudioQuickMenu } from '../components/AudioQuickMenu.jsx';
+import { InviteTool } from './VoiceInvite.jsx';
 import {
   AdvancedIcon, HeadphoneOffIcon, HeadphonesIcon, MicIcon, MicOffIcon,
   PhoneOffIcon, ScreenIcon, ScreenOffIcon, VideoIcon, VideoOffIcon,
@@ -423,7 +424,7 @@ export function VoiceBar() {
           channel={channel}
           speaking={voice.speaking}
         />
-        <div role="toolbar" aria-label={t('voice.bar.toolbar')} className="mt-2 grid grid-cols-5 gap-1.5">
+        <div role="toolbar" aria-label={t('voice.bar.toolbar')} className={cn('mt-2 grid gap-1.5', channel?.type === 'voice' ? 'grid-cols-6' : 'grid-cols-5')}>
           <Tool
             title={micLabel}
             icon={silent ? MicOffIcon : MicIcon}
@@ -452,6 +453,7 @@ export function VoiceBar() {
             on={local.streaming}
             onClick={voice.toggleStream}
           />
+          {channel?.type === 'voice' ? <InviteTool channel={channel} toolClass={toolClass} /> : null}
           <AudioTool voice={voice} />
         </div>
       </div>

@@ -531,6 +531,7 @@ fn federation_routes() -> Router<AppState> {
         .route("/_telium/v1/channels/{id}/voice/stream", post(voice::set_stream))
         .route("/_telium/v1/channels/{id}/voice/watch", post(voice::watch))
         .route("/_telium/v1/channels/{id}/voice/signal", post(voice::signal))
+        .route("/_telium/v1/channels/{id}/voice/invite", post(voice::invite))
         .route("/_telium/v1/channels/{id}/voice/e2ee", get(voice::e2ee_state).post(voice::e2ee_commit))
         .route("/_telium/v1/channels/{id}/voice/e2ee/commits", get(voice::e2ee_commits))
         .route("/_telium/v1/channels/{id}/voice/e2ee/refuse", post(voice::e2ee_refuse))

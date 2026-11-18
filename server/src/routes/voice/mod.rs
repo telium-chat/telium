@@ -1632,6 +1632,86 @@ pub async fn signal(
     Ok(Json(json!({ "ok": true })))
 }
 
+#[derive(Deserialize)]
+pub struct Invite {
+    pub target: String,
+}
+
+/// Asks a guild member to join the call you are in. Nothing is stored: the invite is one
+/// gateway event to the target's connected devices, so there is no row to expire or sweep.
+/// Someone offline simply doesn't see it, which suits an invitation to a call in progress.
+pub async fn invite(
+    State(state): State<AppState>,
+    auth: GuildAuth,
+    Path(channel_id): Path<String>,
+    Json(req): Json<Invite>,
+) -> ApiResult<Json<Value>> {
+    let ctx = voice_channel(&state, &channel_id, &auth.user_id).await?;
+    if req.target == auth.user_id {
+        return Err(ApiError::BadRequest("you cannot invite yourself".into()));
+    }
+    let inside: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM voice_states WHERE channel_id = ? AND user_id IN (?, ?)",
+    )
+    .bind(&channel_id)
+    .bind(&auth.user_id)
+    .bind(&req.target)
+    .fetch_one(&state.pool)
+    .await?;
+    let mine: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM voice_states WHERE channel_id = ? AND user_id = ?",
+    )
+    .bind(&channel_id)
+    .bind(&auth.user_id)
+    .fetch_one(&state.pool)
+    .await?;
+    if mine == 0 {
+        return Err(ApiError::Forbidden("join the channel before inviting people to it".into()));
+    }
+    if inside > 1 {
+        return Err(ApiError::Conflict("they are already in this call".into()));
+    }
+    // The target must be able to connect; a refusal reads the same as an unknown member so
+    // the endpoint can't be used to probe who may see a private channel.
+    if guildstore::require_channel_perm(&state, &channel_id, &req.target, perms::CONNECT)
+        .await
+        .is_err()
+    {
+        return Err(ApiError::NotFound("that member can't be invited to this channel".into()));
+    }
+    if let Err(retry) = state.limiter.take(
+        format!("vcinvite:{}:{}", auth.user_id, req.target),
+        "vc_invite",
+        1.0,
+        1.0 / 30.0,
+    ) {
+        return Err(ApiError::RateLimited(format!(
+            "you just invited them; try again in {} seconds",
+            retry.ceil() as i64
+        )));
+    }
+    state
+        .hub
+        .publish(
+            Event {
+                t: "VOICE_INVITE",
+                guild_id: ctx.guild_id.clone(),
+                channel_id: Some(channel_id.clone()),
+                intent: INTENT_GUILD_VOICE_STATES,
+                only_user: Some(req.target),
+                data: json!({
+                    "guild_id": ctx.guild_id,
+                    "channel_id": channel_id,
+                    "from": auth.user_id,
+                    "at": now_ms(),
+                }),
+            }
+            .into(),
+        )
+        .await;
+    Ok(Json(json!({ "ok": true })))
+}
+
 pub async fn health_check(state: &AppState) -> ApiResult<()> {
     for region in &state.cfg.voice.regions {
         if region.sfu.is_empty() { continue; }

@@ -587,6 +587,8 @@ export class Api {
 
   regions() { return this.get('/_telium/v1/voice/regions'); }
   voiceStates(channelId) { return this.get(`/_telium/v1/channels/${channelId}/voice`); }
+  /// Rings one guild member to the call you are in. Nothing is stored server-side.
+  voiceInvite(channelId, userId) { return this.post(`/_telium/v1/channels/${channelId}/voice/invite`, { target: userId }); }
   voiceJoin(channelId, body) { return this.post(`/_telium/v1/channels/${channelId}/voice/join`, body || {}).then(joined); }
   voiceRelayFull(channelId, region) { return this.post(`/_telium/v1/channels/${channelId}/voice/relay-full`, { region }); }
   voiceLeave(channelId) { return this.post(`/_telium/v1/channels/${channelId}/voice/leave`, {}); }
