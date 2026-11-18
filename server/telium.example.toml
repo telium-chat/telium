@@ -699,7 +699,7 @@ invite_portal = "https://telium.chat"
 enabled = true
 api_key = "PUJfq1nYPGGO7gjwx7wqjGJwOzld1FZiyP35kiBa2wnQ6mRD7JrJnfA0mKfLrHKh"
 api_base_url = "https://api.klipy.com/api/v1"
-media_hosts = ["klipy.com", "static.klipy.com", "static.klipy.co", "media.klipy.com"]
+media_hosts = ["klipy.com", "static.klipy.com", "static1.klipy.com", "static2.klipy.com", "static.klipy.co", "media.klipy.com"]
 
 # Outbound email: recovery-address confirmation and security warnings
 # (docs/migration.md, "Migration alerts").
