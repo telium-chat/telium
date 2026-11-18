@@ -75,7 +75,7 @@ check_domain() {
       { fail "'$label' is not a valid DNS label (cannot begin or end with a hyphen)"; return 1; }
   done
   case "$DOMAIN" in
-    localhost|localhost.*|*example.com|*example.org|*example.net|*your-domain*|*yourdomain*|change.me)
+    localhost|localhost.*|example.com|*.example.com|example.org|*.example.org|example.net|*.example.net|yourdomain.com|*.yourdomain.com|change.me)
       { fail "'$DOMAIN' is a placeholder, not your real domain"; return 1; } ;;
   esac
   return 0
