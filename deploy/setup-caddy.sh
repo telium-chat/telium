@@ -67,8 +67,12 @@ if ! command -v caddy >/dev/null 2>&1; then
   command -v apt-get >/dev/null 2>&1 ||
     die "Caddy is not installed, and this script only installs it on Debian/Ubuntu. Install Caddy (https://caddyserver.com/docs/install), then rerun this script"
   say "installing Caddy (apt-get install caddy)..."
-  DEBIAN_FRONTEND=noninteractive apt-get install -y caddy >/dev/null ||
-    die "could not install Caddy with apt-get; install it yourself (https://caddyserver.com/docs/install) and rerun this script"
+  export DEBIAN_FRONTEND=noninteractive
+  # A fresh box often has an empty package index, which makes "caddy" look
+  # nonexistent, so refresh it first.
+  apt-get update >/dev/null 2>&1 || say "warning: apt-get update reported errors; trying anyway"
+  apt-get install -y caddy ||
+    die "could not install Caddy with apt-get (apt's error is above); install it yourself (https://caddyserver.com/docs/install) and rerun this script"
 fi
 
 # Uploads must fit through the proxy: the largest file the server accepts,
@@ -80,6 +84,14 @@ case "$file_max" in
   *GiB) [[ "${file_max%GiB}" =~ ^[0-9]+$ ]] && max_mib=$(( ${file_max%GiB} * 1024 + 16 )) ;;
   *MiB) [[ "${file_max%MiB}" =~ ^[0-9]+$ ]] && max_mib=$(( ${file_max%MiB} + 16 )) ;;
 esac
+
+# Caddy's admin endpoint defaults to "localhost:2019". On hosts where the name
+# localhost does not resolve to a loopback address (some providers map it to the
+# machine's private address in /etc/hosts), Caddy cannot even start. Pin it to
+# the literal loopback address so it never depends on name resolution.
+global_block='{
+	admin 127.0.0.1:2019
+}'
 
 block="$(cat <<EOF
 $DOMAIN {
@@ -108,10 +120,18 @@ is_stock() {
 install -d -m 755 /etc/caddy
 imported_by_hand=0
 if is_stock; then
-  printf '# Written by Telium setup. Caddy gets and renews the certificate itself.\n%s\n' "$block" > "$CADDYFILE"
+  printf '# Written by Telium setup. Caddy gets and renews the certificate itself.\n%s\n\n%s\n' "$global_block" "$block" > "$CADDYFILE"
   say "wrote $CADDYFILE"
 elif grep -qE "^[[:space:]]*$DOMAIN[[:space:],{]" "$CADDYFILE"; then
   say "$CADDYFILE already has a site for $DOMAIN; left alone"
+  # A file we wrote ourselves earlier lacks the admin pin; add it so Caddy can
+  # start on hosts where "localhost" is not loopback. Never touch a file we did not write.
+  if grep -q '^# Written by Telium setup' "$CADDYFILE" && ! grep -qE '^[[:space:]]*admin[[:space:]]' "$CADDYFILE"; then
+    tmpf="$(mktemp)"
+    { head -n 1 "$CADDYFILE"; printf '%s\n\n' "$global_block"; tail -n +2 "$CADDYFILE"; } > "$tmpf"
+    cat "$tmpf" > "$CADDYFILE"; rm -f "$tmpf"
+    say "added an admin address setting to $CADDYFILE (Caddy could not use \"localhost\" on some hosts)"
+  fi
 else
   printf '# Written by Telium setup.\n%s\n' "$block" > "$SNIPPET"
   say "$CADDYFILE already has your own settings, so it was not changed."
@@ -124,7 +144,11 @@ fi
 if [ "$imported_by_hand" -eq 0 ]; then
   caddy validate --config "$CADDYFILE" --adapter caddyfile >/dev/null 2>&1 ||
     die "Caddy rejected the configuration; run: caddy validate --config $CADDYFILE --adapter caddyfile"
-  systemctl enable --now caddy >/dev/null 2>&1 || die "could not start Caddy; look at: journalctl -u caddy -n 50"
+  if ! systemctl enable --now caddy >/dev/null 2>&1; then
+    say "Caddy did not start. Its last log lines:"
+    journalctl -u caddy -n 15 --no-pager 2>/dev/null | sed 's/^/    /' || true
+    die "could not start Caddy; full log: journalctl -u caddy -n 50"
+  fi
   systemctl reload caddy >/dev/null 2>&1 || systemctl restart caddy ||
     die "could not reload Caddy; look at: journalctl -u caddy -n 50"
   say "Caddy is running"
