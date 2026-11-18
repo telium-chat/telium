@@ -60,6 +60,17 @@ export const FRAME_MS = 10;
 /// Fraction of one core the model may take (laptop ~1.4%, mid phone ~10%).
 export const BENCHMARK_CEILING = 0.25;
 
+/// DeepFilterNet3 costs about eleven times what RNNoise does (about 9% of a core against under 1% on a laptop-class CPU), so it is allowed far more headroom before it is judged too slow to start with; the governor still steps it down if it cannot keep up once a call is running.
+export const DEEPFILTER_CEILING = 0.35;
+
+/// The ladder: each engine yields to the next when a call cannot afford it, and the one after the last is the browser's own suppressor.
+export const ENGINES = ['dfn3', 'rnnoise'];
+
+export function nextEngine(engine) {
+  const at = ENGINES.indexOf(engine);
+  return at >= 0 && at + 1 < ENGINES.length ? ENGINES[at + 1] : null;
+}
+
 export function benchmarkVerdict({ frames, cpuMs }, ceiling = BENCHMARK_CEILING) {
   if (!Number.isFinite(frames) || frames <= 0 || !Number.isFinite(cpuMs) || cpuMs < 0) {
     return { ok: false, load: null, reason: 'no-measurement' };

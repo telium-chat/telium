@@ -1,0 +1,67 @@
+[package]
+name = "telium-deepfilter"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "DeepFilterNet3 noise suppression compiled to a plain WebAssembly module with a C ABI. See README.md."
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+# tract is held to the 0.21 line the vendored code was written for, at >= 0.21.16 because 0.21.4 carries RUSTSEC-2026-0217 (an out-of-bounds read in the NNEF parser). 0.21.16 and later build against ndarray 0.16, hence that below. Moving to tract 0.23 means porting `src/tract.rs` (its state and tensor types changed) and is not done here.
+#
+# `src/lib.rs`, `src/tract.rs` and `src/transforms.rs` are Rikorose/DeepFilterNet's libDF at the commit named in
+# README.md, so the feature names below are upstream's and are what its `cfg`s test.
+[features]
+default = ["tract"]
+transforms = ["dep:ndarray", "dep:rubato"]
+logging = ["dep:log", "dep:crossbeam-channel"]
+tract = [
+  "transforms",
+  "logging",
+  "dep:tract-core",
+  "dep:tract-onnx",
+  "dep:tract-pulse",
+  "dep:tract-hir",
+  "dep:rust-ini",
+  "dep:anyhow",
+  "dep:flate2",
+  "dep:tar",
+  "dep:thiserror",
+]
+
+[dependencies]
+rustfft = "^6.1.0"
+realfft = "^3.1.0"
+itertools = "0.12"
+num-complex = { version = "^0.4", features = ["serde"] }
+log = { version = "0.4", features = ["std"], optional = true }
+crossbeam-channel = { version = "^0.5", optional = true }
+rubato = { version = "0.14", optional = true }
+thiserror = { version = "1.0", optional = true }
+anyhow = { version = "1.0", optional = true }
+ndarray = { version = "^0.16", optional = true }
+rust-ini = { version = "^0.21", optional = true }
+tract-core = { version = "~0.21.16", optional = true }
+tract-onnx = { version = "~0.21.16", optional = true }
+tract-pulse = { version = "~0.21.16", optional = true }
+tract-hir = { version = "~0.21.16", optional = true }
+flate2 = { version = "1.0.24", optional = true }
+tar = { version = "0.4.38", optional = true }
+
+# A transitive dependency (hash seeding inside tract) asks for random bytes, which `wasm32-unknown-unknown` has no source for. `custom` lets `src/ffi.rs` supply one instead of importing it from JavaScript.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["custom"] }
+
+[lints.rust]
+# Upstream's source also names features (dataset, capi, wasm, ...) this crate does not build.
+unexpected_cfgs = { level = "allow" }
+dead_code = "allow"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

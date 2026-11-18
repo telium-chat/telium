@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BENCHMARK_CEILING, DEFAULT_NOISE_MODE, NOISE_MODES, OVERLOAD, benchmarkVerdict, micConstraints,
-  neuralCapability, normalizeNoiseMode, createGovernor, GOVERNOR, judgeSample, PERMANENT_REASONS, unavailableBecause,
+  neuralCapability, normalizeNoiseMode, createGovernor, ENGINES, GOVERNOR, nextEngine, judgeSample, PERMANENT_REASONS, unavailableBecause,
 } from '../lib/denoise.js';
 
 const capable = (over = {}) => ({
@@ -166,5 +166,14 @@ describe('standing aside mid-call', () => {
   it('treats only hard failures as reasons to stop for the call', () => {
     expect(PERMANENT_REASONS.has('no-wasm')).toBe(true);
     expect(PERMANENT_REASONS.has('too-slow')).toBe(false);
+  });
+});
+
+describe('the engine ladder', () => {
+  it('goes from the better model to the lighter one to nothing', () => {
+    expect(ENGINES).toEqual(['dfn3', 'rnnoise']);
+    expect(nextEngine('dfn3')).toBe('rnnoise');
+    expect(nextEngine('rnnoise')).toBeNull();
+    expect(nextEngine('something-else')).toBeNull();
   });
 });

@@ -113,7 +113,7 @@ export async function openDenoiser(callbacks) {
     error.reason = verdict.reason;
     throw error;
   }
-  return new DenoiseChain(callbacks);
+  return new DenoiseChain({ ...callbacks, engine: verdict.engine || 'rnnoise' });
 }
 
 export function cameraVideoConstraints(facingMode = 'user') {
