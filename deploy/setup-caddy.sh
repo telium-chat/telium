@@ -58,7 +58,9 @@ if command -v ss >/dev/null 2>&1; then
 fi
 
 # A name that does not resolve yet is the usual reason HTTPS fails at first.
+dns_missing=0
 if ! getent hosts "$DOMAIN" >/dev/null 2>&1; then
+  dns_missing=1
   say "note: $DOMAIN does not point anywhere yet. Add a DNS record for it that points at"
   say "this machine; Caddy keeps retrying and will finish once DNS has caught up."
 fi
@@ -160,6 +162,13 @@ if [ "$imported_by_hand" -eq 0 ]; then
 else
   # Caddy is not serving this site until the import line is added by hand.
   exit 4
+fi
+
+# With no DNS record there is nothing to wait for; Caddy is running and will
+# get the certificate by itself once the record exists.
+if [ "$dns_missing" -eq 1 ]; then
+  say "Caddy is running and will get the certificate once DNS for $DOMAIN points here."
+  exit 3
 fi
 
 # Getting the first certificate takes a few seconds. Try for about a minute.
