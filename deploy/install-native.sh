@@ -187,22 +187,21 @@ ask_https() {
 }
 
 # Does $DOMAIN point at this machine? Sets $dns_state to one of:
-#   ok          resolves, and to an address this machine has or is reached by
-#   mismatch    resolves, but to somewhere else (listed in $dns_found)
+#   ok          resolves to an address that this machine itself has
+#   mismatch    resolves, but to an address this machine does not have
 #   unresolved  no A/AAAA record yet
-#   unknown     resolves, but this machine's public address could not be learned
+# This only looks things up locally (DNS, and this machine's own addresses);
+# nothing is sent to any third-party service. The catch: on clouds that give a
+# machine a public IP it does not hold itself (NAT or a floating IP), a correct
+# record reads as "mismatch", so the wording below never calls it an error.
 check_dns() {
   dns_found="$(getent ahosts "$DOMAIN" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ' || true)"
   dns_found="${dns_found% }"
   if [ -z "$dns_found" ]; then dns_state=unresolved; return 0; fi
-  local mine
-  mine="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
-  mine="$mine $(hostname -I 2>/dev/null || true) $(curl -6 -fsS --max-time 5 https://api64.ipify.org 2>/dev/null || true)"
-  dns_my_ip="$(printf '%s' "$mine" | awk '{print $1}')"
-  if [ -z "${mine// /}" ]; then dns_state=unknown; return 0; fi
-  local ip
+  local mine ip
+  mine=" $(hostname -I 2>/dev/null || true) "
   for ip in $dns_found; do
-    case " $mine " in *" $ip "*) dns_state=ok; return 0 ;; esac
+    case "$mine" in *" $ip "*) dns_state=ok; return 0 ;; esac
   done
   dns_state=mismatch
 }
@@ -218,11 +217,16 @@ preflight_https() {
     check_dns
     case "$dns_state" in
       ok) say "$DOMAIN points at this machine"; break ;;
-      unknown) say "$DOMAIN resolves to $dns_found (could not confirm that is this machine)"; break ;;
-      mismatch) say "$DOMAIN points at $dns_found, but this machine appears to be ${dns_my_ip:-somewhere else}" ;;
-      unresolved) say "$DOMAIN does not point anywhere yet" ;;
+      mismatch)
+        say "$DOMAIN points at $dns_found, which is not an address this machine has."
+        say "That is fine if your provider forwards that public address to this machine."
+        say "If not, change the A record for $DOMAIN to this machine's public IP address."
+        ;;
+      unresolved)
+        say "$DOMAIN does not point anywhere yet."
+        say "Add an A record for $DOMAIN pointing to this machine's public IP address."
+        ;;
     esac
-    say "Add an A record for $DOMAIN pointing to this machine's public IP${dns_my_ip:+ ($dns_my_ip)}."
     if [ ! -t 0 ]; then
       say "continuing unattended; Caddy keeps retrying and finishes once DNS has caught up"
       break
@@ -243,7 +247,6 @@ https_result=skipped   # skipped | ok | pending | failed
 https_exit=0
 dns_state=unchecked
 dns_found=""
-dns_my_ip=""
 
 if [ "$existing_install" -eq 0 ]; then
   ask_https
@@ -697,10 +700,15 @@ else
       ;;
     pending)
       say "HTTPS: Caddy is installed and running, waiting for a certificate for $DOMAIN."
-      if [ "$dns_state" != ok ] && [ "$dns_state" != unknown ]; then
+      if [ "$dns_state" != ok ]; then
         n=$((n + 1))
-        say "$n. DNS for $DOMAIN does not point at this machine yet. Add an A record for it"
-        say "   pointing to this machine's public IP address. Caddy finishes by itself after that."
+        if [ -n "$dns_found" ]; then
+          say "$n. Check DNS: $DOMAIN points at $dns_found, which this machine does not have."
+        else
+          say "$n. Check DNS: $DOMAIN does not point anywhere yet."
+        fi
+        say "   It needs an A record pointing to this machine's public IP address. Caddy"
+        say "   finishes by itself once that is right."
       else
         n=$((n + 1))
         say "$n. DNS is set. Make sure ports 80 and 443 are open to the internet (firewall and"
@@ -723,7 +731,7 @@ else
       ;;
     *)
       # Automatic HTTPS was not chosen, so none of it has been done.
-      if [ "$dns_state" != ok ] && [ "$dns_state" != unknown ]; then
+      if [ "$dns_state" != ok ]; then
         n=$((n + 1))
         say "$n. Point DNS at this machine. In your domain's DNS settings, add an A record"
         say "   for $DOMAIN that points to this machine's public IP address."
