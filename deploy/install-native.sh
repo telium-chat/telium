@@ -51,32 +51,52 @@ die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
 # the half of every account id this server ever mints, and the check tool
 # would refuse it at startup anyway -- better here, before anything is
 # written, than at ExecStartPre afterwards.
-[ $# -eq 1 ] || { echo "usage: sudo $0 <domain>   e.g. sudo $0 chat.example.com" >&2; exit 2; }
+[ $# -le 1 ] || { echo "usage: sudo $0 [domain]" >&2; exit 2; }
 
-# Accept an optional http(s) URL, but canonicalize and validate the *identity*.
-# DNS names become permanent account identifiers; never quietly accept typos.
-DOMAIN="${1,,}"
-case "$DOMAIN" in
-  http://*|https://*) DOMAIN="${DOMAIN#*://}" ;;
-  *://*) die "only http(s) URLs or bare DNS names are supported" ;;
-esac
-DOMAIN="${DOMAIN%%/*}"
-DOMAIN="${DOMAIN%.}"
-[ "${#DOMAIN}" -le 253 ] || die "domain is too long (maximum 253 characters)"
-[[ "$DOMAIN" == *.* ]] || die "refusing a dotless name ($DOMAIN)"
-[[ "$DOMAIN" != *..* && "$DOMAIN" != .* && "$DOMAIN" != *. ]] ||
-  die "'$DOMAIN' contains an empty DNS label"
-[[ "$DOMAIN" =~ ^[a-z0-9.-]+$ ]] || die "'$DOMAIN' contains invalid DNS characters"
-IFS='.' read -r -a labels <<< "$DOMAIN"
-for label in "${labels[@]}"; do
-  [ "${#label}" -le 63 ] || die "DNS label '$label' is longer than 63 characters"
-  [[ "$label" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] ||
-    die "'$label' is not a valid DNS label (cannot begin or end with a hyphen)"
-done
-case "$DOMAIN" in
-  localhost|localhost.*|example.com|example.org|example.net|change.me)
-    die "refusing '$DOMAIN'; it is a placeholder, not a home" ;;
-esac
+# Normalize "$1" into $DOMAIN, or set $domain_err and return 1.
+fail() { domain_err="$*"; return 1; }
+check_domain() {
+  DOMAIN="${1,,}"
+  case "$DOMAIN" in
+    http://*|https://*) DOMAIN="${DOMAIN#*://}" ;;
+    *://*) { fail "only http(s) URLs or bare DNS names are supported"; return 1; } ;;
+  esac
+  DOMAIN="${DOMAIN%%/*}"
+  DOMAIN="${DOMAIN%.}"
+  [ "${#DOMAIN}" -le 253 ] || { fail "domain is too long (maximum 253 characters)"; return 1; }
+  [[ "$DOMAIN" == *.* ]] || { fail "refusing a dotless name ($DOMAIN)"; return 1; }
+  [[ "$DOMAIN" != *..* && "$DOMAIN" != .* && "$DOMAIN" != *. ]] ||
+    { fail "'$DOMAIN' contains an empty DNS label"; return 1; }
+  [[ "$DOMAIN" =~ ^[a-z0-9.-]+$ ]] || { fail "'$DOMAIN' contains invalid DNS characters"; return 1; }
+  IFS='.' read -r -a labels <<< "$DOMAIN"
+  for label in "${labels[@]}"; do
+    [ "${#label}" -le 63 ] || { fail "DNS label '$label' is longer than 63 characters"; return 1; }
+    [[ "$label" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] ||
+      { fail "'$label' is not a valid DNS label (cannot begin or end with a hyphen)"; return 1; }
+  done
+  case "$DOMAIN" in
+    localhost|localhost.*|example.com|*.example.com|example.org|*.example.org|example.net|*.example.net|yourdomain.com|*.yourdomain.com|change.me)
+      { fail "'$DOMAIN' is a placeholder, not your real domain"; return 1; } ;;
+  esac
+  return 0
+}
+
+# The domain is a question like any other, so there is no example domain in
+# the command for anyone to paste unedited. An argument still works for
+# scripted runs and the test suite.
+domain_err=""
+if [ $# -eq 1 ]; then
+  check_domain "$1" || die "$domain_err"
+else
+  [ -t 0 ] || die "this needs a terminal to ask which domain to use; run it from a shell session"
+  while :; do
+    printf '\nWhat domain will people use to reach this server? (for example: chat.yourdomain.com)\n'
+    printf '  It becomes part of every account name and cannot be changed later.\n> '
+    read -r answer || die "could not read your answer"
+    if check_domain "$answer"; then break; fi
+    printf '  %s -- try again\n' "$domain_err"
+  done
+fi
 
 # ------------------------------------------------------------------ the host
 

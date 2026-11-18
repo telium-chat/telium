@@ -210,8 +210,10 @@ cloning the repository or relying on the current working directory:
 
 ```sh
 curl -fsSLo /tmp/telium-native-setup.sh https://raw.githubusercontent.com/telium-chat/telium/main/deploy/bootstrap-native.sh
-bash /tmp/telium-native-setup.sh chat.example.com
+bash /tmp/telium-native-setup.sh
 ```
+
+The installer asks which domain to use as its first question, so there is nothing to edit before pasting.
 
 The saved bootstrap invokes `sudo` for a non-root account when available,
 but runs directly in a root shell on minimal VPS images without `sudo`.
@@ -226,7 +228,7 @@ must switch to a root login (`su -`) or ask an administrator for access.
 The native installer downloads the release binary, creates the `telium` user,
 writes `/etc/telium/telium.toml`, installs the unit and native update timer,
 and starts the server. A complete checkout still supports
-`bash deploy/install-native.sh chat.example.com` from the repository root.
+`sudo bash deploy/install-native.sh` from the repository root.
 
 On a first install it also offers to set up HTTPS for you with Caddy
 (`setup-caddy.sh`; Debian/Ubuntu, needs DNS pointing at the machine and ports
