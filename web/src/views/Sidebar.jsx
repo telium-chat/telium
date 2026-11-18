@@ -17,7 +17,7 @@ import { faceOf } from '../lib/faces.js';
 import { remoteMediaOrigin } from '../lib/media.js';
 import { participants, shortName, statusLine } from '../lib/util.js';
 import {
-  Avatar, Badge, ChevronDownIcon, ChevronRightIcon,
+  AddFriendIcon, Avatar, Badge, ChevronDownIcon, ChevronRightIcon,
   ContextMenu, DeafenIcon, EmojiText, IconButton, LockIcon,
   MembersIcon, MenuButton, MenuSlider, MenuSeparator, MessageIcon, MicOffIcon,
   Pill, PlusIcon, Reorder, ScreenIcon, SettingsIcon, StatusLine, StatusText, ThreadIcon,
@@ -30,6 +30,8 @@ import { NewConversationDialog } from './dialogs/NewConversationDialog.jsx';
 import { MessageRequestsDialog } from './dialogs/MessageRequestsDialog.jsx';
 import { UserSettings } from './settings.jsx';
 import { VoiceBar } from './VoiceBar.jsx';
+import { InviteDialog } from './dialogs/InviteDialog.jsx';
+import { t as tr } from '../lib/i18n/index.js';
 
 const FRAME = 'flex w-[248px] shrink-0 flex-col bg-rail [--presence-ring:var(--rail)]';
 const HEAD = 'flex h-12 shrink-0 items-center gap-1 px-2';
@@ -244,6 +246,7 @@ function ChannelRow({ channel, parentId, mayManage }) {
   const voice = useVoice();
   useStoreEventFor((guildId) => guildId === channel.guild_id, 'members');
   const menus = useMenus();
+  const modal = useModal();
   const [pressed, setPressed] = useState(false);
   const routed = store.route.channelId === channel.id;
   if (pressed && !routed && store.route.channelId) setPressed(false);
@@ -272,6 +275,20 @@ function ChannelRow({ channel, parentId, mayManage }) {
     setPressed(true);
     store.navigate(channelRoute(channel));
     if (channel.type === 'voice' && voice.channelId !== channel.id) voice.join(channel.id);
+  };
+  // The link for the call you are in; the server deletes it when the call ends.
+  const guildForInvite = store.guilds.get(channel.guild_id);
+  const canInvite = channel.type === 'voice' && voice.channelId === channel.id
+    && Boolean(guildForInvite) && store.canInGuild(channel.guild_id, 'CREATE_INVITE');
+  const inviteToCall = async () => {
+    try {
+      const made = await store.apiForGuild(channel.guild_id).voiceInvite(channel.id);
+      modal.open((close) => (
+        <InviteDialog guild={guildForInvite} invite={made} call={channel} close={close} />
+      ));
+    } catch (e) {
+      reportError(e, tr('voice.invite.failed'));
+    }
   };
   const openChat = () => {
     setPressed(true);
@@ -377,9 +394,20 @@ function ChannelRow({ channel, parentId, mayManage }) {
               </span>
             ) : null}
             <Badge count={!muted ? state.mentions : 0} />
-            <span className={channel.type === 'voice' ? 'w-[52px] shrink-0' : 'size-5 shrink-0'} aria-hidden />
+            <span className={channel.type === 'voice' ? (canInvite ? 'w-[76px] shrink-0' : 'w-[52px] shrink-0') : 'size-5 shrink-0'} aria-hidden />
           </Row>
         </ContextMenu>
+        {canInvite ? (
+          <button
+            type="button"
+            title={tr('voice.invite.open')}
+            aria-label={tr('voice.invite.open')}
+            onClick={inviteToCall}
+            className="pointer-events-none absolute end-14 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-muted opacity-0 transition-[opacity,background-color,color] duration-[var(--dur-1)] ease-[var(--ease)] hover:bg-rail-active hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100"
+          >
+            <AddFriendIcon className="size-3.5" />
+          </button>
+        ) : null}
         {channel.type === 'voice' ? (
           <button
             type="button"
