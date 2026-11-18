@@ -122,6 +122,8 @@ function createProgramIcons({
 
   const nativeIcon = async (filePath) => {
     if (typeof getFileIcon !== 'function' || !path.isAbsolute(filePath)) return null;
+    // Never a network path (`\\host\share`, `//host/share`): opening one would make the OS connect to that host.
+    if (/^[\\/]{2}/.test(filePath)) return null;
     // A Windows path seen from Linux (a Proton game) is not a file here.
     if (platform === 'linux') return null;
     const bytes = await getFileIcon(filePath);

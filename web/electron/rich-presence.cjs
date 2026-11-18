@@ -179,6 +179,9 @@ function createRichPresenceService({
   let programs = [];
   const listings = new Map();
   let listingId = 0;
+  // Paths from the worker's own process listing, by executable. The picker's icon lookup reads a path from here and
+  // never from the window, so a compromised renderer can't point the main process at an arbitrary file or share.
+  let listedPaths = new Map();
   let activityKinds = sanitizeActivityKinds();
   let current = null;
   let lastEmitted = null;
@@ -407,9 +410,13 @@ function createRichPresenceService({
       }
       if (message.type === 'processes') {
         const waiting = listings.get(message.requestId);
+        const rows = Array.isArray(message.rows) ? message.rows : [];
+        listedPaths = new Map(rows
+          .filter((row) => typeof row?.executable === 'string' && typeof row?.path === 'string')
+          .map((row) => [exeKey(row.executable), row.path]));
         if (waiting) {
           listings.delete(message.requestId);
-          waiting(Array.isArray(message.rows) ? message.rows : []);
+          waiting(rows);
         }
       }
       if (message.type === 'wine-bridge-status') emitWineStatus(message);
@@ -513,7 +520,7 @@ function createRichPresenceService({
       await Promise.all(list.map(async (row) => {
         const executable = text(row?.executable, 128);
         if (!executable) return;
-        const icon = await programIcons.iconFor(executable, text(row?.path, 1024), 48);
+        const icon = await programIcons.iconFor(executable, listedPaths.get(exeKey(executable)) || '', 48);
         if (icon) out[executable] = `data:${icon.mime};base64,${Buffer.from(icon.bytes).toString('base64')}`;
       }));
       return out;
