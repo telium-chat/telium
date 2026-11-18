@@ -147,6 +147,109 @@ if { [ ! -f "$CONF" ] || ! grep -qE '^[[:space:]]*\[registration\][[:space:]]*(#
   die "unattended setup requires TELIUM_REGISTRATION=closed or TELIUM_REGISTRATION=open; refusing to guess"
 fi
 
+# Ask whether to set up HTTPS now. Sets $https_choice to caddy or manual.
+# Unattended runs do nothing unless TELIUM_HTTPS=caddy is set, because HTTPS
+# needs DNS and open ports that only the person at the keyboard can vouch for.
+# Whenever Caddy is NOT going to be set up, say so and why: a silent skip is
+# indistinguishable, afterwards, from a silent failure.
+ask_https() {
+  https_choice="${TELIUM_HTTPS:-}"
+  if [ -z "$https_choice" ]; then
+    if [ ! -t 0 ]; then
+      https_choice=manual
+      say "HTTPS: not set up automatically (this run is unattended; set TELIUM_HTTPS=caddy to opt in)"
+      return 0
+    fi
+    if ! command -v apt-get >/dev/null 2>&1 && ! command -v caddy >/dev/null 2>&1; then
+      https_choice=manual
+      say "HTTPS: not set up automatically (needs apt, or Caddy already installed); the end of the setup shows how"
+      return 0
+    fi
+    printf '\nSet up HTTPS for %s automatically? [y/N]\n' "$DOMAIN"
+    printf '  Browsers and other servers need HTTPS to talk to you. This installs Caddy, a\n'
+    printf '  small web server that gets and renews a free certificate for you.\n'
+    printf '  Say N if you already have a web server or tunnel (for example Cloudflare)\n'
+    printf '  handling this; the end of the setup shows how to connect it by hand.\n'
+    printf '  Before you say y:\n'
+    printf '    - DNS for %s must point at this machine (checked next), and\n' "$DOMAIN"
+    printf '    - ports 80 and 443 must be open to the internet.\n> '
+    read -r answer || die "could not read your answer"
+    case "$answer" in
+      y|Y|yes|YES) https_choice=caddy ;;
+      ""|n|N|no|NO) https_choice=manual ;;
+      *) die "please answer y (yes) or n (no)" ;;
+    esac
+  fi
+  case "$https_choice" in
+    caddy|manual) : ;;
+    *) die "TELIUM_HTTPS must be caddy or manual" ;;
+  esac
+}
+
+# Does $DOMAIN point at this machine? Sets $dns_state to one of:
+#   ok          resolves, and to an address this machine has or is reached by
+#   mismatch    resolves, but to somewhere else (listed in $dns_found)
+#   unresolved  no A/AAAA record yet
+#   unknown     resolves, but this machine's public address could not be learned
+check_dns() {
+  dns_found="$(getent ahosts "$DOMAIN" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ' || true)"
+  dns_found="${dns_found% }"
+  if [ -z "$dns_found" ]; then dns_state=unresolved; return 0; fi
+  local mine
+  mine="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
+  mine="$mine $(hostname -I 2>/dev/null || true) $(curl -6 -fsS --max-time 5 https://api64.ipify.org 2>/dev/null || true)"
+  dns_my_ip="$(printf '%s' "$mine" | awk '{print $1}')"
+  if [ -z "${mine// /}" ]; then dns_state=unknown; return 0; fi
+  local ip
+  for ip in $dns_found; do
+    case " $mine " in *" $ip "*) dns_state=ok; return 0 ;; esac
+  done
+  dns_state=mismatch
+}
+
+# Caddy proves ownership of the name over ports 80/443, so the name has to
+# point here BEFORE it starts. Check now, at the start, while the person can
+# still fix DNS or choose to do HTTPS another way -- not after the install.
+# Unattended runs only warn; Caddy keeps retrying until DNS catches up.
+preflight_https() {
+  [ "$https_choice" = caddy ] || return 0
+  step "Checking DNS for $DOMAIN"
+  while :; do
+    check_dns
+    case "$dns_state" in
+      ok) say "$DOMAIN points at this machine"; break ;;
+      unknown) say "$DOMAIN resolves to $dns_found (could not confirm that is this machine)"; break ;;
+      mismatch) say "$DOMAIN points at $dns_found, but this machine appears to be ${dns_my_ip:-somewhere else}" ;;
+      unresolved) say "$DOMAIN does not point anywhere yet" ;;
+    esac
+    say "Add an A record for $DOMAIN pointing to this machine's public IP${dns_my_ip:+ ($dns_my_ip)}."
+    if [ ! -t 0 ]; then
+      say "continuing unattended; Caddy keeps retrying and finishes once DNS has caught up"
+      break
+    fi
+    printf '  [r] check again   [c] continue anyway   [m] skip automatic HTTPS\n> '
+    read -r answer || die "could not read your answer"
+    case "$answer" in
+      c|C) say "continuing; HTTPS will only work once DNS points here"; break ;;
+      m|M) https_choice=manual; say "skipping automatic HTTPS"; break ;;
+      *) : ;;
+    esac
+  done
+}
+
+https_choice=manual
+https_ok=0
+https_result=skipped   # skipped | ok | pending | failed
+https_exit=0
+dns_state=unchecked
+dns_found=""
+dns_my_ip=""
+
+if [ "$existing_install" -eq 0 ]; then
+  ask_https
+  preflight_https
+fi
+
 step "Installing for chat on $DOMAIN ($machine)"
 say "this setup runs as root, but the server itself runs as a separate, restricted 'telium' user"
 if [ "${SUDO_USER:-root}" = root ]; then
@@ -230,39 +333,6 @@ ask_registration() {
   esac
 }
 
-# Ask whether to set up HTTPS now. Sets $https_choice to caddy or manual.
-# Unattended runs do nothing unless TELIUM_HTTPS=caddy is set, because HTTPS
-# needs DNS and open ports that only the person at the keyboard can vouch for.
-ask_https() {
-  https_choice="${TELIUM_HTTPS:-}"
-  if [ -z "$https_choice" ]; then
-    if [ ! -t 0 ] || { ! command -v apt-get >/dev/null 2>&1 && ! command -v caddy >/dev/null 2>&1; }; then
-      https_choice=manual
-      return 0
-    fi
-    printf '\nSet up HTTPS for %s automatically? [y/N]\n' "$DOMAIN"
-    printf '  Browsers and other servers need HTTPS to talk to you. This installs Caddy, a\n'
-    printf '  small web server that gets and renews a free certificate for you.\n'
-    printf '  Say N if you already have a web server or tunnel (for example Cloudflare)\n'
-    printf '  handling this; the end of the setup shows how to connect it by hand.\n'
-    printf '  Before you say y:\n'
-    printf '    - DNS for %s must already point at this machine, and\n' "$DOMAIN"
-    printf '    - ports 80 and 443 must be open to the internet.\n> '
-    read -r answer || die "could not read your answer"
-    case "$answer" in
-      y|Y|yes|YES) https_choice=caddy ;;
-      ""|n|N|no|NO) https_choice=manual ;;
-      *) die "please answer y (yes) or n (no)" ;;
-    esac
-  fi
-  case "$https_choice" in
-    caddy|manual) : ;;
-    *) die "TELIUM_HTTPS must be caddy or manual" ;;
-  esac
-}
-
-https_choice=manual
-https_ok=0
 #
 # Preserve all existing configuration on reruns. The one exception is
 # installer-generated configs missing [registration] from older releases:
@@ -301,7 +371,7 @@ else
     open|closed) : ;;
     *) die "TELIUM_REGISTRATION must be open or closed" ;;
   esac
-  ask_https
+  # (HTTPS was asked, and DNS checked, before anything was installed.)
 
   # New-install media and backup policy, with defaults based on actual disk
   # space. Unattended operators may override each choice using TELIUM_* vars.
@@ -567,12 +637,24 @@ esac
 # script can be rerun later by itself.
 
 if [ "$existing_install" -eq 0 ] && [ "$https_choice" = caddy ]; then
-  if bash "$here/setup-caddy.sh" "$DOMAIN"; then
-    https_ok=1
-  else
-    say "HTTPS is not finished yet, but the server itself is installed and running."
-    say "The steps at the end tell you how to finish it."
-  fi
+  step "HTTPS"
+  https_exit=0
+  bash "$here/setup-caddy.sh" "$DOMAIN" || https_exit=$?
+  case "$https_exit" in
+    0) https_ok=1; https_result=ok ;;
+    3) https_result=pending ;;   # Caddy is running; the certificate is not issued yet
+    *) https_result=failed ;;
+  esac
+  case "$https_result" in
+    failed)
+      printf '\n  !! HTTPS setup FAILED (exit %s). Caddy is not serving %s.\n' "$https_exit" "$DOMAIN"
+      say "The server itself is installed and running. The reason is printed above;"
+      say "fix it and rerun just this step (steps at the end)."
+      ;;
+    pending)
+      say "Caddy is running but has no certificate yet; see the notes above."
+      ;;
+  esac
 fi
 
 # ------------------------------------------------------------ what is left
@@ -606,22 +688,57 @@ else
   step "What to do next"
 
   n=0
-  if [ "$https_ok" -eq 1 ]; then
-    say "HTTPS is set up and working: https://$DOMAIN"
-  else
-    n=$((n + 1))
-    say "$n. Point DNS at this machine. In your domain's DNS settings, add an A record"
-    say "   for $DOMAIN that points to this machine's public IP address."
-    n=$((n + 1))
-    say "$n. Set up HTTPS. The easiest way is Caddy, which gets a free certificate for you."
-    say "   DNS must already point here, and ports 80 and 443 must be open:"
-    say "     curl -fsSLo /tmp/telium-setup-caddy.sh $caddy_script_url"
-    say "     sudo bash /tmp/telium-setup-caddy.sh"
-    say "   Already using a Cloudflare Tunnel or another proxy? Instructions:"
-    say "     https://docs.telium.chat/self-hosting/exposing/"
-    say "   Check that it works with:"
-    say "     curl -fsS https://$DOMAIN/.well-known/telium/server"
-  fi
+  # Re-check now: DNS may have been fixed during the install, and a setup that
+  # was never asked to do HTTPS still needs to be told what is missing.
+  [ "$https_ok" -eq 1 ] || check_dns
+  case "$https_result" in
+    ok)
+      say "HTTPS is set up and working: https://$DOMAIN"
+      ;;
+    pending)
+      say "HTTPS: Caddy is installed and running, waiting for a certificate for $DOMAIN."
+      if [ "$dns_state" != ok ] && [ "$dns_state" != unknown ]; then
+        n=$((n + 1))
+        say "$n. DNS for $DOMAIN does not point at this machine yet. Add an A record for it"
+        say "   pointing to this machine's public IP address. Caddy finishes by itself after that."
+      else
+        n=$((n + 1))
+        say "$n. DNS is set. Make sure ports 80 and 443 are open to the internet (firewall and"
+        say "   your hosting provider's panel). Caddy retries by itself; watch it with:"
+        say "     journalctl -u caddy -n 50"
+      fi
+      say "   Check that it works with:"
+      say "     curl -fsS https://$DOMAIN/.well-known/telium/server"
+      ;;
+    failed)
+      n=$((n + 1))
+      say "$n. Finish HTTPS. Automatic setup failed (reason printed above, under HTTPS)."
+      say "   Fix that, then rerun:"
+      say "     sudo bash $here/setup-caddy.sh $DOMAIN"
+      say "   Or, from anywhere:"
+      say "     curl -fsSLo /tmp/telium-setup-caddy.sh $caddy_script_url"
+      say "     sudo bash /tmp/telium-setup-caddy.sh"
+      say "   Already using a Cloudflare Tunnel or another proxy? Instructions:"
+      say "     https://docs.telium.chat/self-hosting/exposing/"
+      ;;
+    *)
+      # Automatic HTTPS was not chosen, so none of it has been done.
+      if [ "$dns_state" != ok ] && [ "$dns_state" != unknown ]; then
+        n=$((n + 1))
+        say "$n. Point DNS at this machine. In your domain's DNS settings, add an A record"
+        say "   for $DOMAIN that points to this machine's public IP address."
+      fi
+      n=$((n + 1))
+      say "$n. Set up HTTPS (not done automatically). The easiest way is Caddy, which gets a"
+      say "   free certificate for you. Ports 80 and 443 must be open:"
+      say "     curl -fsSLo /tmp/telium-setup-caddy.sh $caddy_script_url"
+      say "     sudo bash /tmp/telium-setup-caddy.sh"
+      say "   Already using a Cloudflare Tunnel or another proxy? Instructions:"
+      say "     https://docs.telium.chat/self-hosting/exposing/"
+      say "   Check that it works with:"
+      say "     curl -fsS https://$DOMAIN/.well-known/telium/server"
+      ;;
+  esac
   n=$((n + 1))
   say "$n. Create your account: open https://telium.chat and sign up using this server."
   case "$registration_state" in
