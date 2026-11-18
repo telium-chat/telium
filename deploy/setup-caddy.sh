@@ -69,13 +69,10 @@ if ! command -v caddy >/dev/null 2>&1; then
   say "installing Caddy (apt-get install caddy)..."
   export DEBIAN_FRONTEND=noninteractive
   # A fresh box often has an empty package index, which makes "caddy" look
-  # nonexistent. Try once as-is, then refresh the index and try again.
-  if ! apt-get install -y caddy >/dev/null 2>&1; then
-    say "first attempt failed; refreshing the package list and retrying..."
-    apt-get update >/dev/null 2>&1 || say "warning: apt-get update reported errors"
-    apt-get install -y caddy ||
-      die "could not install Caddy with apt-get (apt's error is above); install it yourself (https://caddyserver.com/docs/install) and rerun this script"
-  fi
+  # nonexistent, so refresh it first.
+  apt-get update >/dev/null 2>&1 || say "warning: apt-get update reported errors; trying anyway"
+  apt-get install -y caddy ||
+    die "could not install Caddy with apt-get (apt's error is above); install it yourself (https://caddyserver.com/docs/install) and rerun this script"
   command -v caddy >/dev/null 2>&1 || die "apt reported success but the caddy command is still missing"
 fi
 
