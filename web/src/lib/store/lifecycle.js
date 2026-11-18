@@ -21,10 +21,14 @@ async function discoverRelay(home) {
 // Seconds between asks while the homeserver is out of reach; the last wait repeats.
 const STARTUP_RETRY_MS = [3000, 10000, 30000, 60000, 120000];
 
-/// No answer, not a refusal: a 4xx means the homeserver was reached and said no.
+/// No answer, not a refusal: a 4xx means the homeserver was reached and said no. Without a status, only what the
+/// network layer throws counts (a failed fetch, a timeout, `request`'s "could not reach"); any other error is a bug
+/// or a broken local state that asking again every two minutes would not fix.
 function isUnanswered(e) {
   const status = e?.status;
-  return typeof status !== 'number' || status >= 500 || [408, 425, 429].includes(status);
+  if (typeof status === 'number') return status >= 500 || [408, 425, 429].includes(status);
+  if (e?.name === 'AbortError' || e?.name === 'TimeoutError') return true;
+  return /failed to fetch|networkerror|network error|load failed|could not reach/i.test(String(e?.message || ''));
 }
 
 export const lifecycleMethods = {
@@ -176,6 +180,7 @@ export const lifecycleMethods = {
       })
       .then(() => {
         this.encryptionUnanswered = false;
+        this.encryptionRefused = false;
         this.emit('dm', { ready: true });
         this.emit('startup');
       })
@@ -184,9 +189,12 @@ export const lifecycleMethods = {
         console.warn('encryption unavailable', e);
         this.mls = null;
         this.encryptionUnanswered = isUnanswered(e);
+        // Asked again only when the homeserver did not answer. A refusal or a local failure stays off until the next
+        // launch, as before, rather than re-running the engine and the key vault every two minutes for good.
+        this.encryptionRefused = !this.encryptionUnanswered;
         this.emit('dm', { ready: false });
         this.emit('startup');
-        this.scheduleStartupRetry();
+        if (this.encryptionUnanswered) this.scheduleStartupRetry();
       })
       .finally(() => { this.encryptionStarting = null; });
     return this.encryptionStarting;
@@ -244,7 +252,7 @@ export const lifecycleMethods = {
         await this.start().catch(() => {});
         return;
       }
-      if (!this.mls) {
+      if (!this.mls && !this.encryptionRefused) {
         await this.startEncryption();
       } else if (this.vaultPending) {
         await this.openVault(this.mls).catch((e) => this.vaultUnavailable(e));
@@ -257,7 +265,7 @@ export const lifecycleMethods = {
   },
 
   startupPending() {
-    return Boolean(this.startDegraded || !this.mls || this.vaultPending);
+    return Boolean(this.startDegraded || (!this.mls && !this.encryptionRefused) || this.vaultPending);
   },
 
   scheduleStartupRetry() {
