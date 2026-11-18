@@ -173,7 +173,6 @@ export const dispatchMethods = {
       case 'VOICE_WATCHERS_UPDATE': this.onWatchers(d); break;
       case 'VOICE_SERVER_UPDATE': this.emit('voice-server', d); break;
       case 'VOICE_SIGNAL': this.emit('voice-signal', d); break;
-      case 'VOICE_INVITE': this.emit('voice-invite', { ...d, domain }); break;
       case 'VOICE_E2EE': this.emit('voice-e2ee', d); break;
       default: break;
     }

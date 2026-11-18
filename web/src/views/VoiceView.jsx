@@ -8,9 +8,10 @@ import { roomFace } from '../lib/faces.js';
 import { VoiceStatusDialog, VoiceStatusLine, canSetVoiceStatus } from './dialogs/VoiceStatusDialog.jsx';
 import { cn } from '../lib/cn.js';
 import { CallStage, ChatToggle, DockButton } from './CallStage.jsx';
+import { InviteDialog } from './dialogs/InviteDialog.jsx';
 import { Tooltip } from '../components/Tooltip.jsx';
 import {
-  Avatar, ChoiceCard, ChoiceList, EmojiText, EmptyState, GlobeIcon, HashIcon, Hint, Loading,
+  AddFriendIcon, Avatar, ChoiceCard, ChoiceList, EmojiText, EmptyState, GlobeIcon, HashIcon, Hint, Loading,
   ModalShell, ServerIcon, VoiceIcon, WarnIcon,
 } from '../components/index.js';
 import { ChatView } from './ChatView.jsx';
@@ -150,6 +151,19 @@ export function VoiceView({
   const region = store.prefs.voiceRegion && store.prefs.voiceRegion !== 'auto'
     ? store.prefs.voiceRegion
     : null;
+  // The invite link for this call. Only someone in the call can mint it; it dies with the call.
+  const guildForInvite = guildId ? store.guilds.get(guildId) : null;
+  const canInvite = Boolean(guildForInvite) && voice.channelId === channelId;
+  const inviteToCall = async () => {
+    try {
+      const made = await store.apiForGuild(guildId).voiceInvite(channelId);
+      modal.open((close) => (
+        <InviteDialog guild={guildForInvite} invite={made} call={channel} close={close} />
+      ));
+    } catch (e) {
+      reportError(e, t('voice.invite.failed'));
+    }
+  };
   const openRegions = () => modal.open((close) => (
     <RegionDialog channelId={channelId} close={close} />
   ));
@@ -167,6 +181,17 @@ export function VoiceView({
             onMore={onOpenMore}
             actions={(
               <div className="flex items-center gap-0.5">
+                {canInvite ? (
+                  <button
+                    type="button"
+                    onClick={inviteToCall}
+                    title={t('voice.invite.open')}
+                    aria-label={t('voice.invite.open')}
+                    className="flex size-11 mobile-touch-target shrink-0 items-center justify-center rounded-xl text-muted transition-colors active:bg-surface-tertiary"
+                  >
+                    <AddFriendIcon className="size-5" />
+                  </button>
+                ) : null}
                 <ChatToggle
                   open={chatOpen}
                   unread={chatOpen ? null : unread}
@@ -229,6 +254,17 @@ export function VoiceView({
               <ServerIcon className="size-3.5" />
               <span className="max-w-40 truncate">{voice.server.region}</span>
             </span>
+          ) : null}
+          {canInvite ? (
+            <button
+              type="button"
+              onClick={inviteToCall}
+              title={t('voice.invite.open')}
+              aria-label={t('voice.invite.open')}
+              className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-secondary hover:text-foreground"
+            >
+              <AddFriendIcon className="size-4" />
+            </button>
           ) : null}
           <ChatToggle
             open={chatOpen}

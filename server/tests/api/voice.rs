@@ -1149,17 +1149,13 @@ async fn a_mesh_signal_reaches_the_peer_it_names_and_nobody_else() {
 }
 
 #[tokio::test]
-async fn a_call_invite_reaches_the_member_it_names_and_leaves_nothing_behind() {
+async fn a_call_invite_is_one_link_that_ends_with_the_call() {
     let s = start().await;
     let alice = s.user("alice").await;
     let bob = s.user("bob").await;
     let carol = s.user("carol").await;
     let (_, guild) = s.post("/_telium/v1/guilds", Some(&alice.token), json!({ "name": "G" })).await;
     let gid = guild["id"].as_str().unwrap().to_string();
-    let (_, invite) =
-        s.post(&format!("/_telium/v1/guilds/{gid}/invites"), Some(&alice.token), json!({})).await;
-    let code = invite["code"].as_str().unwrap().to_string();
-    s.post(&format!("/_telium/v1/invites/{code}/join"), Some(&bob.token), json!({})).await;
     let (_, ch) = s
         .post(
             &format!("/_telium/v1/guilds/{gid}/channels"),
@@ -1169,45 +1165,38 @@ async fn a_call_invite_reaches_the_member_it_names_and_leaves_nothing_behind() {
         .await;
     let cid = ch["id"].as_str().unwrap().to_string();
     let url = format!("/_telium/v1/channels/{cid}/voice/invite");
+    let join = format!("/_telium/v1/channels/{cid}/voice/join");
+    let rows = || async {
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM invites")
+            .fetch_one(&s.state.pool).await.unwrap()
+    };
 
-    let (mut ws, _) = tokio_tungstenite::connect_async(&s.ws).await.unwrap();
-    let _hello = next_frame(&mut ws).await;
-    ws.send(Message::Text(
-        json!({ "op": "IDENTIFY", "d": { "token": bob.token, "intents": ["GUILD_VOICE_STATES"] } })
-            .to_string(),
-    ))
-    .await
-    .unwrap();
-    assert_eq!(next_frame(&mut ws).await["op"], "READY");
+    let (status, body) = s.post(&url, Some(&alice.token), json!({})).await;
+    assert_eq!(status, 403, "a link can't be minted from outside the call: {body}");
+    assert_eq!(rows().await, 0);
 
-    let (status, body) = s.post(&url, Some(&alice.token), json!({ "target": bob.user_id })).await;
-    assert_eq!(status, 403, "inviting from outside the call is refused: {body}");
+    s.post(&join, Some(&alice.token), json!({"key_package": "pkg"})).await;
+    let (status, first) = s.post(&url, Some(&alice.token), json!({})).await;
+    assert_eq!(status, 200, "{first}");
+    let code = first["code"].as_str().unwrap().to_string();
+    let (_, again) = s.post(&url, Some(&alice.token), json!({})).await;
+    assert_eq!(again["code"], code.as_str(), "asking twice returns the same link");
+    assert_eq!(rows().await, 1, "never more than one row per call");
 
-    s.post(&format!("/_telium/v1/channels/{cid}/voice/join"), Some(&alice.token), json!({"key_package": "pkg"})).await;
+    // Someone with no account in the guild can use it; it is a normal invite.
+    let (status, joined) = s.post(&format!("/_telium/v1/invites/{code}/join"), Some(&carol.token), json!({})).await;
+    assert_eq!(status, 200, "{joined}");
 
-    let (status, body) = s.post(&url, Some(&alice.token), json!({ "target": carol.user_id })).await;
-    assert_eq!(status, 404, "someone outside the guild can't be invited: {body}");
-    let (status, body) = s.post(&url, Some(&alice.token), json!({ "target": alice.user_id })).await;
-    assert_eq!(status, 400, "{body}");
+    s.post(&format!("/_telium/v1/invites/{code}/join"), Some(&bob.token), json!({})).await;
+    let (status, _) = s.post(&join, Some(&bob.token), json!({"key_package": "pkg"})).await;
+    assert_eq!(status, 200);
+    s.post(&format!("/_telium/v1/channels/{cid}/voice/leave"), Some(&alice.token), json!({})).await;
+    assert_eq!(rows().await, 1, "the call is still going while bob is in it");
 
-    let (status, body) = s.post(&url, Some(&alice.token), json!({ "target": bob.user_id })).await;
-    assert_eq!(status, 200, "{body}");
-    let got = wait_for(&mut ws, "VOICE_INVITE").await;
-    assert_eq!(got["d"]["from"], alice.user_id.as_str());
-    assert_eq!(got["d"]["channel_id"], cid.as_str());
-    assert_eq!(got["d"]["guild_id"], gid.as_str());
-
-    let (status, body) = s.post(&url, Some(&alice.token), json!({ "target": bob.user_id })).await;
-    assert_eq!(status, 429, "the same person can't be rung twice in a row: {body}");
-
-    // The only stored invite is the guild's own; the call invite added no row.
-    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM invites")
-        .fetch_one(&s.state.pool).await.unwrap();
-    assert_eq!(rows, 1);
-
-    s.post(&format!("/_telium/v1/channels/{cid}/voice/join"), Some(&bob.token), json!({"key_package": "pkg"})).await;
-    let (status, body) = s.post(&url, Some(&alice.token), json!({ "target": bob.user_id })).await;
-    assert_eq!(status, 409, "someone already in the call needs no invite: {body}");
+    s.post(&format!("/_telium/v1/channels/{cid}/voice/leave"), Some(&bob.token), json!({})).await;
+    assert_eq!(rows().await, 0, "the link goes when the call ends");
+    let (status, _) = s.get(&format!("/_telium/v1/invites/{code}"), None).await;
+    assert_eq!(status, 404);
 }
 
 #[tokio::test]

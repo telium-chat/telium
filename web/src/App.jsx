@@ -17,7 +17,6 @@ import { InviteLanding } from './views/InviteLanding.jsx';
 import { PublicProfileLanding } from './views/PublicProfileLanding.jsx';
 import { Shell } from './views/Shell.jsx';
 import { IncomingCallHost } from './views/IncomingCall.jsx';
-import { VoiceInviteHost } from './views/VoiceInvite.jsx';
 import { conversationTitle } from './lib/conversations.js';
 import { ProfileCardProvider } from './views/ProfileCard.jsx';
 import { TooltipProvider } from './components/Tooltip.jsx';
@@ -87,7 +86,6 @@ function AppTree({ store, covered, onSettled }) {
         <ErrorBoundary>
           <Phases covered={covered} onSettled={onSettled} />
           <IncomingCallHost />
-          <VoiceInviteHost />
           <ToastHost />
         </ErrorBoundary>
       </AppProviders>

@@ -685,9 +685,10 @@ pub async fn disconnect(state: &AppState, guild_id: &str, user_id: &str) -> ApiR
 }
 
 /// A voice channel's status describes the call in it; once the last person leaves there is
-/// no call left to describe, so the status goes with them. Call this wherever a voice state
+/// no call left to describe, so the status goes with them, and so does the call's invite link. Call this wherever a voice state
 /// leaves a channel (leave, switching channels, a moderator move, expiry).
 async fn clear_status_if_empty(state: &AppState, guild_id: &str, channel_id: &str) -> ApiResult<()> {
+    end_call_invites(&state.pool, channel_id).await?;
     if clear_status_rows(&state.pool, channel_id).await? {
         let out = crate::routes::guild::channel_json(state, channel_id).await?;
         state
@@ -1632,84 +1633,81 @@ pub async fn signal(
     Ok(Json(json!({ "ok": true })))
 }
 
-#[derive(Deserialize)]
-pub struct Invite {
-    pub target: String,
-}
+/// How long a call invite may outlive a call that never reports its end (a crash, a lost sweep).
+/// Normally it is deleted the moment the room empties; see `end_call_invites`.
+const CALL_INVITE_BACKSTOP_MS: i64 = 12 * 60 * 60 * 1000;
 
-/// Asks a guild member to join the call you are in. Nothing is stored: the invite is one
-/// gateway event to the target's connected devices, so there is no row to expire or sweep.
-/// Someone offline simply doesn't see it, which suits an invitation to a call in progress.
+/// The invite link for the call you are in. One live link per channel, so tapping the button
+/// twice, or two people tapping it, never adds a second row. It stops working when the call ends.
 pub async fn invite(
     State(state): State<AppState>,
     auth: GuildAuth,
     Path(channel_id): Path<String>,
-    Json(req): Json<Invite>,
 ) -> ApiResult<Json<Value>> {
     let ctx = voice_channel(&state, &channel_id, &auth.user_id).await?;
-    if req.target == auth.user_id {
-        return Err(ApiError::BadRequest("you cannot invite yourself".into()));
-    }
+    guildstore::require_guild_perm(&state, &ctx.guild_id, &auth.user_id, perms::CREATE_INVITE).await?;
     let inside: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM voice_states WHERE channel_id = ? AND user_id IN (?, ?)",
-    )
-    .bind(&channel_id)
-    .bind(&auth.user_id)
-    .bind(&req.target)
-    .fetch_one(&state.pool)
-    .await?;
-    let mine: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM voice_states WHERE channel_id = ? AND user_id = ?",
     )
     .bind(&channel_id)
     .bind(&auth.user_id)
     .fetch_one(&state.pool)
     .await?;
-    if mine == 0 {
+    if inside == 0 {
         return Err(ApiError::Forbidden("join the channel before inviting people to it".into()));
     }
-    if inside > 1 {
-        return Err(ApiError::Conflict("they are already in this call".into()));
-    }
-    // The target must be able to connect; a refusal reads the same as an unknown member so
-    // the endpoint can't be used to probe who may see a private channel.
-    if guildstore::require_channel_perm(&state, &channel_id, &req.target, perms::CONNECT)
-        .await
-        .is_err()
-    {
-        return Err(ApiError::NotFound("that member can't be invited to this channel".into()));
-    }
-    if let Err(retry) = state.limiter.take(
-        format!("vcinvite:{}:{}", auth.user_id, req.target),
-        "vc_invite",
-        1.0,
-        1.0 / 30.0,
-    ) {
-        return Err(ApiError::RateLimited(format!(
-            "you just invited them; try again in {} seconds",
-            retry.ceil() as i64
-        )));
-    }
-    state
-        .hub
-        .publish(
-            Event {
-                t: "VOICE_INVITE",
-                guild_id: ctx.guild_id.clone(),
-                channel_id: Some(channel_id.clone()),
-                intent: INTENT_GUILD_VOICE_STATES,
-                only_user: Some(req.target),
-                data: json!({
-                    "guild_id": ctx.guild_id,
-                    "channel_id": channel_id,
-                    "from": auth.user_id,
-                    "at": now_ms(),
-                }),
-            }
-            .into(),
-        )
-        .await;
-    Ok(Json(json!({ "ok": true })))
+    let now = now_ms();
+    let existing: Option<(String, Option<i64>)> = sqlx::query_as(
+        "SELECT code, expires_at FROM invites \
+         WHERE channel_id = ? AND call_channel = 1 AND (expires_at IS NULL OR expires_at > ?) LIMIT 1",
+    )
+    .bind(&channel_id)
+    .bind(now)
+    .fetch_optional(&state.pool)
+    .await?;
+    let (code, expires_at) = match existing {
+        Some(found) => found,
+        None => {
+            let code = crate::util::invite_code();
+            let expires_at = now + CALL_INVITE_BACKSTOP_MS;
+            sqlx::query(
+                "INSERT INTO invites (code, guild_id, channel_id, creator, max_uses, expires_at, created_at, call_channel) \
+                 VALUES (?, ?, ?, ?, NULL, ?, ?, 1)",
+            )
+            .bind(&code)
+            .bind(&ctx.guild_id)
+            .bind(&channel_id)
+            .bind(&auth.user_id)
+            .bind(expires_at)
+            .bind(now)
+            .execute(&state.pool)
+            .await?;
+            (code, Some(expires_at))
+        }
+    };
+    Ok(Json(json!({
+        "code": code,
+        "url": state.cfg.invite_link(&code),
+        "guild_id": ctx.guild_id,
+        "channel_id": channel_id,
+        "expires_at": expires_at,
+        "max_uses": Value::Null,
+        "call": true,
+    })))
+}
+
+/// Deletes a channel's call invite once nobody is in it. One statement, so a join landing
+/// between "is it empty?" and "delete it" can't lose a live call's link.
+async fn end_call_invites(pool: &sqlx::SqlitePool, channel_id: &str) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "DELETE FROM invites WHERE channel_id = ? AND call_channel = 1 \
+         AND NOT EXISTS (SELECT 1 FROM voice_states WHERE channel_id = ?)",
+    )
+    .bind(channel_id)
+    .bind(channel_id)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 pub async fn health_check(state: &AppState) -> ApiResult<()> {
