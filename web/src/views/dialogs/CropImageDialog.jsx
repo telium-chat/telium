@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useModal } from '../../hooks/useModal.jsx';
 import { reportError } from '../../hooks/useToast.jsx';
 import {
-  PRESETS, ZOOM, clampCrop, cropRect, isAnimated, isAnimatedGif, reencode,
-  reencodeAnimatedGif,
+  PRESETS, ZOOM, canKeepAnimation, clampCrop, cropRect, isAnimated, reencode, reencodeAnimation,
 } from '../../lib/image.js';
 import { Button, Field, ImageIcon, ModalShell, Notice, TextInput } from '../../components/index.js';
 
@@ -22,7 +21,8 @@ export function CropImageDialog({ file, preset, kind, title, onDone, close }) {
     ? expressionName(file.name.replace(/\.[^.]+$/, ''))
     : '');
   const [animated, setAnimated] = useState(false);
-  const [animatedGif, setAnimatedGif] = useState(false);
+  // Whether this browser can read the animation's frames; when it can't, the first frame is used.
+  const [keepable, setKeepable] = useState(false);
   // "Use image" must not run before this is known, or an animated file would be flattened.
   const [inspected, setInspected] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -58,10 +58,12 @@ export function CropImageDialog({ file, preset, kind, title, onDone, close }) {
 
   useEffect(() => {
     let live = true;
-    file.arrayBuffer().then((buf) => {
+    file.arrayBuffer().then(async (buf) => {
+      const moving = isAnimated(buf);
+      const keeps = moving && await canKeepAnimation(buf);
       if (!live) return;
-      setAnimated(isAnimated(buf));
-      setAnimatedGif(isAnimatedGif(buf));
+      setAnimated(moving);
+      setKeepable(keeps);
     }).catch(() => {}).then(() => { if (live) setInspected(true); });
     return () => { live = false; };
   }, [file]);
@@ -187,13 +189,13 @@ export function CropImageDialog({ file, preset, kind, title, onDone, close }) {
     retarget();
   };
 
-  // An animated image stays animated: there is nothing to choose.
+  // An animated image stays animated: there is nothing to choose. Every image is re-encoded, animated ones included,
+  // so the crop always applies and nothing of the original file (metadata, appended bytes) is uploaded.
   const finish = async () => {
     setBusy(true);
     try {
-      const output = animated
-        ? (animatedGif ? await reencodeAnimatedGif(file, crop, preset) : file)
-        : await reencode(file, crop, preset);
+      const output = (animated && keepable ? await reencodeAnimation(file, crop, preset) : null)
+        ?? await reencode(file, crop, preset);
       if (output.size > preset.maxBytes) {
         throw new Error(`this image has to be under ${Math.round(preset.maxBytes / 1024)} KB, `
           + `and the processed file is ${Math.round(output.size / 1024)} KB`);
@@ -224,9 +226,9 @@ export function CropImageDialog({ file, preset, kind, title, onDone, close }) {
         </>
       )}
     >
-      {animated && !animatedGif ? (
+      {animated && !keepable && inspected ? (
         <Notice>
-          This image is animated, so it is uploaded as it is and the crop is not applied.
+          This browser can’t read this image’s animation, so only its first frame is used.
         </Notice>
       ) : null}
 
