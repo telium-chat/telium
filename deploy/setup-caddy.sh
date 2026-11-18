@@ -58,9 +58,7 @@ if command -v ss >/dev/null 2>&1; then
 fi
 
 # A name that does not resolve yet is the usual reason HTTPS fails at first.
-dns_missing=0
 if ! getent hosts "$DOMAIN" >/dev/null 2>&1; then
-  dns_missing=1
   say "note: $DOMAIN does not point anywhere yet. Add a DNS record for it that points at"
   say "this machine; Caddy keeps retrying and will finish once DNS has caught up."
 fi
@@ -75,7 +73,6 @@ if ! command -v caddy >/dev/null 2>&1; then
   apt-get update >/dev/null 2>&1 || say "warning: apt-get update reported errors; trying anyway"
   apt-get install -y caddy ||
     die "could not install Caddy with apt-get (apt's error is above); install it yourself (https://caddyserver.com/docs/install) and rerun this script"
-  command -v caddy >/dev/null 2>&1 || die "apt reported success but the caddy command is still missing"
 fi
 
 # Uploads must fit through the proxy: the largest file the server accepts,
@@ -129,8 +126,7 @@ elif grep -qE "^[[:space:]]*$DOMAIN[[:space:],{]" "$CADDYFILE"; then
   say "$CADDYFILE already has a site for $DOMAIN; left alone"
   # A file we wrote ourselves earlier lacks the admin pin; add it so Caddy can
   # start on hosts where "localhost" is not loopback. Never touch a file we did not write.
-  if grep -q '^# Written by Telium setup' "$CADDYFILE" && ! grep -qE '^[[:space:]]*admin[[:space:]]' "$CADDYFILE" &&
-     ! head -n 1 "$CADDYFILE" | grep -q '^{'; then
+  if grep -q '^# Written by Telium setup' "$CADDYFILE" && ! grep -qE '^[[:space:]]*admin[[:space:]]' "$CADDYFILE"; then
     tmpf="$(mktemp)"
     { head -n 1 "$CADDYFILE"; printf '%s\n\n' "$global_block"; tail -n +2 "$CADDYFILE"; } > "$tmpf"
     cat "$tmpf" > "$CADDYFILE"; rm -f "$tmpf"
@@ -149,12 +145,9 @@ if [ "$imported_by_hand" -eq 0 ]; then
   caddy validate --config "$CADDYFILE" --adapter caddyfile >/dev/null 2>&1 ||
     die "Caddy rejected the configuration; run: caddy validate --config $CADDYFILE --adapter caddyfile"
   if ! systemctl enable --now caddy >/dev/null 2>&1; then
-    if journalctl -u caddy -n 30 --no-pager 2>/dev/null | grep -q 'cannot assign requested address'; then
-      say "Caddy could not bind an address. Your machine's name 'localhost' does not resolve to"
-      say "127.0.0.1 (it gives: $(getent hosts localhost | head -n 1)). Check /etc/hosts and make sure it has:"
-      say "    127.0.0.1 localhost"
-    fi
-    die "could not start Caddy; look at: journalctl -u caddy -n 50"
+    say "Caddy did not start. Its last log lines:"
+    journalctl -u caddy -n 15 --no-pager 2>/dev/null | sed 's/^/    /' || true
+    die "could not start Caddy; full log: journalctl -u caddy -n 50"
   fi
   systemctl reload caddy >/dev/null 2>&1 || systemctl restart caddy ||
     die "could not reload Caddy; look at: journalctl -u caddy -n 50"
@@ -162,13 +155,6 @@ if [ "$imported_by_hand" -eq 0 ]; then
 else
   # Caddy is not serving this site until the import line is added by hand.
   exit 4
-fi
-
-# With no DNS record there is nothing to wait for; Caddy is running and will
-# get the certificate by itself once the record exists.
-if [ "$dns_missing" -eq 1 ]; then
-  say "Caddy is running and will get the certificate once DNS for $DOMAIN points here."
-  exit 3
 fi
 
 # Getting the first certificate takes a few seconds. Try for about a minute.
