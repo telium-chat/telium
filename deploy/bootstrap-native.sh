@@ -6,7 +6,22 @@ set -euo pipefail
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 say() { printf '  %s\n' "$*"; }
 
-[ "$#" -eq 1 ] || { echo "usage: bash bootstrap-native.sh <domain>   e.g. bash bootstrap-native.sh chat.example.com" >&2; exit 2; }
+# The domain is asked for when you run this by hand, so there is no example
+# domain in the command that anyone can paste without editing. It can still be
+# passed as an argument for unattended runs.
+if [ "$#" -eq 0 ]; then
+  [ -t 0 ] || die "no domain given. Pass it as an argument: bash bootstrap-native.sh <your-domain>"
+  printf '\nWhat domain will people use to reach this server? (for example: chat.yourdomain.com)\n'
+  printf '  It becomes part of every account name and cannot be changed later.\n> '
+  read -r answer || die "could not read your answer"
+  set -- "$answer"
+elif [ "$#" -ne 1 ]; then
+  echo "usage: bash bootstrap-native.sh [domain]" >&2; exit 2
+fi
+case "${1,,}" in
+  ""|*example.com|*example.org|*example.net|localhost|localhost.*|*your-domain*|*yourdomain*|change.me)
+    die "'$1' is a placeholder, not your real domain. Rerun with the domain you own." ;;
+esac
 
 # A VPS root shell needs no sudo. For ordinary login accounts, use sudo when
 # available, rather than requiring it on machines with no sudo package.

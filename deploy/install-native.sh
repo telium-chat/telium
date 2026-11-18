@@ -74,7 +74,7 @@ for label in "${labels[@]}"; do
     die "'$label' is not a valid DNS label (cannot begin or end with a hyphen)"
 done
 case "$DOMAIN" in
-  localhost|localhost.*|example.com|example.org|example.net|change.me)
+  localhost|localhost.*|*example.com|*example.org|*example.net|*your-domain*|*yourdomain*|change.me)
     die "refusing '$DOMAIN'; it is a placeholder, not a home" ;;
 esac
 
