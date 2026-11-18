@@ -27,37 +27,69 @@ export function matchExtraGames(processes, games = EXTRA_GAMES) {
   return found;
 }
 
-/// Sends the same SET_ACTIVITY messages arRPC's own scanner would, on the same 5 second beat, and clears the activity when the game goes away.
+/// Sends the same SET_ACTIVITY messages arRPC's own scanner would, on the same 5 second beat, and clears the activity when the game goes away. A `custom` entry (a program the user picked by hand) has no Discord application behind it, so it goes to `sendCustom` as a plain named activity instead, and nothing about it is ever looked up.
 export function createExtraGameScanner({
-  getProcesses, send, games = EXTRA_GAMES, intervalMs = 5000, now = Date.now,
+  getProcesses, send, sendCustom = null, games = EXTRA_GAMES, intervalMs = 5000, now = Date.now,
 }) {
   const started = new Map();
   let timer = null;
+  let current = games;
+
+  const deliver = (game, pid, activity) => {
+    if (game.custom) {
+      sendCustom?.({ source: 'custom-program', socketId: game.id, pid, activity });
+    } else {
+      send({ socketId: game.id }, { cmd: 'SET_ACTIVITY', args: { activity, pid } });
+    }
+  };
 
   const scan = async () => {
     let processes;
     try { processes = await getProcesses(); } catch { return; }
-    const found = matchExtraGames(processes, games);
+    const found = matchExtraGames(processes, current);
     for (const [id, { pid, game }] of found) {
-      if (!started.has(id)) started.set(id, { at: now(), pid });
-      send({ socketId: id }, {
-        cmd: 'SET_ACTIVITY',
-        args: {
-          activity: { application_id: id, name: game.name, timestamps: { start: started.get(id).at } },
-          pid,
-        },
-      });
+      if (!started.has(id)) started.set(id, { at: now(), pid, game });
+      const timestamps = { start: started.get(id).at };
+      deliver(game, pid, game.custom
+        ? { name: game.name, type: 0, timestamps }
+        : { application_id: id, name: game.name, timestamps });
     }
-    for (const [id, { pid }] of started) {
+    for (const [id, { pid, game }] of started) {
       if (found.has(id)) continue;
       started.delete(id);
-      send({ socketId: id }, { cmd: 'SET_ACTIVITY', args: { activity: null, pid } });
+      deliver(game, pid, null);
     }
   };
 
   return {
     scan,
+    /// Swaps the list of programs to look for; one that was running and is no longer listed is cleared on the next scan.
+    setGames(next) { current = next; void scan(); },
     start() { if (!timer) { void scan(); timer = setInterval(scan, intervalMs); } },
     stop() { clearInterval(timer); timer = null; },
   };
+}
+
+/// What the main process and the picker send: a list of `{ id, name, executable }`, cleaned and bounded. The executable is the last path segment, lower-cased, so it matches however the program was launched (including a Windows path under Proton).
+export const MAX_CUSTOM_PROGRAMS = 20;
+
+export function cleanCustomPrograms(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const raw of list) {
+    const executable = String(raw?.executable ?? '').toLowerCase().replaceAll('\\', '/').split('/').pop().trim();
+    const name = String(raw?.name ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 64);
+    if (!executable || executable.length > 128 || !name || seen.has(executable)) continue;
+    seen.add(executable);
+    out.push({ id: `custom:${executable}`, name, executable });
+    if (out.length >= MAX_CUSTOM_PROGRAMS) break;
+  }
+  return out;
+}
+
+export function customGames(programs) {
+  return cleanCustomPrograms(programs).map((p) => ({
+    id: p.id, name: p.name, executables: [p.executable], custom: true,
+  }));
 }

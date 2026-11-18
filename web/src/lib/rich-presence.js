@@ -34,6 +34,36 @@ export function richPresenceActivityAllowed(store, activity) {
   return richPresenceKinds(store)[richPresenceActivityKind(activity)] !== false;
 }
 
+export const MAX_CUSTOM_PROGRAMS = 20;
+
+/// Programs picked by hand to show as "Playing". Device-only (an executable name means nothing on another machine); each is `{ name, executable }`.
+export function customPrograms(store) {
+  const list = store?.prefs?.customPrograms;
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((p) => p && typeof p.name === 'string' && typeof p.executable === 'string' && p.name && p.executable)
+    .slice(0, MAX_CUSTOM_PROGRAMS)
+    .map((p) => ({ name: p.name.slice(0, 64), executable: p.executable.slice(0, 128) }));
+}
+
+export function addCustomProgram(store, { name, executable }) {
+  const list = customPrograms(store);
+  const exe = String(executable || '').trim();
+  const label = String(name || '').trim();
+  if (!exe || !label) return false;
+  const key = exe.replaceAll('\\', '/').split('/').pop().toLowerCase();
+  const rest = list.filter((p) => p.executable.replaceAll('\\', '/').split('/').pop().toLowerCase() !== key);
+  if (rest.length >= MAX_CUSTOM_PROGRAMS) return false;
+  store.prefs.customPrograms = [...rest, { name: label, executable: exe }];
+  store.savePrefs();
+  return true;
+}
+
+export function removeCustomProgram(store, executable) {
+  store.prefs.customPrograms = customPrograms(store).filter((p) => p.executable !== executable);
+  store.savePrefs();
+}
+
 function activityList(value) {
   if (Array.isArray(value)) return value.filter(Boolean);
   return value ? [value] : [];
@@ -248,7 +278,17 @@ export function installDesktopRichPresence(store) {
     });
   };
 
+  let sentPrograms = '';
+  const pushPrograms = () => {
+    const programs = customPrograms(store);
+    const encoded = JSON.stringify(programs);
+    if (encoded === sentPrograms) return;
+    sentPrograms = encoded;
+    window.teliumDesktop.setCustomPrograms?.(programs)?.catch?.(() => {});
+  };
+
   const syncPreference = () => {
+    pushPrograms();
     wanted = richPresenceWanted(store);
     if (activities.some((activity) => !richPresenceActivityAllowed(store, activity))) setActivity(activities);
     syncWorker();
@@ -260,6 +300,7 @@ export function installDesktopRichPresence(store) {
     // Re-read rather than trusting the previous account's value. Game presence defaults on; media presence does not.
     wanted = richPresenceWanted(store);
     authenticated = Boolean(store.session);
+    pushPrograms();
     syncWorker();
     publish();
   };

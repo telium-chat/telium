@@ -130,6 +130,7 @@ function activityKey(data) {
 }
 
 function explicitRpcActivity(data) {
+  if (data?.source === 'custom-program') return false;
   const socketId = data?.socketId;
   if (socketId === undefined || socketId === null) return false;
   const applicationId = data?.activity?.application_id;
@@ -140,6 +141,8 @@ function explicitRpcActivity(data) {
 function activityPriority(data) {
   // Priority: explicit Discord RPC, then native OS media, then generic process-name detection.
   if (data?.source === 'mpris' || data?.source === 'windows-media') return 2;
+  // A program picked by hand ranks with generic detection: a real game's own RPC wins.
+  if (data?.source === 'custom-program') return 1;
   return explicitRpcActivity(data) ? 3 : 1;
 }
 
@@ -172,6 +175,9 @@ function createRichPresenceService({
 } = {}) {
   let child = null;
   let wanted = false;
+  let programs = [];
+  const listings = new Map();
+  let listingId = 0;
   let activityKinds = sanitizeActivityKinds();
   let current = null;
   let lastEmitted = null;
@@ -364,6 +370,16 @@ function createRichPresenceService({
         ready = true;
         stopProbing();
         onWorkerReady?.(message);
+        if (programs.length) {
+          try { worker.postMessage({ op: 'programs', programs }); } catch { /* resent on the next change */ }
+        }
+      }
+      if (message.type === 'processes') {
+        const waiting = listings.get(message.requestId);
+        if (waiting) {
+          listings.delete(message.requestId);
+          waiting(Array.isArray(message.rows) ? message.rows : []);
+        }
       }
       if (message.type === 'wine-bridge-status') emitWineStatus(message);
       if (message.type === 'mpris-status') emitMprisStatus(message);
@@ -435,6 +451,28 @@ function createRichPresenceService({
         emitWindowsMediaStatus({ available: false, state: 'disabled', reason: null });
         emitRpcStatus({ available: false, state: 'disabled', connections: 0, slot: null, earlierPipeOccupied: false });
       }
+    },
+    /// Programs the user chose by hand to show as "Playing". Cleaning happens in the worker, which owns the matching.
+    setPrograms(list) {
+      programs = Array.isArray(list)
+        ? list.slice(0, 40).map((p) => ({ name: text(p?.name, 64), executable: text(p?.executable, 128) }))
+        : [];
+      try { child?.postMessage({ op: 'programs', programs }); } catch { /* sent again when the worker is ready */ }
+    },
+    /// Running programs for the picker; [] when the detector isn't running or is slow to answer.
+    listProcesses() {
+      const worker = child;
+      if (!worker) return Promise.resolve([]);
+      const requestId = ++listingId;
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => { listings.delete(requestId); resolve([]); }, 4000);
+        listings.set(requestId, (rows) => { clearTimeout(timer); resolve(rows); });
+        try { worker.postMessage({ op: 'list-processes', requestId }); } catch {
+          clearTimeout(timer);
+          listings.delete(requestId);
+          resolve([]);
+        }
+      });
     },
     activity() { return current; },
     wineStatus() { return wineStatus; },
