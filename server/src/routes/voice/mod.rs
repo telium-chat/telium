@@ -1658,8 +1658,8 @@ pub async fn invite(
     }
     let now = now_ms();
     let existing: Option<(String, Option<i64>)> = sqlx::query_as(
-        "SELECT code, expires_at FROM invites \
-         WHERE channel_id = ? AND call_channel = 1 AND (expires_at IS NULL OR expires_at > ?) LIMIT 1",
+        "SELECT i.code, i.expires_at FROM call_invites c JOIN invites i ON i.code = c.code \
+         WHERE c.channel_id = ? AND (i.expires_at IS NULL OR i.expires_at > ?)",
     )
     .bind(&channel_id)
     .bind(now)
@@ -1671,8 +1671,8 @@ pub async fn invite(
             let code = crate::util::invite_code();
             let expires_at = now + CALL_INVITE_BACKSTOP_MS;
             sqlx::query(
-                "INSERT INTO invites (code, guild_id, channel_id, creator, max_uses, expires_at, created_at, call_channel) \
-                 VALUES (?, ?, ?, ?, NULL, ?, ?, 1)",
+                "INSERT INTO invites (code, guild_id, channel_id, creator, max_uses, expires_at, created_at) \
+                 VALUES (?, ?, ?, ?, NULL, ?, ?)",
             )
             .bind(&code)
             .bind(&ctx.guild_id)
@@ -1682,6 +1682,11 @@ pub async fn invite(
             .bind(now)
             .execute(&state.pool)
             .await?;
+            sqlx::query("INSERT OR REPLACE INTO call_invites (channel_id, code) VALUES (?, ?)")
+                .bind(&channel_id)
+                .bind(&code)
+                .execute(&state.pool)
+                .await?;
             (code, Some(expires_at))
         }
     };
@@ -1700,7 +1705,15 @@ pub async fn invite(
 /// between "is it empty?" and "delete it" can't lose a live call's link.
 async fn end_call_invites(pool: &sqlx::SqlitePool, channel_id: &str) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "DELETE FROM invites WHERE channel_id = ? AND call_channel = 1 \
+        "DELETE FROM invites WHERE code IN (SELECT code FROM call_invites WHERE channel_id = ?) \
+         AND NOT EXISTS (SELECT 1 FROM voice_states WHERE channel_id = ?)",
+    )
+    .bind(channel_id)
+    .bind(channel_id)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "DELETE FROM call_invites WHERE channel_id = ? \
          AND NOT EXISTS (SELECT 1 FROM voice_states WHERE channel_id = ?)",
     )
     .bind(channel_id)
