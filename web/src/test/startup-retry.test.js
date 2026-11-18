@@ -73,6 +73,26 @@ describe('a homeserver that was out of reach at launch', () => {
     expect(store.startupTimer).toBeFalsy();
   });
 
+  it('does not keep restarting encryption after a failure the network did not cause', async () => {
+    const store = bootStore();
+    store.startEncryption = vi.fn(async () => {});
+    store.encryptionRefused = true;
+
+    await store.retryStartup();
+
+    expect(store.startEncryption).not.toHaveBeenCalled();
+    expect(store.startupPending()).toBe(false);
+    expect(store.startupTimer).toBeFalsy();
+  });
+
+  it('treats a bug as a bug, not as an unreachable homeserver', () => {
+    const store = bootStore();
+    store.mls = {};
+    store.vaultUnavailable(new TypeError("Cannot read properties of undefined (reading 'key')"));
+    expect(store.vaultPending).toBeFalsy();
+    expect(store.startupTimer).toBeFalsy();
+  });
+
   it('stops asking when the store is disposed', () => {
     const store = bootStore();
     store.scheduleStartupRetry();

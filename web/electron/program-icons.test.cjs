@@ -77,6 +77,16 @@ test('Windows: reads the icon from the executable and resizes it', async () => {
   assert.equal(seen.length, 1);
 });
 
+test('Windows: never asks the OS for an icon on a network path', async () => {
+  const seen = [];
+  const icons = createProgramIcons({
+    platform: 'win32', getFileIcon: async (f) => { seen.push(f); return PNG; }, toPng: (b) => b,
+  });
+  assert.equal(await icons.iconFor('game.exe', '//attacker/share/game.exe'), null);
+  assert.equal(await icons.iconFor('other.exe', '\\\\attacker\\share\\other.exe'), null);
+  assert.deepEqual(seen, []);
+});
+
 test('the artwork registry hands out an opaque handle for icon bytes and only accepts PNG', async () => {
   const registry = createLocalArtworkRegistry();
   const handle = registry.registerBytes('blender', PNG);
