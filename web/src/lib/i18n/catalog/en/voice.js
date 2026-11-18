@@ -349,7 +349,7 @@ export const voice = {
   // repeating its name.
   'voice.devices.title': 'Audio devices',
   'voice.devices.subtitle': 'What this call listens to, and where it plays.',
-  'voice.devices.open': 'Choose the microphone and output',
+  'voice.devices.open': 'Audio settings',
   'voice.devices.refreshing': 'Refreshing…',
 
   'voice.devices.input': 'Microphone',

@@ -135,7 +135,7 @@ const MIGRATED = [
   'views/guild-settings/BotsPane.jsx',
   'components/BotCapabilityChecklist.jsx',
   'components/DataTable.jsx',
-  'components/DesktopAudioDevices.jsx',
+  'components/AudioQuickMenu.jsx',
   'hooks/useVoice.jsx',
   'hooks/useWatch.jsx',
   'views/CallStage.jsx',

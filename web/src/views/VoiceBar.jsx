@@ -12,8 +12,9 @@ import { formatCallElapsed } from '../lib/call-elapsed.js';
 import { useT } from '../lib/i18n/react.jsx';
 import { Avatar, EmojiText, IconButton, SpinnerIcon } from '../components/index.js';
 import { Tooltip } from '../components/Tooltip.jsx';
+import { AudioQuickMenu } from '../components/AudioQuickMenu.jsx';
 import {
-  HeadphoneOffIcon, HeadphonesIcon, MicIcon, MicOffIcon,
+  AdvancedIcon, HeadphoneOffIcon, HeadphonesIcon, MicIcon, MicOffIcon,
   PhoneOffIcon, ScreenIcon, ScreenOffIcon, VideoIcon, VideoOffIcon,
 } from '../components/index.js';
 
@@ -164,33 +165,79 @@ function PingHistoryPanel({ samples }) {
   );
 }
 
+function toolClass({ on, danger, disabled }) {
+  return cn(
+    'flex min-w-0 items-center justify-center rounded-row px-2 py-2',
+    'transition-colors duration-[var(--dur-1)] ease-[var(--ease)]',
+    disabled && 'cursor-not-allowed opacity-50',
+    on
+      ? danger
+        ? cn('bg-danger text-danger-foreground', !disabled && 'hover:opacity-90')
+        : cn('bg-accent text-accent-foreground', !disabled && 'hover:bg-accent-hover')
+      : cn(
+        'bg-surface-secondary text-muted',
+        !disabled && 'hover:bg-surface-tertiary hover:text-foreground',
+      ),
+  );
+}
+
 function Tool({ title, icon: Glyph, on, danger, disabled, onClick }) {
   return (
     <Tooltip label={title} side="top">
-    <button
-      type="button"
-      title={title}
-      aria-label={title}
-      aria-pressed={on}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        'flex min-w-0 items-center justify-center rounded-row px-2 py-2',
-        'transition-colors duration-[var(--dur-1)] ease-[var(--ease)]',
-        disabled && 'cursor-not-allowed opacity-50',
-        on
-          ? danger
-            ? cn('bg-danger text-danger-foreground', !disabled && 'hover:opacity-90')
-            : cn('bg-accent text-accent-foreground', !disabled && 'hover:bg-accent-hover')
-          : cn(
-            'bg-surface-secondary text-muted',
-            !disabled && 'hover:bg-surface-tertiary hover:text-foreground',
-          ),
-      )}
-    >
-      <Glyph className="size-[17px] shrink-0" />
-    </button>
+      <button
+        type="button"
+        title={title}
+        aria-label={title}
+        aria-pressed={on}
+        disabled={disabled}
+        onClick={onClick}
+        className={toolClass({ on, danger, disabled })}
+      >
+        <Glyph className="size-[17px] shrink-0" />
+      </button>
     </Tooltip>
+  );
+}
+
+// The audio popover: microphone, noise suppression and output, one click from the call controls.
+function AudioTool({ voice }) {
+  const [open, setOpen] = useState(false);
+  const title = t('voice.devices.open');
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Tooltip label={open ? null : title} side="top">
+        <Popover.Trigger
+          render={<button type="button" />}
+          aria-label={title}
+          title={title}
+          className={toolClass({ on: false })}
+        >
+          <AdvancedIcon className="size-[17px] shrink-0" />
+        </Popover.Trigger>
+      </Tooltip>
+      <Popover.Portal>
+        <Popover.Positioner
+          side="top"
+          align="end"
+          positionMethod="fixed"
+          sideOffset={8}
+          collisionPadding={12}
+          className="popover z-50"
+        >
+          <Popover.Popup aria-label={title} className="popup popup--panel w-[280px]">
+            <AudioQuickMenu
+              devicePicking={Boolean(voice.chooseInput)}
+              onInput={(id) => voice.chooseInput?.(id)}
+              onOutput={(id) => voice.chooseOutput?.(id)}
+              noiseMode={voice.noiseMode}
+              noiseSupport={voice.noiseSupport}
+              noiseState={voice.noiseState}
+              onNoise={voice.setNoiseMode}
+            />
+          </Popover.Popup>
+        </Popover.Positioner>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 
@@ -376,7 +423,7 @@ export function VoiceBar() {
           channel={channel}
           speaking={voice.speaking}
         />
-        <div role="toolbar" aria-label={t('voice.bar.toolbar')} className="mt-2 grid grid-cols-4 gap-1.5">
+        <div role="toolbar" aria-label={t('voice.bar.toolbar')} className="mt-2 grid grid-cols-5 gap-1.5">
           <Tool
             title={micLabel}
             icon={silent ? MicOffIcon : MicIcon}
@@ -405,6 +452,7 @@ export function VoiceBar() {
             on={local.streaming}
             onClick={voice.toggleStream}
           />
+          <AudioTool voice={voice} />
         </div>
       </div>
     </div>

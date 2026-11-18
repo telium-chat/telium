@@ -25,8 +25,7 @@ import {
 import { t, tOrNull } from '../lib/i18n/index.js';
 import {
   DESKTOP_AUDIO_INPUT_KEY,
-  DesktopAudioDevices,
-} from '../components/DesktopAudioDevices.jsx';
+} from '../components/AudioQuickMenu.jsx';
 import {
   applyDesktopAudioOutput, desktopAudioPreference, playCallTone, switchCallInput,
 } from './voice/callAudio.js';
@@ -1383,6 +1382,9 @@ export function VoiceProvider({ children }) {
     noiseSupport: neuralCapability(),
     noiseState,
     setNoiseMode,
+    // Switching the running call's devices is wired for the desktop app only.
+    chooseInput: isElectronRuntime() ? chooseDesktopInput : null,
+    chooseOutput: isElectronRuntime() ? chooseDesktopOutput : null,
     join,
     leave: coreLeave,
     volumeFor,
@@ -1401,16 +1403,6 @@ export function VoiceProvider({ children }) {
   return (
     <VoiceContext.Provider value={value}>
       {children}
-      {isElectronRuntime() ? (
-        <DesktopAudioDevices
-          active={Boolean(channelId)}
-          onInput={chooseDesktopInput}
-          onOutput={chooseDesktopOutput}
-          noiseMode={noiseMode}
-          noiseSupport={value.noiseSupport}
-          onNoise={setNoiseMode}
-        />
-      ) : null}
     </VoiceContext.Provider>
   );
 }
