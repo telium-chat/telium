@@ -1252,6 +1252,11 @@ describe('editing, deleting, and pinning', () => {
     const later = await device(home, '@a:h', 'd-alice-2');
     await later.sync('conv-name', home.frames.get('conv-name'));
     expect(later.nameIn('conv-name')).toBe('Again');
+
+    // Each rename leaves one line for the timeline, in order, with who did it.
+    expect(bob.renamesIn('conv-name').map((r) => [r.by, r.name])).toEqual([
+      ['@a:h', 'Game night'], ['@b:h', 'Saturday'], ['@a:h', null],
+    ]);
   });
 
   it('ignores a malformed superseding gesture instead of stopping the walk', async () => {

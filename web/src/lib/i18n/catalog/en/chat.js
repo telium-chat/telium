@@ -194,6 +194,8 @@ export const chat = {
   // hand, and the server keeps the one it stored) is a different sentence
   // rather than a sentence with the name left out of it. The name itself is a
   // placeholder, filled the way `quickReact` above fills its emoji.
+  'chat.timeline.renameNotice.named': '{name} renamed the group to “{group}”',
+  'chat.timeline.renameNotice.cleared': '{name} removed the group name',
   'chat.timeline.pinNotice.named': '{name} pinned a message',
   'chat.timeline.pinNotice.anonymous': 'A message was pinned',
   'chat.timeline.pinNotice.seeAll': 'See all pins',

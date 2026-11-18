@@ -113,6 +113,7 @@ function newStamp() {
 const SNIPPET_MAX = 200;
 
 const GROUP_NAME_MAX = 100;
+const RENAME_LOG_MAX = 50;
 
 function validGroupName(text) {
   return typeof text === 'string' && text.trim() === text && text.length > 0 && text.length <= GROUP_NAME_MAX;
@@ -225,6 +226,8 @@ export class Mls {
     this.callSfus = new Map();
     // A group's chosen name, last one wins.
     this.names = new Map();
+    // Who renamed it, and to what, in order: the lines the timeline draws.
+    this.renames = new Map();
     // Edit/delete are author-only.
     this.authors = new Map();
     this.stateRead = new Set();
@@ -693,7 +696,7 @@ export class Mls {
     // Reload now: until then `joined` says no and the store would mistake the new group for none.
     await this.loadGroup(conversationId).catch(() => null);
     if (this.stateRead.has(conversationId)) {
-      for (const folds of [this.reactions, this.edits, this.tombstones, this.pins, this.callSfus, this.names]) {
+      for (const folds of [this.reactions, this.edits, this.tombstones, this.pins, this.callSfus, this.names, this.renames]) {
         folds.delete(conversationId);
       }
       await this.readFolds(conversationId);
@@ -1679,6 +1682,12 @@ export class Mls {
     }
     if (validSfu(cx.sfu)) this.callSfus.set(conversationId, cx.sfu);
     if (validGroupName(cx.name)) this.names.set(conversationId, cx.name);
+    for (const row of cx.renames || []) {
+      if (typeof row?.id !== 'string' || typeof row?.by !== 'string') continue;
+      if (row.name !== null && !validGroupName(row.name)) continue;
+      if (!this.renames.has(conversationId)) this.renames.set(conversationId, []);
+      this.renames.get(conversationId).push({ id: row.id, by: row.by, name: row.name, at: Number(row.at) || 0 });
+    }
   }
 
   /// MLS forward secrecy means `selfJoin` can't supply the backlog. Gap-filling only: local rows win.
@@ -1842,19 +1851,30 @@ export class Mls {
     }
     const payload = { name: value };
     const frame = await this.post(conversationId, pack(RENAME, JSON.stringify(payload)));
-    this.applyRename(conversationId, this.userId, payload);
+    this.applyRename(conversationId, this.userId, payload, frame);
     if (frame?.id) await this.mark(conversationId, frame.id);
     return frame;
   }
 
   /// The sender must be someone the group's rules let change it, checked here by every member and not trusted to the sender.
-  applyRename(conversationId, sender, payload) {
+  applyRename(conversationId, sender, payload, frame = null) {
     if (payload?.name !== null && !validGroupName(payload?.name)) return;
     if (!policyAllows(this.policyOf(conversationId), 'policy', sender)) return;
     if (payload.name === null) this.names.delete(conversationId);
     else this.names.set(conversationId, payload.name);
+    if (frame?.id) {
+      const log = this.renames.get(conversationId) || [];
+      if (!log.some((r) => r.id === frame.id)) {
+        log.push({ id: frame.id, by: sender, name: payload.name, at: frame.created_at || Date.now() });
+        this.renames.set(conversationId, log.slice(-RENAME_LOG_MAX));
+      }
+    }
     this.saveMessageState(conversationId);
     this.onGroupName?.(conversationId);
+  }
+
+  renamesIn(conversationId) {
+    return this.renames.get(conversationId) || [];
   }
 
   nameIn(conversationId) {
@@ -1884,6 +1904,7 @@ export class Mls {
       pins: [...(this.pins.get(conversationId) || [])].map(([t, p]) => ({ t, ...p })),
       sfu: this.callSfus.get(conversationId) || null,
       name: this.names.get(conversationId) || null,
+      renames: this.renames.get(conversationId) || [],
     };
     this.track(put(OPENED, `${this.scope}:cx:${conversationId}`, state));
     this.backup?.queue(conversationId, CX, state);
@@ -2002,7 +2023,7 @@ export class Mls {
       return;
     }
     if (payload.type === 'rename') {
-      this.applyRename(conversationId, frame.sender, payload);
+      this.applyRename(conversationId, frame.sender, payload, frame);
       return;
     }
     if (payload.type === 'call_sfu') {
