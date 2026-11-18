@@ -101,6 +101,7 @@ export const lifecycleMethods = {
           this.verifyClaimedPackage(userId, deviceId, signatureKey)
         );
         engine.isRevokedKey = (userId, key) => Boolean(this.trust?.isRevokedKey(userId, key));
+        engine.onGroupName = () => this.emit('conversations');
         engine.sendsRead = (id) => this.readReceiptsIn(id);
         engine.sendsDelivered = (id) => this.deliveryAcksIn(id);
         this.refreshCustody().catch(() => {});

@@ -137,6 +137,36 @@ export function ConversationDialog({ convo: opened, close, refresh }) {
         {note || act ? <>{note}{act}</> : null}
       </Verdict>
 
+      {group ? (
+        <div>
+          <div className="eyebrow pb-1.5">Group name</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="min-w-0 flex-1 truncate text-sm">
+              {store.groupNameIn(convo.id) || <span className="text-muted">No name. It shows who is in it.</span>}
+            </span>
+            <Button
+              size="sm"
+              disabled={!can('policy')}
+              onClick={() => dialogs.prompt({
+                title: 'Rename this group',
+                label: 'Group name',
+                value: store.groupNameIn(convo.id) || '',
+                onSubmit: async (text) => {
+                  try {
+                    await store.setGroupName(convo.id, text);
+                    bump((n) => n + 1);
+                    refresh?.();
+                  } catch (e) { reportError(e, 'Could not rename the group'); }
+                },
+              })}
+            >
+              Rename
+            </Button>
+          </div>
+          {can('policy') ? null : <Hint>This group’s rules let only certain people rename it.</Hint>}
+        </div>
+      ) : null}
+
       <div className="flex flex-col rounded-card bg-surface-secondary p-1">
         {participants(convo).map((m) => {
           const count = devices.get(m.user_id) || 0;

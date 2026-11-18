@@ -1229,6 +1229,31 @@ describe('editing, deleting, and pinning', () => {
     expect(alice.pinsIn('conv-pin')).toEqual([]);
   });
 
+  it('renames a group for every member, last name winning, and a blank name clears it', async () => {
+    const home = new FakeHome();
+    const { alice, bob } = await pairWith(home, 'conv-name');
+    expect(alice.nameIn('conv-name')).toBeNull();
+
+    await alice.setGroupName('conv-name', '  Game   night  ');
+    expect(alice.nameIn('conv-name')).toBe('Game night');
+    await bob.sync('conv-name', home.frames.get('conv-name'));
+    expect(bob.nameIn('conv-name')).toBe('Game night');
+
+    await bob.setGroupName('conv-name', 'Saturday');
+    await alice.sync('conv-name', home.frames.get('conv-name'));
+    expect(alice.nameIn('conv-name')).toBe('Saturday');
+
+    await alice.setGroupName('conv-name', '   ');
+    await bob.sync('conv-name', home.frames.get('conv-name'));
+    expect(bob.nameIn('conv-name')).toBeNull();
+
+    // A device admitted late replays the same frames to the same answer.
+    await alice.setGroupName('conv-name', 'Again');
+    const later = await device(home, '@a:h', 'd-alice-2');
+    await later.sync('conv-name', home.frames.get('conv-name'));
+    expect(later.nameIn('conv-name')).toBe('Again');
+  });
+
   it('ignores a malformed superseding gesture instead of stopping the walk', async () => {
     const home = new FakeHome();
     const { alice, bob } = await pairWith(home, 'conv-mal');

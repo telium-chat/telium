@@ -62,6 +62,17 @@ export const signalMethods = {
     this.emit('dm', { conversation_id: conversationId });
   },
 
+  async setGroupName(conversationId, name) {
+    if (!this.mls) throw new Error('Encryption is not ready on this device yet.');
+    await this.mls.setGroupName(conversationId, name);
+    this.emit('dm', { conversation_id: conversationId });
+    this.emit('conversations');
+  },
+
+  groupNameIn(conversationId) {
+    return this.mls?.nameIn(conversationId) || null;
+  },
+
   callSfuIn(conversationId) {
     return this.mls?.callSfuIn(conversationId) || null;
   },

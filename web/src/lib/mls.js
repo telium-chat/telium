@@ -22,7 +22,7 @@ import {
   GROUPS, IDENTITY, OPENED, PACKAGES, all, del, exclusive, get, put, rows,
 } from './mls-store.js';
 import {
-  CALL_SFU, DELETE, DELIVERED, EDIT, MESSAGE, PIN, REACTION, RECEIPT, TYPING,
+  CALL_SFU, DELETE, DELIVERED, EDIT, MESSAGE, PIN, REACTION, RECEIPT, RENAME, TYPING,
   decodeBody, decodeMessage, encode64, encodeBody, pack, unpack, wire,
 } from './mls-wire.js';
 import {
@@ -111,6 +111,18 @@ function newStamp() {
 
 /// Snapshot for devices that can't open the pinned frame.
 const SNIPPET_MAX = 200;
+
+const GROUP_NAME_MAX = 100;
+
+function validGroupName(text) {
+  return typeof text === 'string' && text.trim() === text && text.length > 0 && text.length <= GROUP_NAME_MAX;
+}
+
+/// Blank means no name.
+function cleanGroupName(text) {
+  const value = String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, GROUP_NAME_MAX).trim();
+  return value || null;
+}
 
 /// Every member dials it.
 function validSfu(text) {
@@ -211,6 +223,8 @@ export class Mls {
     this.pins = new Map();
     // Set by any member and known only to the group.
     this.callSfus = new Map();
+    // A group's chosen name, last one wins.
+    this.names = new Map();
     // Edit/delete are author-only.
     this.authors = new Map();
     this.stateRead = new Set();
@@ -679,7 +693,7 @@ export class Mls {
     // Reload now: until then `joined` says no and the store would mistake the new group for none.
     await this.loadGroup(conversationId).catch(() => null);
     if (this.stateRead.has(conversationId)) {
-      for (const folds of [this.reactions, this.edits, this.tombstones, this.pins, this.callSfus]) {
+      for (const folds of [this.reactions, this.edits, this.tombstones, this.pins, this.callSfus, this.names]) {
         folds.delete(conversationId);
       }
       await this.readFolds(conversationId);
@@ -1664,6 +1678,7 @@ export class Mls {
       });
     }
     if (validSfu(cx.sfu)) this.callSfus.set(conversationId, cx.sfu);
+    if (validGroupName(cx.name)) this.names.set(conversationId, cx.name);
   }
 
   /// MLS forward secrecy means `selfJoin` can't supply the backlog. Gap-filling only: local rows win.
@@ -1819,6 +1834,33 @@ export class Mls {
     this.saveMessageState(conversationId);
   }
 
+  /// A blank name clears it, so the group shows its people again.
+  async setGroupName(conversationId, name) {
+    const value = cleanGroupName(name);
+    if (!this.permits(conversationId, 'policy')) {
+      throw new Error('This group’s rules do not let you rename it.');
+    }
+    const payload = { name: value };
+    const frame = await this.post(conversationId, pack(RENAME, JSON.stringify(payload)));
+    this.applyRename(conversationId, this.userId, payload);
+    if (frame?.id) await this.mark(conversationId, frame.id);
+    return frame;
+  }
+
+  /// The sender must be someone the group's rules let change it, checked here by every member and not trusted to the sender.
+  applyRename(conversationId, sender, payload) {
+    if (payload?.name !== null && !validGroupName(payload?.name)) return;
+    if (!policyAllows(this.policyOf(conversationId), 'policy', sender)) return;
+    if (payload.name === null) this.names.delete(conversationId);
+    else this.names.set(conversationId, payload.name);
+    this.saveMessageState(conversationId);
+    this.onGroupName?.(conversationId);
+  }
+
+  nameIn(conversationId) {
+    return this.names.get(conversationId) || null;
+  }
+
   callSfuIn(conversationId) {
     return this.callSfus.get(conversationId) || null;
   }
@@ -1841,6 +1883,7 @@ export class Mls {
       dead: [...(this.tombstones.get(conversationId) || [])],
       pins: [...(this.pins.get(conversationId) || [])].map(([t, p]) => ({ t, ...p })),
       sfu: this.callSfus.get(conversationId) || null,
+      name: this.names.get(conversationId) || null,
     };
     this.track(put(OPENED, `${this.scope}:cx:${conversationId}`, state));
     this.backup?.queue(conversationId, CX, state);
@@ -1956,6 +1999,10 @@ export class Mls {
     }
     if (payload.type === 'pin') {
       this.applyPin(conversationId, frame.sender, payload);
+      return;
+    }
+    if (payload.type === 'rename') {
+      this.applyRename(conversationId, frame.sender, payload);
       return;
     }
     if (payload.type === 'call_sfu') {
