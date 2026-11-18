@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { reportError } from '../../hooks/useToast.jsx';
 import { shortName } from '../../lib/util.js';
 import { cn } from '../../lib/cn.js';
@@ -167,20 +167,59 @@ function useScreenZoom(containerRef, videoRef, stream) {
   return { chipRef, reset: () => api.current?.reset() };
 }
 
+const IDLE_MS = 2500;
+
+/// Fullscreen has no hover to end, so the overlays and the cursor would stay on top of the picture for as long as the mouse rests on it. After a pause with nothing moving they go; any movement, press or key brings them back.
+function useIdleInFullscreen(containerRef) {
+  const [idle, setIdle] = useState(false);
+  useEffect(() => {
+    const box = containerRef.current;
+    if (!box) return undefined;
+    let timer = null;
+    let full = false;
+    const clear = () => { if (timer) clearTimeout(timer); timer = null; };
+    const arm = () => {
+      clear();
+      setIdle(false);
+      if (!full) return;
+      timer = setTimeout(function settle() {
+        // A menu held open (the more button) is in use, not idle.
+        if (box.querySelector('[data-popup-open]')) { timer = setTimeout(settle, IDLE_MS); return; }
+        setIdle(true);
+      }, IDLE_MS);
+    };
+    const onFullscreen = () => {
+      full = document.fullscreenElement === box;
+      arm();
+    };
+    const events = ['pointermove', 'pointerdown', 'keydown'];
+    for (const name of events) box.addEventListener(name, arm);
+    document.addEventListener('fullscreenchange', onFullscreen);
+    return () => {
+      clear();
+      for (const name of events) box.removeEventListener(name, arm);
+      document.removeEventListener('fullscreenchange', onFullscreen);
+    };
+  }, [containerRef]);
+  return idle;
+}
+
 export function ScreenTile({ id, stream, mine, shareVolume = 100, onShareVolume, onStop, mobile = false }) {
   const t = useT();
   const videoRef = useRef(null);
   const containerRef = useRef(null);
   const zoom = useScreenZoom(containerRef, videoRef, stream);
+  const idle = useIdleInFullscreen(containerRef);
   return (
     <div
       ref={containerRef}
+      data-idle={idle ? 'true' : undefined}
       role="group"
       aria-label={mine ? 'Your screen share' : `${shortName(id)}'s screen share`}
       tabIndex={0}
       aria-keyshortcuts="+ - 0"
       className={cn(
-        'group relative flex min-h-0 items-center justify-center overflow-hidden rounded-xl bg-black',
+        'screen-tile group relative flex min-h-0 items-center justify-center overflow-hidden rounded-xl bg-black',
         'outline-none focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent',
         mobile && 'min-h-[min(52dvh,420px)]',
       )}
@@ -200,7 +239,7 @@ export function ScreenTile({ id, stream, mine, shareVolume = 100, onShareVolume,
         className="stage-chip tnum absolute start-2 top-2 h-7 px-2 text-xs font-medium"
         onClick={zoom.reset}
       />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-gradient-to-t from-black/70 to-transparent px-3 py-2">
+      <div className="screen-tile__hud pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-gradient-to-t from-black/70 to-transparent px-3 py-2">
         <ScreenIcon className="size-3.5 shrink-0 text-white/80" />
         <span className="truncate text-sm font-medium text-white">
           {t('voice.stage.shareName', { mine: mine ? 'yes' : 'no', who: shortName(id) })}
@@ -209,7 +248,7 @@ export function ScreenTile({ id, stream, mine, shareVolume = 100, onShareVolume,
       {!mine ? (
         <label
           className={cn(
-            'absolute bottom-10 end-2 flex items-center gap-2 rounded-lg bg-black/70 px-2 py-1.5 text-xs text-white backdrop-blur-sm transition-opacity',
+            'screen-tile__hud absolute bottom-10 end-2 flex items-center gap-2 rounded-lg bg-black/70 px-2 py-1.5 text-xs text-white backdrop-blur-sm transition-opacity',
             mobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100',
           )}
           title={t('voice.tile.screenAudioVolume')}
@@ -228,7 +267,7 @@ export function ScreenTile({ id, stream, mine, shareVolume = 100, onShareVolume,
         </label>
       ) : null}
       <div className={cn(
-        'absolute end-2 top-2 flex items-center gap-1.5 transition-opacity',
+        'screen-tile__hud absolute end-2 top-2 flex items-center gap-1.5 transition-opacity',
         mobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100',
       )}>
         <button

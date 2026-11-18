@@ -144,7 +144,10 @@ export function Tile({
               >
                 <MoreIcon className="size-4" />
               </MenuButton>
-            ) : null}
+            ) : (
+              // Everyone's pills end at the same edge: a tile with no menu (yours) keeps the button's width.
+              !mobile && !compact ? <span aria-hidden="true" className="size-7 shrink-0" /> : null
+            )}
           </div>
         ) : null}
 
