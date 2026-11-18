@@ -62,7 +62,7 @@ function createLocalArtworkRegistry() {
       if (!bytes || bytes.length < 12) return null;
       if (mime === 'image/svg+xml') {
         // Only ever drawn by the window through an <img> and re-encoded to a raster before it is shared; see program-icons.cjs.
-        if (!/^\s*(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*(<!DOCTYPE[^>]*>\s*)?<svg[\s>]/i.test(Buffer.from(bytes).subarray(0, 2048).toString('utf8'))) return null;
+        if (!startsLikeSvg(Buffer.from(bytes).subarray(0, 2048).toString('utf8'))) return null;
       } else if (imageMime(bytes) !== 'image/png') {
         return null;
       }
@@ -96,6 +96,27 @@ function createLocalArtworkRegistry() {
 
     clear() { entries.clear(); },
   });
+}
+
+/// Whether text opens like an SVG document: optional XML declaration, comments and doctype, then `<svg`.
+/// A plain scan, so hostile input can't make it backtrack.
+function startsLikeSvg(text) {
+  let at = 0;
+  const skipSpace = () => { while (at < text.length && /\s/.test(text[at])) at += 1; };
+  const skipPast = (open, close) => {
+    if (!text.slice(at, at + open.length).toLowerCase().startsWith(open.toLowerCase())) return false;
+    const end = text.indexOf(close, at + open.length);
+    if (end < 0) { at = text.length; return true; }
+    at = end + close.length;
+    return true;
+  };
+  skipSpace();
+  skipPast('<?xml', '>');
+  skipSpace();
+  while (skipPast('<!--', '-->')) skipSpace();
+  skipPast('<!doctype', '>');
+  skipSpace();
+  return /^<svg[\s>]/i.test(text.slice(at, at + 6));
 }
 
 module.exports = { createLocalArtworkRegistry, localFileUrl, imageMime };
