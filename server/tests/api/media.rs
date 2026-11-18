@@ -303,6 +303,23 @@ async fn an_avatar_is_capped_far_below_the_general_attachment_limit() {
 }
 
 #[tokio::test]
+async fn the_default_profile_ceiling_leaves_room_for_an_animated_avatar() {
+    let s = start_with(|_| {}).await;
+    let alice = s.user("alice").await;
+    let upload = |len: usize| {
+        s.client
+            .post(format!("{}/_telium/v1/media", s.base))
+            .bearer_auth(&alice.home)
+            .header("X-Telium-Purpose", "profile")
+            .header("Content-Type", "image/webp")
+            .body("x".repeat(len))
+            .send()
+    };
+    assert_eq!(upload(400 * 1024).await.unwrap().status().as_u16(), 200);
+    assert_eq!(upload(600 * 1024).await.unwrap().status().as_u16(), 413);
+}
+
+#[tokio::test]
 async fn guild_emoji_uploads_cannot_bypass_server_media_capacity() {
     let s = start_with(|cfg| cfg.media_policy.max_total_bytes = 1).await;
     let alice = s.user("alice").await;

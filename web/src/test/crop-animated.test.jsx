@@ -6,8 +6,8 @@ import { StoreProvider } from '../hooks/useStore.jsx';
 import { ModalHost, ModalProvider } from '../hooks/useModal.jsx';
 import { freshStore } from './fake-server.js';
 
-function webp(animated) {
-  const b = new Uint8Array(30);
+function webp(animated, size = 30) {
+  const b = new Uint8Array(size);
   b.set([...'RIFF'].map((c) => c.charCodeAt(0)), 0);
   b.set([...'WEBP'].map((c) => c.charCodeAt(0)), 8);
   b.set([...'VP8X'].map((c) => c.charCodeAt(0)), 12);
@@ -15,7 +15,7 @@ function webp(animated) {
   return new File([b], 'me.webp', { type: 'image/webp' });
 }
 
-async function open(file) {
+async function open(file, originCap) {
   URL.createObjectURL = vi.fn(() => 'blob:x');
   URL.revokeObjectURL = vi.fn();
   const onDone = vi.fn();
@@ -23,8 +23,11 @@ async function open(file) {
     const crop = useImageCrop();
     return <button type="button" onClick={() => crop(file, 'avatar').then(onDone)}>Open crop</button>;
   }
+  const store = freshStore();
+  store.session = { home: { domain: 'home.example' } };
+  if (originCap) store.caps.set('home.example', { media: { max_profile_asset_bytes: originCap } });
   render(
-    <StoreProvider store={freshStore()}>
+    <StoreProvider store={store}>
       <ModalProvider>
         <Opener />
         <ModalHost />
@@ -57,5 +60,24 @@ describe('cropping an animated avatar', () => {
   it('says plainly that the crop is skipped for an animated WebP', async () => {
     await open(webp(true));
     expect(await screen.findByText(/crop is not applied/)).toBeTruthy();
+  });
+
+  it('takes a 300 KB animated avatar when the origin allows 512 KB', async () => {
+    const file = webp(true, 300 * 1024);
+    const { onDone } = await open(file, 512 * 1024);
+    const use = await screen.findByRole('button', { name: 'Use image' });
+    await waitFor(() => expect(use.disabled).toBe(false));
+    await userEvent.click(use);
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(file));
+  });
+
+  it('still refuses it when the origin has not said it allows more than 256 KB', async () => {
+    const file = webp(true, 300 * 1024);
+    const { onDone } = await open(file, undefined);
+    const use = await screen.findByRole('button', { name: 'Use image' });
+    await waitFor(() => expect(use.disabled).toBe(false));
+    await userEvent.click(use);
+    await waitFor(() => expect(use.disabled).toBe(false));
+    expect(onDone).not.toHaveBeenCalled();
   });
 });

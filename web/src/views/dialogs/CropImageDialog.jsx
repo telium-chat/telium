@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useModal } from '../../hooks/useModal.jsx';
+import { useOptionalStore } from '../../hooks/useStore.jsx';
 import { reportError } from '../../hooks/useToast.jsx';
 import {
-  PRESETS, ZOOM, clampCrop, cropRect, isAnimated, isAnimatedGif, reencode,
+  PRESETS, ZOOM, animatedLimit, clampCrop, cropRect, isAnimated, isAnimatedGif, reencode,
   reencodeAnimatedGif,
 } from '../../lib/image.js';
 import { Button, Field, ImageIcon, ModalShell, Notice, TextInput } from '../../components/index.js';
@@ -12,6 +13,7 @@ const NUDGE = 0.04;
 const SHAPES = { avatar: 'circle', icon: 'squircle', banner: 'wide' };
 
 export function CropImageDialog({ file, preset, kind, title, onDone, close }) {
+  const store = useOptionalStore();
   const namesExpression = kind === 'emoji' || kind === 'sticker';
   const aspect = preset?.aspect || 1;
   const shape = SHAPES[kind] || 'square';
@@ -191,11 +193,14 @@ export function CropImageDialog({ file, preset, kind, title, onDone, close }) {
   const finish = async () => {
     setBusy(true);
     try {
+      const originCap = store?.caps?.get(store.session?.home?.domain)?.media?.max_profile_asset_bytes;
+      const limit = animated ? animatedLimit(preset, originCap) : preset.maxBytes;
+      const fitted = { ...preset, maxBytes: limit };
       const output = animated
-        ? (animatedGif ? await reencodeAnimatedGif(file, crop, preset) : file)
+        ? (animatedGif ? await reencodeAnimatedGif(file, crop, fitted) : file)
         : await reencode(file, crop, preset);
-      if (output.size > preset.maxBytes) {
-        throw new Error(`this image has to be under ${Math.round(preset.maxBytes / 1024)} KB, `
+      if (output.size > limit) {
+        throw new Error(`this image has to be under ${Math.round(limit / 1024)} KB, `
           + `and the processed file is ${Math.round(output.size / 1024)} KB`);
       }
       settle(namesExpression ? namedExpression(output, name) : output);
