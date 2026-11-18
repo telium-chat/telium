@@ -42,7 +42,7 @@ export function PeoplePicker({
     || top.name.toLowerCase().startsWith(q)
     || top.id.slice(1).toLowerCase().startsWith(q)
   );
-  const literal = query.includes(':') && !rows.some((r) => r.person.id === typed);
+  const literal = /[:@]./.test(query.replace(/^@/, '')) && !rows.some((r) => r.person.id === typed);
   const cursor = !rows.length || literal
     ? -1
     : (at >= 0 ? Math.min(at, rows.length - 1) : (q && meant ? 0 : -1));

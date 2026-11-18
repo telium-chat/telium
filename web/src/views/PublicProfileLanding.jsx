@@ -6,7 +6,7 @@ import { mediaUrl } from '../lib/media.js';
 import { isNativeShell } from '../lib/platform.js';
 import { AnimatedImage } from '../components/AnimatedImage.jsx';
 import { RichActivityCard } from '../components/RichActivityCard.jsx';
-import { activityLine, colourOf, domainOf, shortName, themeOf, tint } from '../lib/util.js';
+import { activityLine, colourOf, displayId, domainOf, shortName, themeOf, tint } from '../lib/util.js';
 import { themeStyle } from './profile/ProfileBody.jsx';
 import { richActivitiesOf } from '../lib/activity.js';
 import { useMediaSrc } from '../hooks/useMediaSrc.jsx';
@@ -292,11 +292,11 @@ export function PublicProfileLanding({
                 className="pc__handle"
                 data-guest={foreignHome ? 'true' : 'false'}
                 title="Copy username"
-                aria-label={`Copy username ${targetUserId}`}
-                onClick={() => copyToClipboard(targetUserId, 'Username')}
+                aria-label={`Copy username ${displayId(targetUserId)}`}
+                onClick={() => copyToClipboard(displayId(targetUserId), 'Username')}
               >
-                <span className="pc__handle-local">{`@${shortName(targetUserId)}`}</span>
-                <span className="pc__handle-domain">{`:${domainOf(targetUserId)}`}</span>
+                <span className="pc__handle-local">{shortName(targetUserId)}</span>
+                <span className="pc__handle-domain">{`@${domainOf(targetUserId)}`}</span>
               </button>
               {presenceShape ? (
                 <span className="pc__fact" data-presence={publicPresence.status}>

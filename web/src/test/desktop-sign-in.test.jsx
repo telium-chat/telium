@@ -478,9 +478,9 @@ describe('recommending a server, and not having to remember it', () => {
       expect(await screen.findByRole('heading', { name: 'Pick a username' })).toBeTruthy();
       expect(document.querySelector('.stage__cur .auth-host').textContent).toContain('telium.chat');
       // The server is part of the username, and the field shows the whole address as it is typed.
-      expect(screen.getByTestId('username-preview').textContent).toContain('@yourname:telium.chat');
+      expect(screen.getByTestId('username-preview').textContent).toContain('yourname@telium.chat');
       await user.type(screen.getByLabelText('Username'), 'Ada');
-      expect(screen.getByTestId('username-preview').textContent).toContain('@ada:telium.chat');
+      expect(screen.getByTestId('username-preview').textContent).toContain('ada@telium.chat');
     } finally {
       sessionStorage.clear();
     }

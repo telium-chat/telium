@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useStore, useStoreEvent } from '../../hooks/useStore.jsx';
 import { MAX_ACCOUNTS } from '../../lib/accounts.js';
-import { shortName } from '../../lib/util.js';
+import { displayId, shortName } from '../../lib/util.js';
 import {
   Avatar, Button, IconButton, ModalShell, PlusIcon, SignOutIcon, useDialogs,
 } from '../../components/index.js';
@@ -60,7 +60,7 @@ export function AccountsDialog({ close }) {
               <AccountFace account={account} />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium">{name}</div>
-                <div className="truncate text-xs text-muted">{account.user_id}</div>
+                <div className="truncate text-xs text-muted">{displayId(account.user_id)}</div>
               </div>
               {isActive ? (
                 <span className="px-2 text-xs text-muted">Active</span>

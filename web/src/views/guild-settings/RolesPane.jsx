@@ -14,7 +14,7 @@ import {
   mayDropAt, mayHold, moveRole, rankedRoles, roleMoves,
 } from '../../lib/roles.js';
 import { remoteMediaOrigin } from '../../lib/media.js';
-import { colourOf, colourToInt, shortName } from '../../lib/util.js';
+import { colourOf, colourToInt, displayId, shortName } from '../../lib/util.js';
 import {
   Async, Avatar, BackIcon, Button, DropLine, EditIcon, EmojiText, EmptyState, Hint,
   IconButton, Loading, MembersIcon, Notice, PlusIcon, Section, ShieldIcon, SwatchRow, Switch,
@@ -587,7 +587,7 @@ function MembersTab({ guildId, api, role, disabled, onChanged }) {
         <span className="block truncate text-base">
           <EmojiText>{member.nickname || member.display_name || shortName(member.user_id)}</EmojiText>
         </span>
-        <span className="block truncate font-mono text-xs text-muted">{member.user_id}</span>
+        <span className="block truncate font-mono text-xs text-muted">{displayId(member.user_id)}</span>
       </span>
       <Button
         variant={held ? 'danger-soft' : 'secondary'}

@@ -256,7 +256,7 @@ const LOCALPART_MAX = 32;
 
 /// The full address a chosen name will have on `host`. The one place that spells the format.
 export function formatAddress(localpart, host) {
-  return `@${localpart}:${host}`;
+  return `${localpart}@${host}`;
 }
 
 /// What the registration field will become, for the live preview. The server lowercases the name and
@@ -264,8 +264,8 @@ export function formatAddress(localpart, host) {
 export function registrationPreview(text, host) {
   const typed = String(text ?? '').trim().replace(/^@/, '');
   // A pasted full address keeps its name; the server part is chosen separately.
-  const colon = typed.indexOf(':');
-  const localpart = (colon === -1 ? typed : typed.slice(0, colon)).toLowerCase();
+  const cut = typed.search(/[:@]/);
+  const localpart = (cut === -1 ? typed : typed.slice(0, cut)).toLowerCase();
   let fault = '';
   if (localpart.length > LOCALPART_MAX) fault = 'too_long';
   else if (localpart && !/^[a-z0-9._-]+$/.test(localpart)) fault = 'charset';

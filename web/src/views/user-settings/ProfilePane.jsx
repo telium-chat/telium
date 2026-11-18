@@ -6,7 +6,7 @@ import { copyToClipboard } from '../../lib/clipboard.js';
 import { uploadMedia, profileRef } from '../../lib/upload.js';
 import { downscaleToFit } from '../../lib/image.js';
 import { publicProfileLink } from '../PublicProfileLanding.jsx';
-import { themeOf } from '../../lib/util.js';
+import { displayId, themeOf } from '../../lib/util.js';
 import { useImageCrop } from '../dialogs/CropImageDialog.jsx';
 import { useUnsavedChanges } from '../../components/SettingsLayout.jsx';
 import { useAutosize } from '../chat/MarkdownInk.jsx';
@@ -359,7 +359,7 @@ function Preview({ me, draft, base, avatarMenu, bannerMenu }) {
             <span className="profile-edit__pronouns">{draft.pronouns.trim()}</span>
           ) : null}
         </div>
-        <div className="profile-edit__handle">{me.user_id}</div>
+        <div className="profile-edit__handle">{displayId(me.user_id)}</div>
         {draft.bio.trim() ? (
           <div className="profile-edit__bio"><BioText>{draft.bio}</BioText></div>
         ) : (

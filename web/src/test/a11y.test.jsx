@@ -330,7 +330,7 @@ describe('screens', () => {
         ],
       }),
     });
-    await screen.findByText('@bo:home.example');
+    await screen.findByText('bo@home.example');
     await expectNoViolations(view, 'the accounts pane');
   });
 

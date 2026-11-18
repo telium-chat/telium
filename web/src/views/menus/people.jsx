@@ -4,7 +4,7 @@ import { has } from '../../lib/perms.js';
 import { copyToClipboard } from '../../lib/clipboard.js';
 import { faceOf } from '../../lib/faces.js';
 import { mediaUrl } from '../../lib/media.js';
-import { colourOf, participants, shortName, tint } from '../../lib/util.js';
+import { colourOf, displayId, participants, shortName, tint } from '../../lib/util.js';
 import { AnimatedImage } from '../../components/AnimatedImage.jsx';
 import {
   AddFriendIcon, AdvancedIcon, Avatar, BanIcon, CheckIcon, CloseIcon, CopyIcon, DeafenIcon, EditIcon,
@@ -60,7 +60,7 @@ function AccountCard() {
         </div>
         <div className="account-card__text">
           <div className="account-card__name"><EmojiText>{name}</EmojiText></div>
-          <div className="account-card__handle">{me?.user_id}</div>
+          <div className="account-card__handle">{displayId(me?.user_id)}</div>
           {custom ? (
             <div className="account-card__status"><StatusText store={store}>{custom}</StatusText></div>
           ) : null}
@@ -421,7 +421,7 @@ export const account = (env) => {
             <span className="flex min-w-0 items-center gap-2">
               <AccountFace account={a} size="xxs" />
               <span className="truncate">{a.card?.name || shortName(a.user_id)}</span>
-              <span className="truncate text-muted">{a.user_id}</span>
+              <span className="truncate text-muted">{displayId(a.user_id)}</span>
             </span>
           </MenuItem>
         ))}

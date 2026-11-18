@@ -265,7 +265,7 @@ describe('every screen mounts', () => {
     expect(pill.getAttribute('title')).toBe('@alice:home.example');
     await user.click(pill);
     const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByRole('button', { name: /^@alice:home\.example, copy username$/ })).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: /^alice@home\.example, copy username$/ })).toBeTruthy();
     expect(dialog.closest('.popover')).toBeTruthy();
     await dismiss(user);
 
