@@ -39,6 +39,11 @@ ipcMain.handle('telium:list-processes', async (event) => {
   return (await richPresence?.listProcesses()) || [];
 });
 
+ipcMain.handle('telium:program-icons', async (event, rows) => {
+  assertTeliumWindow(event);
+  return (await richPresence?.programIcons(rows)) || {};
+});
+
 ipcMain.handle('telium:rich-presence-activity', (event) => {
   assertTeliumWindow(event);
   return richPresence?.activity() || null;

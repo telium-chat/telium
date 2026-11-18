@@ -82,6 +82,7 @@ const bridge = Object.freeze({
     } : null,
   ),
   setCustomPrograms: (programs) => ipcRenderer.invoke('telium:set-custom-programs', Array.isArray(programs) ? programs : []),
+  programIcons: (rows) => ipcRenderer.invoke('telium:program-icons', Array.isArray(rows) ? rows : []),
   listProcesses: () => ipcRenderer.invoke('telium:list-processes'),
   richPresenceActivity: () => ipcRenderer.invoke('telium:rich-presence-activity'),
   readRichPresenceArtwork: (handle) => ipcRenderer.invoke('telium:read-rich-presence-artwork', handle),

@@ -13,14 +13,23 @@ export function ProgramPicker() {
   const listed = customPrograms(store);
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState(null);
+  const [icons, setIcons] = useState({});
   const [query, setQuery] = useState('');
   const [chosen, setChosen] = useState(null);
   const [name, setName] = useState('');
 
   const refresh = useCallback(() => {
     setRows(null);
-    window.teliumDesktop.listProcesses().then((next) => setRows(next || [])).catch(() => setRows([]));
-  }, []);
+    window.teliumDesktop.listProcesses()
+      .then((next) => {
+        const list = next || [];
+        setRows(list);
+        // Icons arrive after the list so it is never held up by them; only the rows a person can plausibly pick are asked for.
+        const likely = pickableProcesses(list, { listed: customPrograms(store) }).slice(0, 80);
+        window.teliumDesktop.programIcons?.(likely)?.then((found) => setIcons(found || {})).catch(() => {});
+      })
+      .catch(() => setRows([]));
+  }, [store]);
 
   useEffect(() => { if (open) refresh(); }, [open, refresh]);
 
@@ -88,8 +97,15 @@ export function ProgramPicker() {
                   className="flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left hover:bg-surface-hover"
                   onClick={() => choose(row)}
                 >
-                  <span className="text-sm">{row.executable}</span>
-                  <span className="max-w-full truncate font-mono text-xs text-muted">{row.path}</span>
+                  <span className="flex min-w-0 max-w-full items-center gap-2">
+                    {icons[row.executable]
+                      ? <img src={icons[row.executable]} alt="" className="size-6 shrink-0 rounded" />
+                      : <span className="size-6 shrink-0 rounded bg-surface-hover" aria-hidden="true" />}
+                    <span className="min-w-0">
+                      <span className="block text-sm">{row.executable}</span>
+                      <span className="block max-w-full truncate font-mono text-xs text-muted">{row.path}</span>
+                    </span>
+                  </span>
                 </button>
               </li>
             ))}

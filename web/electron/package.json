@@ -51,6 +51,7 @@
       "publisher.json",
       "rich-presence.cjs",
       "rich-presence-local-art.cjs",
+      "program-icons.cjs",
       "rich-presence-worker.mjs",
       "rich-presence-name.mjs",
       "rich-presence-extra-games.mjs",

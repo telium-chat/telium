@@ -1,7 +1,8 @@
 'use strict';
 
 const path = require('node:path');
-const { app, utilityProcess } = require('electron');
+const { app, nativeImage, utilityProcess } = require('electron');
+const { createProgramIcons, exeKey } = require('./program-icons.cjs');
 const { createLocalArtworkRegistry } = require('./rich-presence-local-art.cjs');
 
 const MAX_TEXT = 128;
@@ -190,6 +191,16 @@ function createRichPresenceService({
   let sequence = 0;
   const activities = new Map();
   const localArtwork = createLocalArtworkRegistry();
+  const programHandles = new Map();
+  const programIcons = createProgramIcons({
+    getFileIcon: async (file) => (await app.getFileIcon(file, { size: 'large' })).toPNG(),
+    toPng: (bytes, size) => {
+      const image = nativeImage.createFromBuffer(Buffer.from(bytes));
+      if (image.isEmpty()) return null;
+      const { width } = image.getSize();
+      return (width > size ? image.resize({ width: size, height: size, quality: 'best' }) : image).toPNG();
+    },
+  });
 
   const currentWindow = () => {
     const window = getWindow?.();
@@ -311,6 +322,11 @@ function createRichPresenceService({
           large_text: text(rawActivity?.assets?.large_text),
         };
       }
+      // A program whose icon was already found keeps it on every re-report, so the status doesn't blink each scan.
+      const knownIcon = data?.source === 'custom-program'
+        ? programHandles.get(exeKey(String(data.socketId || '').replace(/^custom:/, '')))
+        : null;
+      if (knownIcon) activity.assets = { ...(activity.assets || {}), local_large_image: knownIcon };
       activities.set(key, {
         activity,
         priority: activityPriority(data),
@@ -319,6 +335,20 @@ function createRichPresenceService({
     } else {
       activities.delete(key);
     }
+    selectActivity();
+    if (activity && data?.source === 'custom-program' && !activity.assets?.local_large_image) void addProgramIcon(key, data, activity);
+  };
+
+  // The icon is looked up after the status is already showing, then the same activity is re-applied with its artwork handle.
+  const addProgramIcon = async (key, data, activity) => {
+    const executable = exeKey(String(data?.socketId || '').replace(/^custom:/, ''));
+    const png = await programIcons.iconFor(executable, text(data?.programPath, 1024), 128);
+    const handle = png ? localArtwork.registerBytes(executable, png) : null;
+    if (handle) programHandles.set(executable, handle);
+    const entry = activities.get(key);
+    if (!handle || !entry || entry.activity !== activity || activity.assets?.local_large_image) return;
+    entry.activity = { ...activity, assets: { ...(activity.assets || {}), local_large_image: handle } };
+    entry.sequence = ++sequence;
     selectActivity();
   };
 
@@ -330,6 +360,7 @@ function createRichPresenceService({
     generation += 1;
     activities.clear();
     localArtwork.clear();
+    programHandles.clear();
     if (running) {
       try { running.postMessage({ op: 'stop' }); } catch { /* already exited */ }
       setTimeout(() => {
@@ -405,6 +436,7 @@ function createRichPresenceService({
       child = null;
       activities.clear();
       localArtwork.clear();
+    programHandles.clear();
       emit(null);
       emitWineStatus({ available: false, state: 'stopped', reason: ready ? 'worker-exited' : 'worker-not-ready' });
       emitMprisStatus({ available: false, state: 'stopped', reason: ready ? 'worker-exited' : 'worker-not-ready' });
@@ -474,6 +506,18 @@ function createRichPresenceService({
         }
       });
     },
+    /// `{ [executable]: data URL }` for the picker's rows (small icons, local to this window only).
+    async programIcons(rows) {
+      const out = {};
+      const list = Array.isArray(rows) ? rows.slice(0, 80) : [];
+      await Promise.all(list.map(async (row) => {
+        const executable = text(row?.executable, 128);
+        if (!executable) return;
+        const png = await programIcons.iconFor(executable, text(row?.path, 1024), 48);
+        if (png) out[executable] = `data:image/png;base64,${Buffer.from(png).toString('base64')}`;
+      }));
+      return out;
+    },
     activity() { return current; },
     wineStatus() { return wineStatus; },
     mprisStatus() { return mprisStatus; },
@@ -490,6 +534,7 @@ function createRichPresenceService({
       windowsMediaStatus = null;
       rpcStatus = null;
       localArtwork.clear();
+    programHandles.clear();
     },
   });
 }

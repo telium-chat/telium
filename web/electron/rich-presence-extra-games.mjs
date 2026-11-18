@@ -21,7 +21,7 @@ export function matchExtraGames(processes, games = EXTRA_GAMES) {
     const tails = pathTails(path);
     for (const game of games) {
       if (found.has(game.id)) continue;
-      if (game.executables.some((exe) => tails.includes(exe))) found.set(game.id, { pid, game });
+      if (game.executables.some((exe) => tails.includes(exe))) found.set(game.id, { pid, game, path });
     }
   }
   return found;
@@ -35,9 +35,9 @@ export function createExtraGameScanner({
   let timer = null;
   let current = games;
 
-  const deliver = (game, pid, activity) => {
+  const deliver = (game, pid, activity, path = '') => {
     if (game.custom) {
-      sendCustom?.({ source: 'custom-program', socketId: game.id, pid, activity });
+      sendCustom?.({ source: 'custom-program', socketId: game.id, pid, activity, programPath: path });
     } else {
       send({ socketId: game.id }, { cmd: 'SET_ACTIVITY', args: { activity, pid } });
     }
@@ -47,12 +47,12 @@ export function createExtraGameScanner({
     let processes;
     try { processes = await getProcesses(); } catch { return; }
     const found = matchExtraGames(processes, current);
-    for (const [id, { pid, game }] of found) {
+    for (const [id, { pid, game, path }] of found) {
       if (!started.has(id)) started.set(id, { at: now(), pid, game });
       const timestamps = { start: started.get(id).at };
       deliver(game, pid, game.custom
         ? { name: game.name, type: 0, timestamps }
-        : { application_id: id, name: game.name, timestamps });
+        : { application_id: id, name: game.name, timestamps }, path);
     }
     for (const [id, { pid, game }] of started) {
       if (found.has(id)) continue;

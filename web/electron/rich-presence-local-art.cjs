@@ -57,10 +57,22 @@ function createLocalArtworkRegistry() {
       return handle;
     },
 
+    /// An image already in memory (a program's icon): same opaque handle, no file behind it. PNG only.
+    registerBytes(key, bytes) {
+      if (!bytes || bytes.length < 12 || imageMime(bytes) !== 'image/png') return null;
+      const handle = `program-icon:${createHash('sha256').update(String(key)).digest('hex').slice(0, 32)}`;
+      touch(handle, { bytes });
+      return handle;
+    },
+
     async read(handle) {
       const item = entries.get(handle);
       if (!item) return null;
       touch(handle, item);
+      if (item.bytes) {
+        const copy = item.bytes.buffer.slice(item.bytes.byteOffset, item.bytes.byteOffset + item.bytes.byteLength);
+        return { bytes: copy, mime: 'image/png', name: 'program-icon.png' };
+      }
       const filename = fileURLToPath(item.url);
       const info = await stat(filename);
       if (!info.isFile() || info.size <= 0 || info.size > MAX_LOCAL_ART_BYTES) return null;
