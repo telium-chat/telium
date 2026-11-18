@@ -87,10 +87,11 @@ export const lifecycleMethods = {
       // again by retryStartup() when it answers, rather than staying off until the app is restarted.
       this.startDegraded = true;
       this.scheduleStartupRetry();
+      this.emit('startup');
       this.emit('ready');
       return;
     }
-    this.startDegraded = false;
+    if (this.startDegraded) { this.startDegraded = false; this.emit('startup'); }
     this.emit('me', this.me);
 
     this.loadMigrationAlerts();
@@ -173,12 +174,18 @@ export const lifecycleMethods = {
           // badges the rail opens with come from this pass.
           .then(() => this.catchUpDmUnread().catch(() => {}));
       })
-      .then(() => this.emit('dm', { ready: true }))
+      .then(() => {
+        this.encryptionUnanswered = false;
+        this.emit('dm', { ready: true });
+        this.emit('startup');
+      })
       .then(() => this.startTrust())
       .catch((e) => {
         console.warn('encryption unavailable', e);
         this.mls = null;
+        this.encryptionUnanswered = isUnanswered(e);
         this.emit('dm', { ready: false });
+        this.emit('startup');
         this.scheduleStartupRetry();
       })
       .finally(() => { this.encryptionStarting = null; });
@@ -202,7 +209,7 @@ export const lifecycleMethods = {
     }
     this.sync.adoptKeyring(v, { current: !!v.created })
       .catch((e) => console.warn('sync store could not take the key', e));
-    this.vaultPending = false;
+    if (this.vaultPending) { this.vaultPending = false; this.emit('startup'); }
     return engine.adoptRecoveryKey(v);
   },
 
@@ -211,8 +218,19 @@ export const lifecycleMethods = {
     console.warn('key vault unavailable', e);
     if (isUnanswered(e)) {
       this.vaultPending = true;
+      this.emit('startup');
       this.scheduleStartupRetry();
     }
+  },
+
+  /// The homeserver did not answer something the app needs from it, and a retry is waiting. Not true for a failure the
+  /// homeserver answered or one that has nothing to do with the network, which a banner could not help with.
+  homeUnreachable() {
+    return Boolean(
+      this.startDegraded
+      || this.vaultPending
+      || (!this.mls && this.encryptionUnanswered && !this.encryptionStarting),
+    );
   },
 
   /// Whatever a start left undone because the homeserver was out of reach. Called when the network or the window

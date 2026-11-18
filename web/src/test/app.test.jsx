@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from '../App.jsx';
@@ -454,6 +454,50 @@ describe('the client', () => {
     expect(banner.textContent).toMatch(/Other servers are unaffected/);
     expect(store.signedIn).toBe(true);
     expect(screen.getByTitle(/Telium - guilds\.example is degraded/)).toBeTruthy();
+  });
+
+  it('says so when the homeserver cannot be reached for the encryption keys, and offers a retry', async () => {
+    const { store, user } = await boot();
+    expect(screen.queryByText(/Can't reach/)).toBeNull();
+    const retry = vi.spyOn(store, 'retryStartup').mockResolvedValue();
+
+    act(() => {
+      store.vaultPending = true;
+      store.emit('startup');
+    });
+
+    const banner = await screen.findByText(/to unlock your encrypted messages/, {}, { timeout: 5000 });
+    expect(banner.textContent).toMatch(/Can't reach home\.example/);
+    await user.click(screen.getByRole('button', { name: 'Try again now' }));
+    expect(retry).toHaveBeenCalled();
+
+    act(() => {
+      store.vaultPending = false;
+      store.emit('startup');
+    });
+    await waitFor(() => expect(screen.queryByText(/Can't reach/)).toBeNull());
+  });
+
+  it('says so, with the age of the saved view, when the start itself could not reach the homeserver', async () => {
+    const { store } = await boot();
+    act(() => {
+      store.cachedAt = Date.now() - 60_000;
+      store.startDegraded = true;
+      store.emit('startup');
+    });
+    const banner = await screen.findByText(/Showing your last saved view/, {}, { timeout: 5000 });
+    expect(banner.textContent).toMatch(/Can't reach home\.example/);
+    act(() => { store.startDegraded = false; store.cachedAt = null; store.emit('startup'); });
+  });
+
+  it('does not blame the network for an encryption failure that is not about it', async () => {
+    const { store } = await boot();
+    act(() => {
+      store.mls = null;
+      store.encryptionUnanswered = false;
+      store.emit('startup');
+    });
+    expect(store.homeUnreachable()).toBe(false);
   });
 
 function seedSession(origins, { expiresAt = Date.now() + 3_600_000 } = {}) {
