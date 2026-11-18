@@ -14,6 +14,9 @@ const RING = 1024;
 
 const PCM = 32768;
 
+/// Enough to settle the model's recurrent state and the engine's own first-call costs.
+const WARMUP_FRAMES = 40;
+
 /// About once a second (375 quanta at 48 kHz).
 const REPORT_QUANTA = 375;
 
@@ -54,13 +57,27 @@ class DeepFilterEngine {
     this.state = state;
     this.input = input;
     this.output = output;
+    this.buffer = null;
+    this.inView = null;
+    this.outView = null;
+  }
+
+  /// Views over the module's memory, rebuilt only when it has grown (which replaces the buffer): nothing is allocated per frame on the audio thread.
+  views() {
+    const { buffer } = this.exports.memory;
+    if (buffer !== this.buffer) {
+      this.buffer = buffer;
+      this.inView = new Float32Array(buffer, this.input, FRAME);
+      this.outView = new Float32Array(buffer, this.output, FRAME);
+    }
   }
 
   run(frame, out) {
-    const { exports, memory = exports.memory } = this;
-    new Float32Array(memory.buffer, this.input, FRAME).set(frame);
-    exports.df_process(this.state, this.input, this.output);
-    out.set(new Float32Array(memory.buffer, this.output, FRAME));
+    this.views();
+    this.inView.set(frame);
+    this.exports.df_process(this.state, this.input, this.output);
+    this.views();
+    out.set(this.outView);
   }
 
   destroy() {
@@ -81,7 +98,12 @@ async function startDeepFilter({ wasm, model }) {
   exports.df_free(at, bytes.length);
   if (!state) throw new Error('the DeepFilterNet3 model was refused');
   if (exports.df_frame_len(state) !== FRAME) throw new Error('unexpected DeepFilterNet3 frame size');
-  return new DeepFilterEngine(exports, state, exports.df_alloc(FRAME * 4), exports.df_alloc(FRAME * 4));
+  const engine = new DeepFilterEngine(exports, state, exports.df_alloc(FRAME * 4), exports.df_alloc(FRAME * 4));
+  // The first frames of a model are its slowest (the render quantum is 2.7 ms, a cold frame can take ten), so they are spent here, on silence, before anyone is listening to the result.
+  const silence = new Float32Array(FRAME);
+  const scratch = new Float32Array(FRAME);
+  for (let i = 0; i < WARMUP_FRAMES; i += 1) engine.run(silence, scratch);
+  return engine;
 }
 
 async function startRnnoise({ binary }) {

@@ -12,7 +12,7 @@ import {
 import {
   displayAudioFailureReason, displayAudioSupport, withScreenShareConstraints,
 } from '../lib/screenShare.js';
-import { neuralCapability, normalizeNoiseMode } from '../lib/denoise.js';
+import { neuralCapability, noiseChange, normalizeNoiseMode } from '../lib/denoise.js';
 import { chooseGuildVoiceRegion } from '../lib/voiceRegion.js';
 import { sleep } from '../lib/util.js';
 import { ScreenShareDialog } from '../views/dialogs/ScreenShareDialog.jsx';
@@ -1335,11 +1335,15 @@ export function VoiceProvider({ children }) {
     return () => { alive = false; clearInterval(id); };
   }, [phase]);
 
+  const appliedNoise = useRef(normalizeNoiseMode(store.prefs.micNoise));
   useEffect(() => {
     const apply = () => {
       const mode = normalizeNoiseMode(store.prefs.micNoise);
       setNoise(mode);
-      const changing = callRef.current?.setNoiseMode?.(mode);
+      const change = noiseChange(appliedNoise.current, mode);
+      if (change === null) return;
+      appliedNoise.current = change;
+      const changing = callRef.current?.setNoiseMode?.(change);
       changing?.catch?.((error) => reportError(error, t('voice.error.noiseChange')));
     };
     apply();

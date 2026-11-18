@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BENCHMARK_CEILING, DEFAULT_NOISE_MODE, NOISE_MODES, OVERLOAD, benchmarkVerdict, micConstraints,
-  neuralCapability, normalizeNoiseMode, createGovernor, ENGINES, GOVERNOR, nextEngine, judgeSample, PERMANENT_REASONS, unavailableBecause,
+  neuralCapability, normalizeNoiseMode, createGovernor, ENGINES, noiseChange, GOVERNOR, nextEngine, judgeSample, PERMANENT_REASONS, unavailableBecause,
 } from '../lib/denoise.js';
 
 const capable = (over = {}) => ({
@@ -175,5 +175,14 @@ describe('the engine ladder', () => {
     expect(nextEngine('dfn3')).toBe('rnnoise');
     expect(nextEngine('rnnoise')).toBeNull();
     expect(nextEngine('something-else')).toBeNull();
+  });
+});
+
+describe('reacting to the noise setting', () => {
+  it('acts only when the setting changed, so an unrelated preference cannot undo a stand-down', () => {
+    expect(noiseChange('neural', 'neural')).toBeNull();
+    expect(noiseChange('neural', undefined)).toBe('browser');
+    expect(noiseChange('browser', 'neural')).toBe('neural');
+    expect(noiseChange('browser', 'garbage')).toBeNull();
   });
 });

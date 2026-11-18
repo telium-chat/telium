@@ -155,6 +155,12 @@ export class MeshCall {
       return;
     }
 
+    // A chain this call already retired is not a working one, whatever else says `neural`.
+    if (this.denoiser?.spent) {
+      await this.denoiser.stop?.().catch?.(() => {});
+      this.denoiser = null;
+    }
+
     if (this.denoiser) {
       this.denoiser.setBypass(false);
       this.stream = new MediaStream([await this.denoiser.replace(track)]);

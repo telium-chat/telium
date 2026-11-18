@@ -81,6 +81,12 @@ export function benchmarkVerdict({ frames, cpuMs }, ceiling = BENCHMARK_CEILING)
     : { ok: true, load, reason: null };
 }
 
+/// The `prefs` event fires for every preference there is. A call must act on the noise setting only when it is the *setting* that changed: re-applying an unchanged `neural` would undo a call's own decision to stand down (it keeps what the person chose and runs something else for that call), and leave the microphone with no suppression at all.
+export function noiseChange(applied, wanted) {
+  const mode = normalizeNoiseMode(wanted);
+  return mode === applied ? null : mode;
+}
+
 /// What a busy machine looks like. `load` is the model's own share of the audio thread (worklet clock); `underruns` is Chromium's whole-context underrun ratio, a hint that only counts when the worklet cannot report its own load, because it also rises when something else starves the audio thread, which dropping the model does not fix.
 export const OVERLOAD = { load: 0.6, underruns: 0.05 };
 

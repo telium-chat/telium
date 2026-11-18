@@ -45,7 +45,7 @@ export function VoicePane() {
         ))}
       </ChoiceList>
       <Hint>
-        Neural uses noticeably more battery and CPU, and up to 20 ms more delay than standard.
+        Neural uses noticeably more battery and CPU, and up to 40 ms more delay than standard.
         If the device gets busy mid-call, the model steps aside and comes back on its own; your choice here is never changed.
       </Hint>
       {voice.noiseMode === 'neural' && voice.noiseState && voice.noiseState !== 'active'

@@ -229,6 +229,11 @@ export class SfuCall {
       }
       return;
     }
+    // A chain this call already retired is not a working one, whatever else says `neural`.
+    if (this.denoiser?.spent) {
+      await track.stopProcessor?.().catch?.(() => {});
+      this.denoiser = null;
+    }
     if (this.denoiser) return;
 
     try {
