@@ -262,7 +262,7 @@ ask_https() {
 }
 
 https_choice=manual
-https_ok=0
+https_result=skipped   # skipped | ok | pending | manual | failed
 #
 # Preserve all existing configuration on reruns. The one exception is
 # installer-generated configs missing [registration] from older releases:
@@ -567,12 +567,16 @@ esac
 # script can be rerun later by itself.
 
 if [ "$existing_install" -eq 0 ] && [ "$https_choice" = caddy ]; then
-  if bash "$here/setup-caddy.sh" "$DOMAIN"; then
-    https_ok=1
-  else
-    say "HTTPS is not finished yet, but the server itself is installed and running."
-    say "The steps at the end tell you how to finish it."
-  fi
+  https_exit=0
+  bash "$here/setup-caddy.sh" "$DOMAIN" || https_exit=$?
+  case "$https_exit" in
+    0) https_result=ok ;;
+    3) https_result=pending ;;   # Caddy is running; no certificate yet
+    4) https_result=manual ;;    # your own Caddyfile; setup-caddy printed the line to add
+    *) https_result=failed
+       printf '\n  !! HTTPS setup FAILED. Caddy is not serving %s; the reason is printed above.\n' "$DOMAIN"
+       say "The server itself is installed and running. The last step below shows how to retry." ;;
+  esac
 fi
 
 # ------------------------------------------------------------ what is left
@@ -606,17 +610,36 @@ else
   step "What to do next"
 
   n=0
-  if [ "$https_ok" -eq 1 ]; then
+  if [ "$https_result" = ok ]; then
     say "HTTPS is set up and working: https://$DOMAIN"
   else
     n=$((n + 1))
     say "$n. Point DNS at this machine. In your domain's DNS settings, add an A record"
     say "   for $DOMAIN that points to this machine's public IP address."
     n=$((n + 1))
-    say "$n. Set up HTTPS. The easiest way is Caddy, which gets a free certificate for you."
-    say "   DNS must already point here, and ports 80 and 443 must be open:"
-    say "     curl -fsSLo /tmp/telium-setup-caddy.sh $caddy_script_url"
-    say "     sudo bash /tmp/telium-setup-caddy.sh"
+    case "$https_result" in
+      pending)
+        say "$n. HTTPS: Caddy is installed and running, and gets the certificate by itself"
+        say "   once DNS points here (ports 80 and 443 must be open). Its log:"
+        say "     journalctl -u caddy -n 50"
+        ;;
+      manual)
+        say "$n. HTTPS: add the import line shown above to your Caddyfile, then:"
+        say "     systemctl reload caddy"
+        ;;
+      failed)
+        say "$n. HTTPS: automatic setup FAILED (the reason is printed above)."
+        say "   Fix that, then retry just this step:"
+        say "     curl -fsSLo /tmp/telium-setup-caddy.sh $caddy_script_url"
+        say "     sudo bash /tmp/telium-setup-caddy.sh"
+        ;;
+      *)
+        say "$n. Set up HTTPS. The easiest way is Caddy, which gets a free certificate for you."
+        say "   DNS must already point here, and ports 80 and 443 must be open:"
+        say "     curl -fsSLo /tmp/telium-setup-caddy.sh $caddy_script_url"
+        say "     sudo bash /tmp/telium-setup-caddy.sh"
+        ;;
+    esac
     say "   Already using a Cloudflare Tunnel or another proxy? Instructions:"
     say "     https://docs.telium.chat/self-hosting/exposing/"
     say "   Check that it works with:"
