@@ -43,7 +43,7 @@ function frameDelay(frame) {
 }
 
 export function ControlledGifCanvas({
-  src, active, alt = '', className, style, onError, onLoad, onClick, title,
+  src, active, alt = '', className, style, onError, onLoad, onClick, title, onDecodeFailed,
   loading = 'lazy', loader = loadDesktopGif,
 }) {
   const canvasRef = useRef(null);
@@ -164,6 +164,7 @@ export function ControlledGifCanvas({
       } catch {
         if (!live) return;
         setFailed(true);
+        onDecodeFailed?.();
       }
     })();
 

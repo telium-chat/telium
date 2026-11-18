@@ -119,3 +119,37 @@ describe('GIF focus behavior', () => {
     expect(image.getAttribute('src')).toBeNull();
   });
 });
+
+describe('GIF focus behavior on the desktop shell', () => {
+  it('still freezes a GIF the desktop player cannot decode', async () => {
+    let focused = true;
+    vi.spyOn(document, 'hasFocus').mockImplementation(() => focused);
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({ drawImage: vi.fn() }));
+    window.teliumDesktop = {
+      runtime: 'electron',
+      onWindowFocusChanged: () => () => {},
+      windowFocus: () => Promise.resolve(true),
+      fetchGifBytes: () => Promise.reject(new Error('too large')),
+    };
+
+    try {
+      const { AnimatedImage } = await import('../components/AnimatedImage.jsx');
+      const url = 'https://media.example/provider/content/too-big.gif';
+      render(<AnimatedImage src={url} alt="big" animated gif />);
+
+      // Decode fails, so the plain image takes over and must still obey focus.
+      await waitFor(() => expect(document.querySelectorAll('img').length).toBe(1));
+      const image = screen.getByAltText('big');
+      Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 320 });
+      Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 180 });
+
+      focused = false;
+      window.dispatchEvent(new CustomEvent('telium:native-window-focus', { detail: false }));
+      await waitFor(() => expect(image.getAttribute('src')).toBeNull());
+      const canvas = document.querySelector('canvas[aria-label="big"]');
+      expect(canvas).toBeTruthy();
+    } finally {
+      delete window.teliumDesktop;
+    }
+  });
+});
