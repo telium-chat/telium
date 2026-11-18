@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { t } from '../lib/i18n/index.js';
 import { useT } from '../lib/i18n/react.jsx';
-import { Publisher, Unchecked, assess, fetchManifest, publisherState } from '../lib/updates.js';
+import {
+  Publisher, Unchecked, assess, fetchManifest, publishCheck, publisherState,
+} from '../lib/updates.js';
 
 export function UpdateStatus() {
   useT();
@@ -11,7 +13,11 @@ export function UpdateStatus() {
 
   useEffect(() => {
     let live = true;
+    // The desktop updater polls on its own timer; opening settings asks it too.
+    globalThis.teliumDesktop?.updates?.check?.()?.catch?.(() => {});
     fetchManifest().then((result) => {
+      // Published even if this footer has unmounted: the check still happened.
+      publishCheck(result);
       if (!live) return;
       setError(result.error || null);
       setManifest(result.manifest);

@@ -82,6 +82,8 @@ export const voice = {
   'voice.bar.channel': 'Voice',
   // Said for a direct call, where there is no guild to name underneath.
   'voice.bar.directMessage': 'Direct message',
+  'voice.bar.goTo': 'Go to this call',
+  'voice.bar.goToLabel': 'Go to {name} {where}',
 
   // The two states of the line beside the signal meter. "Voice connected" is
   // two words doing one job: it says which subsystem is up, because this bar

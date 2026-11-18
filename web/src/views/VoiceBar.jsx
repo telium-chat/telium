@@ -4,6 +4,7 @@ import { cn } from '../lib/cn.js';
 import { useStore, useStoreEventFor } from '../hooks/useStore.jsx';
 import { conversationName, shortName } from '../lib/util.js';
 import { roomFace } from '../lib/faces.js';
+import { channelRoute } from '../lib/channels.js';
 import { VoiceStatusLine } from './dialogs/VoiceStatusDialog.jsx';
 import { PING_WINDOW, useVoice } from '../hooks/useVoice.jsx';
 import { t } from '../lib/i18n/index.js';
@@ -165,6 +166,7 @@ function PingHistoryPanel({ samples }) {
 
 function Tool({ title, icon: Glyph, on, danger, disabled, onClick }) {
   return (
+    <Tooltip label={title} side="top">
     <button
       type="button"
       title={title}
@@ -173,8 +175,8 @@ function Tool({ title, icon: Glyph, on, danger, disabled, onClick }) {
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        'flex min-w-0 items-center justify-center gap-1.5 rounded-row px-2 py-1.5',
-        'text-xs font-medium transition-colors duration-[var(--dur-1)] ease-[var(--ease)]',
+        'flex min-w-0 items-center justify-center rounded-row px-2 py-2',
+        'transition-colors duration-[var(--dur-1)] ease-[var(--ease)]',
         disabled && 'cursor-not-allowed opacity-50',
         on
           ? danger
@@ -186,9 +188,9 @@ function Tool({ title, icon: Glyph, on, danger, disabled, onClick }) {
           ),
       )}
     >
-      <Glyph className="size-[15px] shrink-0" />
-      <span className="truncate">{title}</span>
+      <Glyph className="size-[17px] shrink-0" />
     </button>
+    </Tooltip>
   );
 }
 
@@ -266,6 +268,11 @@ export function VoiceBar() {
   const history = voice.pingHistory || [];
   const connecting = voice.phase === 'connecting';
   const local = voice.local;
+  // The call's own screen: its channel in a guild, its conversation for a DM.
+  const goToCall = () => {
+    if (channel) store.navigate(channelRoute(channel));
+    else if (convo) store.navigate({ view: 'dms', conversationId: convo.id });
+  };
 
   const mine = (store.voice.get(voice.channelId) || [])
     .find((v) => v.user_id === store.me?.user_id);
@@ -342,7 +349,13 @@ export function VoiceBar() {
           </IconButton>
         </div>
 
-        <div className="mt-0.5 flex min-w-0 items-baseline gap-1 text-xs">
+        <button
+          type="button"
+          title={t('voice.bar.goTo')}
+          aria-label={t('voice.bar.goToLabel', { name, where: where || '' })}
+          onClick={goToCall}
+          className="mt-0.5 flex w-full min-w-0 items-baseline gap-1 rounded text-start text-xs hover:underline focus-visible:underline"
+        >
           <span className="min-w-0 truncate font-medium text-foreground"><EmojiText>{name}</EmojiText></span>
           {where ? (
             <>
@@ -350,7 +363,7 @@ export function VoiceBar() {
               <span className="min-w-0 truncate text-muted"><EmojiText>{where}</EmojiText></span>
             </>
           ) : null}
-        </div>
+        </button>
         {channel?.type === 'voice' && channel?.voice_status ? (
           <div className="mt-0.5 min-w-0" title={channel.voice_status}>
             <VoiceStatusLine channel={channel} className="block" />
@@ -363,7 +376,7 @@ export function VoiceBar() {
           channel={channel}
           speaking={voice.speaking}
         />
-        <div role="toolbar" aria-label={t('voice.bar.toolbar')} className="mt-2 grid grid-cols-2 gap-1.5">
+        <div role="toolbar" aria-label={t('voice.bar.toolbar')} className="mt-2 grid grid-cols-4 gap-1.5">
           <Tool
             title={micLabel}
             icon={silent ? MicOffIcon : MicIcon}
