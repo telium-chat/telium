@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-11-18T04:13:46.555Z",
+  "generated_at": "2026-11-18T13:53:20.512Z",
   "servers": {
     "notdiscord.fyi": {
       "domain": "notdiscord.fyi",
       "ok": true,
-      "checked_at": "2026-11-18T04:13:46.409Z",
+      "checked_at": "2026-11-18T13:53:19.805Z",
       "error": null,
       "server_name": "notdiscord.fyi",
       "api_origin": "https://notdiscord.fyi",
@@ -53,9 +53,9 @@
       },
       "recommendations_accepting": true,
       "recommendations_referral_weight": 1,
-      "probe_ms": 146,
+      "probe_ms": 707,
       "uptime_30d": null,
-      "samples": 12,
+      "samples": 13,
       "first_probe_at": "2026-11-14T19:44:19.000Z",
       "recommendation": {
         "eligible": true,
