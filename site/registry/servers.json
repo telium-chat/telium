@@ -15,5 +15,22 @@
       "opt_in": true
     },
     "added": "2026-11-14"
+  },
+  {
+    "domain": "yapper.cloud",
+    "name": "yapper.cloud",
+    "description": "A telium homeserver",
+    "region": {
+      "label": "Eygelshoven, NL",
+      "code": "eu-west"
+    },
+    "operator": {
+      "name": "20plays",
+      "contact": "mailto:himself@20plays.com"
+    },
+    "recommendations": {
+      "opt_in": true
+    },
+    "added": "2026-11-18"
   }
 ]
