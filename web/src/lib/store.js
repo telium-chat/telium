@@ -1,5 +1,6 @@
 // `home` is the account server; `servers` maps guild hosts, each with its own token and socket. Methods are mixed in from lib/store/.
 
+import { VoiceRooms } from './voice-order.js';
 import { rememberSession } from './accounts.js';
 import { isHandoffPath, pendingHandoff } from './handoff.js';
 import { ConnectionManager, Status } from './gateway.js';
@@ -112,7 +113,7 @@ export class Store extends Emitter {
     this.readState = new Map();
     this.reading = null;
     this.threads = new Map();
-    this.voice = new Map();
+    this.voice = new VoiceRooms();
     this.ringing = new Map();
     this.ringTimers = new Map();
     this.declinedCalls = new Set();
