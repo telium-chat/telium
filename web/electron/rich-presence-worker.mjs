@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import RPCServer from 'arrpc';
 import { createMprisSource } from './mpris-source.mjs';
+import { createExtraGameScanner } from './rich-presence-extra-games.mjs';
 import {
   cleanApplicationName,
   createApplicationNameResolver,
@@ -28,6 +29,7 @@ let windowsRpcPromoter = null;
 let ipcServerClassPromise = null;
 let stopping = false;
 let detectableMetadataPromise = null;
+let extraGames = null;
 const activityRevisions = new Map();
 
 function post(message) {
@@ -47,6 +49,24 @@ async function ipcServerClass() {
     })();
   }
   return ipcServerClassPromise;
+}
+
+async function initializeExtraGames(server) {
+  try {
+    const packageJson = require.resolve('arrpc/package.json');
+    const natives = await import(pathToFileURL(
+      join(dirname(packageJson), 'src', 'process', 'native', 'index.js'),
+    ).href);
+    const native = natives[process.platform];
+    if (!native?.getProcesses) return;
+    extraGames = createExtraGameScanner({
+      getProcesses: native.getProcesses,
+      send: (socket, message) => server.onMessage(socket, message),
+    });
+    extraGames.start();
+  } catch (error) {
+    console.warn('[Telium rich presence worker] extra game detection unavailable:', error?.message || error);
+  }
 }
 
 async function replacementIpcServer(server) {
@@ -154,6 +174,7 @@ async function shutdown(code = 0) {
   try { await mprisSource?.stop(); } catch { /* best effort during shutdown */ }
   try { await windowsMediaSource?.stop(); } catch { /* best effort during shutdown */ }
   try { windowsRpcPromoter?.stop(); } catch { /* best effort during shutdown */ }
+  try { extraGames?.stop(); } catch { /* best effort during shutdown */ }
   try { await wineBridge?.stop(); } catch { /* best effort during shutdown */ }
   process.exit(code);
 }
@@ -327,6 +348,7 @@ try {
     post({ type: 'ready' });
   }
 
+  void initializeExtraGames(server);
   void initializeWineBridge(server);
   void initializeMpris();
   void initializeWindowsMedia();

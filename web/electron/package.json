@@ -27,6 +27,7 @@
     "asarUnpack": [
       "rich-presence-worker.mjs",
       "rich-presence-name.mjs",
+      "rich-presence-extra-games.mjs",
       "mpris-source.mjs",
       "wine-rpc-bridge.mjs",
       "wine-rpc-container-bridge.mjs",
@@ -52,6 +53,7 @@
       "rich-presence-local-art.cjs",
       "rich-presence-worker.mjs",
       "rich-presence-name.mjs",
+      "rich-presence-extra-games.mjs",
       "mpris-source.mjs",
       "wine-rpc-bridge.mjs",
       "wine-rpc-container-bridge.mjs",
