@@ -1657,15 +1657,16 @@ pub async fn invite(
         return Err(ApiError::Forbidden("join the channel before inviting people to it".into()));
     }
     let now = now_ms();
-    let existing: Option<(String, Option<i64>)> = sqlx::query_as(
-        "SELECT i.code, i.expires_at FROM call_invites c JOIN invites i ON i.code = c.code \
-         WHERE c.channel_id = ? AND (i.expires_at IS NULL OR i.expires_at > ?)",
+    // A link left from a call that ended uncleanly (expired, or deleted by hand) no longer names this call.
+    sqlx::query(
+        "DELETE FROM call_invites WHERE channel_id = ? AND code NOT IN \
+         (SELECT code FROM invites WHERE expires_at IS NULL OR expires_at > ?)",
     )
     .bind(&channel_id)
     .bind(now)
-    .fetch_optional(&state.pool)
+    .execute(&state.pool)
     .await?;
-    let (code, expires_at) = match existing {
+    let (code, expires_at) = match live_call_invite(&state.pool, &channel_id, now).await? {
         Some(found) => found,
         None => {
             let code = crate::util::invite_code();
@@ -1682,12 +1683,27 @@ pub async fn invite(
             .bind(now)
             .execute(&state.pool)
             .await?;
-            sqlx::query("INSERT OR REPLACE INTO call_invites (channel_id, code) VALUES (?, ?)")
-                .bind(&channel_id)
-                .bind(&code)
-                .execute(&state.pool)
-                .await?;
-            (code, Some(expires_at))
+            // The channel is the key, so two people pressing the button at once can't both claim it. The loser's row
+            // is removed and both get the winner's link; otherwise it would outlive the call, invisible to the cleanup.
+            let claimed = sqlx::query(
+                "INSERT INTO call_invites (channel_id, code) VALUES (?, ?) ON CONFLICT(channel_id) DO NOTHING",
+            )
+            .bind(&channel_id)
+            .bind(&code)
+            .execute(&state.pool)
+            .await?
+            .rows_affected();
+            if claimed == 1 {
+                (code, Some(expires_at))
+            } else {
+                sqlx::query("DELETE FROM invites WHERE code = ?")
+                    .bind(&code)
+                    .execute(&state.pool)
+                    .await?;
+                live_call_invite(&state.pool, &channel_id, now)
+                    .await?
+                    .ok_or_else(|| ApiError::Conflict("the call's link changed; try again".into()))?
+            }
         }
     };
     Ok(Json(json!({
@@ -1701,16 +1717,34 @@ pub async fn invite(
     })))
 }
 
-/// Deletes a channel's call invite once nobody is in it. One statement, so a join landing
-/// between "is it empty?" and "delete it" can't lose a live call's link.
+/// The live invite naming this channel's call, if there is one.
+async fn live_call_invite(
+    pool: &sqlx::SqlitePool,
+    channel_id: &str,
+    now: i64,
+) -> Result<Option<(String, Option<i64>)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT i.code, i.expires_at FROM call_invites c JOIN invites i ON i.code = c.code \
+         WHERE c.channel_id = ? AND (i.expires_at IS NULL OR i.expires_at > ?)",
+    )
+    .bind(channel_id)
+    .bind(now)
+    .fetch_optional(pool)
+    .await
+}
+
+/// Deletes a channel's call invite once nobody is in it. Each statement checks emptiness itself, so a join landing
+/// between "is it empty?" and "delete it" can't lose a live call's link, and both run in one transaction so the
+/// invite and its bookkeeping row go together.
 async fn end_call_invites(pool: &sqlx::SqlitePool, channel_id: &str) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
     sqlx::query(
         "DELETE FROM invites WHERE code IN (SELECT code FROM call_invites WHERE channel_id = ?) \
          AND NOT EXISTS (SELECT 1 FROM voice_states WHERE channel_id = ?)",
     )
     .bind(channel_id)
     .bind(channel_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
     sqlx::query(
         "DELETE FROM call_invites WHERE channel_id = ? \
@@ -1718,8 +1752,9 @@ async fn end_call_invites(pool: &sqlx::SqlitePool, channel_id: &str) -> Result<(
     )
     .bind(channel_id)
     .bind(channel_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(())
 }
 
