@@ -1200,6 +1200,54 @@ async fn a_call_invite_is_one_link_that_ends_with_the_call() {
 }
 
 #[tokio::test]
+async fn two_people_minting_a_call_invite_at_once_get_one_link() {
+    let s = start().await;
+    let alice = s.user("alice").await;
+    let bob = s.user("bob").await;
+    let (_, guild) = s.post("/_telium/v1/guilds", Some(&alice.token), json!({ "name": "G" })).await;
+    let gid = guild["id"].as_str().unwrap().to_string();
+    let (_, ch) = s
+        .post(
+            &format!("/_telium/v1/guilds/{gid}/channels"),
+            Some(&alice.token),
+            json!({ "name": "Voice", "type": "voice" }),
+        )
+        .await;
+    let cid = ch["id"].as_str().unwrap().to_string();
+    let (_, inv) = s.post(&format!("/_telium/v1/guilds/{gid}/invites"), Some(&alice.token), json!({})).await;
+    s.post(&format!("/_telium/v1/invites/{}/join", inv["code"].as_str().unwrap()), Some(&bob.token), json!({})).await;
+    let join = format!("/_telium/v1/channels/{cid}/voice/join");
+    s.post(&join, Some(&alice.token), json!({"key_package": "pkg"})).await;
+    s.post(&join, Some(&bob.token), json!({"key_package": "pkg"})).await;
+    // A bookkeeping row left by a call that never ended cleanly must not block a new link.
+    sqlx::query("INSERT INTO call_invites (channel_id, code) VALUES (?, 'gone')")
+        .bind(&cid)
+        .execute(&s.state.pool)
+        .await
+        .unwrap();
+    let call_rows = || async {
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM invites WHERE channel_id = ? AND code <> ?")
+            .bind(&cid)
+            .bind(inv["code"].as_str().unwrap())
+            .fetch_one(&s.state.pool).await.unwrap()
+    };
+
+    let url = format!("/_telium/v1/channels/{cid}/voice/invite");
+    let ((a_status, a), (b_status, b)) = tokio::join!(
+        s.post(&url, Some(&alice.token), json!({})),
+        s.post(&url, Some(&bob.token), json!({})),
+    );
+    assert_eq!(a_status, 200, "{a}");
+    assert_eq!(b_status, 200, "{b}");
+    assert_eq!(a["code"], b["code"], "both get the same link");
+    assert_eq!(call_rows().await, 1, "the losing mint leaves no stray invite behind");
+
+    s.post(&format!("/_telium/v1/channels/{cid}/voice/leave"), Some(&alice.token), json!({})).await;
+    s.post(&format!("/_telium/v1/channels/{cid}/voice/leave"), Some(&bob.token), json!({})).await;
+    assert_eq!(call_rows().await, 0, "the link goes when the call ends");
+}
+
+#[tokio::test]
 async fn a_guild_call_on_an_sfu_keeps_one_encryption_group() {
     let s = start().await;
     let alice = s.user("alice").await;
