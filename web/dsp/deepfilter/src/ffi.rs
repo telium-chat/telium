@@ -103,4 +103,9 @@ fn fill_random(buffer: &mut [u8]) -> Result<(), getrandom::Error> {
 }
 
 #[cfg(target_arch = "wasm32")]
-getrandom::register_custom_getrandom!(fill_random);
+#[no_mangle]
+unsafe extern "Rust" fn __getrandom_v03_custom(dest: *mut u8, len: usize) -> Result<(), getrandom::Error> {
+    // The buffer may be uninitialised: zero it before taking a slice.
+    core::ptr::write_bytes(dest, 0, len);
+    fill_random(core::slice::from_raw_parts_mut(dest, len))
+}

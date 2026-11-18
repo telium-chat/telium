@@ -47,7 +47,7 @@ const weights = await model()
 execFileSync(
   'cargo',
   ['build', '--locked', '--release', '--target', 'wasm32-unknown-unknown', '--manifest-path', join(CRATE, 'Cargo.toml')],
-  { stdio: 'inherit' },
+  { stdio: 'inherit', cwd: CRATE }, // cwd so the crate's .cargo/config.toml (getrandom backend flag) applies
 )
 
 mkdirSync(OUT, { recursive: true })

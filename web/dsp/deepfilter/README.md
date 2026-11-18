@@ -10,14 +10,18 @@ DeepFilterNet3 noise suppression compiled to a plain WebAssembly module, for the
 copied alongside). The changes are:
 
 - `src/lib.rs` has `mod ffi;` appended.
-- `src/tract.rs` spells `m.symbol_table` as `m.symbols` in three places, the one name tract 0.21.16+ changed.
+- `src/tract.rs` is ported from tract 0.21 to 0.23: `symbol_table` is `symbols`; `to_array_view[_mut]`/`into_array` are
+  `to_plain_array_view[_mut]`/`into_plain_array`; `with_output_names` is `with_outputs_by_name`; `SimpleState` is built
+  from `&Arc<plan>` and no longer takes type parameters; `TValue` is a shared tensor, so `to_scalar` goes through
+  `try_as_plain_ram()` and `tvalue_to_array_view_mut` reads its pointer from that view. Output was checked against the
+  0.21 build on the same input: the largest sample difference was 2e-7.
 - `Cargo.toml` is ours. It declares the feature names upstream's `cfg`s test (`tract`, `transforms`, `logging`) and holds
-  `tract-*` to `~0.21.16` (see the comment there for why not 0.21.4, and why not 0.23).
+  `tract-*` to `~0.23.0` (see the comment there for why the 0.21 line is not used).
 
 `src/ffi.rs` is entirely ours. It is the whole interface: `df_alloc`, `df_free`, `df_create`, `df_frame_len`,
 `df_process`, `df_destroy`. There is no wasm-bindgen glue, because an `AudioWorkletGlobalScope` has no `TextDecoder`,
 and the finished module has **no imports** and needs nothing from JavaScript. (`getrandom`, which tract's hashing asks
-for, is given a fixed byte stream in `ffi.rs`; nothing here depends on it being unpredictable.)
+for, is given a fixed byte stream in `ffi.rs`, selected by `.cargo/config.toml`; nothing here depends on it being unpredictable.)
 
 To update upstream: copy the four files from the new commit, re-append `mod ffi;`, update `UPSTREAM_COMMIT` and
 `MODEL_SHA256` in `../../scripts/build-deepfilter.mjs`, build, and run `bun run test -- src/test/denoise-worklet.test.js`.
