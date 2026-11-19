@@ -23,7 +23,8 @@ const OUTPUT = new URL('public/.well-known/telium/sfu-directory.json', root)
 
 const readJson = async (url) => JSON.parse(await readFile(url, 'utf8'))
 
-const mode = process.argv.includes('--write') ? 'write' : 'check'
+const optional = process.argv.includes('--write-if-configured')
+const mode = process.argv.includes('--write') || optional ? 'write' : 'check'
 
 const main = async () => {
   const [registry, status] = await Promise.all([readJson(REGISTRY), readJson(STATUS)])
@@ -36,7 +37,11 @@ const main = async () => {
     // First run: the feed starts at serial 1.
   }
 
-  const { document } = buildUnsignedSfuDirectory(registry, status, { serial: serial + 1 })
+  // The serial must only ever go up, and a production build on a fresh checkout
+  // has no committed counter to read, so it also follows the clock (minutes
+  // since the epoch) instead of restarting at 1 and being refused as stale.
+  serial = Math.max(serial + 1, Math.floor(Date.now() / 60000))
+  const { document } = buildUnsignedSfuDirectory(registry, status, { serial })
   console.log(`sfu directory: ${document.sfus.length} listed, serial ${document.serial}`)
   for (const entry of registry) {
     const probe = status.sfus?.[entry.url]
@@ -49,6 +54,10 @@ const main = async () => {
   const seed = process.env.TELIUM_SFU_DIRECTORY_SIGNING_KEY
   const publicKey = process.env.TELIUM_SFU_DIRECTORY_PUBLIC_KEY
   const keyId = process.env.TELIUM_SFU_DIRECTORY_KEY_ID || 'ed25519:sfu-directory'
+  if (!seed && optional) {
+    console.log('sfu directory: no signing key in this environment, feed not written')
+    return
+  }
   if (!seed) throw new Error('TELIUM_SFU_DIRECTORY_SIGNING_KEY is required with --write')
   if (!publicKey) throw new Error('TELIUM_SFU_DIRECTORY_PUBLIC_KEY is required with --write')
   assertPublicKeyMatchesSeed(seed, publicKey)
