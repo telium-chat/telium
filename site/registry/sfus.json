@@ -1,1 +1,20 @@
-[]
+[
+  {
+    "url": "https://sfu.notdiscord.fyi",
+    "name": "sfu.notdiscord.fyi",
+    "description": "A telium relay",
+    "capacity_band": "1g",
+    "region": {
+      "label": "Salt Lake City, US",
+      "code": "na-west"
+    },
+    "operator": {
+      "name": "20plays",
+      "contact": "mailto:himself@20plays.com"
+    },
+    "feed": {
+      "opt_in": true
+    },
+    "added": "2026-11-19"
+  }
+]
