@@ -15,6 +15,9 @@
 # which is exactly when a box needs to hear about them.
 !deploy/compose.yml
 !server/telium.example.toml
+# The Compose kit's updater logic and its compose file; see the Dockerfile.
+!deploy/compose/update.sh
+!deploy/compose/compose.yml
 
 # Build output and dependencies, which the stages produce for themselves. The
 # host's `target/` in particular is gigabytes of a different libc's artifacts,

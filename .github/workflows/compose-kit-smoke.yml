@@ -1,0 +1,33 @@
+name: Compose kit smoke
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/compose/**'
+      - 'deploy/tests/compose-kit-smoke.sh'
+      - '.github/workflows/compose-kit-smoke.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/compose/**'
+      - 'deploy/tests/compose-kit-smoke.sh'
+      - '.github/workflows/compose-kit-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compose-kit-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+      - name: Shell syntax
+        run: |
+          sh -n deploy/compose/update.sh
+          bash -n deploy/tests/compose-kit-smoke.sh
+          # The updater runs on Alpine's busybox sh, not bash.
+          docker run --rm -v "$PWD/deploy/compose:/k:ro" alpine:3 sh -n /k/update.sh
+      - name: Install from compose.yml, then update through the updater
+        run: bash deploy/tests/compose-kit-smoke.sh
