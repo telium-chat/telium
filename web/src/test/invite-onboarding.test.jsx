@@ -229,4 +229,65 @@ describe('public invite onboarding', () => {
     await user.type(field, 'elsewhere.example');
     expect(field.value).toBe('elsewhere.example');
   });
+  it('hides the registration code when the account home says it needs none, and sends none', async () => {
+    const server = createFakeServer({ registrationCodeRequired: false });
+    server.install();
+    const store = freshStore();
+    const user = userEvent.setup();
+    renderInvite(store);
+
+    expect(await screen.findByRole('heading', { name: 'Telium' })).toBeTruthy();
+    await waitFor(() => expect(screen.queryByLabelText('Registration code')).toBeNull());
+
+    await user.type(screen.getByLabelText('Display name'), 'New Person');
+    await user.type(screen.getByLabelText('Username'), 'new');
+    await user.type(screen.getByLabelText('Password'), 'hunter2hunter2');
+    await user.click(screen.getByRole('button', { name: 'Create account & join Telium' }));
+    await waitFor(() => expect(server.state.joins).toContain('INVITE1'), { timeout: 15_000 });
+  });
+
+  it('keeps the registration code when the account home requires one', async () => {
+    const server = createFakeServer({ registrationCodeRequired: true });
+    server.install();
+    const store = freshStore();
+    renderInvite(store);
+
+    expect(await screen.findByRole('heading', { name: 'Telium' })).toBeTruthy();
+    // Shown while unknown, and still shown once the home has answered.
+    expect(screen.getByLabelText('Registration code')).toBeTruthy();
+    await waitFor(() => expect(fetch.mock.calls.some(([input]) => String(input?.url || input).includes('/capabilities'))).toBe(true));
+    await new Promise((resolve) => { setTimeout(resolve, 500); });
+    expect(screen.getByLabelText('Registration code')).toBeTruthy();
+  });
+
+  it('recommends an account home for a portal link, as regular sign-up does', async () => {
+    const meta = document.createElement('meta');
+    meta.name = 'telium-portal';
+    meta.content = '1';
+    document.head.appendChild(meta);
+    try {
+      const server = createFakeServer();
+      server.install();
+      const store = freshStore();
+      renderInvite(store, { base: undefined, serverName: 'guilds.example' });
+
+      expect(await screen.findByRole('heading', { name: 'Telium' })).toBeTruthy();
+      const accountHome = await screen.findByTestId('account-home-picker');
+      expect(await within(accountHome).findByText('Community Home')).toBeTruthy();
+    } finally {
+      meta.remove();
+    }
+  });
+  it('previews the full account address under the username, as regular sign-up does', async () => {
+    const server = createFakeServer({ suggestAlternatives: true });
+    server.install();
+    const store = freshStore();
+    const user = userEvent.setup();
+    renderInvite(store);
+
+    await screen.findByText('Community Home');
+    expect(screen.queryByText(/first part of your Telium account id/i)).toBeNull();
+    await user.type(screen.getByLabelText('Username'), 'New');
+    await waitFor(() => expect(screen.getByTestId('username-preview').textContent).toContain('new@home.example'));
+  });
 });

@@ -2325,7 +2325,6 @@ export const messages = {
   'onboarding.invite.unopenableTitle': 'Impossible d’ouvrir cette invitation',
   'onboarding.invite.unreachable': 'Le serveur de la guilde n’a pas pu être joint.',
   'onboarding.invite.useAnotherAccount': 'Utiliser un autre compte',
-  'onboarding.invite.usernameHint': 'Cela deviendra la première partie de votre identifiant de compte Telium.',
   'onboarding.invite.usernamePlaceholder': 'votrenom',
   'onboarding.recoveryKey.body': 'Elle peut réinitialiser votre mot de passe et récupérer votre compte chiffré.',
   'onboarding.recoveryKey.clipboardLabel': 'Clé de récupération',

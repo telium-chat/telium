@@ -1395,7 +1395,6 @@ export const messages = {
   'onboarding.invite.unopenableTitle': '이 초대를 열 수 없어요',
   'onboarding.invite.unreachable': '길드 서버에 연결할 수 없어요.',
   'onboarding.invite.useAnotherAccount': '다른 계정 사용',
-  'onboarding.invite.usernameHint': '이것이 Telium 계정 ID의 첫 부분이 돼요.',
   'onboarding.invite.usernamePlaceholder': 'yourname',
   'onboarding.recoveryKey.body': '비밀번호를 재설정하고 암호화된 계정을 복구할 수 있어요.',
   'onboarding.recoveryKey.clipboardLabel': '복구 키',

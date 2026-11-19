@@ -1395,7 +1395,6 @@ export const messages = {
   'onboarding.invite.unopenableTitle': 'No se pudo abrir esta invitación',
   'onboarding.invite.unreachable': 'No se pudo contactar con el servidor del gremio.',
   'onboarding.invite.useAnotherAccount': 'Usar otra cuenta',
-  'onboarding.invite.usernameHint': 'Esto se convierte en la primera parte del ID de tu cuenta de Telium.',
   'onboarding.invite.usernamePlaceholder': 'tunombre',
   'onboarding.recoveryKey.body': 'Puede restablecer tu contraseña y recuperar tu cuenta cifrada.',
   'onboarding.recoveryKey.clipboardLabel': 'Clave de recuperación',

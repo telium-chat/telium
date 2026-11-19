@@ -566,6 +566,9 @@ export function createFakeServer(overrides = {}) {
         },
         profile: { bio_max_chars: state.bioMaxChars ?? 1024 },
         registration_open: true,
+        ...(typeof state.registrationCodeRequired === 'boolean'
+          ? { registration_code_required: state.registrationCodeRequired }
+          : {}),
         auth: state.opaqueAuth
           ? {
             opaque: true,

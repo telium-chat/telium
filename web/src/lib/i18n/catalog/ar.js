@@ -5975,7 +5975,6 @@ export const messages = {
   'onboarding.invite.unopenableTitle': 'تعذّر فتح هذه الدعوة',
   'onboarding.invite.unreachable': 'تعذّر الوصول إلى خادم النقابة.',
   'onboarding.invite.useAnotherAccount': 'استخدام حساب مختلف',
-  'onboarding.invite.usernameHint': 'يصبح هذا الجزء الأول من معرّف حساب Telium.',
   'onboarding.invite.usernamePlaceholder': 'yourname',
   'onboarding.recoveryKey.body': 'يمكنه إعادة تعيين كلمة مرورك واستعادة حسابك المشفّر.',
   'onboarding.recoveryKey.clipboardLabel': 'مفتاح الاستعادة',
