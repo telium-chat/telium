@@ -85,7 +85,7 @@ class OneTunnelTests(unittest.TestCase):
         self.assertEqual(wizard.ssh_target(env), "bob@[2001:db8::7]")
 
     def test_setup_link_goes_through_the_tunnel_for_every_mode(self):
-        token = "AbC_def-123456789012345678901234"
+        token = "test-setup-token-000000000000000"
         for printed in (
             f"Open this one-time setup URL:\n  http://203.0.113.7/admin?token={token}\n",
             f"  http://localhost:7891/admin?token={token}\n",
@@ -98,7 +98,7 @@ class OneTunnelTests(unittest.TestCase):
 
     def test_a_late_setup_link_is_not_mistaken_for_an_update(self):
         early = "Telium SFU started, but the setup URL was not found in the journal yet.\n"
-        token = "AbC_def-123456789012345678901234"
+        token = "test-setup-token-000000000000000"
         with tempfile.TemporaryDirectory() as directory:
             self.assertEqual(
                 wizard.finished_state(early, "portable", directory, journal=lambda: ""),
