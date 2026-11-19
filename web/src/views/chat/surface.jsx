@@ -250,8 +250,9 @@ export function useDmSurface(convo) {
     remove: (msg) => store.deleteDm(conversationId, msg.id),
     edit: (msg, content) => store.editDm(conversationId, msg.id, content),
     mayEdit: (msg) => msg.author === store.me?.user_id,
-    canJump: false,
-    jump: () => false,
+    // The timeline pages back through history until the quoted message is loaded (see `JUMP_PAGES`).
+    canJump: true,
+    jump: (msg) => Boolean(msg.reply_to) && store.jumpTo(conversationId, msg.reply_to),
     ack: () => store.markConversationRead(conversationId),
     menu: (msg, handlers) => (
       <>

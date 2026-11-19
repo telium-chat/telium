@@ -265,7 +265,8 @@ export class DenoiseChain {
     if (this.paused || this.spent) return;
     const verdict = this.governor.push(sample);
     if (!verdict) return;
-    if (verdict.giveUp) { this.stepDown('too-slow'); return; }
+    // A model with a lighter one below it is swapped for that one, not paused: a pause only brings the same heavy model back in 15 seconds.
+    if (verdict.giveUp || nextEngine(this.engine)) { this.stepDown('too-slow'); return; }
     this.pause(verdict.pauseMs, sample);
   }
 

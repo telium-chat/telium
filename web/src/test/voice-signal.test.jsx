@@ -346,3 +346,19 @@ describe('the ping history panel', () => {
     await expectNoViolations(view, 'the open ping history panel');
   });
 });
+
+describe('the call bar audio popover', () => {
+  it('opens on the button it was opened from, not at the top-left of the window', async () => {
+    voice.local = { self_mute: false, self_deaf: false, self_video: false, streaming: false };
+    voice.noiseSupport = { neural: true };
+    const user = userEvent.setup();
+    const { unmount } = render(<StoreProvider store={store}><VoiceBar /></StoreProvider>);
+    const button = screen.getByRole('button', { name: /audio|device|microphone/i });
+    await user.click(button);
+    await screen.findByRole('dialog');
+    // The popover is positioned against this element; had it been swapped for a new one, it would be measured as zero size at (0, 0).
+    expect(screen.getByRole('button', { name: button.getAttribute('aria-label') })).toBe(button);
+    expect(button.isConnected).toBe(true);
+    unmount();
+  });
+});

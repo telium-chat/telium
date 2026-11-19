@@ -68,12 +68,27 @@ describe('rich presence application metadata', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('uses bundled detectable metadata for a program icon without hitting Discord', async () => {
+  it('prefers the icon Discord has now to a stale one in the bundled list', async () => {
+    // THE FINALS: the bundled hash 404s on the CDN since the game changed its icon.
+    const localLookup = vi.fn(async () => ({ name: 'THE FINALS', icon_hash: 'cb3b1dea9fab7119dc5901d2f464a6f7' }));
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ id: '1182713227491147776', name: 'THE FINALS', icon: 'b5e88216b2c5f93553c2d53bd859aff9' }),
+    }));
+    const resolver = createApplicationNameResolver({ localLookup, fetchImpl });
+
+    const artwork = await resolver.resolveArtwork('1182713227491147776', null);
+    expect(artwork.large_image).toBe('https://cdn.discordapp.com/app-icons/1182713227491147776/b5e88216b2c5f93553c2d53bd859aff9.png?size=128');
+    await resolver.resolveArtwork('1182713227491147776', null);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to the bundled icon when Discord cannot be reached', async () => {
     const localLookup = vi.fn(async () => ({
       name: 'Overwatch',
       icon_hash: 'd20f9f39f2eec584dcdbc7b206786124',
     }));
-    const fetchImpl = vi.fn();
+    const fetchImpl = vi.fn(async () => { throw new TypeError('Failed to fetch'); });
     const resolver = createApplicationNameResolver({ localLookup, fetchImpl });
 
     await expect(resolver.resolveArtwork('356875221078245376', null)).resolves.toEqual({
@@ -82,7 +97,6 @@ describe('rich presence application metadata', () => {
       small_image: null,
       small_text: null,
     });
-    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('resolves RPC asset keys through the public application asset list once', async () => {
@@ -135,7 +149,8 @@ describe('rich presence application metadata', () => {
       small_image: 'https://cdn.discordapp.com/app-icons/666666666666666666/abcdef0123456789abcdef0123456789.png?size=128',
       small_text: 'Safe Game',
     });
-    expect(fetchImpl).not.toHaveBeenCalled();
+    // Only Discord's own metadata is asked (for a current icon), never the external artwork's host.
+    expect(fetchImpl.mock.calls.map(([url]) => new URL(url).host)).not.toContain('art.example');
   });
 
   it('accepts Discord media-proxy artwork without contacting the origin', async () => {

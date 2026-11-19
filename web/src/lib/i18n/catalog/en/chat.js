@@ -49,6 +49,9 @@ export const chat = {
   // direction: this button never means "right" or "left", and in a vertical
   // script it does not mean "down" either.
   'chat.timeline.jumpToBottom': 'Jump to bottom',
+  // The pill above the composer while scrolled up: how many messages arrived since, or, far up with nothing new, the way back.
+  'chat.timeline.newMessages': '{count, plural, one {# new message} other {# new messages}}',
+  'chat.timeline.jumpToPresent': 'Jump to present',
 
   // The rule drawn across the stream at the first message you have not read.
   // One word, upper-cased by the stylesheet rather than by the string, because

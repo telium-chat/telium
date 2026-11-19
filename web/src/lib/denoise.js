@@ -60,8 +60,8 @@ export const FRAME_MS = 10;
 /// Fraction of one core the model may take (laptop ~1.4%, mid phone ~10%).
 export const BENCHMARK_CEILING = 0.25;
 
-/// DeepFilterNet3 costs about eleven times what RNNoise does (about 9% of a core against under 1% on a laptop-class CPU), so it is allowed far more headroom before it is judged too slow to start with; the governor still steps it down if it cannot keep up once a call is running.
-export const DEEPFILTER_CEILING = 0.35;
+/// DeepFilterNet3 costs about eleven times what RNNoise does (about 3% of a core on a current desktop CPU, 0.3 ms a frame, against under 1% for RNNoise). A frame does not have to fit in the 2.67 ms render quantum it runs in: the device takes about 10 ms of audio per callback, so a slow frame borrows from the quanta around it. What breaks is a share that leaves no slack when the rest of the machine is busy too: measured in Chromium, frames at a third of a core played clean on an idle machine and dropped out hundreds of times in ten seconds with every core loaded. 0.15 keeps that slack.
+export const DEEPFILTER_CEILING = 0.15;
 
 /// The ladder: each engine yields to the next when a call cannot afford it, and the one after the last is the browser's own suppressor.
 export const ENGINES = ['dfn3', 'rnnoise'];
@@ -102,7 +102,7 @@ export const GOVERNOR = {
   calm: 60,
 };
 
-/// `true` bad, `false` good, `null` not measured (the count must not move).
+/// `true` bad, `false` good, `null` not measured (the count must not move). The slowest single quantum is not judged: one long quantum is the machine pausing the audio thread, which a lighter model does not fix.
 export function judgeSample({ load = null, underrunRatio = null } = {}, limits = OVERLOAD) {
   if (Number.isFinite(load)) return load > limits.load;
   if (Number.isFinite(underrunRatio)) return underrunRatio > limits.underruns;
