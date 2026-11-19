@@ -4,6 +4,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from '../App.jsx';
 import { Api } from '../lib/api.js';
+import { displayId } from '../lib/util.js';
 import {
   PublicProfileLanding, publicProfileLink, publicProfilePath,
 } from '../views/PublicProfileLanding.jsx';
@@ -137,7 +138,7 @@ describe('the public profile page', () => {
     const { publicProfilePage } = serve(moved({ ...QUIET, profile: { ...PROFILE, display_name: 'Bob Elsewhere' } }));
     await landing(BOB);
     expect(screen.getByRole('heading', { name: 'Bob Elsewhere' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: `Copy username ${BOB_MOVED}` })).toBeTruthy();
+    expect(screen.getByRole('button', { name: `Copy username ${displayId(BOB_MOVED)}` })).toBeTruthy();
     expect(screen.getByText(`Moved from ${BOB}`)).toBeTruthy();
     expect(publicProfilePage).toHaveBeenCalledTimes(1);
     expect(publicProfilePage).toHaveBeenCalledWith(BOB_MOVED);

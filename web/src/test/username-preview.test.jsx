@@ -7,12 +7,12 @@ import { mount, signedInStore } from './harness.jsx';
 describe('registrationPreview', () => {
   it('shows the lowercased name on the chosen server', () => {
     expect(registrationPreview('  Ada ', 'example.org')).toEqual({
-      localpart: 'ada', address: '@ada:example.org', fault: '',
+      localpart: 'ada', address: 'ada@example.org', fault: '',
     });
   });
 
   it('keeps the name from a pasted full address and ignores its server', () => {
-    expect(registrationPreview('@Ada:other.net', 'example.org').address).toBe('@ada:example.org');
+    expect(registrationPreview('@Ada:other.net', 'example.org').address).toBe('ada@example.org');
   });
 
   it('has no address until something is typed', () => {
@@ -31,10 +31,10 @@ describe('registrationPreview', () => {
 describe('UsernamePreview', () => {
   it('spells out that the server is part of the username as the name is typed', () => {
     const { rerender } = mount(<UsernamePreview user="" host="example.org" />, signedInStore({}));
-    expect(screen.getByTestId('username-preview').textContent).toContain('@yourname:example.org');
+    expect(screen.getByTestId('username-preview').textContent).toContain('yourname@example.org');
 
     rerender(<UsernamePreview user="Ada" host="example.org" />);
-    expect(screen.getByTestId('username-preview').textContent).toContain('@ada:example.org');
+    expect(screen.getByTestId('username-preview').textContent).toContain('ada@example.org');
   });
 
   it('warns instead of previewing a name that cannot be registered', () => {

@@ -172,11 +172,11 @@ describe('the roles pane', () => {
     await user.click(await within(dialog).findByRole('tab', { name: 'Manage Members' }));
 
     await within(dialog).findByText('Holding Moderator - 1');
-    await within(dialog).findByText('@bob:home.example');
-    expect(within(dialog).queryByText('@alice:home.example')).toBeNull();
+    await within(dialog).findByText('bob@home.example');
+    expect(within(dialog).queryByText('alice@home.example')).toBeNull();
 
     await user.type(within(dialog).getByLabelText('Search members to add'), 'alice');
-    await within(dialog).findByText('@alice:home.example');
+    await within(dialog).findByText('alice@home.example');
     await user.click(await within(dialog).findByRole('button', { name: 'Add' }));
     await within(dialog).findByText('Holding Moderator - 2');
   });

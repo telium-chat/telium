@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAsync, useOptionalStore } from '../../hooks/useStore.jsx';
 import { reportError } from '../../hooks/useToast.jsx';
 import { Trans, useT } from '../../lib/i18n/react.jsx';
+import { displayId } from '../../lib/util.js';
 import { list } from '../../lib/i18n/index.js';
 import {
   Async, BotCapabilityChecklist, Button, DataTable, Hint, Notice, Pill, Section, TextInput,
@@ -214,7 +215,7 @@ export function BotsPane({ guildId, api }) {
                   components={{ name: <span className="font-medium text-foreground" /> }}
                 />
               </div>
-              <div className="min-w-0 truncate pt-0.5 text-xs text-muted">{review.bot_user_id}</div>
+              <div className="min-w-0 truncate pt-0.5 text-xs text-muted">{displayId(review.bot_user_id)}</div>
               {review.description ? (
                 <div className="mt-2 text-sm break-words text-muted">{clamp(review.description, 400)}</div>
               ) : null}
@@ -268,7 +269,7 @@ export function BotsPane({ guildId, api }) {
               <div className="font-medium break-words">
                 {t('bots.edit.heading', { name: editing.display_name })}
               </div>
-              <div className="truncate text-xs text-muted">{editing.bot_user_id}</div>
+              <div className="truncate text-xs text-muted">{displayId(editing.bot_user_id)}</div>
             </div>
             {editing.limited_to_current ? (
               <Notice tone="warn">{t('bots.edit.offline')}</Notice>
@@ -328,7 +329,7 @@ export function BotsPane({ guildId, api }) {
                         </span>
                         <Pill tone="accent">{t('bots.list.badge')}</Pill>
                       </div>
-                      <div className="truncate text-xs text-muted">{bot.bot_user_id}</div>
+                      <div className="truncate text-xs text-muted">{displayId(bot.bot_user_id)}</div>
                     </div>
                   ),
                 },
