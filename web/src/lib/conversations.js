@@ -15,6 +15,8 @@ export function dmPeer(store, userId) {
 }
 
 export function conversationTitle(store, convo) {
+  const chosen = convo.kind === 'gc' ? store.groupNameIn?.(convo.id) : null;
+  if (chosen) return chosen;
   if (convo.name) return convo.name;
   const others = participants(convo).filter((m) => (m.user_id || m) !== store.me?.user_id);
   if (!others.length) return 'Just you';

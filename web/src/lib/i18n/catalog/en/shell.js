@@ -102,6 +102,9 @@ export const shell = {
   // `retryHome` names a domain because the reader may be reading a copy served
   // by a different one, and "try again" without saying which server would be
   // ambiguous in the one situation where the ambiguity matters.
+  'shell.banner.homeUnreachable': "Can't reach {domain}. Trying again…",
+  'shell.banner.homeUnreachableCached': "Can't reach {domain}. Showing your last saved view from {when}. Trying again…",
+  'shell.banner.homeUnreachableKeys': "Can't reach {domain} to unlock your encrypted messages. Trying again…",
   'shell.banner.retryHome': 'Try {domain} again',
   'shell.banner.signIn': 'Sign in again',
   // "Telium" and not "the page": the desktop and Android shells draw this too,

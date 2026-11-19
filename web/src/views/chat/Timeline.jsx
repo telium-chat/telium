@@ -8,6 +8,7 @@ import { EmptyState, MessageIcon, RowSkeleton } from '../../components/index.js'
 import { MessageRow } from './MessageRow.jsx';
 import { CallLogRow } from './CallLog.jsx';
 import { PinNoticeRow } from './PinNotice.jsx';
+import { RenameNoticeRow } from './RenameNotice.jsx';
 import { EphemeralMessages } from './EphemeralMessages.jsx';
 
 const scrollMemory = new Map();
@@ -284,6 +285,7 @@ export function Timeline({
                 if (row.kind === 'day') return <DayBreak key={`day-${row.key}`} label={row.label} />;
                 if (row.kind === 'new') return <NewMarker key="new-marker" />;
                 if (row.kind === 'call') return <CallLogRow key={row.msg.id} entry={row.msg} />;
+                if (row.kind === 'rename') return <RenameNoticeRow key={row.msg.id} entry={row.msg} />;
                 if (row.kind === 'pin') {
                   return <PinNoticeRow key={row.msg.id} entry={row.msg} surface={surface} mobile={mobile} />;
                 }
@@ -416,7 +418,7 @@ function rowsFor(list, firstUnread) {
       previous = null;
       previousMsg = null;
     }
-    if (msg.kind === 'call' || msg.kind === 'pin') {
+    if (msg.kind === 'call' || msg.kind === 'pin' || msg.kind === 'rename') {
       rows.push({ kind: msg.kind, msg, grouped: false });
       previous = null;
       continue;

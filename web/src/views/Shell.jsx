@@ -535,7 +535,7 @@ function BannerStack() {
 
 function ConnectionBanner() {
   const store = useStore();
-  useStoreEvent('status', 'guilds', 'fallback');
+  useStoreEvent('status', 'guilds', 'fallback', 'startup');
   useT();
   const banner = connectionBanner(store);
   const settled = useSettled(banner?.key ?? null, banner?.urgent ? 0 : SETTLE_MS);
@@ -561,6 +561,28 @@ function connectionBanner(store) {
             onClick={() => store.checkPrimary().catch(() => {})}
           >
             {t('shell.banner.retryHome', { domain: home })}
+          </Button>
+        </Banner>
+      ),
+    };
+  }
+
+  if (store.homeUnreachable?.()) {
+    const home = store.session?.home?.domain;
+    return {
+      key: `unreachable:${store.startDegraded ? 'start' : 'keys'}`,
+      node: (
+        <Banner tone="warning" role="status">
+          {store.startDegraded && store.cachedAt
+            ? t('shell.banner.homeUnreachableCached', { domain: home, when: relative(store.cachedAt) })
+            : t(store.startDegraded ? 'shell.banner.homeUnreachable' : 'shell.banner.homeUnreachableKeys', { domain: home })}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="ms-1 min-h-9 shrink-0 rounded-lg"
+            onClick={() => store.retryStartup()}
+          >
+            {t('shell.banner.wake')}
           </Button>
         </Banner>
       ),

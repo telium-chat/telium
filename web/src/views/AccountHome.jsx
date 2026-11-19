@@ -3,6 +3,7 @@ import { Button, ChevronRightIcon, ServerIcon } from '../components/index.js';
 import { copyToClipboard } from '../lib/clipboard.js';
 import { discover } from '../lib/api.js';
 import { hasPinnedRecommendationKey } from '../lib/account-home-recommendations.js';
+import { formatAddress, registrationPreview } from '../lib/account-address.js';
 import { Trans, useT } from '../lib/i18n/react.jsx';
 
 export function HomeChip({ host, onClick = null }) {
@@ -26,6 +27,28 @@ export function HomeChip({ host, onClick = null }) {
       </button>
     )
     : <span className="auth-host">{inner}</span>;
+}
+
+/// While registering: the server is part of the username, so show the whole address as it is typed.
+export function UsernamePreview({ user, host }) {
+  const t = useT();
+  const { address, fault } = registrationPreview(user, host);
+  if (fault) {
+    return (
+      <p className="text-sm text-warning" role="status" data-testid="username-preview">
+        {t('errors.username_invalid', { reason: fault })}
+      </p>
+    );
+  }
+  return (
+    <p className="text-sm leading-[1.6] text-muted" role="status" data-testid="username-preview">
+      <Trans
+        k={address ? 'auth.identity.preview' : 'auth.identity.previewEmpty'}
+        values={{ address: address || formatAddress('yourname', host) }}
+        components={{ b: <strong className="break-all font-semibold text-foreground" /> }}
+      />
+    </p>
+  );
 }
 
 export function AccountAddress({ userId }) {

@@ -351,6 +351,17 @@ export function useDmItems(frames, convo, mls, me, callLogs = []) {
       durationMs: entry.durationMs ?? null,
     }));
   }
+  for (const r of mls?.renamesIn?.(conversationId) || []) {
+    items.push(hold(cache.current, seen, {
+      kind: 'rename',
+      id: `rename:${r.id}`,
+      channel_id: conversationId,
+      guild_id: null,
+      author: r.by,
+      created_at: r.at,
+      name: r.name,
+    }));
+  }
   items.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
   return items;
 }
@@ -400,6 +411,9 @@ function same(a, b) {
       && a.created_at === b.created_at
       && a.author === b.author
       && (a.durationMs ?? null) === (b.durationMs ?? null);
+  }
+  if (a.kind === 'rename') {
+    return a.name === b.name && a.author === b.author && a.created_at === b.created_at;
   }
   return a.content === b.content
     && a.nonce === b.nonce

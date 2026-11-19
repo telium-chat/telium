@@ -877,6 +877,8 @@ impl Default for Klipy {
             media_hosts: vec![
                 "klipy.com".into(),
                 "static.klipy.com".into(),
+                "static1.klipy.com".into(),
+                "static2.klipy.com".into(),
                 "static.klipy.co".into(),
                 "media.klipy.com".into(),
             ],

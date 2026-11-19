@@ -165,7 +165,7 @@ export function DmView({ conversationId, mobile = false, onBack, onMore, onOpenN
     onCall && store.outgoingCalls.get(conversationId) && othersInCall.length === 0,
   );
   const title = known?.kind === 'gc'
-    ? conversationName(known, store.me?.user_id)
+    ? (store.groupNameIn(known.id) || conversationName(known, store.me?.user_id))
     : withWhom;
 
   const mobileActions = convo ? (

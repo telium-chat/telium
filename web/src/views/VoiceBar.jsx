@@ -308,7 +308,7 @@ export function VoiceBar() {
   const convo = !channel && voice.channelId
     ? store.conversations.find((c) => c.id === voice.channelId)
     : null;
-  const name = channel?.name || conversationName(convo, store.me?.user_id) || t('voice.bar.channel');
+  const name = channel?.name || (convo?.kind === 'gc' && store.groupNameIn(convo.id)) || conversationName(convo, store.me?.user_id) || t('voice.bar.channel');
   const guild = channel?.guild_id ? store.guilds.get(channel.guild_id) : null;
   const where = guild?.name || (convo ? t('voice.bar.directMessage') : null);
   const signal = connectionLevel(voice.ping);

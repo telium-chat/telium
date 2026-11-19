@@ -95,6 +95,7 @@ export const FRAME_INTENT = {
   delete: BOOKKEEPING,
   pin: BOOKKEEPING,
   call_sfu: BOOKKEEPING,
+  rename: BOOKKEEPING,
   unknown: BOOKKEEPING,
 };
 

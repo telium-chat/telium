@@ -106,7 +106,44 @@ describe('GIF provider adapter', () => {
     await expect(provider.resolveShareUrl(
       'https://klipy.com/gifs/big-brother-is-watching-you-5',
     )).resolves.toBe('https://static.klipy.com/one.gif');
-    expect(fetcher.mock.calls[0][0]).toContain('q=big-brother-is-watching-you-5');
+    // Exact lookup first, then the search fallback.
+    expect(fetcher.mock.calls[0][0]).toContain('/gifs/items?slugs=big-brother-is-watching-you-5');
+  });
+
+  it('resolves a Klipy share page by exact slug lookup without searching', async () => {
+    const fetcher = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        result: true,
+        data: { data: [{
+          id: 7,
+          slug: 'orange-cat-16',
+          file: { hd: { gif: { url: 'https://static.klipy.com/orange.gif' } } },
+        }] },
+      }),
+    }));
+    const provider = new KlipyProvider(config, { fetcher, debounceMs: 0 });
+    await expect(provider.resolveShareUrl('https://klipy.com/gifs/orange-cat-16'))
+      .resolves.toBe('https://static.klipy.com/orange.gif');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0][0]).toContain('/gifs/items?slugs=orange-cat-16');
+  });
+
+  it('falls back to searching when the slug lookup finds nothing or the wrong GIF', async () => {
+    const fetcher = vi.fn(async (url) => ({
+      ok: true,
+      json: async () => (String(url).includes('/gifs/items')
+        ? { data: { data: [{ id: 1, slug: 'unrelated-1', file: { md: { gif: { url: 'https://static.klipy.com/no.gif' } } } }] } }
+        : { data: { data: [{ id: 2, slug: 'orange-cat-16--abc', file: { md: { gif: { url: 'https://static.klipy.com/yes.gif' } } } }] } }),
+    }));
+    const provider = new KlipyProvider(config, { fetcher, debounceMs: 0 });
+    await expect(provider.resolveShareUrl('https://klipy.com/gifs/orange-cat-16'))
+      .resolves.toBe('https://static.klipy.com/yes.gif');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('allows the numbered Klipy media hosts', () => {
+    expect(klipyConfig().mediaHosts).toEqual(expect.arrayContaining(['static1.klipy.com', 'static2.klipy.com']));
   });
 
   it('calls the browser fetch method with the correct receiver', async () => {

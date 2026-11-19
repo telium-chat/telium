@@ -1,3 +1,4 @@
+import { orderParticipants } from '../voice-order.js';
 import { mayInterrupt } from '../interrupts.js';
 import { participants } from '../util.js';
 import { rejoinKey } from '../rejoin.js';
@@ -494,7 +495,7 @@ export const dispatchMethods = {
       else if (d.guild_id && this.channels.get(channelId)?.guild_id !== d.guild_id) continue;
       const at = list.findIndex((v) => v.user_id === d.user_id);
       if (at < 0) continue;
-      if (channelId === d.channel_id && !d.left) Object.assign(list[at], d);
+      if (channelId === d.channel_id && !d.left) { Object.assign(list[at], d); orderParticipants(list); }
       else list.splice(at, 1);
       touched.add(channelId);
     }

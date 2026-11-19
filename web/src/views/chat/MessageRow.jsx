@@ -14,7 +14,7 @@ import {
 import { displayText, hasDisplayOnly, wireText } from '../../lib/mentions.js';
 import {
   Avatar, BotBadge, ContextMenu, EmojiIcon, EmojiText, EditIcon, IconButton, LockIcon, MenuButton,
-  MoreIcon, Pill, PinIcon, ReactionPill, ReplyIcon, ThreadIcon, TrashIcon,
+  MoreIcon, Pill, PinIcon, ReactionPill, ReplyIcon, ThreadIcon, TrashIcon, VisibilityOffIcon,
 } from '../../components/index.js';
 import { watchShift } from './shiftHeld.js';
 import { MarkdownInk, useAutosize } from './MarkdownInk.jsx';
@@ -25,6 +25,8 @@ import { useProfileCard } from '../../hooks/useProfileCard.js';
 import { EmojiPopover } from './EmojiPicker.jsx';
 import { useMenus } from '../menus.jsx';
 import { Attachments } from './Attachments.jsx';
+import { playableKind } from './PlayableAttachment.jsx';
+import { linksIn } from '../../lib/embeds.js';
 import { QuotePreview } from './QuotePreview.jsx';
 import { Embeds } from './Embeds.jsx';
 import { GifEmbeds, isGifOnlyContent } from './GifEmbed.jsx';
@@ -33,6 +35,17 @@ import { invitesIn, InviteCards } from './InviteCard.jsx';
 import { PlayableLinkEmbeds } from './PlayableLinkEmbeds.jsx';
 import { klipyConfig } from '../../lib/gifs.js';
 import { AppMessage } from '../../components/message-ui/index.js';
+
+// Messages whose media the reader hid. Module-level so a row that scrolls out
+// and back in (or remounts) keeps its state; it lasts until the app reloads.
+const hiddenMedia = new Set();
+
+function carriesMedia(msg, encrypted) {
+  if (msg.deleted) return false;
+  if (msg.sticker) return true;
+  if ((msg.attachments || []).some((a) => (a.mime || '').startsWith('image/') || playableKind(a))) return true;
+  return !encrypted && linksIn(msg.content || '').length > 0;
+}
 
 export const MessageRow = memo(function MessageRow({
   msg, surface, grouped, member, colour, parent, thread, mentionsMe, pinned = false,
@@ -59,6 +72,14 @@ export const MessageRow = memo(function MessageRow({
   const mayReact = has(perms, 'ADD_REACTIONS') && !msg.deleted && !pending;
   const mayReply = has(perms, 'SEND_MESSAGES') && !msg.deleted && !msg.unreadable && !pending;
   const mayEdit = mine && surface.mayEdit(msg) && !msg.deleted && !msg.unreadable && !pending;
+
+  const [mediaHidden, setMediaHidden] = useState(() => hiddenMedia.has(msg.id));
+  const hasMedia = carriesMedia(msg, surface.encrypted);
+  const toggleMedia = () => {
+    if (hiddenMedia.has(msg.id)) hiddenMedia.delete(msg.id); else hiddenMedia.add(msg.id);
+    setMediaHidden(hiddenMedia.has(msg.id));
+  };
+  const hideMedia = mediaHidden && hasMedia;
 
   const [reactOpen, setReactOpen] = useState(false);
   const reactRef = useRef(null);
@@ -336,20 +357,33 @@ export const MessageRow = memo(function MessageRow({
           </div>
         ) : null}
 
-        {msg.deleted ? null : (
+        {hideMedia ? (
+          <button
+            type="button"
+            className="mt-1 flex cursor-pointer appearance-none items-center gap-1.5 border-0 bg-transparent p-0 text-xs text-muted hover:text-text focus-outside"
+            onClick={toggleMedia}
+          >
+            <VisibilityOffIcon className="size-3.5" />
+            {t('chat.message.media.hidden')}
+          </button>
+        ) : (
           <>
-            <GifEmbeds content={msg.content} />
-            <PlayableLinkEmbeds content={msg.content} />
+            {msg.deleted ? null : (
+              <>
+                <GifEmbeds content={msg.content} />
+                <PlayableLinkEmbeds content={msg.content} />
+              </>
+            )}
+
+            {msg.sticker ? <Sticker sticker={msg.sticker} guildId={surface.guildId} /> : null}
+
+            <Attachments msg={msg} base={surface.avatarBase} encrypted={surface.encrypted} />
+
+            {surface.encrypted
+              ? (msg.deleted ? null : <InviteCards urls={invitesIn(msg.content || '')} />)
+              : <Embeds msg={msg} />}
           </>
         )}
-
-        {msg.sticker ? <Sticker sticker={msg.sticker} guildId={surface.guildId} /> : null}
-
-        <Attachments msg={msg} base={surface.avatarBase} encrypted={surface.encrypted} />
-
-        {surface.encrypted
-          ? (msg.deleted ? null : <InviteCards urls={invitesIn(msg.content || '')} />)
-          : <Embeds msg={msg} />}
 
         {msg.deleted ? null : (
           <AppMessage msg={msg} member={member} base={surface.avatarBase} />
@@ -423,6 +457,16 @@ export const MessageRow = memo(function MessageRow({
         {mayReply ? (
           <IconButton title={t('chat.message.actions.reply')} className="popup-icon-button size-7" onClick={() => onReply(msg)}>
             <ReplyIcon className="size-3.5" />
+          </IconButton>
+        ) : null}
+        {hasMedia ? (
+          <IconButton
+            title={t(mediaHidden ? 'chat.message.actions.showMedia' : 'chat.message.actions.hideMedia')}
+            className="popup-icon-button size-7"
+            active={mediaHidden}
+            onClick={toggleMedia}
+          >
+            <VisibilityOffIcon className="size-3.5" />
           </IconButton>
         ) : null}
         {mayEdit ? (

@@ -251,3 +251,27 @@ export async function searchName(user, candidates, {
   const ids = new Set();
   return results.filter((r) => r && !ids.has(r.userId) && ids.add(r.userId));
 }
+
+const LOCALPART_MAX = 32;
+
+/// The full address a chosen name will have on `host`. The one place that spells the format.
+export function formatAddress(localpart, host) {
+  return `@${localpart}:${host}`;
+}
+
+/// What the registration field will become, for the live preview. The server lowercases the name and
+/// takes 1-32 of `a-z 0-9 . _ -`, so show exactly that and name the problem before the form is sent.
+export function registrationPreview(text, host) {
+  const typed = String(text ?? '').trim().replace(/^@/, '');
+  // A pasted full address keeps its name; the server part is chosen separately.
+  const colon = typed.indexOf(':');
+  const localpart = (colon === -1 ? typed : typed.slice(0, colon)).toLowerCase();
+  let fault = '';
+  if (localpart.length > LOCALPART_MAX) fault = 'too_long';
+  else if (localpart && !/^[a-z0-9._-]+$/.test(localpart)) fault = 'charset';
+  return {
+    localpart,
+    address: localpart ? formatAddress(localpart, host) : null,
+    fault,
+  };
+}
