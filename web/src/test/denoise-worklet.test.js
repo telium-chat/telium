@@ -85,6 +85,35 @@ describe('the denoise worklet', () => {
     expect(rms(out.subarray(-48000))).toBeLessThan(rms(input.subarray(-48000)) * 0.2);
   }, 60000);
 
+  it('keeps the same delay through a pause, so pausing and resuming leave no gap and skip nothing', async () => {
+    const PREFILL = 448;
+    const node = new Processor();
+    const binary = readFileSync(join(process.cwd(), 'node_modules', '@jitsi', 'rnnoise-wasm', 'dist', 'rnnoise.wasm'));
+    node.port.onmessage({ data: { type: 'engine', engine: 'rnnoise', binary: new Uint8Array(binary) } });
+    await until(node, 'ready');
+    run(node, noisy(0.2));
+
+    // A ramp never repeats a value and is never zero, so a skipped, repeated or silent sample shows.
+    const ramp = (n, from) => Float32Array.from({ length: n * QUANTUM }, (_, i) => (from + i + 1) / 1e6);
+    const bypassed = (input) => {
+      node.port.onmessage({ data: { type: 'bypass', on: true } });
+      const out = run(node, input);
+      for (let j = PREFILL; j < out.length; j += 1) expect(out[j]).toBe(input[j - PREFILL]);
+      return out;
+    };
+    bypassed(ramp(20, 0));
+
+    node.port.onmessage({ data: { type: 'bypass', on: false } });
+    const back = run(node, ramp(20, 10_000));
+    let zeros = 0;
+    let longest = 0;
+    for (const x of back) { zeros = x === 0 ? zeros + 1 : 0; longest = Math.max(longest, zeros); }
+    expect(longest).toBeLessThan(64);
+
+    // And paused again: still the same delay, not a jump to the live input.
+    bypassed(ramp(20, 20_000));
+  });
+
   it('reports a broken engine and keeps the audio flowing', async () => {
     const node = new Processor();
     node.port.onmessage({ data: { type: 'engine', engine: 'dfn3', wasm: new Uint8Array([1, 2, 3]), model: new Uint8Array([]) } });

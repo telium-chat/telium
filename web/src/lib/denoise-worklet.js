@@ -118,6 +118,9 @@ class DenoiseProcessor extends AudioWorkletProcessor {
     this.engineName = null;
     this.loading = 0;        // bumped per request so a slow load cannot replace a newer one
     this.bypass = false;
+    // Once an engine has run, everything goes through the ring, model or not: a pause, a swap or a load keeps the same delay, so none of them skips or repeats a few milliseconds of voice. Under load the governor pauses and resumes, and each delay change used to be a gap the other end heard.
+    this.delayed = false;
+    this.starved = false;
 
     this.frame = new Float32Array(FRAME);
     this.cleaned = new Float32Array(FRAME);
@@ -136,10 +139,8 @@ class DenoiseProcessor extends AudioWorkletProcessor {
   handle(message) {
     if (!message) return;
     if (message.type === 'bypass') {
-      const on = Boolean(message.on);
-      // Coming back starts from silence, not from whatever the ring held when it stopped being fed.
-      if (this.bypass && !on) this.reset();
-      this.bypass = on;
+      // The ring is fed while bypassed, so coming back needs nothing reset.
+      this.bypass = Boolean(message.on);
       return;
     }
     if (message.type !== 'engine') return;
@@ -154,7 +155,8 @@ class DenoiseProcessor extends AudioWorkletProcessor {
     start
       .then((engine) => {
         if (ticket !== this.loading) { engine.destroy(); return; }
-        this.reset();
+        // The one step from wire to delayed is the only time the ring starts over.
+        if (!this.delayed) { this.reset(); this.delayed = true; }
         this.engine = engine;
         this.engineName = message.engine;
         this.port.postMessage({ type: 'ready', engine: message.engine });
@@ -165,7 +167,7 @@ class DenoiseProcessor extends AudioWorkletProcessor {
       });
   }
 
-  /// Starts the ring from silence, so nothing left from before a pause or a swap is played.
+  /// Starts the ring from silence: before the first model, and after the microphone was gone.
   reset() {
     this.fill = 0;
     this.ring.fill(0);
@@ -173,15 +175,19 @@ class DenoiseProcessor extends AudioWorkletProcessor {
     this.write = PREFILL;
   }
 
-  denoise() {
-    try {
-      this.engine.run(this.frame, this.cleaned);
-    } catch (error) {
-      // A trap in the engine ends it, not the call: the node turns into a wire and the main thread decides what comes next.
-      const name = this.engineName;
-      this.engine = null;
-      this.engineName = null;
-      this.port.postMessage({ type: 'failed', engine: name, message: String(error?.message || error) });
+  denoise(running) {
+    if (running) {
+      try {
+        this.engine.run(this.frame, this.cleaned);
+      } catch (error) {
+        // A trap in the engine ends it, not the call: frames pass through unchanged and the main thread decides what comes next.
+        const name = this.engineName;
+        this.engine = null;
+        this.engineName = null;
+        this.port.postMessage({ type: 'failed', engine: name, message: String(error?.message || error) });
+        this.cleaned.set(this.frame);
+      }
+    } else {
       this.cleaned.set(this.frame);
     }
     for (let i = 0; i < FRAME; i += 1) {
@@ -195,23 +201,27 @@ class DenoiseProcessor extends AudioWorkletProcessor {
     const output = outputs[0]?.[0];
     if (!output) return true;
 
-    // A gone microphone or muted track: the node stays in the graph so unmuting needs no rebuild, and emits silence.
-    if (!input) { output.fill(0); return true; }
+    // A gone microphone or muted track: the node stays in the graph so unmuting needs no rebuild, and emits silence. What the ring held from before is not played after.
+    if (!input) { output.fill(0); this.starved = true; return true; }
 
-    // Anything that is not a working, wanted model is a straight copy; bypass is one boolean, not a graph edit racing the audio thread.
-    if (this.bypass || !this.engine) { output.set(input); return true; }
+    // Until a model has ever run, a straight copy.
+    if (!this.delayed) { output.set(input); return true; }
+    if (this.starved) { this.starved = false; this.reset(); }
 
-    const started = clock();
+    // Paused, loading or failed: frames still go through the ring, unchanged. Bypass is one boolean, not a graph edit racing the audio thread.
+    const running = Boolean(this.engine) && !this.bypass;
+    const started = running ? clock() : 0;
 
     for (let i = 0; i < input.length; i += 1) {
       this.frame[this.fill] = input[i];
       this.fill += 1;
-      if (this.fill === FRAME) { this.denoise(); this.fill = 0; }
+      if (this.fill === FRAME) { this.denoise(running); this.fill = 0; }
     }
     for (let i = 0; i < output.length; i += 1) {
       output[i] = this.ring[(this.read + i) & (RING - 1)];
     }
     this.read = (this.read + output.length) & (RING - 1);
+    if (!running) return true;
 
     const spent = clock() - started;
     this.cpuMs += spent;
