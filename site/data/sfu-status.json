@@ -1,53 +1,41 @@
 {
-  "generated_at": "2026-11-19T07:02:32.454Z",
+  "generated_at": "2026-11-19T07:09:40.415Z",
   "sfus": {
     "https://sfu.notdiscord.fyi": {
       "url": "https://sfu.notdiscord.fyi",
-      "ok": false,
-      "checked_at": "2026-11-19T07:02:32.289Z",
-      "error": "Invalid IP address: undefined",
-      "accepting": null,
-      "rooms": null,
-      "participants": null,
-      "service": null,
-      "probe_ms": 165,
+      "ok": true,
+      "checked_at": "2026-11-19T07:09:40.086Z",
+      "error": null,
+      "accepting": true,
+      "rooms": 0,
+      "participants": 0,
+      "service": "telium-sfu",
+      "probe_ms": 245,
       "uptime_30d": null,
-      "samples": 2,
+      "samples": 3,
       "first_probe_at": "2026-11-19T06:56:39.000Z",
       "eligibility": {
-        "eligible": false,
-        "reasons": [
-          "listing_too_new",
-          "insufficient_observed_age",
-          "unreachable",
-          "insufficient_probe_history",
-          "uptime_below_minimum"
-        ],
+        "eligible": true,
+        "reasons": [],
         "weight": 1
       }
     },
     "https://sfu.yapper.cloud": {
       "url": "https://sfu.yapper.cloud",
-      "ok": false,
-      "checked_at": "2026-11-19T07:02:32.293Z",
-      "error": "Invalid IP address: undefined",
-      "accepting": null,
-      "rooms": null,
-      "participants": null,
-      "service": null,
-      "probe_ms": 45,
+      "ok": true,
+      "checked_at": "2026-11-19T07:09:40.091Z",
+      "error": null,
+      "accepting": true,
+      "rooms": 0,
+      "participants": 0,
+      "service": "telium-sfu",
+      "probe_ms": 324,
       "uptime_30d": null,
-      "samples": 1,
+      "samples": 2,
       "first_probe_at": "2026-11-19T07:02:32.000Z",
       "eligibility": {
-        "eligible": false,
-        "reasons": [
-          "listing_too_new",
-          "insufficient_observed_age",
-          "unreachable",
-          "insufficient_probe_history",
-          "uptime_below_minimum"
-        ],
+        "eligible": true,
+        "reasons": [],
         "weight": 1
       }
     }
