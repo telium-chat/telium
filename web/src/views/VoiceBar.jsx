@@ -200,12 +200,13 @@ function Tool({ title, icon: Glyph, on, danger, disabled, onClick }) {
 }
 
 // The audio popover: microphone, noise suppression and output, one click from the call controls.
+// The tooltip stays mounted while the popover is open: dropping it swapped the trigger element, and the popover, still anchored to the old one, opened in the window's top-left corner.
 function AudioTool({ voice }) {
   const [open, setOpen] = useState(false);
   const title = t('voice.devices.open');
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Tooltip label={open ? null : title} side="top">
+      <Tooltip label={title} side="top">
         <Popover.Trigger
           render={<button type="button" />}
           aria-label={title}
