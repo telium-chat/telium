@@ -1,6 +1,6 @@
 {
   "alg": "ed25519",
   "key_id": "ed25519:release-manifest:8QJew4e2Iq",
-  "statement": "telium-sfu-release-manifest-v1 sha256=0f47f469a50eddc41069200cc53c5205f220cda29db7c3423f4b3798475c4aef",
-  "signature": "tt3s49GGHhEFbOQumhcKvkaoEc-chvsDN2vO40btUmnWVFMEON6_LTqvzb-kDs9VjrKRC8ueC8Q9GmIIg-CYAw"
+  "statement": "telium-sfu-release-manifest-v1 sha256=37cb4dc6e104951820e368bfe082e0f0001e5a51b834874eec1b4b1807d70991",
+  "signature": "LzLZbeq8GLlEBjjplRoIUPytDgHiJ7vDjehnbiamZWJgzXNCFh9h0f-ggyGBEqM6S5HwXPkB-OM9KjL-trcfCg"
 }
