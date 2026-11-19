@@ -2,7 +2,7 @@ import { useStore } from '../../hooks/useStore.jsx';
 import { useServerVersion } from '../../hooks/useServerVersion.js';
 import { useT } from '../../lib/i18n/react.jsx';
 import {
-  AdvancedIcon, BellIcon, FolderIcon, GlobeIcon, HelpIcon, HomeIcon, KeyIcon, MembersIcon, MessageIcon, MicIcon,
+  AdvancedIcon, BellIcon, FolderIcon, GlobeIcon, HelpIcon, HomeIcon, KeyIcon, MembersIcon, MessageIcon,
   PlayIcon, ScreenIcon, ServerIcon, SettingsIcon, SettingsLayout, ShieldIcon, SunIcon, UserIcon,
 } from '../../components/index.js';
 import { isElectronRuntime } from '../../lib/platform.js';
@@ -24,7 +24,6 @@ import { SecurityPane } from './SecurityPane.jsx';
 import { DeveloperPane } from './DeveloperPane.jsx';
 import { AdminPane } from './AdminPane.jsx';
 import { LocalDataPane } from './LocalDataPane.jsx';
-import { CallsPane } from './CallsPane.jsx';
 import { GifFavoritesPane } from './GifFavoritesPane.jsx';
 import { FeedbackPane } from './FeedbackPane.jsx';
 
@@ -71,13 +70,6 @@ const BASE_PANES = {
     icon: SunIcon,
     keywords: ['theme', 'dark', 'light', 'language', 'locale'],
   },
-  calls: {
-    label: 'Calls & audio',
-    component: CallsPane,
-    group: 'Communication',
-    icon: MicIcon,
-    keywords: ['microphone', 'noise', 'noise cancellation', 'suppression', 'audio', 'call', 'call privacy'],
-  },
   notifications: {
     label: 'Notifications',
     component: NotificationsPane,
@@ -86,11 +78,15 @@ const BASE_PANES = {
     keywords: ['push', 'sound', 'badge', 'mute'],
   },
   signals: {
-    label: 'Messages',
+    label: 'Messages & calls',
     component: ConversationSignalsPane,
     group: 'Communication',
     icon: MessageIcon,
-    keywords: ['read receipts', 'typing', 'seen'],
+    keywords: [
+      'read receipts', 'delivered', 'delivery', 'typing', 'seen',
+      'microphone', 'noise', 'noise cancellation', 'audio', 'call privacy',
+      'direct calling', 'ip address', 'call', 'calls',
+    ],
   },
   lookups: {
     label: 'Profile lookups',
@@ -184,10 +180,13 @@ export function UserSettings({ close, initial }) {
   const store = useStore();
   const serverVersion = useServerVersion();
   const t = useT();
-  const requestedInitial = initial === 'voice' ? 'calls' : initial;
-  if (storage.get('telium.settings.user.pane', null) === 'voice') {
-    storage.set('telium.settings.user.pane', 'calls');
+  // The calls pane merged into the messages pane; older builds stored 'voice' or 'calls'.
+  const MERGED_PANES = { voice: 'signals', calls: 'signals' };
+  const storedPane = storage.get('telium.settings.user.pane', null);
+  if (storedPane && MERGED_PANES[storedPane]) {
+    storage.set('telium.settings.user.pane', MERGED_PANES[storedPane]);
   }
+  const requestedInitial = (initial && MERGED_PANES[initial]) || initial;
   const panes = {};
   for (const [id, pane] of Object.entries(BASE_PANES)) {
     panes[id] = pane.labelKey ? { ...pane, label: t(pane.labelKey) } : pane;

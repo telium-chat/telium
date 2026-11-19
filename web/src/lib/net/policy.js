@@ -164,7 +164,7 @@ export function refusalCopy(refusal, { domain = 'that server' } = {}) {
 }
 
 export const NOT_COVERED = [
-  'Voice and video calls. Those have their own setting, under Conversation signals.',
+  'Voice and video calls. Those have their own setting, under Messages & calls.',
   'Your own account server, which holds your account and always sees your address.',
   'GIF search, link previews, emoji images and anything else loaded from a third party.',
   'Files you upload to an outside host, which you connect to directly.',
@@ -204,8 +204,8 @@ export const CALLS_ELSEWHERE = {
   description: 'This page is only about the connections that carry servers, channels and '
     + 'messages. A call reaches the other people in it another way, it is settled with them '
     + 'rather than by you alone, and nothing on this page changes it. It lives under '
-    + 'Conversation signals, as Call privacy.',
-  pane: 'calls',
+    + 'Messages & calls, as Call privacy.',
+  pane: 'signals',
 };
 
 export const PANE_COPY = {
