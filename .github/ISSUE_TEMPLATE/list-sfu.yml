@@ -44,13 +44,6 @@ body:
       options:
         - label: I run this relay myself — it is not someone else's relay.
           required: true
-  - type: checkboxes
-    id: feed
-    attributes:
-      label: Automatic call routing
-      description: Optional. If you tick this, guild owners in automatic mode may route calls through your relay. The health rules still apply.
-      options:
-        - label: Also let guilds in automatic mode route calls through this relay
   - type: textarea
     id: notes
     attributes:

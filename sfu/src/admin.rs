@@ -472,10 +472,19 @@ async fn setup_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) ->
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.split(':').next())
         .filter(|v| valid_domain(v))
+        // Reached over the SSH tunnel or by IP: nothing worth prefilling.
+        .filter(|v| v.parse::<std::net::IpAddr>().is_err())
         .unwrap_or("")
         .to_string();
     let livekit_domain = public_host(&current.livekit.public_url);
-    let checked = if current.trust.public { "checked" } else { "" };
+    // A fresh install has made neither choice yet: ask, rather than quietly
+    // defaulting to private and leaving a listed relay refusing every guild.
+    let configured = !current.livekit.public_url.is_empty() || !current.trust.origins.is_empty();
+    let (public_checked, private_checked) = match (configured, current.trust.public) {
+        (false, _) => ("", ""),
+        (true, true) => ("checked", ""),
+        (true, false) => ("", "checked"),
+    };
     let origin = current.trust.origins.first();
     let setup_description = if portable {
         "Portable installation: Telium saves its config but does NOT manage nginx, Certbot, HTTPS certificates or firewall rules. Use your existing reverse proxy."
@@ -511,23 +520,29 @@ async fn setup_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) ->
             <small>Used for secure LiveKit WebSocket signaling.</small>
           </label>
           {email_input}
-          <label class="check"><input type="checkbox" name="public_sfu" {checked}> Make this a public SFU</label>
-          <hr>
-          <h2>Private SFU trust</h2>
-          <p class="muted">Optional when public mode is enabled.</p>
-          <label>Telium server name
+          <h2>Who can use this relay?</h2>
+          <label class="check"><input type="radio" name="public_sfu" value="yes" required {public_checked}>
+            <span><strong>Public relay</strong> — guilds on any Telium homeserver can run calls through it.
+            <small>Choose this if you plan to list the relay at telium.chat/list; a private relay in the directory turns every caller away. Limits and blocks are on the Status page.</small></span></label>
+          <label class="check"><input type="radio" name="public_sfu" value="no" required {private_checked}>
+            <span><strong>Private relay</strong> — only the homeservers you trust.
+            <small>Enter your homeserver below; add more later under Trusted servers.</small></span></label>
+          <label>Your homeserver <span class="muted">(required for a private relay, optional for a public one)</span>
             <input name="origin_server_name" placeholder="chat.example.com" value="{origin_name}">
           </label>
+          <details><summary>Advanced: discovery URL</summary>
           <label>Discovery URL
             <input name="origin_discovery_url" placeholder="https://chat.example.com" value="{origin_url}">
-          </label>
+            <small>Leave empty: it is found and verified from the homeserver's name.</small>
+          </label></details>
           <button type="submit">Configure everything</button>
         </form>
         <aside>{setup_footer}</aside>
         "#,
         sfu_domain = esc(&sfu_domain),
         livekit_domain = esc(&livekit_domain),
-        checked = checked,
+        public_checked = public_checked,
+        private_checked = private_checked,
         origin_name = esc(origin.map(|o| o.server_name.as_str()).unwrap_or("")),
         origin_url = esc(origin.and_then(|o| o.discovery_url.as_deref()).unwrap_or("")),
         setup_description = setup_description,
@@ -569,11 +584,41 @@ async fn apply_setup(
     cfg.livekit.rtc.use_external_ip = true;
     cfg.admin.bind = "127.0.0.1:7891".into();
     cfg.trust.discovery = true;
-    cfg.trust.public = form.public_sfu.is_some();
+    // "on" is the old checkbox's value, from a page loaded before an update.
+    cfg.trust.public = matches!(form.public_sfu.as_deref(), Some("yes" | "on"));
 
-    let origin_name = form.origin_server_name.unwrap_or_default().trim().to_string();
-    let discovery_url = form.origin_discovery_url.unwrap_or_default().trim().to_string();
-    if !origin_name.is_empty() {
+    let origin_name = form.origin_server_name.unwrap_or_default().trim().to_ascii_lowercase();
+    if !origin_name.is_empty() && !valid_domain(&origin_name) {
+        return error_page(StatusCode::BAD_REQUEST, "Enter your homeserver's name, such as chat.example.com.");
+    }
+    if !cfg.trust.public && origin_name.is_empty() && cfg.trust.origins.is_empty() {
+        return error_page(
+            StatusCode::BAD_REQUEST,
+            "A private relay only serves the homeservers it trusts. Enter your homeserver's name, or choose Public relay.",
+        );
+    }
+    let mut discovery_url = form.origin_discovery_url.unwrap_or_default().trim().to_string();
+    let already_trusted = cfg.trust.origins.iter().any(|o| o.server_name == origin_name);
+    if !origin_name.is_empty() && discovery_url.is_empty() && !already_trusted {
+        // Same lookup as Trusted servers. Without it the entry would carry
+        // neither a key nor an address, and the relay could never verify it.
+        let mut probe = TrustedKeys::from_config(&cfg.trust);
+        match probe
+            .discover_origin(&origin_name, crate::fetch::AddressPolicy::OperatorConfigured)
+            .await
+        {
+            Some(base) => discovery_url = base,
+            None => {
+                return error_page(
+                    StatusCode::BAD_GATEWAY,
+                    "Could not find and verify that homeserver. Check its name (and that it is online), then submit this page again. Nothing was changed.",
+                )
+            }
+        }
+    }
+    // An already-trusted homeserver resubmitted with no new URL keeps its
+    // entry (and any pinned key) as it is.
+    if !origin_name.is_empty() && !(already_trusted && discovery_url.is_empty()) {
         let entry = TrustedOrigin {
             server_name: origin_name.clone(),
             key_id: String::new(),
@@ -624,10 +669,16 @@ async fn apply_setup(
             <p>SFU endpoint: <code>https://{}</code></p>
             <p>LiveKit signaling: <code>wss://{}</code></p>
             <p>Dashboard: <a href="{dashboard_url}">{dashboard_url}</a></p>
-            <p>You can now add <code>https://{}</code> as a Telium voice region.</p>"#,
+            <p>You can now add <code>https://{}</code> as a Telium voice region.</p>
+            {listing}"#,
             esc(&sfu_domain),
             esc(&livekit_domain),
             esc(&sfu_domain),
+            listing = if cfg.trust.public {
+                r#"<p>Want other communities to use it? <a href="https://telium.chat/list?type=relay">List it in the public directory</a>. You decide there whether automatic call routing may use it.</p>"#
+            } else {
+                r#"<p>This is a private relay. To list it in the public directory later, switch it to Public under Configure first.</p>"#
+            },
             result_note = result_note,
             dashboard_url = esc(&dashboard_url),
         ),

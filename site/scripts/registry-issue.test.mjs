@@ -103,9 +103,16 @@ test('homeserver opt-in comes from the wizard JSON and only a literal true count
   const extra = rebuildEntry('server', serverEntry({ recommendations: { opt_in: true, weight: 9 } }), { added: '2026-11-04', consent: false })
   assert.deepEqual(extra.recommendations, { opt_in: true })
 
-  // relay consent is still the checkbox, never the JSON
-  const feedSmuggled = rebuildEntry('sfu', { url: 'https://sfu.example', feed: { opt_in: true } }, { added: '2026-11-04', consent: false })
-  assert.equal('feed' in feedSmuggled, false)
+  // relay consent comes from the wizard's JSON, like a homeserver's; only a literal true counts
+  const feedFromJson = rebuildEntry('sfu', { url: 'https://sfu.example', feed: { opt_in: true } }, { added: '2026-11-04', consent: false })
+  assert.deepEqual(feedFromJson.feed, { opt_in: true })
+  for (const bad of [{ opt_in: 'true' }, { opt_in: 1 }, true, null, []]) {
+    const e = rebuildEntry('sfu', { url: 'https://sfu.example', feed: bad }, { added: '2026-11-04', consent: false })
+    assert.equal('feed' in e, false)
+  }
+  const feedExtra = rebuildEntry('sfu', { url: 'https://sfu.example', feed: { opt_in: true, weight: 9 } }, { added: '2026-11-04', consent: false })
+  assert.deepEqual(feedExtra.feed, { opt_in: true })
+  assert.equal('feed' in rebuildEntry('sfu', { url: 'https://sfu.example' }, { added: '2026-11-04', consent: false }), false)
   const feedOpted = rebuildEntry('sfu', { url: 'https://sfu.example', weight: 3, pubkey_hint: 'x' }, { added: '2026-11-04', consent: true })
   assert.deepEqual(feedOpted.feed, { opt_in: true })
   assert.equal('weight' in feedOpted, false)
@@ -236,6 +243,46 @@ test('the CLI detects a real marker-free relay issue', async () => {
       '### Automatic call routing',
       '',
       '- [X] Also let guilds in automatic mode route calls through this relay',
+    ].join('\n'))
+    const run = spawnSync(process.execPath, [
+      CLI, '--body-file', body,
+      '--created', '2026-11-04T09:30:00Z',
+      '--registry', registry,
+    ], { encoding: 'utf8' })
+    assert.equal(run.status, 0, `expected success, got:\n${run.stdout}\n${run.stderr}`)
+    const entries = JSON.parse(await readFile(registry, 'utf8'))
+    assert.equal(entries[0].url, relay.url)
+    assert.deepEqual(entries[0].feed, { opt_in: true })
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('a relay issue from the current form takes the routing choice from the JSON alone', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'registry-issue-relay-json-'))
+  try {
+    const registry = join(dir, 'sfus.json')
+    await writeFile(registry, '[]\n')
+    const body = join(dir, 'body.md')
+    const relay = {
+      url: 'https://sfu.example.com',
+      name: 'Example Relay',
+      description: 'General-purpose public relay in Oregon.',
+      region: { label: 'Oregon, US', code: 'na-west' },
+      feed: { opt_in: true },
+      capacity_band: '1g',
+      operator: { name: 'Example Collective', contact: 'https://example.org/contact' },
+    }
+    await writeFile(body, [
+      '### Registry entry',
+      '',
+      '```json',
+      JSON.stringify(relay),
+      '```',
+      '',
+      '### Ownership',
+      '',
+      "- [X] I run this relay myself — it is not someone else's relay.",
     ].join('\n'))
     const run = spawnSync(process.execPath, [
       CLI, '--body-file', body,

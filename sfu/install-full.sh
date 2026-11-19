@@ -345,7 +345,13 @@ else
       # Your existing proxy is not touched before you enter domains, so the
       # setup page is reached over an SSH tunnel to the dashboard's local port.
       url="${url/http:\/\/SERVER_IP:7891/http:\/\/localhost:7891}"
-      tunnel_hint="  From your own computer first run: ssh -L 7891:127.0.0.1:7891 USER@$public_ip"
+      tunnel_hint="  From your own computer first run: ssh -N -L 7891:127.0.0.1:7891 USER@$public_ip"
+    fi
+    if [[ "${TELIUM_SFU_FROM_WIZARD:-}" == 1 ]]; then
+      # The web installer turns this URL into a localhost link that goes
+      # through the SSH tunnel the operator already has open.
+      url="${url/http:\/\/$public_ip/http:\/\/localhost:7891}"
+      tunnel_hint="  (The installer page shows a Continue button for this; no new tunnel is needed.)"
     fi
     echo
     echo "=============================================================="
