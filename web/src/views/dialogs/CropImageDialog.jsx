@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useModal } from '../../hooks/useModal.jsx';
+import { useOptionalStore } from '../../hooks/useStore.jsx';
 import { reportError } from '../../hooks/useToast.jsx';
 import {
-  PRESETS, ZOOM, clampCrop, cropRect, isAnimated, isAnimatedGif, reencode,
-  reencodeAnimatedGif,
+  PRESETS, ZOOM, animatedLimit, canKeepAnimation, clampCrop, cropRect, isAnimated, reencode, reencodeAnimation,
 } from '../../lib/image.js';
 import { Button, Field, ImageIcon, ModalShell, Notice, TextInput } from '../../components/index.js';
 
@@ -12,6 +12,7 @@ const NUDGE = 0.04;
 const SHAPES = { avatar: 'circle', icon: 'squircle', banner: 'wide' };
 
 export function CropImageDialog({ file, preset, kind, title, onDone, close }) {
+  const store = useOptionalStore();
   const namesExpression = kind === 'emoji' || kind === 'sticker';
   const aspect = preset?.aspect || 1;
   const shape = SHAPES[kind] || 'square';
@@ -22,7 +23,10 @@ export function CropImageDialog({ file, preset, kind, title, onDone, close }) {
     ? expressionName(file.name.replace(/\.[^.]+$/, ''))
     : '');
   const [animated, setAnimated] = useState(false);
-  const [animatedGif, setAnimatedGif] = useState(false);
+  // Whether this browser can read the animation's frames; when it can't, the first frame is used.
+  const [keepable, setKeepable] = useState(false);
+  // "Use image" must not run before this is known, or an animated file would be flattened.
+  const [inspected, setInspected] = useState(false);
   const [busy, setBusy] = useState(false);
   const stage = useRef(null);
   const frame = useRef(null);
@@ -56,11 +60,13 @@ export function CropImageDialog({ file, preset, kind, title, onDone, close }) {
 
   useEffect(() => {
     let live = true;
-    file.arrayBuffer().then((buf) => {
+    file.arrayBuffer().then(async (buf) => {
+      const moving = isAnimated(buf);
+      const keeps = moving && await canKeepAnimation(buf);
       if (!live) return;
-      setAnimated(isAnimated(buf));
-      setAnimatedGif(isAnimatedGif(buf));
-    }).catch(() => {});
+      setAnimated(moving);
+      setKeepable(keeps);
+    }).catch(() => {}).then(() => { if (live) setInspected(true); });
     return () => { live = false; };
   }, [file]);
 
@@ -185,14 +191,18 @@ export function CropImageDialog({ file, preset, kind, title, onDone, close }) {
     retarget();
   };
 
-  const finish = async (original) => {
+  // An animated image stays animated: there is nothing to choose. Every image is re-encoded, animated ones included,
+  // so the crop always applies and nothing of the original file (metadata, appended bytes) is uploaded.
+  const finish = async () => {
     setBusy(true);
     try {
-      const output = original
-        ? (animatedGif ? await reencodeAnimatedGif(file, crop, preset) : file)
-        : await reencode(file, crop, preset);
-      if (output.size > preset.maxBytes) {
-        throw new Error(`this image has to be under ${Math.round(preset.maxBytes / 1024)} KB, `
+      const originCap = store?.caps?.get(store.session?.home?.domain)?.media?.max_profile_asset_bytes;
+      const keeps = animated && keepable;
+      const limit = keeps ? animatedLimit(preset, originCap) : preset.maxBytes;
+      const output = (keeps ? await reencodeAnimation(file, crop, { ...preset, maxBytes: limit }) : null)
+        ?? await reencode(file, crop, preset);
+      if (output.size > limit) {
+        throw new Error(`this image has to be under ${Math.round(limit / 1024)} KB, `
           + `and the processed file is ${Math.round(output.size / 1024)} KB`);
       }
       settle(namesExpression ? namedExpression(output, name) : output);
@@ -211,28 +221,19 @@ export function CropImageDialog({ file, preset, kind, title, onDone, close }) {
       footer={(
         <>
           <Button variant="ghost" onClick={close}>Cancel</Button>
-          {animated ? (
-            <Button variant="secondary" disabled={busy} onClick={() => finish(true)}>
-              {animatedGif ? 'Keep animation (WebP)' : 'Keep animation'}
-            </Button>
-          ) : null}
           <Button
             variant="primary"
-            disabled={busy || !source || (namesExpression && !name)}
-            onClick={() => finish(false)}
+            disabled={busy || !source || !inspected || (namesExpression && !name)}
+            onClick={finish}
           >
             {busy ? 'Processing…' : 'Use image'}
           </Button>
         </>
       )}
     >
-      {animated ? (
-        <Notice tone="warn">
-          {animatedGif
-            ? 'This image is animated. “Use image” keeps the first frame only; '
-              + '“Keep animation” crops and compresses it as an animated WebP.'
-            : 'This image is animated. Cropping it keeps the first frame only — '
-              + 'use “Keep animation” to upload it unchanged instead.'}
+      {animated && !keepable && inspected ? (
+        <Notice>
+          This browser can’t read this image’s animation, so only its first frame is used.
         </Notice>
       ) : null}
 

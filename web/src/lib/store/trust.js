@@ -2,6 +2,22 @@ import * as vault from '../vault.js';
 import { verification } from './shared.js';
 
 export const trustMethods = {
+  /// The account key is lost on every device: start a new one with the recovery key. Contacts see the account as changed
+  /// and must compare emoji again.
+  async recoverIdentity(recoveryKey) {
+    const trust = await this.startTrust();
+    if (!trust) throw new Error('encryption is not available on this device');
+    // Always sealed under the account key; with none in hand (a locked vault) there is nothing safe to seal under.
+    const sealKey = this.vault?.key || null;
+    if (!sealKey) throw new Error('Unlock your encrypted messages with your password before resetting your identity.');
+    const outcome = await trust.recoverWithRecoveryKey(recoveryKey, {
+      mlsKey: await this.mls.leafKey(),
+      sealKey,
+    });
+    this.emit('verify', { ready: true });
+    return outcome;
+  },
+
   /// Fails closed: an outage must not become device trust.
   async startTrust() {
     // No IndexedDB means no local device identity: an expected degraded mode.
@@ -23,34 +39,32 @@ export const trustMethods = {
           this.mls.cs,
           this.vault?.key || null,
           await this.mls.leafKey(),
-          this.custody?.mode || this.vault?.mode || 'device_custody',
         );
         this.trust = trust;
 
         trust.onRecoveryAdopted = async (ring) => {
-          const mode = this.custody?.mode || this.vault?.mode || 'device_custody';
+          // What this device read about the second copy stands whichever way the ring arrived; dropping it made Settings
+          // say "Recovery key: Not made yet" on a device that took its keys from a sibling.
+          const held = this.vault || {};
           let recovered = {
             ...ring,
-            mode,
+            // A ring from a sibling is the account key only once it is in the account's vault under the password.
+            mode: held.mode === 'opaque_custody' ? 'opaque_custody' : null,
+            independent: Boolean(held.independent),
+            recoveryKey: Boolean(held.recoveryKey),
+            independentCiphertext: held.independentCiphertext || null,
             locked: false,
             needs_device: false,
           };
           await vault.rememberDeviceRecovery(userId, recovered).catch(() => {});
-          if (this.authRecoveryWrapper) {
-            // Carry over what this device read about the second copy.
-            const held = this.vault || {};
-            recovered = await vault.setMode(
+          // With the password in hand the ring is written under it, so the vault is `opaque_custody` and the root can be
+          // sealed under it; a retired `device_custody` vault (L1h) is converted here too. Without the password nothing
+          // is written, and the ring stays local until the next password sign-in.
+          const adoptable = !held.retiredMode || held.retiredMode === 'device_custody';
+          if (this.authRecoveryWrapper && adoptable) {
+            recovered = await vault.writeOpaque(
               this.home,
-              {
-                ...recovered,
-                mode: recovered.mode || 'device_custody',
-                independent: Boolean(held.independent),
-                recoveryKey: Boolean(held.recoveryKey),
-                legacyIndependent: Boolean(held.legacyIndependent),
-                independentCiphertext: held.independentCiphertext || null,
-              },
-              'opaque_custody',
-              null,
+              { ...recovered, version: held.version },
               userId,
               this.authRecoveryWrapper,
             ).catch(() => recovered);
@@ -58,6 +72,11 @@ export const trustMethods = {
           }
           this.vault = recovered;
           trust.recovery = recovered;
+          // A root this device took from a sibling is sealed under the ring it took with it (I4).
+          if (recovered.key && recovered.mode === 'opaque_custody') {
+            await trust.sealRootProperly(recovered.key)
+              .catch((e) => console.warn('could not seal the account key under the recovery key', e));
+          }
           this.sync.adoptKeyring(recovered).catch(() => {});
           await this.mls.adoptRecoveryKey(recovered);
           this.emit('vault', recovered);

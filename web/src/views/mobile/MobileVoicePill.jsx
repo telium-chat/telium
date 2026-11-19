@@ -27,7 +27,7 @@ export function MobileVoicePill({ onExpand }) {
 
   const channel = voice.channelId ? store.channels.get(voice.channelId) : null;
   const convo = !channel && voice.channelId ? store.conversations.find((c) => c.id === voice.channelId) : null;
-  const name = channel?.name ? `#${channel.name}` : conversationName(convo, store.me?.user_id) || 'Voice Call';
+  const name = channel?.name ? `#${channel.name}` : (convo?.kind === 'gc' && store.groupNameIn(convo.id)) || conversationName(convo, store.me?.user_id) || 'Voice Call';
 
   const mine = (store.voice.get(voice.channelId) || [])
     .find((v) => v.user_id === store.me?.user_id);

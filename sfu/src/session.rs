@@ -44,8 +44,11 @@ pub async fn session_handler(
 
     maybe_discover(&state.trust, &value).await;
 
-    if !state.trust.read().await.verify_json(&value) {
-        return Err((StatusCode::FORBIDDEN, Json(json!({ "error": "bad signature" }))));
+    {
+        let trust = state.trust.read().await;
+        if !trust.verify_json(&value) {
+            return Err((StatusCode::FORBIDDEN, Json(trust.rejection(&value))));
+        }
     }
 
     // Otherwise a future signed command sharing field names could replay into a join.
@@ -450,6 +453,22 @@ fn unique_usage_dir() -> std::path::PathBuf {
             .await
             .unwrap_err();
         assert_eq!(err.0, StatusCode::FORBIDDEN);
+        assert_eq!(err.1.0["code"], "sfu_bad_signature");
+    }
+
+    /// A signer we hold no keys for (discovery failed, or public mode is off) is a different
+    /// failure from a forged signature, and the client is told which.
+    #[tokio::test]
+    async fn an_unverifiable_signer_is_told_apart_from_a_bad_signature() {
+        let signing = SigningKey::from_bytes(&[7u8; 32]);
+        let state = wired_state(&signing, "home.example", "ed25519:test").await;
+
+        let token = forge_token(&signing, "ed25519:test", "stranger.example", true, true, false);
+        let err = session_handler(State(state), Json(SessionRequest { token }))
+            .await
+            .unwrap_err();
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+        assert_eq!(err.1.0["code"], "sfu_origin_unverified");
     }
 
     #[tokio::test]

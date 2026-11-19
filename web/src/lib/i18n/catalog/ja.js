@@ -2847,7 +2847,6 @@ export const messages = {
   // cause as a fact about the arrangement, where ので leans toward excusing it.
   // The instruction at the end takes てください, the only imperative register this
   // file uses, and adds nothing after it -- no ご安心ください, no 推奨します.
-  'chat.encryption.custody.escrowed': 'ここでのメッセージは MLS フレームです。これを中継するホームサーバーには、誰が誰といつ話しているかが常に見えています。このアカウントは、従来のサーバー補助によるDM復旧を使っています。復旧用の保管庫と履歴のミラーを開く鍵をホームサーバーが持っているため、運営者はこれらのメッセージを読むことができます。設定 →「{pane}」で、復旧を信頼済みの端末に移してください。',
   // 送られることはありません, the absolute negative, for "is never sent". 送られ
   // ません alone would be a statement about this occasion; ことはありません says
   // it does not happen at all, which is the claim OPAQUE actually supports.
@@ -2857,16 +2856,13 @@ export const messages = {
   // 〜ますが、〜ていません, the Japanese shape for a has/has-not pair, which says
   // both halves in one breath where English needed "but holds no key". The
   // second half is the one that matters and it goes last.
-  'chat.encryption.custody.device': 'ここでのメッセージは MLS フレームです。これを中継するホームサーバーには、誰が誰といつ話しているかが常に見えています。DMの復旧鍵は、あなたが承認した端末にあります。ホームサーバーは暗号化された履歴のミラーを保管しますが、それを開く鍵は持っていません。',
   // どちらも covers English's "Neither", and it has to come first in Japanese --
   // the quantifier binds at the head of the clause, so the sentence that ends in
   // English with the negation begins with it here.
-  'chat.encryption.custody.self': 'ここでのメッセージは MLS フレームです。これを中継するホームサーバーには、誰が誰といつ話しているかが常に見えています。信頼済みの端末があなたのDM鍵を保持し、すべての端末を失った場合は別の復旧パスフレーズから復元できます。どちらもホームサーバーに送られることはありません。',
 
   // Byte-for-byte the tail of `custody.escrowed`, as English requires: the reader
   // may see both, and two wordings of one arrangement read as two arrangements.
   // If either is ever edited, both are.
-  'chat.encryption.escrowedNote': 'このアカウントは、従来のサーバー補助によるDM復旧を使っています。復旧用の保管庫と履歴のミラーを開く鍵をホームサーバーが持っているため、運営者はこれらのメッセージを読むことができます。設定 →「{pane}」で、復旧を信頼済みの端末に移してください。',
 
   // 鍵束 for "keyring", built on the glossary's 鍵 rather than borrowing
   // キーリング: the rest of this catalogue writes 鍵 in kanji everywhere
@@ -2884,14 +2880,13 @@ export const messages = {
   // width of a Latin letter, so English's "two words at the very most" becomes
   // "five glyphs at the very most" here, and every entry below is four or five.
 
-  // 体言止め, a noun phrase: 鍵の変更, "a key change". 鍵が変わりました is the
-  // sentence and is eight glyphs, which is a pill that pushes the channel name
+  // 体言止め, a noun phrase: 新しい鍵, "a new key". 新しい鍵になりました is the
+  // sentence and is longer, which is a pill that pushes the channel name
   // off a phone. Named for the meaning rather than the mechanism, as English
   // requires -- 鍵エスクロー中 would be accurate and would tell a reader nothing.
-  'chat.encryption.chip.keyChanged': '鍵の変更',
+  'chat.encryption.chip.keyChanged': '新しい鍵',
   // A relative clause used as a label, with no です. This is the one thing a
   // reader needs off a glance and it says it in six glyphs: the server can read.
-  'chat.encryption.chip.serverCanRead': 'サーバーが読める',
   // Katakana, because this is the term of art and Japanese security writing
   // borrows it whole. 端末間暗号化 is the native compound, is accurate, and is
   // six kanji -- wider than the katakana and less recognisable to the person who
@@ -2914,11 +2909,10 @@ export const messages = {
 
   // Identical to `changedIdentity.title` plus `.body` run together, because a
   // `title` attribute is one string and the banner and the tooltip must not tell
-  // two stories. こう見えます twice, once for each reading, which is how Japanese
-  // says "looks like this; so does" -- the language has no elliptical "so does",
-  // so both halves state the verb and the parallelism carries the refusal to
-  // choose between them.
-  'chat.encryption.chip.keyChangedTooltip': 'ここにいる誰かが別のアカウント鍵を使っています。鍵をリセットしたときもこう見えますし、なりすましでもこう見えます。信頼する前に、もう一度確認してください。',
+  // two stories. Calm and plain: a new key usually means the account was set up
+  // again, so that is said first, then that messages stay encrypted, then how to
+  // be sure -- 見比べて, compare side by side.
+  'chat.encryption.chip.keyChangedTooltip': 'ここにいる誰かが新しいアカウント鍵を使っています。多くの場合、アカウントを設定し直したことを意味します。メッセージは暗号化されたままです。本人かどうか確かめるには、相手のプロフィールから鍵を見比べてください。',
 
   // ------------------------------------------------------------------ the banners
   //
@@ -2956,18 +2950,17 @@ export const messages = {
   // now, which is a state rather than a past event.
   'chat.encryption.rejoinUndeliverable.body': 'この会話の順序を決めるサーバーに接続できないため、要求は送り出されていません。やり直すと、まだ接続できる全員に新しいグループができます。',
 
-  'chat.encryption.changedIdentity.title': 'ここにいる誰かが別のアカウント鍵を使っています。',
+  'chat.encryption.changedIdentity.title': 'ここにいる誰かが新しいアカウント鍵を使っています。',
   // なりすまし, the native noun for impersonation, and it is not softened into
   // 第三者の可能性 or anything hedged. The English refuses to choose between the
   // two readings and so does this: both are stated, in the same shape, in the
   // order of likelihood.
-  'chat.encryption.changedIdentity.body': '鍵をリセットしたときもこう見えますし、なりすましでもこう見えます。信頼する前に、もう一度確認してください。',
+  'chat.encryption.changedIdentity.body': '多くの場合、アカウントを設定し直したことを意味します。メッセージは暗号化されたままです。本人かどうか確かめるには、相手のプロフィールから鍵を見比べてください。',
 
   'chat.encryption.vaultLocked.title': '以前のメッセージは、この端末ではロックされています。',
   // 設定 →「{pane}」 -- see the section note on why the pane name is a
   // placeholder. 元に戻せます at the tail, where Japanese puts the outcome; English
   // leads with the instruction and trails "to get them back".
-  'chat.encryption.vaultLocked.body': '設定 →「{pane}」で復旧パスフレーズを入力すると、元に戻せます。',
 
   'chat.encryption.deviceApproval.title': 'この端末にはまだあなたの鍵がありません。',
   // 端末どうしの間を直接 is the claim about *where the keys go*, and it is the
@@ -2977,12 +2970,12 @@ export const messages = {
 
   // The state that most looks like a failure and is not one. 〜ませんでした, flat
   // past: sign-in happened, the unlock did not.
-  'chat.encryption.recoveryFallback.title': 'サインインしても、以前のメッセージのロックは解除されませんでした。',
   // Two ways out, in the order of what they cost, joined with 〜するか which is
   // the Japanese alternative-conjunction and keeps both options in one sentence
   // the way English's "or" does.
-  'chat.encryption.recoveryFallback.body': '設定 →「{pane}」で復旧パスフレーズを入力するか、すでに使っている端末からこの端末を承認してください。',
 
+  'chat.encryption.heldBack.own': 'あなたのもう1台の端末は、まだこの会話に入っていません。あなたの端末だと確認できると、自動的に参加します。',
+  'chat.encryption.heldBack.other': '相手の端末のうち1台は、まだこの会話に入っていません。相手の端末だと確認できると、自動的に参加します。',
   'chat.encryption.syncFailed.title': 'この端末では暗号化の同期がずれています。',
   // 保留されます, "are being held back", which is deliberately not 届いていません
   // -- the fear this banner answers is that messages are being lost, and 保留
@@ -5006,12 +4999,7 @@ export const messages = {
   // ---- auth
   'auth.advanced.identityMismatch': 'このアカウントの識別情報の履歴を確認できませんでした。',
   'auth.advanced.identityName': 'アカウントの識別情報',
-  'auth.advanced.legacyPassphraseBody': 'このアカウントは、古いバージョンの Telium のパスフレーズをまだ持ち続けています。パスワードが同じ役割をすでに果たしています。',
-  'auth.advanced.legacyPassphraseName': '古い復旧パスフレーズ',
   'auth.advanced.modeName': 'このアカウントの復旧方法',
-  'auth.advanced.passphraseRemoved': '古いパスフレーズを削除しました。パスワードで引き続きメッセージを取り戻せます。',
-  'auth.advanced.removeFailed': '古い復旧パスフレーズを削除できませんでした：{detail}',
-  'auth.advanced.removePassphrase': '古いパスフレーズを削除',
   'auth.advanced.rootSequence': ' · ルートシーケンス {sequence}',
   'auth.backup.delete': 'バックアップを削除',
   'auth.backup.deleteBody': 'この端末にすでにあるメッセージは残ります。新しい端末では以前のメッセージを取り戻せなくなります。',
@@ -5019,7 +5007,6 @@ export const messages = {
   'auth.backup.deleted': 'バックアップを削除しました。',
   'auth.backup.deleteFailed': 'バックアップを削除できませんでした：{detail}',
   'auth.backup.deleteTitle': 'バックアップの削除',
-  'auth.backup.detail': '{count, plural, one {#件の項目を密封。} other {#件の項目を密封。}} {readable, select, yes {ホームサーバーが開けます。} other {ホームサーバーは開けません。}}',
   'auth.backup.detailName': 'バックアップ',
   'auth.backup.empty': 'まだ何も保存されていません。新しい端末は今日から始まります。',
   'auth.backup.explain': '新しい端末が追いつけるように、暗号化された写しを保管しています。最後に書き込まれたのは {at, relative} です。',
@@ -5029,15 +5016,9 @@ export const messages = {
   'auth.crumb.recoveryKey': '復旧鍵',
   'auth.crumb.username': 'ユーザー名',
   'auth.crumb.welcome': 'ようこそ',
-  'auth.custody.device.name': '信頼済み端末による復旧',
-  'auth.custody.device.note': '鍵は、あなたが承認した端末だけにあります。',
-  'auth.custody.escrowed.name': 'サーバー補助による復旧（従来）',
-  'auth.custody.escrowed.note': 'ホームサーバーが、これらのメッセージを開く鍵を持っています。',
   'auth.custody.line': '{name}。{note}',
   'auth.custody.opaque.name': 'パスワードによる復旧（OPAQUE エクスポート鍵）',
   'auth.custody.opaque.note': 'パスワードでサインインするだけでメッセージを取り戻せます。',
-  'auth.custody.self.name': '独立したパスフレーズ（従来）',
-  'auth.custody.self.note': '鍵はあなたの端末にあり、パスフレーズが復旧の道です。',
   'auth.custody.unknown': 'まだ確立していません',
   'auth.encryption.backupEmpty': '保存されたものはありません',
   'auth.encryption.backupFact': '以前のメッセージのバックアップ',
@@ -5047,10 +5028,7 @@ export const messages = {
   'auth.encryption.devicesHint': '端末は、端末を確認したりサインアウトさせたりする場所です。',
   'auth.encryption.devicesSignedIn': '{count, plural, one {# 台がサインイン中} other {# 台がサインイン中}}',
   'auth.encryption.devicesVerified': '{total, plural, one {{verified} / # 確認済み} other {{verified} / # 確認済み}}',
-  'auth.encryption.escrowed.note': 'このアカウントはまだ古い復旧設定を使っています。オフにするのは1回押すだけで、2つ目のパスワードは不要です。',
-  'auth.encryption.escrowed.title': 'ホームサーバーがあなたのプライベートメッセージを読めます。',
   'auth.encryption.keyFact': '復旧鍵',
-  'auth.encryption.keyLegacy': '古いパスフレーズ',
   'auth.encryption.keyMissing': '未作成',
   'auth.encryption.keySaved': '保存済み',
   'auth.encryption.locked.note': '新しいメッセージは利用できます。以前のメッセージを取り戻すには、下の復旧鍵を使うか、すでに使っている端末からこの端末を承認してください。',
@@ -5059,13 +5037,6 @@ export const messages = {
   'auth.encryption.ok.title': 'あなたのプライベートメッセージは保護されています。',
   'auth.encryption.settingUp.note': 'サインイン後、少し時間がかかります。',
   'auth.encryption.settingUp.title': 'この端末で暗号化を設定しています。',
-  'auth.escrow.button': 'オフにする',
-  'auth.escrow.doneDevices': '完了しました。鍵はあなたの端末にあります。',
-  'auth.escrow.doneRefresh': '完了しました。ただし、いくつかの会話ではまだ鍵の更新が必要です。',
-  'auth.escrow.doneServer': '完了しました。サーバーは新しいメッセージを開けなくなりました。',
-  'auth.escrow.explain': 'これをオフにすると、サーバーは以後に送られたものを開けなくなります。すでに見たものは、すでに見られています。',
-  'auth.escrow.failed': 'サーバー補助による復旧をオフにできませんでした：{detail}',
-  'auth.escrow.title': 'サーバー補助による復旧をオフにする',
   'auth.find.afterColon': 'または、@{user}:your.server のようにコロンの後に入力してください',
   'auth.find.busy': '照会しています…',
   'auth.find.changeAddress': '別のアドレスを使う',
@@ -5144,7 +5115,6 @@ export const messages = {
   'auth.localData.identity.confirmTitle': 'これは取り消せません。失うもの：',
   'auth.localData.identity.cost1': 'この端末の MLS 署名用の識別情報。話している全員にとって新しい端末となり、もう一度確認するまで未確認として見えます。',
   'auth.localData.identity.cost2': '暗号化されたすべての会話の保存済みグループ状態。この端末にすでにあるメッセージは、アカウントの復旧鍵で再び開ける場合にのみ読めます。この端末が最後の保持者であるものは失われます。',
-  'auth.localData.identity.cost3': 'キャッシュされた DM 復旧鍵束。次にサインインするときに、鍵の保管庫をもう一度開く必要があります。そのとき復旧鍵かパスフレーズが必要なので、用意しておいてください。',
   'auth.localData.identity.cost4': 'あなたのセッション。この端末からサインアウトされます。',
   'auth.localData.identity.open': '端末の識別情報を消去…',
   'auth.localData.identity.title': 'この端末の識別情報を消去',
@@ -5230,14 +5200,10 @@ export const messages = {
   'auth.start.title': 'Telium へようこそ',
   'auth.unlock.button': 'ロック解除',
   'auth.unlock.done': '解除しました。これ以降はパスワードだけで十分です。',
-  'auth.unlock.doneDevice': 'この端末で解除しました。',
   'auth.unlock.enterKey': '復旧鍵を入力してください。',
-  'auth.unlock.enterPassphrase': '復旧パスフレーズを入力してください。',
   'auth.unlock.failed': 'メッセージのロックを解除できませんでした：{detail}',
   'auth.unlock.keyHint': 'このアカウントを作成したときに渡された鍵です。',
   'auth.unlock.otherDevice': 'すでに使っている端末で Telium を開き、そこからこの端末を承認することもできます。何も入力する必要はなく、サーバーが鍵を見ることもありません。',
-  'auth.unlock.passphraseHint': 'あなた自身がこのアカウントに追加したパスフレーズです。',
-  'auth.unlock.passphraseLabel': '復旧パスフレーズ',
   'auth.unlock.title': '以前のメッセージのロックを解除',
 
   // ---- chat
@@ -5527,7 +5493,6 @@ export const messages = {
   'onboarding.invite.unopenableTitle': 'この招待を開けませんでした',
   'onboarding.invite.unreachable': 'ギルドのサーバーに接続できませんでした。',
   'onboarding.invite.useAnotherAccount': '別のアカウントを使う',
-  'onboarding.invite.usernameHint': 'これは Telium アカウント ID の最初の部分になります。',
   'onboarding.invite.usernamePlaceholder': 'yourname',
   'onboarding.recoveryKey.body': 'パスワードのリセットと、暗号化されたアカウントの復旧ができます。',
   'onboarding.recoveryKey.clipboardLabel': '復旧鍵',

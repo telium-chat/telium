@@ -13,18 +13,20 @@ export const UNKNOWN = 'relay';
 export const POSTURE_COPY = {
   direct: {
     label: 'Direct',
-    description: 'Connect straight to the others when the network allows. The quickest '
-      + 'path, but in a peer-to-peer call everyone in it can see your IP address.',
+    description: 'Calls connect straight between the people in them when the network '
+      + 'allows — the quickest path. In a direct call, everyone in it can see your '
+      + 'IP address.',
   },
   relay: {
     label: 'Relay only',
-    description: 'Every connection goes through a TURN relay, so nobody in the call learns '
-      + 'your address. Needs a relay on your server, or an SFU.',
+    description: 'Every connection goes through a relay on your server, so nobody in '
+      + 'the call learns your address. Your server needs a relay or an SFU.',
   },
   sfu: {
     label: 'Through an SFU',
-    description: 'Media goes through an SFU and is encrypted end to end, so the SFU cannot '
-      + 'hear or see it. The SFU still sees your address and when you talk.',
+    description: 'Calls connect through an SFU, and the media is encrypted end to end '
+      + 'so it cannot hear or see the call. The SFU still sees your address and when '
+      + 'you talk.',
   },
 };
 

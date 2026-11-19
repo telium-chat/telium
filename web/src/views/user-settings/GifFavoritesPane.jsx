@@ -8,6 +8,8 @@ import {
 import { KEYS, MAX_GIF_FAVORITES } from '../../lib/sync.js';
 import { uploadMedia } from '../../lib/upload.js';
 import { teliumFetch } from '../../lib/net/transport.js';
+import { DISCORD_GIF_EXPORT_SCRIPT } from '../../lib/discordGifExport.js';
+import { copyToClipboard } from '../../lib/clipboard.js';
 import { downloadText } from './RecoveryParts.jsx';
 
 export function discordGifFavoriteUrls(document) {
@@ -168,54 +170,7 @@ export function GifFavoritesPane() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState('');
   const favorites = gifFavorites(store.sync);
-  const isDesktop = typeof window !== 'undefined' && Boolean(window.teliumDesktop?.importDiscordGifs);
-
-  const importFromDiscord = async () => {
-    if (!window.teliumDesktop?.importDiscordGifs) return;
-    setBusy(true);
-    setProgress('Waiting for Discord login…');
-    try {
-      const result = await window.teliumDesktop.importDiscordGifs();
-      if (result?.canceled) {
-        toast('Discord import canceled.');
-        return;
-      }
-      if (!result?.success || !result?.gifs) {
-        throw new Error(result?.error || 'Could not retrieve Discord favorite GIFs.');
-      }
-
-      setProgress('Processing and re-hosting Discord GIFs…');
-      const { urls, rehostedCount, externalCount, failedCount } = await processAndRehostFavorites({
-        document: result.gifs,
-        home: store.home,
-        onProgress: setProgress,
-      });
-
-      if (!urls.length) {
-        throw new Error('No valid GIF favorites were found in your Discord account.');
-      }
-
-      const combined = [...favorites, ...urls.filter((url) => !favorites.includes(url))];
-      const next = combined.slice(0, MAX_GIF_FAVORITES);
-      store.sync.set(KEYS.gifFavorites, next);
-      store.emit?.('gif-favorites');
-
-      const added = next.length - favorites.length;
-      let msg = `Imported ${added} GIF ${added === 1 ? 'favorite' : 'favorites'} (${rehostedCount} re-hosted from Discord, ${externalCount} links).`;
-      if (failedCount > 0) {
-        msg += ` (${failedCount} failed to re-host; see console).`;
-      }
-      if (combined.length > next.length) {
-        msg += ` ${combined.length - next.length} did not fit (max ${MAX_GIF_FAVORITES}).`;
-      }
-      toast(msg);
-    } catch (error) {
-      toast(error?.message || 'Could not import from Discord.', { error: true });
-    } finally {
-      setBusy(false);
-      setProgress('');
-    }
-  };
+  const copyScript = () => copyToClipboard(DISCORD_GIF_EXPORT_SCRIPT, 'Export script');
 
   const importFile = async (file) => {
     if (!file) return;
@@ -313,28 +268,19 @@ export function GifFavoritesPane() {
       <div className="ekey-more__body">
         <Section title="Import Discord favorites">
           <Hint>
-            {isDesktop
-              ? 'Log in to Discord to automatically import your favorited GIFs. Regular links (Tenor/Giphy) are added to favorites, and expiring Discord CDN attachments are automatically downloaded and re-hosted to your Telium homeserver.'
-              : 'Import your favorited GIFs from Discord. Expiring Discord CDN attachments are automatically downloaded and re-hosted to your Telium homeserver, while regular links (Tenor/Giphy) are preserved. (Tip: Direct 1-click login import is available and much easier on the Telium Desktop App!)'}
+            Export your favorites from Discord's web app, then choose the file here. Expiring Discord CDN attachments are downloaded and re-hosted to your Telium homeserver, while regular links (Tenor/Giphy) are kept.
           </Hint>
+          <ol className="list-decimal space-y-1 pl-5 text-sm text-muted">
+            <li>Open Discord in a browser (discord.com/app) and log in.</li>
+            <li>Press Ctrl+Shift+I (Cmd+Option+I on Mac) and open the Console tab.</li>
+            <li>Copy the script below, paste it into the console, and press Enter. If it asks, type "allow pasting" first.</li>
+            <li>It saves discord-favorite-gifs-fresh.json. Choose that file here.</li>
+          </ol>
           <div className="flex flex-wrap items-center gap-3">
-            {isDesktop ? (
-              <Button disabled={busy} onClick={importFromDiscord}>
-                {busy ? (progress || 'Importing from Discord…') : 'Import from Discord'}
-              </Button>
-            ) : null}
-            <Button
-              variant={isDesktop ? 'secondary' : 'primary'}
-              disabled={busy}
-              onClick={() => jsonInput.current?.click()}
-            >
-              {busy && !isDesktop ? (progress || 'Importing…') : 'Choose JSON file'}
+            <Button variant="secondary" onClick={copyScript}>Copy export script</Button>
+            <Button disabled={busy} onClick={() => jsonInput.current?.click()}>
+              {busy ? (progress || 'Importing…') : 'Choose JSON file'}
             </Button>
-            {!isDesktop ? (
-              <span className="text-xs text-muted">
-                Tip: 1-click direct import is available and much easier on the Telium Desktop App!
-              </span>
-            ) : null}
           </div>
           <input
             ref={jsonInput}

@@ -3,6 +3,7 @@ import { useStore, useStoreEvent } from '../../hooks/useStore.jsx';
 import { Hint, Notice, Section, Switch } from '../../components/index.js';
 import { RichActivityCard } from '../../components/RichActivityCard.jsx';
 import { richPresenceKinds } from '../../lib/rich-presence.js';
+import { ProgramPicker } from './ProgramPicker.jsx';
 
 function wineBridgeMessage(status) {
   if (!status) return 'Wine/Proton bridge: starting…';
@@ -192,25 +193,25 @@ export function ActivityPane() {
   return (
     <>
       <Section
-        title="Desktop activity"
-        description="Show games, apps, and media players detected by the Telium desktop app."
+        title="Activity sharing"
+        description="Shows games, apps, and media players detected by Telium."
       >
         <div className="divide-y divide-border panel px-3">
           <Switch
             label="Game presence"
-            hint="Share games and detected desktop applications."
+            hint="Shares games and apps that are currently running."
             checked={kinds.game}
             onChange={setKind('richPresenceGameEnabled')}
           />
           <Switch
             label="Music presence"
-            hint="Share Listening activity from media players and apps."
+            hint="Shares music that is currently playing."
             checked={kinds.music}
             onChange={setKind('richPresenceMusicEnabled')}
           />
           <Switch
             label="Video presence"
-            hint="Share Watching or Streaming activity, including detected video titles."
+            hint="Shares videos you are watching or streaming."
             checked={kinds.video}
             onChange={setKind('richPresenceVideoEnabled')}
           />
@@ -227,7 +228,7 @@ export function ActivityPane() {
           </div>
         ) : enabled ? (
           <Notice tone="default">
-            Activity sharing is on. Nothing is detected right now.
+            Activity sharing is on. Nothing is currently detected.
           </Notice>
         ) : null}
         {(kinds.music || kinds.video) && platform === 'linux' && window.teliumDesktop?.mprisStatus ? (
@@ -265,13 +266,16 @@ export function ActivityPane() {
         ) : null}
         {platform === 'linux' ? (
           <Hint>
-            Steam/Proton needs a one-time setup per prefix, and one game restart after it.
+            Steam and Proton games do not show up the first time they are launched.
+            Restart the game once after setup to enable activity detection.
           </Hint>
         ) : null}
         <Hint>
           Servers where status sharing is hidden are not sent your desktop activity.
         </Hint>
       </Section>
+
+      {kinds.game && window.teliumDesktop?.listProcesses ? <ProgramPicker /> : null}
 
       <Section title="Privacy">
         <Hint>

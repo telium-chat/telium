@@ -459,7 +459,7 @@ async fn setup_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) ->
         return page(
             "Configure the Compose SFU",
             r#"<h1>Configure your Compose SFU on the host</h1>
-            <p>This dashboard can monitor the SFU, but the native nginx/Certbot
+            <p>This dashboard can monitor the SFU, but the native proxy
             setup wizard is not available inside a container.</p>
             <p>Edit <code>/opt/telium-sfu/sfu.toml</code> on the host and configure
             TLS for the SFU and LiveKit domains with your host reverse proxy.</p>
@@ -480,7 +480,7 @@ async fn setup_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) ->
     let setup_description = if portable {
         "Portable installation: Telium saves its config but does NOT manage nginx, Certbot, HTTPS certificates or firewall rules. Use your existing reverse proxy."
     } else {
-        "Full installation: Telium configures nginx, HTTPS certificates, LiveKit signaling and recommended firewall ports."
+        "Full installation: Telium adds its two sites to your Caddy or nginx, gets HTTPS certificates, and opens the recommended firewall ports."
     };
     let email_input = if portable {
         r#"<input type="hidden" name="email" value="">"#
@@ -494,7 +494,7 @@ async fn setup_page(State(state): State<Arc<AdminState>>, headers: HeaderMap) ->
         SSH tunnel to <code>127.0.0.1:7891</code>. Allow the appropriate LiveKit media ports
         through your firewall (UDP 3478 and 50000-60000, TCP 7881)."#
     } else {
-        r#"<strong>Before continuing:</strong> create DNS A/AAAA records for both domains pointing at this machine. The installer handles nginx and Certbot after that."#
+        r#"<strong>Before continuing:</strong> create DNS A/AAAA records for both domains pointing at this machine. The installer sets up the proxy and certificates after that."#
     };
     let html = format!(
         r#"
@@ -591,7 +591,7 @@ async fn apply_setup(
         if let Err(e) = apply_proxy(&sfu_domain, &livekit_domain, form.email.trim()).await {
             return error_page(
                 StatusCode::BAD_GATEWAY,
-                &format!("nginx/Certbot setup failed: {e}. Check DNS, then submit this page again."),
+                &format!("Proxy/certificate setup failed: {e}. Check DNS, then submit this page again."),
             );
         }
     }
@@ -732,7 +732,9 @@ async fn add_trust(
     }
     // Keep the verified key so a second network failure cannot lose a successful discovery.
     probe.refresh_discovery(&cfg.trust).await;
-    *state.trust.write().await = probe;
+    let mut live = state.trust.write().await;
+    probe.adopt_discovered(&live);
+    *live = probe;
 
     Redirect::to("/admin/trust").into_response()
 }
@@ -768,7 +770,9 @@ async fn remove_trust(
 async fn reload_runtime_trust(state: &AdminState, cfg: &SfuConfig) -> anyhow::Result<()> {
     let mut next = TrustedKeys::from_config(&cfg.trust);
     next.refresh_discovery(&cfg.trust).await;
-    *state.trust.write().await = next;
+    let mut live = state.trust.write().await;
+    next.adopt_discovered(&live);
+    *live = next;
     Ok(())
 }
 

@@ -421,34 +421,34 @@ async fn a_vault_write_against_a_stale_version_is_refused() {
     let alice = s.user("vaultcas-alice").await;
     let put = |body: Value| s.put("/_telium/v1/vault", &alice.home, body);
 
-    let (status, made) = put(json!({ "mode": "device_custody", "ciphertext": "first", "expected_version": 0 })).await;
+    let (status, made) = put(json!({ "mode": "opaque_custody", "ciphertext": "first", "expected_version": 0 })).await;
     assert_eq!(status, 200, "{made}");
     let v1 = made["version"].as_i64().unwrap();
-    let (status, body) = put(json!({ "mode": "device_custody", "ciphertext": "second-first", "expected_version": 0 })).await;
+    let (status, body) = put(json!({ "mode": "opaque_custody", "ciphertext": "second-first", "expected_version": 0 })).await;
     assert_eq!(status, 409, "two first devices may not both create: {body}");
     assert_eq!(body["code"], "vault_version_conflict");
     assert_eq!(body["version"].as_i64(), Some(v1));
 
-    let (status, body) = put(json!({ "mode": "device_custody", "ciphertext": "second", "expected_version": v1 })).await;
+    let (status, body) = put(json!({ "mode": "opaque_custody", "ciphertext": "second", "expected_version": v1 })).await;
     assert_eq!(status, 200, "{body}");
     let v2 = body["version"].as_i64().unwrap();
     assert!(v2 > v1);
-    let (status, body) = put(json!({ "mode": "device_custody", "ciphertext": "stale", "expected_version": v1 })).await;
+    let (status, body) = put(json!({ "mode": "opaque_custody", "ciphertext": "stale", "expected_version": v1 })).await;
     assert_eq!(status, 409, "{body}");
 
     let mode = |body: Value| s.post("/_telium/v1/vault/mode", Some(&alice.home), body);
-    let (status, body) = mode(json!({ "mode": "device_custody", "ciphertext": "stale-mode", "expected_version": v1 })).await;
+    let (status, body) = mode(json!({ "mode": "opaque_custody", "ciphertext": "stale-mode", "expected_version": v1 })).await;
     assert_eq!(status, 409, "{body}");
     assert_eq!(body["code"], "vault_version_conflict");
     let (_, vault) = s.get("/_telium/v1/vault", Some(&alice.home)).await;
     assert_eq!(vault["ciphertext"], "second", "a refused write changes nothing");
     assert_eq!(vault["version"].as_i64(), Some(v2));
 
-    let (status, body) = mode(json!({ "mode": "device_custody", "ciphertext": "current", "expected_version": v2 })).await;
+    let (status, body) = mode(json!({ "mode": "opaque_custody", "ciphertext": "current", "expected_version": v2 })).await;
     assert_eq!(status, 200, "{body}");
-    let (status, body) = mode(json!({ "mode": "device_custody", "ciphertext": "unconditional" })).await;
+    let (status, body) = mode(json!({ "mode": "opaque_custody", "ciphertext": "unconditional" })).await;
     assert_eq!(status, 200, "a client that names no version is not held to one: {body}");
-    let (status, body) = put(json!({ "mode": "device_custody", "ciphertext": "legacy-put" })).await;
+    let (status, body) = put(json!({ "mode": "opaque_custody", "ciphertext": "legacy-put" })).await;
     assert_eq!(status, 200, "{body}");
 }
 

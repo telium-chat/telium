@@ -1,4 +1,5 @@
 import { useStore, useStoreEvent } from '../../hooks/useStore.jsx';
+import { useServerVersion } from '../../hooks/useServerVersion.js';
 import { has } from '../../lib/perms.js';
 import { useT } from '../../lib/i18n/react.jsx';
 import { SettingsLayout } from '../../components/index.js';
@@ -22,6 +23,7 @@ export function GuildSettings({ guildId, close, initial = 'overview' }) {
   useStoreEvent('guilds');
   const guild = store.guilds.get(guildId);
   const api = store.apiForGuild(guildId);
+  const serverVersion = useServerVersion(api || null);
 
   if (!api) {
     return <EmptyState>{t('guild.unreachable')}</EmptyState>;
@@ -57,6 +59,7 @@ export function GuildSettings({ guildId, close, initial = 'overview' }) {
       initial={initial}
       footerLabel={t('guild.hostedBy')}
       footerValue={guild?.domain}
+      footerDetail={serverVersion ? `Server v${serverVersion.replace(/^v/, '')}` : ''}
       onClose={close}
     />
   );

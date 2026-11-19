@@ -23,6 +23,55 @@ const RESET_TTL_MS: i64 = 10 * 60 * 1000;
 pub const PASSWORD_SENTINEL: &str = "opaque:v1";
 const RESET_DOMAIN: &str = "telium-password-reset:v1";
 const COPY_RESTORE_DOMAIN: &str = "telium-recovery-k1-restore:v1";
+const RESET_START_DOMAIN: &str = "telium-password-reset-start:v1";
+const MAX_VAULT_CIPHERTEXT: usize = 128 * 1024;
+
+/// Key-stretching parameter sets the client knows (`KSF_VERSIONS` in web/src/lib/opaque-auth.js). The server never
+/// runs the stretching (design doc 3.5), so this only bounds what an account may record. A new set is added here and
+/// there together; an account is moved to it by a password write that carries the new version.
+pub const KSF_VERSION_CURRENT: i64 = 1;
+const KSF_VERSION_MAX: i64 = 1;
+
+/// A missing field means version 1, the set every account without the field was registered with; it is never "whatever
+/// is current", which would record a set the client did not use.
+fn check_ksf_version(version: Option<i64>) -> ApiResult<i64> {
+    let version = version.unwrap_or(1);
+    if !(1..=KSF_VERSION_MAX).contains(&version) {
+        return Err(ApiError::BadRequest("unsupported key-stretching version".into())
+            .with_code(errcodes::UNSUPPORTED_KSF_VERSION)
+            .with_detail("max", KSF_VERSION_MAX));
+    }
+    Ok(version)
+}
+
+/// A password write may keep or raise the recorded set, never lower it.
+async fn refuse_ksf_downgrade(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    user_id: &str,
+    new: i64,
+) -> ApiResult<()> {
+    let stored: Option<i64> =
+        sqlx::query_scalar("SELECT opaque_ksf_version FROM accounts WHERE user_id = ?")
+            .bind(user_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    if stored.is_some_and(|stored| new < stored) {
+        return Err(ApiError::BadRequest("the key-stretching version cannot be lowered".into())
+            .with_code(errcodes::UNSUPPORTED_KSF_VERSION)
+            .with_detail("max", KSF_VERSION_MAX));
+    }
+    Ok(())
+}
+
+async fn ksf_version_of(state: &AppState, user_id: &str) -> i64 {
+    sqlx::query_scalar::<_, i64>("SELECT opaque_ksf_version FROM accounts WHERE user_id = ?")
+        .bind(user_id)
+        .fetch_optional(&state.pool)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(KSF_VERSION_CURRENT)
+}
 
 struct TeliumOpaque;
 
@@ -163,6 +212,8 @@ pub struct RegisterFinish {
     #[serde(default)]
     pub recovery_public_key: Option<String>,
     #[serde(default)]
+    pub ksf_version: Option<i64>,
+    #[serde(default)]
     pub device_name: Option<String>,
     #[serde(default)]
     pub device_pubkey: Option<String>,
@@ -194,6 +245,7 @@ pub async fn register_finish(
             ));
         }
     }
+    let ksf_version = check_ksf_version(req.ksf_version)?;
 
     let user_id = format!("@{}:{}", localpart, state.cfg.server_name);
     let now = now_ms();
@@ -221,14 +273,15 @@ pub async fn register_finish(
 
     sqlx::query(
         "INSERT INTO accounts \
-         (user_id, localpart, domain, password_hash, opaque_record, recovery_public_key, created_at, admin) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+         (user_id, localpart, domain, password_hash, opaque_record, opaque_ksf_version, recovery_public_key, created_at, admin) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&user_id)
     .bind(&localpart)
     .bind(&state.cfg.server_name)
     .bind(PASSWORD_SENTINEL)
     .bind(&req.registration_record)
+    .bind(ksf_version)
     .bind(req.recovery_public_key.as_deref())
     .bind(now)
     .bind(admin as i64)
@@ -320,9 +373,11 @@ async fn begin_login(
     .execute(&state.pool)
     .await?;
 
+    // An unknown user gets the current version, so the answer does not tell an account from a stranger.
     Ok(Json(json!({
         "login_id": id,
         "login_response": b64(started.message.serialize().as_slice()),
+        "ksf_version": ksf_version_of(state, user_id).await,
     })))
 }
 
@@ -615,6 +670,8 @@ pub async fn enroll_start(
 pub struct EnrollFinish {
     pub upgrade_token: String,
     pub registration_record: String,
+    #[serde(default)]
+    pub ksf_version: Option<i64>,
 }
 
 pub async fn enroll_finish(
@@ -627,13 +684,15 @@ pub async fn enroll_finish(
         &req.registration_record,
     )?)
     .map_err(|e| protocol_bad("invalid OPAQUE registration record", e))?;
+    let ksf_version = check_ksf_version(req.ksf_version)?;
 
     consume_token(&state, &auth.user_id, &req.upgrade_token, "enroll").await?;
     let done = sqlx::query(
-        "UPDATE accounts SET opaque_record = ?, password_hash = ? \
+        "UPDATE accounts SET opaque_record = ?, opaque_ksf_version = ?, password_hash = ? \
          WHERE user_id = ? AND opaque_record IS NULL",
     )
     .bind(&req.registration_record)
+    .bind(ksf_version)
     .bind(PASSWORD_SENTINEL)
     .bind(&auth.user_id)
     .execute(&state.pool)
@@ -879,16 +938,28 @@ pub async fn recovery_copy_finish(
     Ok(Json(json!({ "recovery_copy_restored": true })))
 }
 
+/// What the recovery key signs to finish a reset. When the reset re-wraps the key vault, the new vault copy and the
+/// version it replaces are inside the signature, so neither can be swapped for another.
 fn recovery_reset_payload(
     user_id: &str,
     reset_id: &str,
     challenge: &str,
     registration_record: &str,
+    vault: Option<(&str, i64)>,
+    unopenable: Option<i64>,
 ) -> Vec<u8> {
-    format!(
+    let mut payload = format!(
         "{RESET_DOMAIN}|{user_id}|{reset_id}|{challenge}|{registration_record}"
-    )
-    .into_bytes()
+    );
+    if let Some((ciphertext, version)) = vault {
+        payload.push_str(&format!("|{version}|{ciphertext}"));
+    }
+    // The holder of the recovery key says that the copy of vault `version` does not open under it, and accepts that the
+    // reset leaves that vault as it is. Signed, so neither the server nor anyone without the key can say it.
+    if let Some(version) = unopenable {
+        payload.push_str(&format!("|vault-unopenable|{version}"));
+    }
+    payload.into_bytes()
 }
 
 fn verify_recovery_signature(public: &str, payload: &[u8], signature: &str) -> bool {
@@ -912,6 +983,14 @@ fn verify_recovery_signature(public: &str, payload: &[u8], signature: &str) -> b
 pub struct PasswordResetStart {
     pub user: String,
     pub registration_request: String,
+    /// The recovery key's signature over `reset_start_payload`. Only with it does the answer carry the recovery copy
+    /// of the vault, which the client opens to re-wrap the vault in the same request that replaces the password.
+    #[serde(default)]
+    pub signature: Option<String>,
+}
+
+fn reset_start_payload(user: &str, registration_request: &str) -> Vec<u8> {
+    format!("{RESET_START_DOMAIN}|{user}|{registration_request}").into_bytes()
 }
 
 pub async fn password_reset_start(
@@ -948,11 +1027,42 @@ pub async fn password_reset_start(
     .execute(&state.pool)
     .await?;
 
+    // The recovery copy is sealed under a key only the recovery key derives, and is handed out only against a valid
+    // signature, so an unproven caller learns nothing about the account (same shape as for a stranger).
+    let mut vault = Value::Null;
+    if let Some(signature) = req.signature.as_deref() {
+        let public: Option<Option<String>> = sqlx::query_scalar(
+            "SELECT recovery_public_key FROM accounts \
+             WHERE user_id = ? AND deleted_at IS NULL AND deactivated = 0",
+        )
+        .bind(&user_id)
+        .fetch_optional(&state.pool)
+        .await?;
+        if let Some(Some(public)) = public {
+            let payload = reset_start_payload(&req.user, &req.registration_request);
+            if verify_recovery_signature(&public, &payload, signature) {
+                let row: Option<(String, i64)> = sqlx::query_as(
+                    "SELECT independent_ciphertext, version FROM key_vault \
+                     WHERE user_id = ? AND mode = 'opaque_custody' \
+                     AND independent_ciphertext LIKE 'k1.%'",
+                )
+                .bind(&user_id)
+                .fetch_optional(&state.pool)
+                .await?;
+                if let Some((ciphertext, version)) = row {
+                    vault = json!({ "independent_ciphertext": ciphertext, "version": version });
+                }
+            }
+        }
+    }
+
     Ok(Json(json!({
         "user_id": user_id,
         "reset_id": reset_id,
         "challenge": challenge,
         "registration_response": b64(response.message.serialize().as_slice()),
+        "ksf_version": KSF_VERSION_CURRENT,
+        "vault": vault,
     })))
 }
 
@@ -962,6 +1072,17 @@ pub struct PasswordResetFinish {
     pub reset_id: String,
     pub registration_record: String,
     pub signature: String,
+    #[serde(default)]
+    pub ksf_version: Option<i64>,
+    /// The vault ring sealed under the new password's export key, and the vault version it replaces (from `start`).
+    #[serde(default)]
+    pub vault_ciphertext: Option<String>,
+    #[serde(default)]
+    pub vault_version: Option<i64>,
+    /// Version of a vault whose recovery copy the client could not open (an account moved from another server carries a
+    /// copy made under the source's recovery key). Inside the signature; refused with `vault_ciphertext`.
+    #[serde(default)]
+    pub vault_unopenable: Option<i64>,
     #[serde(default)]
     pub device_name: Option<String>,
     #[serde(default)]
@@ -981,6 +1102,20 @@ pub async fn password_reset_finish(
     let user_id = identity::canonical_login_user_id(&req.user, &state.cfg.server_name);
     let user_id = crate::relocation::current_user_id(&state, user_id).await;
     let now = now_ms();
+    // Shape checks that say nothing about the account come first; everything that does waits for the proof.
+    let ksf_version = check_ksf_version(req.ksf_version)?;
+    if let Some(ciphertext) = req.vault_ciphertext.as_deref() {
+        if req.vault_unopenable.is_some() {
+            return Err(ApiError::BadRequest(
+                "send a re-wrapped vault or say the copy does not open, not both".into(),
+            ));
+        }
+        if ciphertext.len() > MAX_VAULT_CIPHERTEXT || req.vault_version.is_none() {
+            return Err(ApiError::BadRequest(
+                "vault_ciphertext needs vault_version and must be under 128 KiB".into(),
+            ));
+        }
+    }
 
     let attempt: Option<(String, String, i64)> = sqlx::query_as(
         "DELETE FROM password_reset_attempts WHERE id = ? \
@@ -998,7 +1133,7 @@ pub async fn password_reset_finish(
             .with_code(errcodes::INVALID_RECOVERY_PROOF));
     }
 
-    let mut tx = state.pool.begin().await?;
+    let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
     let account: Option<(Option<String>, Option<i64>, i64)> = sqlx::query_as(
         "SELECT recovery_public_key, deleted_at, deactivated \
          FROM accounts WHERE user_id = ?",
@@ -1017,6 +1152,8 @@ pub async fn password_reset_finish(
         &req.reset_id,
         &challenge,
         &req.registration_record,
+        req.vault_ciphertext.as_deref().zip(req.vault_version),
+        req.vault_unopenable,
     );
     if !verify_recovery_signature(&public, &payload, &req.signature) {
         return Err(ApiError::Unauthorized("invalid recovery proof".into())
@@ -1031,10 +1168,23 @@ pub async fn password_reset_finish(
             .with_code(errcodes::ACCOUNT_DEACTIVATED));
     }
 
+    // The new record and the vault under the new export key land together or not at all (I5). The recovery copy
+    // (`independent_ciphertext`) is sealed under the account key, which a password change does not touch.
+    rewrap_vault(
+        &mut tx,
+        &user_id,
+        req.vault_ciphertext.as_deref(),
+        req.vault_version,
+        req.vault_unopenable,
+        false,
+    )
+    .await?;
+    refuse_ksf_downgrade(&mut tx, &user_id, ksf_version).await?;
     sqlx::query(
-        "UPDATE accounts SET opaque_record = ?, password_hash = ? WHERE user_id = ?",
+        "UPDATE accounts SET opaque_record = ?, opaque_ksf_version = ?, password_hash = ? WHERE user_id = ?",
     )
     .bind(&req.registration_record)
+    .bind(ksf_version)
     .bind(PASSWORD_SENTINEL)
     .bind(&user_id)
     .execute(&mut *tx)
@@ -1070,6 +1220,222 @@ pub async fn password_reset_finish(
         opaque_upgrade_token: None,
         sunset: crate::sunset::login_notice(&state).await,
     }))
+}
+
+/// Writes the vault re-wrapped under a new export key, inside the caller's transaction, and returns its new version. A
+/// vault in `opaque_custody` must be re-wrapped: leaving it would pair the new OPAQUE record with a vault only the old
+/// password opens. A reset (`strict` false) has no session, so only a vault whose recovery copy it can open (`k1.`) is
+/// required to be; a change (`strict`) holds the ring and always supplies it. Other modes (legacy, deleted in phase 4)
+/// are not wrapped by the export key and are left alone; an account with no vault has nothing to write.
+async fn rewrap_vault(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    user_id: &str,
+    ciphertext: Option<&str>,
+    expected_version: Option<i64>,
+    unopenable: Option<i64>,
+    strict: bool,
+) -> ApiResult<Option<i64>> {
+    let row: Option<(String, Option<String>, i64)> = sqlx::query_as(
+        "SELECT mode, independent_ciphertext, version FROM key_vault WHERE user_id = ?",
+    )
+    .bind(user_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let wrapped = matches!(
+        &row,
+        Some((mode, independent, _)) if mode == "opaque_custody"
+            && (strict || independent.as_deref().is_some_and(|c| c.starts_with("k1.")))
+    );
+    // A reset the recovery key signed as "the copy does not open": allowed only against the version that was read.
+    if let (Some(said), None, true, Some((_, _, stored))) = (unopenable, ciphertext, wrapped, &row) {
+        if said == *stored {
+            return Ok(None);
+        }
+        return Err(ApiError::Conflict("the key vault changed since it was read".into())
+            .with_code(errcodes::VAULT_VERSION_CONFLICT)
+            .with_detail("version", *stored));
+    }
+    match (ciphertext, expected_version, wrapped, &row) {
+        (None, _, false, _) => Ok(None),
+        (None, _, true, _) => Err(ApiError::BadRequest(
+            "the vault must be re-wrapped under the new password in the same request".into(),
+        )
+        .with_code(errcodes::VAULT_REWRAP_REQUIRED)),
+        (Some(_), _, _, None) => Err(ApiError::Conflict("there is no vault to re-wrap".into())),
+        (Some(_), _, _, Some((mode, _, _))) if mode != "opaque_custody" => Err(ApiError::Conflict(
+            "the vault is not wrapped by the account password".into(),
+        )),
+        (Some(ciphertext), Some(expected), _, Some(_)) => {
+            let done = sqlx::query(
+                "UPDATE key_vault SET ciphertext = ?, version = version + 1, updated_at = ? \
+                 WHERE user_id = ? AND mode = 'opaque_custody' AND version = ?",
+            )
+            .bind(ciphertext)
+            .bind(now_ms())
+            .bind(user_id)
+            .bind(expected)
+            .execute(&mut **tx)
+            .await?;
+            if done.rows_affected() != 1 {
+                let stored = row.map(|(_, _, v)| v).unwrap_or(0);
+                return Err(ApiError::Conflict("the key vault changed since it was read".into())
+                    .with_code(errcodes::VAULT_VERSION_CONFLICT)
+                    .with_detail("version", stored));
+            }
+            Ok(Some(expected + 1))
+        }
+        (Some(_), None, _, Some(_)) => Err(ApiError::BadRequest(
+            "vault_ciphertext needs vault_version".into(),
+        )),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct PasswordChangeStart {
+    pub registration_request: String,
+}
+
+/// Step one of a password change: the registration response for the new password. Needs the session only; the
+/// current password is proven in `password_change_finish`.
+pub async fn password_change_start(
+    State(state): State<AppState>,
+    auth: HomeAuth,
+    Json(req): Json<PasswordChangeStart>,
+) -> ApiResult<Json<Value>> {
+    let record: Option<String> =
+        sqlx::query_scalar("SELECT opaque_record FROM accounts WHERE user_id = ?")
+            .bind(&auth.user_id)
+            .fetch_one(&state.pool)
+            .await?;
+    if record.is_none() {
+        return Err(ApiError::Conflict("OPAQUE is not enrolled yet".into()));
+    }
+    let identifier = credential_identifier(&state, &auth.user_id).await;
+    let setup = setup(&state).await?;
+    let request = RegistrationRequest::deserialize(&decode(
+        "registration request",
+        &req.registration_request,
+    )?)
+    .map_err(|e| protocol_bad("invalid OPAQUE registration request", e))?;
+    let response = ServerRegistration::<TeliumOpaque>::start(
+        &setup,
+        request,
+        identifier.as_bytes(),
+    )
+    .map_err(|e| protocol_bad("could not start OPAQUE password change", e))?;
+    Ok(Json(json!({
+        "registration_response": b64(response.message.serialize().as_slice()),
+        "ksf_version": KSF_VERSION_CURRENT,
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct PasswordChangeFinish {
+    /// A `sensitive` reauth token: proof of the current password, spent by this request.
+    pub reauth_token: String,
+    pub registration_record: String,
+    #[serde(default)]
+    pub ksf_version: Option<i64>,
+    #[serde(default)]
+    pub vault_ciphertext: Option<String>,
+    #[serde(default)]
+    pub vault_version: Option<i64>,
+}
+
+/// Replaces the OPAQUE record and re-wraps the vault under the new export key in one transaction. The reauth token is
+/// spent in that transaction too, so a refused change (a stale vault version, say) leaves it usable for the retry. Every
+/// other session and every outstanding reauth proof ends with it.
+pub async fn password_change_finish(
+    State(state): State<AppState>,
+    auth: HomeAuth,
+    Json(req): Json<PasswordChangeFinish>,
+) -> ApiResult<Json<Value>> {
+    ServerRegistration::<TeliumOpaque>::deserialize(&decode(
+        "registration record",
+        &req.registration_record,
+    )?)
+    .map_err(|e| protocol_bad("invalid OPAQUE registration record", e))?;
+    let ksf_version = check_ksf_version(req.ksf_version)?;
+    if let Some(ciphertext) = req.vault_ciphertext.as_deref() {
+        if ciphertext.len() > MAX_VAULT_CIPHERTEXT {
+            return Err(ApiError::BadRequest("vault_ciphertext is too large".into()));
+        }
+    }
+
+    let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let spent = sqlx::query(
+        "UPDATE opaque_reauth_tokens SET used_at = ? \
+         WHERE token_hash = ? AND user_id = ? AND purpose = 'sensitive' \
+         AND used_at IS NULL AND expires_at >= ?",
+    )
+    .bind(now_ms())
+    .bind(hash_token(&req.reauth_token))
+    .bind(&auth.user_id)
+    .bind(now_ms())
+    .execute(&mut *tx)
+    .await?;
+    if spent.rows_affected() != 1 {
+        return Err(ApiError::Unauthorized("reauthentication expired".into())
+            .with_code(errcodes::REAUTH_EXPIRED));
+    }
+    let vault_version = rewrap_vault(
+        &mut tx,
+        &auth.user_id,
+        req.vault_ciphertext.as_deref(),
+        req.vault_version,
+        None,
+        true,
+    )
+    .await?;
+    refuse_ksf_downgrade(&mut tx, &auth.user_id, ksf_version).await?;
+    let done = sqlx::query(
+        "UPDATE accounts SET opaque_record = ?, opaque_ksf_version = ?, password_hash = ? \
+         WHERE user_id = ? AND opaque_record IS NOT NULL",
+    )
+    .bind(&req.registration_record)
+    .bind(ksf_version)
+    .bind(PASSWORD_SENTINEL)
+    .bind(&auth.user_id)
+    .execute(&mut *tx)
+    .await?;
+    if done.rows_affected() != 1 {
+        return Err(ApiError::Conflict("OPAQUE is not enrolled yet".into()));
+    }
+    // Every other session ends with the old password, and every outstanding proof of it; this one stays. A device that
+    // kept the old password's key in memory can then neither call the server nor re-wrap the vault under it.
+    let others: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT device_id FROM home_sessions WHERE user_id = ? AND device_id != ?",
+    )
+    .bind(&auth.user_id)
+    .bind(&auth.device_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    sqlx::query("DELETE FROM home_sessions WHERE user_id = ? AND device_id != ?")
+        .bind(&auth.user_id)
+        .bind(&auth.device_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("UPDATE devices SET active = 0 WHERE user_id = ? AND device_id != ?")
+        .bind(&auth.user_id)
+        .bind(&auth.device_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM opaque_reauth_tokens WHERE user_id = ?")
+        .bind(&auth.user_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    for device in &others {
+        crate::revocation::announce(
+            &state,
+            &auth.user_id,
+            crate::revocation::DEVICE,
+            Some(device),
+            None,
+        )
+        .await;
+    }
+    Ok(Json(json!({ "ok": true, "vault_version": vault_version })))
 }
 
 async fn credential_identifier(state: &AppState, user_id: &str) -> String {

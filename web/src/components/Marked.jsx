@@ -17,8 +17,12 @@ export function Marked({ text, positions = [], hitClassName = 'text-accent' }) {
 }
 
 export function MarkedHandle({ text, positions = [], hitClassName }) {
-  const cut = text.startsWith('@') ? text.indexOf(':') : -1;
-  if (cut < 0) return <Marked text={text} positions={positions} hitClassName={hitClassName} />;
+  const wire = text.startsWith('@') ? text.indexOf(':') : -1;
+  if (wire < 0) return <Marked text={text} positions={positions} hitClassName={hitClassName} />;
+  // Shown as `user@server`; `positions` index the stored `@user:server`, so the `@` and `:` marks move or drop.
+  positions = positions.filter((p) => p !== 0 && p !== wire).map((p) => p - 1);
+  text = `${text.slice(1, wire)}@${text.slice(wire + 1)}`;
+  const cut = wire - 1;
   return (
     <>
       <Marked text={text.slice(0, cut)} positions={positions.filter((p) => p < cut)} hitClassName={hitClassName} />

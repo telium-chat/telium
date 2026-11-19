@@ -224,7 +224,7 @@ async fn opaque_vault_mode_never_stores_a_server_recovery_key() {
             json!({
                 "mode": "opaque_custody",
                 "ciphertext": "client-only-primary-wrapper",
-                "independent_ciphertext": "optional-second-wrapper",
+                "independent_ciphertext": "k1.optional-second-wrapper",
             }),
         )
         .await;
@@ -233,9 +233,8 @@ async fn opaque_vault_mode_never_stores_a_server_recovery_key() {
     let (_, vault) = s.get("/_telium/v1/vault", Some(token)).await;
     assert_eq!(vault["mode"], "opaque_custody");
     assert_eq!(vault["ciphertext"], "client-only-primary-wrapper");
-    assert_eq!(vault["independent_ciphertext"], "optional-second-wrapper");
-    assert_eq!(vault["server_can_recover"], false);
-    assert!(vault["escrow_key"].is_null());
+    assert_eq!(vault["independent_ciphertext"], "k1.optional-second-wrapper");
+    assert!(vault.get("server_can_recover").is_none() && vault.get("escrow_key").is_none());
 
     let (status, refused) = s
         .put(
@@ -359,7 +358,7 @@ async fn vault_mode_keeps_the_independent_copy_unless_told_to_clear_it() {
             json!({
                 "mode": "opaque_custody",
                 "ciphertext": "primary.copy",
-                "independent_ciphertext": "p2.other",
+                "independent_ciphertext": "k1.other",
                 "clear_independent": true,
             }),
         )
@@ -408,18 +407,12 @@ async fn a_recovery_key_is_replaced_in_one_step_or_not_at_all() {
         (Some(old_public.clone()), Some("k1.first.copy".into())),
     );
 
-    let (status, _) = s
-        .post(
-            "/_telium/v1/vault/mode",
-            Some(&token),
-            json!({
-                "mode": "opaque_custody",
-                "ciphertext": "primary.copy",
-                "independent_ciphertext": "p2.legacy.copy",
-            }),
-        )
-        .await;
-    assert_eq!(status, 200);
+    // A legacy passphrase copy can no longer be written through the API; this account carries one from before.
+    sqlx::query("UPDATE key_vault SET independent_ciphertext = 'p2.legacy.copy' WHERE user_id = ?")
+        .bind(&user_id)
+        .execute(&s.state.pool)
+        .await
+        .unwrap();
     let (status, refused) = opaque_reauth_with(
         &s,
         &token,
@@ -645,4 +638,418 @@ async fn usernames_accept_capitals_but_identity_is_case_insensitive() {
         assert_eq!(status, 200, "{logged_in}");
         assert_eq!(logged_in["user_id"], "@alice:test.example");
     }
+}
+
+// --- Phase 3 of the key-custody design: password writes re-wrap the vault atomically (I5) ---
+
+/// A password nobody chose: made per test, so no secret-looking literal sits in the source.
+fn test_password() -> String {
+    format!("pw-{:016x}{:016x}", rand::random::<u64>(), rand::random::<u64>())
+}
+
+/// One OPAQUE registration round for a new password; `start` is the route's answer.
+fn registration_record(password: &str, started: ClientRegistrationStartResult<BrowserOpaqueSuite>, start: &Value) -> String {
+    let mut rng = OsRng;
+    let bytes = URL_SAFE_NO_PAD
+        .decode(start["registration_response"].as_str().unwrap())
+        .unwrap();
+    let finished = started
+        .state
+        .finish(
+            &mut rng,
+            password.as_bytes(),
+            RegistrationResponse::deserialize(&bytes).unwrap(),
+            ClientRegistrationFinishParameters::default(),
+        )
+        .unwrap();
+    opaque_b64(finished.message.serialize().as_slice())
+}
+
+/// A reset attempt: its start answer and the replacement record. `signer` signs the start (to be handed the vault copy).
+async fn reset_attempt(
+    s: &Server,
+    user_id: &str,
+    password: &str,
+    signer: Option<&SigningKey>,
+) -> (Value, String) {
+    let mut rng = OsRng;
+    let started =
+        ClientRegistration::<BrowserOpaqueSuite>::start(&mut rng, password.as_bytes()).unwrap();
+    let request = opaque_b64(started.message.serialize().as_slice());
+    let mut body = json!({ "user": user_id, "registration_request": request });
+    if let Some(key) = signer {
+        body["signature"] = json!(identity_signature(
+            key,
+            &format!("telium-password-reset-start:v1|{user_id}|{request}"),
+        ));
+    }
+    let (status, start) = s.post("/_telium/v1/password-reset/opaque/start", None, body).await;
+    assert_eq!(status, 200, "reset start: {start}");
+    let record = registration_record(password, started, &start);
+    (start, record)
+}
+
+async fn reset_finish(
+    s: &Server,
+    user_id: &str,
+    start: &Value,
+    record: &str,
+    signer: &SigningKey,
+    vault: Option<(&str, i64)>,
+    extra: Value,
+) -> (u16, Value) {
+    let mut payload = format!(
+        "telium-password-reset:v1|{}|{}|{}|{}",
+        start["user_id"].as_str().unwrap(),
+        start["reset_id"].as_str().unwrap(),
+        start["challenge"].as_str().unwrap(),
+        record,
+    );
+    if let Some((ciphertext, version)) = vault {
+        payload.push_str(&format!("|{version}|{ciphertext}"));
+    }
+    if let Some(version) = extra.get("vault_unopenable").and_then(Value::as_i64) {
+        payload.push_str(&format!("|vault-unopenable|{version}"));
+    }
+    let mut body = json!({
+        "user": user_id,
+        "reset_id": start["reset_id"],
+        "registration_record": record,
+        "signature": identity_signature(signer, &payload),
+    });
+    if let Some((ciphertext, version)) = vault {
+        body["vault_ciphertext"] = json!(ciphertext);
+        body["vault_version"] = json!(version);
+    }
+    for (k, v) in extra.as_object().unwrap() {
+        // `vault_unopenable_unsigned` is the marker sent without being signed.
+        let key = if k == "vault_unopenable_unsigned" { "vault_unopenable" } else { k };
+        body[key] = v.clone();
+    }
+    s.post("/_telium/v1/password-reset/opaque/finish", None, body).await
+}
+
+async fn vault_row(s: &Server, user_id: &str) -> (String, String, Option<String>, i64) {
+    sqlx::query_as(
+        "SELECT mode, ciphertext, independent_ciphertext, version FROM key_vault WHERE user_id = ?",
+    )
+    .bind(user_id)
+    .fetch_one(&s.state.pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn password_reset_replaces_the_record_and_the_vault_in_one_write() {
+    let s = start_with(|cfg| cfg.rate_limit.auth_burst = 1_000).await;
+    let old = test_password();
+    let old = old.as_str();
+    let new = test_password();
+    let new = new.as_str();
+    let (_token, user_id, recovery) = enrolled_account(&s, "resetwrap", old).await;
+    let (_, _, copy, version) = vault_row(&s, &user_id).await;
+    assert_eq!(copy.as_deref(), Some("k1.first.copy"));
+
+    // The recovery copy goes only to a caller that proves it holds the recovery key.
+    let (unsigned, _) = reset_attempt(&s, &user_id, new, None).await;
+    assert!(unsigned["vault"].is_null(), "{unsigned}");
+    let (stranger, _) = reset_attempt(&s, &user_id, new, Some(&identity_signing_key())).await;
+    assert!(stranger["vault"].is_null(), "{stranger}");
+    let (unknown, _) = reset_attempt(&s, "@nobody:localhost", new, Some(&recovery)).await;
+    assert!(unknown["vault"].is_null(), "{unknown}");
+    assert_eq!(unknown["ksf_version"], unsigned["ksf_version"]);
+    let (start, record) = reset_attempt(&s, &user_id, new, Some(&recovery)).await;
+    assert_eq!(start["vault"]["independent_ciphertext"], "k1.first.copy");
+    assert_eq!(start["vault"]["version"], version);
+
+    // A reset that leaves the vault under the old password is refused whole: it would pair the new record with a vault
+    // only the old password opens.
+    let (status, refused) =
+        reset_finish(&s, &user_id, &start, &record, &recovery, None, json!({})).await;
+    assert_eq!(status, 400, "{refused}");
+    assert_eq!(refused["code"], "vault_rewrap_required");
+    assert!(opaque_login(&s, &user_id, old, None).await.is_some(), "the old password must still work");
+    assert_eq!(vault_row(&s, &user_id).await.1, "primary.copy");
+
+    // A stale version loses and changes nothing.
+    let (start, record) = reset_attempt(&s, &user_id, new, Some(&recovery)).await;
+    let (status, refused) = reset_finish(
+        &s, &user_id, &start, &record, &recovery, Some(("rewrapped.stale", version + 5)), json!({}),
+    )
+    .await;
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(refused["code"], "vault_version_conflict");
+    assert!(opaque_login(&s, &user_id, old, None).await.is_some());
+    assert_eq!(vault_row(&s, &user_id).await.1, "primary.copy");
+
+    // The vault copy is inside the signature.
+    let (start, record) = reset_attempt(&s, &user_id, new, Some(&recovery)).await;
+    let (status, forged) = reset_finish(
+        &s, &user_id, &start, &record, &recovery, Some(("rewrapped.signed", version)),
+        json!({ "vault_ciphertext": "rewrapped.swapped" }),
+    )
+    .await;
+    assert_eq!(status, 401, "{forged}");
+    assert_eq!(vault_row(&s, &user_id).await.1, "primary.copy");
+
+    // An unknown stretching version is refused before anything else.
+    let (start, record) = reset_attempt(&s, &user_id, new, Some(&recovery)).await;
+    let (status, refused) = reset_finish(
+        &s, &user_id, &start, &record, &recovery, Some(("rewrapped.ksf", version)), json!({ "ksf_version": 2 }),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+    assert_eq!(refused["code"], "unsupported_ksf_version");
+    assert!(opaque_login(&s, &user_id, old, None).await.is_some());
+
+    let (start, record) = reset_attempt(&s, &user_id, new, Some(&recovery)).await;
+    let (status, done) = reset_finish(
+        &s, &user_id, &start, &record, &recovery, Some(("rewrapped.new", version)), json!({}),
+    )
+    .await;
+    assert_eq!(status, 200, "{done}");
+    let (mode, ciphertext, copy, now) = vault_row(&s, &user_id).await;
+    assert_eq!((mode.as_str(), ciphertext.as_str()), ("opaque_custody", "rewrapped.new"));
+    assert_eq!(copy.as_deref(), Some("k1.first.copy"), "the recovery copy is under the account key and stays");
+    assert_eq!(now, version + 1);
+    assert!(opaque_login(&s, &user_id, new, None).await.is_some());
+    assert!(opaque_login(&s, &user_id, old, None).await.is_none());
+}
+
+async fn change_start(s: &Server, token: &str, password: &str) -> (u16, Value, Option<String>) {
+    let mut rng = OsRng;
+    let started =
+        ClientRegistration::<BrowserOpaqueSuite>::start(&mut rng, password.as_bytes()).unwrap();
+    let (status, start) = s
+        .post(
+            "/_telium/v1/auth/opaque/password/change/start",
+            Some(token),
+            json!({ "registration_request": opaque_b64(started.message.serialize().as_slice()) }),
+        )
+        .await;
+    if status != 200 {
+        return (status, start, None);
+    }
+    let record = registration_record(password, started, &start);
+    (status, start, Some(record))
+}
+
+#[tokio::test]
+async fn password_change_replaces_the_record_and_the_vault_in_one_write() {
+    let s = start_with(|cfg| cfg.rate_limit.auth_burst = 1_000).await;
+    let old = test_password();
+    let old = old.as_str();
+    let new = test_password();
+    let new = new.as_str();
+    let (token, user_id, _recovery) = enrolled_account(&s, "changewrap", old).await;
+    let (_, _, copy, version) = vault_row(&s, &user_id).await;
+
+    let (status, _, _) = change_start(&s, "not-a-session", new).await;
+    assert_eq!(status, 401);
+    let (status, start, record) = change_start(&s, &token, new).await;
+    assert_eq!(status, 200, "{start}");
+    assert_eq!(start["ksf_version"], 1);
+    let record = record.unwrap();
+    let proof = opaque_reauth(&s, &token, old).await;
+    let finish = |extra: Value| {
+        let mut body = json!({ "reauth_token": proof, "registration_record": record });
+        for (k, v) in extra.as_object().unwrap() {
+            body[k] = v.clone();
+        }
+        body
+    };
+    let url = "/_telium/v1/auth/opaque/password/change/finish";
+
+    // Refusals leave everything as it was, and leave the proof spendable for the retry.
+    let (status, refused) = s.post(url, Some(&token), finish(json!({}))).await;
+    assert_eq!(status, 400, "{refused}");
+    assert_eq!(refused["code"], "vault_rewrap_required");
+    let (status, refused) = s
+        .post(url, Some(&token), finish(json!({ "vault_ciphertext": "rewrapped.stale", "vault_version": version + 5 })))
+        .await;
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(refused["code"], "vault_version_conflict");
+    let (status, refused) = s
+        .post(url, Some(&token), finish(json!({ "vault_ciphertext": "x", "vault_version": version, "ksf_version": 2 })))
+        .await;
+    assert_eq!(status, 400, "{refused}");
+    assert_eq!(refused["code"], "unsupported_ksf_version");
+    let (status, refused) = s
+        .post(url, Some("not-a-session"), finish(json!({ "vault_ciphertext": "x", "vault_version": version })))
+        .await;
+    assert_eq!(status, 401, "{refused}");
+    assert!(opaque_login(&s, &user_id, old, None).await.is_some(), "the old password must still work");
+    assert_eq!(vault_row(&s, &user_id).await.1, "primary.copy");
+
+    // Another device signed in with the old password, and a proof of it that was never spent.
+    let (other, _) = opaque_login(&s, &user_id, old, None).await.unwrap();
+    let other_token = other["access_token"].as_str().unwrap().to_string();
+    let spare = opaque_reauth(&s, &other_token, old).await;
+    let (status, _) = s.get("/_telium/v1/whoami", Some(&other_token)).await;
+    assert_eq!(status, 200);
+
+    let (status, done) = s
+        .post(url, Some(&token), finish(json!({ "vault_ciphertext": "rewrapped.new", "vault_version": version })))
+        .await;
+    assert_eq!(status, 200, "{done}");
+    let (status, _) = s.get("/_telium/v1/whoami", Some(&other_token)).await;
+    assert_eq!(status, 401, "a session of the old password survived the change");
+    let (status, replay) = s
+        .post(url, Some(&token), json!({
+            "reauth_token": spare, "registration_record": record,
+            "vault_ciphertext": "from.the.old.password", "vault_version": version + 1,
+        }))
+        .await;
+    assert_eq!(status, 401, "a proof of the old password outlived the change: {replay}");
+    assert_eq!(vault_row(&s, &user_id).await.1, "rewrapped.new");
+    assert_eq!(done["vault_version"], version + 1);
+    let (_, ciphertext, kept, now) = vault_row(&s, &user_id).await;
+    assert_eq!(ciphertext, "rewrapped.new");
+    assert_eq!(kept, copy);
+    assert_eq!(now, version + 1);
+    assert!(opaque_login(&s, &user_id, new, None).await.is_some());
+    assert!(opaque_login(&s, &user_id, old, None).await.is_none());
+    let (status, _) = s.get("/_telium/v1/whoami", Some(&token)).await;
+    assert_eq!(status, 200, "a password change does not end the session that made it");
+
+    // The proof is spent by the write that used it.
+    let (status, replay) = s
+        .post(url, Some(&token), finish(json!({ "vault_ciphertext": "again", "vault_version": version + 1 })))
+        .await;
+    assert_eq!(status, 401, "{replay}");
+    assert_eq!(vault_row(&s, &user_id).await.1, "rewrapped.new");
+}
+
+#[tokio::test]
+async fn login_answers_with_the_key_stretching_version() {
+    let s = start_with(|cfg| cfg.rate_limit.auth_burst = 1_000).await;
+    let (_token, user_id, _) = enrolled_account(&s, "ksfver", &test_password()).await;
+    let mut rng = OsRng;
+    let started = ClientLogin::<BrowserOpaqueSuite>::start(&mut rng, b"whatever").unwrap();
+    let ask = |user: String| {
+        let request = opaque_b64(started.message.serialize().as_slice());
+        let s = &s;
+        async move {
+            s.post(
+                "/_telium/v1/login/opaque/start",
+                None,
+                json!({ "user": user, "start_login_request": request }),
+            )
+            .await
+        }
+    };
+    let (_, known) = ask(user_id.clone()).await;
+    let (_, stranger) = ask("@nobody:localhost".into()).await;
+    assert_eq!(known["ksf_version"], 1, "{known}");
+    assert_eq!(stranger["ksf_version"], 1, "a stranger is told the same as an account");
+
+    // Registering with a version the server does not know is refused.
+    let new_pw = test_password();
+    let started =
+        ClientRegistration::<BrowserOpaqueSuite>::start(&mut rng, new_pw.as_bytes()).unwrap();
+    let request = opaque_b64(started.message.serialize().as_slice());
+    let (_, start) = s
+        .post(
+            "/_telium/v1/register/opaque/start",
+            None,
+            json!({ "localpart": "ksfnew", "registration_request": request }),
+        )
+        .await;
+    let record = registration_record(&new_pw, started, &start);
+    let (status, refused) = s
+        .post(
+            "/_telium/v1/register/opaque/finish",
+            None,
+            json!({ "localpart": "ksfnew", "registration_record": record, "ksf_version": 99 }),
+        )
+        .await;
+    assert_eq!(status, 400, "{refused}");
+    assert_eq!(refused["code"], "unsupported_ksf_version");
+}
+
+#[tokio::test]
+async fn a_reset_whose_recovery_copy_does_not_open_can_say_so_in_the_signature() {
+    // An account moved from another server carries that server's recovery copy; the key made here does not open it.
+    let s = start_with(|cfg| cfg.rate_limit.auth_burst = 1_000).await;
+    let old = test_password();
+    let new = test_password();
+    let (_token, user_id, recovery) = enrolled_account(&s, "unopenable", &old).await;
+    let (_, _, copy, version) = vault_row(&s, &user_id).await;
+
+    // Refused without the marker, as before.
+    let (start, record) = reset_attempt(&s, &user_id, &new, Some(&recovery)).await;
+    let (status, refused) =
+        reset_finish(&s, &user_id, &start, &record, &recovery, None, json!({})).await;
+    assert_eq!(status, 400, "{refused}");
+    // A marker nobody signed, for another version, or next to a re-wrapped vault is refused.
+    let (start, record) = reset_attempt(&s, &user_id, &new, Some(&recovery)).await;
+    let (status, forged) = reset_finish(
+        &s, &user_id, &start, &record, &recovery, None, json!({ "vault_unopenable_unsigned": version }),
+    )
+    .await;
+    assert_eq!(status, 401, "{forged}");
+    let (start, record) = reset_attempt(&s, &user_id, &new, Some(&recovery)).await;
+    let (status, stale) = reset_finish(
+        &s, &user_id, &start, &record, &recovery, None, json!({ "vault_unopenable": version + 3 }),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(stale["code"], "vault_version_conflict");
+    let (start, record) = reset_attempt(&s, &user_id, &new, Some(&recovery)).await;
+    let (status, both) = reset_finish(
+        &s, &user_id, &start, &record, &recovery, Some(("rewrapped.x", version)),
+        json!({ "vault_unopenable": version }),
+    )
+    .await;
+    assert_eq!(status, 400, "{both}");
+    assert!(opaque_login(&s, &user_id, &old, None).await.is_some(), "nothing above may change the password");
+
+    // Signed by the recovery key and for the version that was read: the reset goes through and leaves the vault alone.
+    let (start, record) = reset_attempt(&s, &user_id, &new, Some(&recovery)).await;
+    let (status, done) = reset_finish(
+        &s, &user_id, &start, &record, &recovery, None, json!({ "vault_unopenable": version }),
+    )
+    .await;
+    assert_eq!(status, 200, "{done}");
+    let (_, ciphertext, kept, now) = vault_row(&s, &user_id).await;
+    assert_eq!((ciphertext.as_str(), kept, now), ("primary.copy", copy, version));
+    assert!(opaque_login(&s, &user_id, &new, None).await.is_some());
+    assert!(opaque_login(&s, &user_id, &old, None).await.is_none());
+}
+
+#[tokio::test]
+async fn a_password_write_cannot_lower_the_key_stretching_version() {
+    let s = start_with(|cfg| cfg.rate_limit.auth_burst = 1_000).await;
+    let old = test_password();
+    let (token, user_id, recovery) = enrolled_account(&s, "ksflower", &old).await;
+    let (_, _, _, version) = vault_row(&s, &user_id).await;
+    // As if an account were on a newer set than the one a (downgraded) client asks for.
+    sqlx::query("UPDATE accounts SET opaque_ksf_version = 2 WHERE user_id = ?")
+        .bind(&user_id)
+        .execute(&s.state.pool)
+        .await
+        .unwrap();
+    let (_, start, record) = change_start(&s, &token, &test_password()).await;
+    assert_eq!(start["ksf_version"], 1);
+    let proof = opaque_reauth(&s, &token, &old).await;
+    let (status, refused) = s
+        .post(
+            "/_telium/v1/auth/opaque/password/change/finish",
+            Some(&token),
+            json!({
+                "reauth_token": proof, "registration_record": record.unwrap(), "ksf_version": 1,
+                "vault_ciphertext": "x", "vault_version": version,
+            }),
+        )
+        .await;
+    assert_eq!(status, 400, "{refused}");
+    assert_eq!(refused["code"], "unsupported_ksf_version");
+    let (start, record) = reset_attempt(&s, &user_id, &test_password(), Some(&recovery)).await;
+    let (status, refused) = reset_finish(
+        &s, &user_id, &start, &record, &recovery, Some(("x", version)), json!({ "ksf_version": 1 }),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+    assert_eq!(refused["code"], "unsupported_ksf_version");
+    assert_eq!(vault_row(&s, &user_id).await.1, "primary.copy");
 }

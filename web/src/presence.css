@@ -102,6 +102,24 @@
   white-space: nowrap;
 }
 
+.account-card__copy {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--text-2xs);
+  text-align: start;
+  cursor: pointer;
+}
+
+.account-card__copy:hover,
+.account-card__copy:focus-visible {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+
 .activity-note__glyph {
   display: inline-block;
   width: 1.05em;
@@ -119,6 +137,7 @@
 .activity-card {
   --activity-card-fill: var(--surface);
   display: flex;
+  min-width: 0;
   gap: 12px;
   padding: 12px 14px;
   border-radius: var(--radius-card);

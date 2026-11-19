@@ -79,6 +79,217 @@ async fn anchor_test_identity(s: &Server, user: &User, key: &SigningKey) -> (Str
 }
 
 #[tokio::test]
+async fn a_first_key_made_twice_at_once_keeps_one_and_refuses_the_other() {
+    let s = start().await;
+    let alice = s.user("identity-first-key").await;
+    let (a, b) = (identity_public(&identity_signing_key()), identity_public(&identity_signing_key()));
+    let create = |key: &str| json!({ "identity_key": key, "sealed_secret": "sealed", "create_only": true });
+
+    let ((status_a, body_a), (status_b, body_b)) = tokio::join!(
+        s.put("/_telium/v1/crosssigning", &alice.home, create(&a)),
+        s.put("/_telium/v1/crosssigning", &alice.home, create(&b)),
+    );
+    let mut statuses = [status_a, status_b];
+    statuses.sort();
+    assert_eq!(statuses, [200, 409], "exactly one create wins: {body_a} / {body_b}");
+    let winner = if status_a == 200 { &a } else { &b };
+
+    let (_, doc) = s.get("/_telium/v1/crosssigning", Some(&alice.home)).await;
+    assert_eq!(doc["identity_key"].as_str(), Some(winner.as_str()), "{doc}");
+
+    // A later create is refused too, and leaves the stored key alone.
+    let (status, _) = s.put("/_telium/v1/crosssigning", &alice.home, create(&a)).await;
+    assert_eq!(status, 409);
+    let (_, doc) = s.get("/_telium/v1/crosssigning", Some(&alice.home)).await;
+    assert_eq!(doc["identity_key"].as_str(), Some(winner.as_str()), "{doc}");
+}
+
+async fn give_recovery_key(s: &Server, user: &User, key: &SigningKey) {
+    sqlx::query("UPDATE accounts SET recovery_public_key = ? WHERE user_id = ?")
+        .bind(identity_public(key))
+        .bind(&user.user_id)
+        .execute(&s.state.pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_recovery_key_resets_a_lost_identity_to_a_new_one_and_only_once_per_challenge() {
+    let s = start().await;
+    let alice = s.user("identity-reset").await;
+    let root0 = identity_signing_key();
+    let (immutable0, _) = anchor_test_identity(&s, &alice, &root0).await;
+
+    let (status, _) = s.post("/_telium/v1/identity/reset/start", Some(&alice.home), json!({})).await;
+    assert_eq!(status, 409, "no recovery key, no reset");
+    let recovery = identity_signing_key();
+    give_recovery_key(&s, &alice, &recovery).await;
+
+    let root1 = identity_signing_key();
+    let public1 = identity_public(&root1);
+    let immutable1 = identity_id(&public1);
+    let finish = |attempt: &Value, signer: &SigningKey| {
+        let attempt_id = attempt["attempt_id"].as_str().unwrap();
+        let challenge = attempt["challenge"].as_str().unwrap();
+        let payload = format!(
+            "telium-identity-reset:v1|{}|{attempt_id}|{challenge}|{immutable1}|{public1}",
+            alice.user_id
+        );
+        json!({
+            "attempt_id": attempt_id,
+            "immutable_id": immutable1,
+            "identity_key": public1,
+            "anchor_signature": identity_signature(&root1, &identity_anchor_payload(&alice.user_id, &immutable1, &public1)),
+            "sealed_secret": "sealed-reset-root",
+            "signature": identity_signature(signer, &payload),
+        })
+    };
+
+    let (_, attempt) = s.post("/_telium/v1/identity/reset/start", Some(&alice.home), json!({})).await;
+    let (status, body) = s.post("/_telium/v1/identity/reset/finish", Some(&alice.home), finish(&attempt, &identity_signing_key())).await;
+    assert_eq!(status, 401, "not the recovery key: {body}");
+    let (status, _) = s.post("/_telium/v1/identity/reset/finish", Some(&alice.home), finish(&attempt, &recovery)).await;
+    assert_eq!(status, 401, "a challenge is spent by its first answer");
+
+    let (_, attempt) = s.post("/_telium/v1/identity/reset/start", Some(&alice.home), json!({})).await;
+    let (status, reset) = s.post("/_telium/v1/identity/reset/finish", Some(&alice.home), finish(&attempt, &recovery)).await;
+    assert_eq!(status, 200, "{reset}");
+    assert_eq!(reset["immutable_id"], immutable1.as_str());
+    assert_ne!(reset["immutable_id"], immutable0.as_str(), "a reset is a new identity, never a continuation");
+    assert_eq!(reset["sequence"], 0);
+    let (_, cross) = s.get("/_telium/v1/crosssigning", Some(&alice.home)).await;
+    assert_eq!(cross["identity_key"].as_str(), Some(public1.as_str()), "{cross}");
+}
+
+/// The throwaway-key seal is refused on the way in, on every route that writes a root. An account whose stored root is
+/// already sealed that way (a legacy account) is not locked out by that: it still resets and rotates, sealed properly.
+#[tokio::test]
+async fn a_root_sealed_with_the_retired_throwaway_key_is_refused_but_a_stored_one_can_still_be_replaced() {
+    let s = start().await;
+    let alice = s.user("identity-retired-seal").await;
+    let root0 = identity_signing_key();
+    let (immutable0, public0) = anchor_test_identity(&s, &alice, &root0).await;
+    sqlx::query("UPDATE cross_signing SET sealed_secret = 'device-v1:legacy.sealed' WHERE user_id = ?")
+        .bind(&alice.user_id)
+        .execute(&s.state.pool)
+        .await
+        .unwrap();
+
+    // put: refused, and the stored root is untouched.
+    let (status, err) = s
+        .put(
+            "/_telium/v1/crosssigning",
+            &alice.home,
+            json!({ "identity_key": public0, "sealed_secret": "device-v1:again" }),
+        )
+        .await;
+    assert_eq!(status, 400, "{err}");
+    assert_eq!(err["code"], "custody_retired");
+    let (_, doc) = s.get("/_telium/v1/crosssigning", Some(&alice.home)).await;
+    assert_eq!(doc["sealed_secret"], "device-v1:legacy.sealed", "{doc}");
+    // The account-key seal is accepted over it: this is how a device that holds the root heals it.
+    let (status, ok) = s
+        .put(
+            "/_telium/v1/crosssigning",
+            &alice.home,
+            json!({ "identity_key": public0, "sealed_secret": "recovery-v1:sealed" }),
+        )
+        .await;
+    assert_eq!(status, 200, "{ok}");
+    sqlx::query("UPDATE cross_signing SET sealed_secret = 'device-v1:legacy.sealed' WHERE user_id = ?")
+        .bind(&alice.user_id)
+        .execute(&s.state.pool)
+        .await
+        .unwrap();
+
+    // rotate
+    let root1 = identity_signing_key();
+    let public1 = identity_public(&root1);
+    let rotate = identity_rotation_payload(&immutable0, 1, &public0, &public1);
+    let rotation = |sealed: &str| {
+        json!({
+            "sequence": 1,
+            "previous_key": public0,
+            "new_key": public1,
+            "sealed_secret": sealed,
+            "new_key_signature": identity_signature(&root1, &rotate),
+            "authorization": { "kind": "existing_root", "signature": identity_signature(&root0, &rotate) },
+        })
+    };
+    let (status, err) = s.post("/_telium/v1/identity/rotate", Some(&alice.home), rotation("device-v1:x")).await;
+    assert_eq!(status, 400, "{err}");
+    assert_eq!(err["code"], "custody_retired");
+
+    // reset (#74): a legacy stored seal does not stop it; a throwaway seal on the new root is refused.
+    let recovery = identity_signing_key();
+    give_recovery_key(&s, &alice, &recovery).await;
+    let root2 = identity_signing_key();
+    let public2 = identity_public(&root2);
+    let immutable2 = identity_id(&public2);
+    let finish = |attempt: &Value, sealed: &str| {
+        let attempt_id = attempt["attempt_id"].as_str().unwrap();
+        let challenge = attempt["challenge"].as_str().unwrap();
+        let payload = format!(
+            "telium-identity-reset:v1|{}|{attempt_id}|{challenge}|{immutable2}|{public2}",
+            alice.user_id
+        );
+        json!({
+            "attempt_id": attempt_id,
+            "immutable_id": immutable2,
+            "identity_key": public2,
+            "anchor_signature": identity_signature(&root2, &identity_anchor_payload(&alice.user_id, &immutable2, &public2)),
+            "sealed_secret": sealed,
+            "signature": identity_signature(&recovery, &payload),
+        })
+    };
+    let (_, attempt) = s.post("/_telium/v1/identity/reset/start", Some(&alice.home), json!({})).await;
+    let (status, err) = s.post("/_telium/v1/identity/reset/finish", Some(&alice.home), finish(&attempt, "device-v1:x")).await;
+    assert_eq!(status, 400, "{err}");
+    assert_eq!(err["code"], "custody_retired");
+    let (_, attempt) = s.post("/_telium/v1/identity/reset/start", Some(&alice.home), json!({})).await;
+    let (status, reset) =
+        s.post("/_telium/v1/identity/reset/finish", Some(&alice.home), finish(&attempt, "recovery-v1:sealed-under-the-account-key")).await;
+    assert_eq!(status, 200, "a legacy account resets with the recovery key: {reset}");
+    let (_, cross) = s.get("/_telium/v1/crosssigning", Some(&alice.home)).await;
+    assert_eq!(cross["sealed_secret"], "recovery-v1:sealed-under-the-account-key", "{cross}");
+}
+
+#[tokio::test]
+async fn another_account_cannot_spend_a_reset_attempt_it_does_not_own() {
+    let s = start().await;
+    let alice = s.user("identity-reset-owner").await;
+    let mallory = s.user("identity-reset-other").await;
+    let root0 = identity_signing_key();
+    anchor_test_identity(&s, &alice, &root0).await;
+    let recovery = identity_signing_key();
+    give_recovery_key(&s, &alice, &recovery).await;
+    let (_, attempt) = s.post("/_telium/v1/identity/reset/start", Some(&alice.home), json!({})).await;
+    let attempt_id = attempt["attempt_id"].as_str().unwrap();
+
+    let (status, _) = s
+        .post(
+            "/_telium/v1/identity/reset/finish",
+            Some(&mallory.home),
+            json!({
+                "attempt_id": attempt_id,
+                "immutable_id": "x",
+                "identity_key": "x",
+                "anchor_signature": "x",
+                "sealed_secret": "x",
+                "signature": "x",
+            }),
+        )
+        .await;
+    assert_eq!(status, 401);
+    let still: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM identity_reset_attempts WHERE id = ?")
+        .bind(attempt_id)
+        .fetch_one(&s.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(still.0, 1, "someone else's finish must not delete the owner's attempt");
+}
+
+#[tokio::test]
 async fn immutable_identity_blocks_server_style_replacement_and_accepts_authorized_rotation() {
     let s = start().await;
     let alice = s.user("identity-alice").await;
@@ -563,25 +774,57 @@ async fn identity_recovery_requires_the_configured_two_of_three_guardians() {
 }
 
 #[tokio::test]
-async fn vault_custody_modes_and_what_the_server_admits_to() {
+async fn the_vault_takes_only_opaque_custody_and_the_server_admits_to_no_escrow() {
     let s = start().await;
     let u = s.user("custodian").await;
 
     let (_, v) = s.get("/_telium/v1/vault", Some(&u.home)).await;
     assert_eq!(v["exists"], false, "a fresh account has no vault: {v}");
 
+    // Every retired mode, and a write that names none (which used to mean one of them), is refused with a code.
+    for body in [
+        json!({ "ciphertext": "iv.ct", "mode": "device_custody" }),
+        json!({ "ciphertext": "iv.ct", "mode": "self_custody" }),
+        json!({ "ciphertext": "iv.ct", "mode": "escrowed", "escrow_key": "aaaa" }),
+        json!({ "ciphertext": "iv.ct", "escrow_key": "aaaa" }),
+        json!({ "ciphertext": "iv.ct" }),
+    ] {
+        let (status, err) = s.put("/_telium/v1/vault", &u.home, body.clone()).await;
+        assert_eq!(status, 400, "{body}: {err}");
+        assert_eq!(err["code"], "custody_retired", "{body}: {err}");
+    }
+    let (status, err) = s
+        .put(
+            "/_telium/v1/vault",
+            &u.home,
+            json!({ "ciphertext": "x", "mode": "opaque_custody", "escrow_key": "aaaa" }),
+        )
+        .await;
+    assert_eq!(status, 400, "the server takes no escrow key from anyone: {err}");
+    let (status, err) = s
+        .put(
+            "/_telium/v1/vault",
+            &u.home,
+            json!({ "ciphertext": "x", "mode": "opaque_custody", "independent_ciphertext": "p2.salt.iv.ct" }),
+        )
+        .await;
+    assert_eq!(status, 400, "a passphrase copy is retired with its mode: {err}");
+    assert_eq!(err["code"], "custody_retired");
+    let (_, v) = s.get("/_telium/v1/vault", Some(&u.home)).await;
+    assert_eq!(v["exists"], false, "a refused write stored nothing: {v}");
+
     let (status, _) = s
         .put(
             "/_telium/v1/vault",
             &u.home,
-            json!({ "ciphertext": "iv.ct", "mode": "device_custody" }),
+            json!({ "ciphertext": "iv.ct", "mode": "opaque_custody", "independent_ciphertext": "k1.iv.ct" }),
         )
         .await;
     assert_eq!(status, 200);
     let (_, v) = s.get("/_telium/v1/vault", Some(&u.home)).await;
-    assert_eq!(v["mode"], "device_custody");
-    assert_eq!(v["server_can_recover"], false);
-    assert!(v["escrow_key"].is_null());
+    assert_eq!(v["mode"], "opaque_custody");
+    assert!(v.get("escrow_key").is_none(), "the vault is never served with a key: {v}");
+    assert!(v.get("server_can_recover").is_none(), "{v}");
 
     let (status, _) = s
         .put(
@@ -593,92 +836,71 @@ async fn vault_custody_modes_and_what_the_server_admits_to() {
     assert_eq!(status, 200);
     let (_, v) = s.get("/_telium/v1/vault", Some(&u.home)).await;
     assert_eq!(v["backup"]["items"], 1);
-    assert_eq!(v["backup"]["server_can_read"], false);
+    assert!(v["backup"].get("server_can_read").is_none(), "{v}");
 
-    let (status, _) = s
-        .put("/_telium/v1/vault", &u.home, json!({ "ciphertext": "x", "mode": "escrowed" }))
-        .await;
-    assert_eq!(status, 400, "escrowed with no key is not escrowed");
-    let (status, _) = s
-        .put(
-            "/_telium/v1/vault",
-            &u.home,
-            json!({ "ciphertext": "x", "mode": "device_custody", "escrow_key": "aaaa" }),
-        )
-        .await;
-    assert_eq!(status, 400, "trusted-device custody must not accept an escrow key");
-    let (status, _) = s
-        .put(
-            "/_telium/v1/vault",
-            &u.home,
-            json!({ "ciphertext": "x", "mode": "self_custody", "escrow_key": "aaaa" }),
-        )
-        .await;
-    assert_eq!(status, 400, "self-custody must not accept an escrow key");
-
-    let (status, _) = s
-        .post(
-            "/_telium/v1/vault/mode",
-            Some(&u.home),
-            json!({ "mode": "escrowed", "ciphertext": "legacy.blob" }),
-        )
-        .await;
-    assert_eq!(status, 400, "server-assisted recovery requires the wrapper key");
-
-    let (status, _) = s
-        .post(
-            "/_telium/v1/vault/mode",
-            Some(&u.home),
-            json!({
-                "mode": "escrowed",
-                "ciphertext": "legacy.blob",
-                "escrow_key": "aaaa",
-            }),
-        )
-        .await;
-    assert_eq!(status, 200);
+    // The mode route refuses them too, with or without the fields the retired modes needed.
+    for body in [
+        json!({ "mode": "escrowed", "ciphertext": "legacy.blob", "escrow_key": "aaaa" }),
+        json!({ "mode": "device_custody", "ciphertext": "device.blob" }),
+        json!({ "mode": "self_custody", "ciphertext": "self.blob", "recovery_confirmed": true }),
+    ] {
+        let (status, err) = s.post("/_telium/v1/vault/mode", Some(&u.home), body.clone()).await;
+        assert_eq!(status, 400, "{body}: {err}");
+        assert_eq!(err["code"], "custody_retired", "{body}: {err}");
+    }
     let (_, v) = s.get("/_telium/v1/vault", Some(&u.home)).await;
-    assert_eq!(v["mode"], "escrowed");
-    assert_eq!(v["server_can_recover"], true);
-    assert_eq!(v["backup"]["server_can_read"], true);
+    assert_eq!(v["mode"], "opaque_custody", "refused changes left the vault as it was: {v}");
+}
 
-    let (status, _) = s
-        .post(
-            "/_telium/v1/vault/mode",
-            Some(&u.home),
-            json!({ "mode": "device_custody", "ciphertext": "device.blob" }),
-        )
-        .await;
-    assert_eq!(status, 200);
+/// A vault stored in a retired mode is still served as it is (the client reads the mode and refuses it), and writing
+/// `opaque_custody` over it is the one way it is converted, whatever mode the row holds.
+#[tokio::test]
+async fn a_vault_stored_in_a_retired_mode_is_served_and_converted_only_to_opaque() {
+    let s = start().await;
+    let u = s.user("legacy").await;
+    sqlx::query(
+        "INSERT INTO key_vault (user_id, mode, ciphertext, escrow_key, version, updated_at) \
+         VALUES (?, 'device_custody', 'throwaway.sealed', NULL, 4, 1)",
+    )
+    .bind(&u.user_id)
+    .execute(&s.state.pool)
+    .await
+    .unwrap();
+
     let (_, v) = s.get("/_telium/v1/vault", Some(&u.home)).await;
     assert_eq!(v["mode"], "device_custody");
-    assert_eq!(v["server_can_recover"], false);
-    assert_eq!(v["backup"]["server_can_read"], false);
+    assert_eq!(v["version"], 4);
 
     let (status, _) = s
         .post(
             "/_telium/v1/vault/mode",
             Some(&u.home),
-            json!({ "mode": "self_custody", "ciphertext": "self.blob" }),
+            json!({ "mode": "device_custody", "ciphertext": "again", "expected_version": 4 }),
         )
         .await;
-    assert_eq!(status, 400);
+    assert_eq!(status, 400, "a retired mode is not writable even over a row that holds it");
 
-    let (status, _) = s
+    let (status, done) = s
         .post(
             "/_telium/v1/vault/mode",
             Some(&u.home),
-            json!({
-                "mode": "self_custody",
-                "ciphertext": "self.blob",
-                "recovery_confirmed": true,
-            }),
+            json!({ "mode": "opaque_custody", "ciphertext": "iv.ct", "expected_version": 4 }),
         )
         .await;
-    assert_eq!(status, 200);
+    assert_eq!(status, 200, "{done}");
+    assert_eq!(done["version"], 5);
+    // The retired row was copied whole before it was overwritten (it landed after migration 0099, e.g. by import).
+    let archived: (String, String, i64) = sqlx::query_as(
+        "SELECT mode, ciphertext, version FROM key_vault_legacy_archive WHERE user_id = ?",
+    )
+    .bind(&u.user_id)
+    .fetch_one(&s.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(archived, ("device_custody".into(), "throwaway.sealed".into(), 4));
     let (_, v) = s.get("/_telium/v1/vault", Some(&u.home)).await;
-    assert_eq!(v["mode"], "self_custody");
-    assert_eq!(v["server_can_recover"], false);
+    assert_eq!(v["mode"], "opaque_custody");
+    assert_eq!(v["ciphertext"], "iv.ct");
 }
 
 #[tokio::test]

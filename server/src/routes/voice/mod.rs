@@ -685,9 +685,10 @@ pub async fn disconnect(state: &AppState, guild_id: &str, user_id: &str) -> ApiR
 }
 
 /// A voice channel's status describes the call in it; once the last person leaves there is
-/// no call left to describe, so the status goes with them. Call this wherever a voice state
+/// no call left to describe, so the status goes with them, and so does the call's invite link. Call this wherever a voice state
 /// leaves a channel (leave, switching channels, a moderator move, expiry).
 async fn clear_status_if_empty(state: &AppState, guild_id: &str, channel_id: &str) -> ApiResult<()> {
+    end_call_invites(&state.pool, channel_id).await?;
     if clear_status_rows(&state.pool, channel_id).await? {
         let out = crate::routes::guild::channel_json(state, channel_id).await?;
         state
@@ -1630,6 +1631,131 @@ pub async fn signal(
         )
         .await;
     Ok(Json(json!({ "ok": true })))
+}
+
+/// How long a call invite may outlive a call that never reports its end (a crash, a lost sweep).
+/// Normally it is deleted the moment the room empties; see `end_call_invites`.
+const CALL_INVITE_BACKSTOP_MS: i64 = 12 * 60 * 60 * 1000;
+
+/// The invite link for the call you are in. One live link per channel, so tapping the button
+/// twice, or two people tapping it, never adds a second row. It stops working when the call ends.
+pub async fn invite(
+    State(state): State<AppState>,
+    auth: GuildAuth,
+    Path(channel_id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let ctx = voice_channel(&state, &channel_id, &auth.user_id).await?;
+    guildstore::require_guild_perm(&state, &ctx.guild_id, &auth.user_id, perms::CREATE_INVITE).await?;
+    let inside: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM voice_states WHERE channel_id = ? AND user_id = ?",
+    )
+    .bind(&channel_id)
+    .bind(&auth.user_id)
+    .fetch_one(&state.pool)
+    .await?;
+    if inside == 0 {
+        return Err(ApiError::Forbidden("join the channel before inviting people to it".into()));
+    }
+    let now = now_ms();
+    // A link left from a call that ended uncleanly (expired, or deleted by hand) no longer names this call.
+    sqlx::query(
+        "DELETE FROM call_invites WHERE channel_id = ? AND code NOT IN \
+         (SELECT code FROM invites WHERE expires_at IS NULL OR expires_at > ?)",
+    )
+    .bind(&channel_id)
+    .bind(now)
+    .execute(&state.pool)
+    .await?;
+    let (code, expires_at) = match live_call_invite(&state.pool, &channel_id, now).await? {
+        Some(found) => found,
+        None => {
+            let code = crate::util::invite_code();
+            let expires_at = now + CALL_INVITE_BACKSTOP_MS;
+            sqlx::query(
+                "INSERT INTO invites (code, guild_id, channel_id, creator, max_uses, expires_at, created_at) \
+                 VALUES (?, ?, ?, ?, NULL, ?, ?)",
+            )
+            .bind(&code)
+            .bind(&ctx.guild_id)
+            .bind(&channel_id)
+            .bind(&auth.user_id)
+            .bind(expires_at)
+            .bind(now)
+            .execute(&state.pool)
+            .await?;
+            // The channel is the key, so two people pressing the button at once can't both claim it. The loser's row
+            // is removed and both get the winner's link; otherwise it would outlive the call, invisible to the cleanup.
+            let claimed = sqlx::query(
+                "INSERT INTO call_invites (channel_id, code) VALUES (?, ?) ON CONFLICT(channel_id) DO NOTHING",
+            )
+            .bind(&channel_id)
+            .bind(&code)
+            .execute(&state.pool)
+            .await?
+            .rows_affected();
+            if claimed == 1 {
+                (code, Some(expires_at))
+            } else {
+                sqlx::query("DELETE FROM invites WHERE code = ?")
+                    .bind(&code)
+                    .execute(&state.pool)
+                    .await?;
+                live_call_invite(&state.pool, &channel_id, now)
+                    .await?
+                    .ok_or_else(|| ApiError::Conflict("the call's link changed; try again".into()))?
+            }
+        }
+    };
+    Ok(Json(json!({
+        "code": code,
+        "url": state.cfg.invite_link(&code),
+        "guild_id": ctx.guild_id,
+        "channel_id": channel_id,
+        "expires_at": expires_at,
+        "max_uses": Value::Null,
+        "call": true,
+    })))
+}
+
+/// The live invite naming this channel's call, if there is one.
+async fn live_call_invite(
+    pool: &sqlx::SqlitePool,
+    channel_id: &str,
+    now: i64,
+) -> Result<Option<(String, Option<i64>)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT i.code, i.expires_at FROM call_invites c JOIN invites i ON i.code = c.code \
+         WHERE c.channel_id = ? AND (i.expires_at IS NULL OR i.expires_at > ?)",
+    )
+    .bind(channel_id)
+    .bind(now)
+    .fetch_optional(pool)
+    .await
+}
+
+/// Deletes a channel's call invite once nobody is in it. Each statement checks emptiness itself, so a join landing
+/// between "is it empty?" and "delete it" can't lose a live call's link, and both run in one transaction so the
+/// invite and its bookkeeping row go together.
+async fn end_call_invites(pool: &sqlx::SqlitePool, channel_id: &str) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "DELETE FROM invites WHERE code IN (SELECT code FROM call_invites WHERE channel_id = ?) \
+         AND NOT EXISTS (SELECT 1 FROM voice_states WHERE channel_id = ?)",
+    )
+    .bind(channel_id)
+    .bind(channel_id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "DELETE FROM call_invites WHERE channel_id = ? \
+         AND NOT EXISTS (SELECT 1 FROM voice_states WHERE channel_id = ?)",
+    )
+    .bind(channel_id)
+    .bind(channel_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
 }
 
 pub async fn health_check(state: &AppState) -> ApiResult<()> {

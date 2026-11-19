@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAsync, useStore } from '../../hooks/useStore.jsx';
 import { reportError, toast } from '../../hooks/useToast.jsx';
+import { displayId } from '../../lib/util.js';
 import { copyToClipboard } from '../../lib/clipboard.js';
 import {
   Async,
@@ -153,7 +154,7 @@ export function DeveloperPane() {
   const retire = (app) => dialogs.confirm({
     title: `Retire ${app.name}?`,
     body: 'This is permanent. Telium revokes the bot token, stops new installations, and reserves '
-      + `${app.bot_user_id} so nobody can later inherit the bot's old identity. Existing guilds can `
+      + `${displayId(app.bot_user_id)} so nobody can later inherit the bot's old identity. Existing guilds can `
       + 'still remove the inactive bot from their member list.',
     confirmLabel: 'Retire permanently',
     danger: true,
@@ -320,7 +321,7 @@ export function DeveloperPane() {
                         {app.retired ? <Pill>retired</Pill> : null}
                         {!app.retired && !app.install_enabled ? <Pill>installs off</Pill> : null}
                       </div>
-                      <div className="truncate text-xs text-muted">{app.bot_user_id}</div>
+                      <div className="truncate text-xs text-muted">{displayId(app.bot_user_id)}</div>
                     </div>
                   ),
                 },

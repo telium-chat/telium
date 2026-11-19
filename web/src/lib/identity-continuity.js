@@ -9,6 +9,7 @@ const ANCHOR_DOMAIN = 'telium-identity-anchor:v1';
 const POLICY_DOMAIN = 'telium-identity-recovery-policy:v1';
 const ROTATE_DOMAIN = 'telium-identity-rotate:v1';
 const REVOKE_DOMAIN = 'telium-device-revoke:v1';
+const RESET_DOMAIN = 'telium-identity-reset:v1';
 const ID_DOMAIN = te.encode('telium-identity-id:v1\0');
 
 function concat(a, b) {
@@ -63,6 +64,12 @@ export function identityRotationPayload(
   return te.encode(
     `${ROTATE_DOMAIN}|${immutableId}|${sequence}|${previousKey}|${newKey}`,
   );
+}
+
+/// Signed with the recovery key to start a new identity in place of a lost one; the server checks it, contacts never
+/// see it, since to them a reset is a changed identity whoever asked for it.
+export function identityResetPayload(userId, attemptId, challenge, immutableId, identityKey) {
+  return te.encode(`${RESET_DOMAIN}|${userId}|${attemptId}|${challenge}|${immutableId}|${identityKey}`);
 }
 
 /// Names the immutable identity as well as the address, so a statement can't be replayed against another identity that later holds the address.
@@ -438,6 +445,30 @@ export function pinIdentity(userId, identity) {
   storage.set(key, merged);
   if (JSON.stringify(before) !== JSON.stringify(merged)) pinsChanged();
   return { ok: true, pinned: merged.immutableId, checkpoint: merged };
+}
+
+/// Replaces a pin with a different identity. Only for a change a human confirmed (comparing emoji with that person or
+/// with one of your own devices) or that this device made itself with the recovery key: anything else is exactly the
+/// swap a pin exists to refuse.
+export function replaceIdentityPin(userId, identity, { verified = false } = {}) {
+  const next = checkpoint(identity);
+  if (!next.immutableId) return false;
+  storage.set(PIN_PREFIX + userId, { ...next, verified });
+  pinsChanged();
+  return true;
+}
+
+/// What a reset leaves and nothing else does: a brand-new identity whose only root is its genesis key, with no
+/// rotations. A chain with transitions can be forged by a homeserver (those up to the pinned sequence skip the new-root
+/// signature), so a changed identity is never taken on this device's say-so unless it has this shape.
+export function isFreshGenesis(identity) {
+  return Boolean(
+    identity?.immutableId
+    && Number(identity.sequence) === 0
+    && identity.genesisKey
+    && identity.genesisKey === identity.currentKey
+    && (identity.keys?.size ?? 1) === 1,
+  );
 }
 
 export function pinnedIdentity(userId) {

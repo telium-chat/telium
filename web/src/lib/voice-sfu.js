@@ -23,7 +23,7 @@ const RENEW_RETRY_MS = 30_000;
 export class SfuCall {
   constructor({
     me, onSpeaking, onPeers, onScreen, onCamera, onScreenEnd, onCameraEnd, onError,
-    onAudioBlocked, onNoiseFallback, onDropped, onRemoved, onKeyTrouble, onDrainNotice, onMediaLimit, endpoint, joinToken,
+    onAudioBlocked, onNoiseFallback, onNoiseState, onDropped, onRemoved, onKeyTrouble, onDrainNotice, onMediaLimit, endpoint, joinToken,
     iceServers, maxBitrate, policy, e2ee, noiseMode, tokenTtl, renewToken,
   }) {
     this.me = me;
@@ -65,6 +65,7 @@ export class SfuCall {
     this.onError = onError || (() => {});
     this.onAudioBlocked = onAudioBlocked || (() => {});
     this.onNoiseFallback = onNoiseFallback || (() => {});
+    this.onNoiseState = onNoiseState || (() => {});
     // Called when the connection is gone for good, instead of reporting.
     this.onDropped = onDropped || null;
     // The server removed this seat (a moderator, or a sweep that raced a
@@ -228,11 +229,20 @@ export class SfuCall {
       }
       return;
     }
+    // A chain this call already retired is not a working one, whatever else says `neural`.
+    if (this.denoiser?.spent) {
+      await track.stopProcessor?.().catch?.(() => {});
+      this.denoiser = null;
+    }
     if (this.denoiser) return;
 
     try {
       const { neuralProcessor } = await import('./denoise-chain.js');
-      const chain = await openDenoiser((reason) => this.surrender(reason));
+      const chain = await openDenoiser({
+        onOverload: (reason) => this.surrender(reason),
+        onPause: (info) => this.pauseNoise(info),
+        onResume: () => this.resumeNoise(),
+      });
       // `setProcessor` needs an AudioContext already on the track; ours is 48 kHz, which the model needs.
       await chain.open();
       track.setAudioContext?.(chain.context);
@@ -262,26 +272,52 @@ export class SfuCall {
     await this.route();
   }
 
+  /// The model stood aside because the machine is busy; the browser's own suppressor covers the gap, and `resumeNoise` undoes it. The choice itself (`noiseMode`) is untouched.
+  pauseNoise(info) {
+    if (this.noiseMode !== 'neural') return;
+    const track = this.micTrack();
+    track?.applyConstraints?.(micConstraints('browser'))?.catch?.(() => {});
+    try { this.onNoiseState('paused', info); } catch { /* a UI callback must not break the call */ }
+  }
+
+  resumeNoise() {
+    if (this.noiseMode !== 'neural') return;
+    const track = this.micTrack();
+    track?.applyConstraints?.(micConstraints('neural'))?.catch?.(() => {});
+    try { this.onNoiseState('active'); } catch { /* as above */ }
+  }
+
   surrender(reason) {
     if (this.noiseMode !== 'neural') return;
     this.noiseMode = 'browser';
     const track = this.micTrack();
-    this.denoiser?.setBypass?.(true);
+    this.denoiser?.retire?.();
     track?.applyConstraints?.(micConstraints('browser'))?.catch?.(() => {});
     try { this.onNoiseFallback(reason); } catch { /* a UI callback must not break the call */ }
   }
 
   async fetchSession() {
     const base = this.endpoint.replace(/\/$/, '');
-    const resp = await fetch(`${base}/session`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ token: this.joinToken }),
-    });
+    let resp;
+    try {
+      resp = await fetch(`${base}/session`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token: this.joinToken }),
+      });
+    } catch (e) {
+      // Marked here, at the one request that proves it, so a caller can try another relay
+      // without mistaking an unrelated TypeError for "this relay is unreachable".
+      e.relayUnreachable = true;
+      throw e;
+    }
     if (!resp.ok) {
       const failed = new Error(`SFU /session returned ${resp.status}`);
       // So a caller can tell an SFU that answered 'no' from one that is down.
       failed.status = resp.status;
+      // The relay's `{ error, code }` body, so `errorMessage` can say which refusal it was
+      // (`sfu_origin_unverified` is not a permission problem) instead of a sentence for the status.
+      failed.body = await resp.json().catch(() => null);
       throw failed;
     }
     const data = await resp.json();

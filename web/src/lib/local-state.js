@@ -26,7 +26,7 @@ export const CACHE_COSTS = [
 export const IDENTITY_COSTS = [
   'This device’s MLS signing identity. It will be a new device to everyone you talk to, and they will see it as unverified until you verify it again.',
   'The stored group state for every encrypted conversation. Messages already on this device stay readable only if the account’s recovery key can reopen them; anything this device is the last holder of is gone.',
-  'The cached DM recovery keyring, so the next sign-in has to unlock the key vault again — with your recovery key or passphrase, which you will need to have.',
+  'The cached DM recovery keyring, so the next sign-in has to unlock the key vault again — with your recovery key, which you will need to have.',
   'Your session. You will be signed out on this device.',
 ];
 

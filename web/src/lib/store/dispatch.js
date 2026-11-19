@@ -1,3 +1,4 @@
+import { orderParticipants } from '../voice-order.js';
 import { mayInterrupt } from '../interrupts.js';
 import { participants } from '../util.js';
 import { rejoinKey } from '../rejoin.js';
@@ -494,7 +495,7 @@ export const dispatchMethods = {
       else if (d.guild_id && this.channels.get(channelId)?.guild_id !== d.guild_id) continue;
       const at = list.findIndex((v) => v.user_id === d.user_id);
       if (at < 0) continue;
-      if (channelId === d.channel_id && !d.left) Object.assign(list[at], d);
+      if (channelId === d.channel_id && !d.left) { Object.assign(list[at], d); orderParticipants(list); }
       else list.splice(at, 1);
       touched.add(channelId);
     }
@@ -542,7 +543,11 @@ export const dispatchMethods = {
       this.admitSigned(
         d.conversation_id,
         [{ userId: d.sender, deviceId: d.sender_device, ...(signatureKey ? { signatureKey } : {}) }],
-      ).catch(() => {});
+      )
+        // The walk judges whether the asker's leaf is a leftover to replace, which this frame alone cannot tell.
+        .then(() => this.mls.sync(d.conversation_id, list || [d]))
+        .then(() => this.answerRejoins(d.conversation_id))
+        .catch(() => {});
       return;
     }
 
@@ -558,6 +563,10 @@ export const dispatchMethods = {
           this.scheduleSignals(d.conversation_id);
           this.answerRejoins(d.conversation_id);
           if (d.kind === 'commit') this.rereadMembers(d.conversation_id);
+          // A start-over this device was not let into: its old group is gone, so ask to be let in now rather than at the next open or send.
+          if (this.mls.takeReplaced?.(d.conversation_id) && !this.vault?.needs_device) {
+            this.rejoinConversation(d.conversation_id).catch(() => {});
+          }
           // Unopened live frame the gap-fill missed: re-read history once, bounded, so it arrives late not never.
           if (d.kind === 'application'
             && this.dmFrames.has(d.conversation_id)

@@ -273,17 +273,16 @@ describe('sealed sync store', () => {
 
   it('reseals every key from its own copy on the device that rotated the keyring', async () => {
     const account = fakeAccount();
-    const escrowed = keyring({ mode: 'escrowed' });
-    const a = await device(account, escrowed, { current: true });
+    const older = keyring();
+    const a = await device(account, older, { current: true });
     withTheme(a, 'light');
     a.set(KEYS.emojiTone, '3');
     a.set(KEYS.savedStickers, [{ id: 's1', origin: 'guilds.example', name: 'wave' }]);
     a.set(KEYS.drafts, { 'channel:c1': { text: 'kept here', at: Date.now() } });
     await a.push();
-    expect(account.rows[KEYS.drafts]).toBeUndefined();
 
-    account.rows[KEYS.prefs] = await forge(escrowed, KEYS.prefs, { theme: 'planted', muted: {}, collapsed: {} });
-    const rotated = keyring({ retired: [escrowed.raw] });
+    account.rows[KEYS.prefs] = await forge(older, KEYS.prefs, { theme: 'planted', muted: {}, collapsed: {} });
+    const rotated = keyring({ retired: [older.raw] });
     await a.adoptKeyring(rotated, { current: true });
 
     expect(a.get(KEYS.prefs).theme).toBe('light');
@@ -300,19 +299,19 @@ describe('sealed sync store', () => {
 
   it('never takes drafts or saved stickers sealed under a retired key', async () => {
     const account = fakeAccount();
-    const escrowed = keyring({ mode: 'escrowed' });
-    const rotated = keyring({ retired: [escrowed.raw] });
+    const older = keyring();
+    const rotated = keyring({ retired: [older.raw] });
     const a = await device(account, rotated, { current: true });
     a.set(KEYS.savedStickers, [{ id: 's1', origin: 'guilds.example', name: 'wave' }]);
     a.set(KEYS.drafts, { 'channel:c1': { text: 'mine', at: Date.now() } });
     await a.push();
 
     const plant = async (target) => {
-      target.rows[KEYS.drafts] = await forge(escrowed, KEYS.drafts, {
+      target.rows[KEYS.drafts] = await forge(older, KEYS.drafts, {
         'channel:c1': { text: 'planted', at: Date.now() + 60_000 },
         'conversation:d1': { text: 'planted too', at: Date.now() + 60_000 },
       });
-      target.rows[KEYS.savedStickers] = await forge(escrowed, KEYS.savedStickers, [
+      target.rows[KEYS.savedStickers] = await forge(older, KEYS.savedStickers, [
         { id: 'forged', origin: 'evil.example', name: 'forged' },
       ]);
     };
@@ -335,23 +334,23 @@ describe('sealed sync store', () => {
 
   it('refuses any retired-key value once it has seen one under the live key', async () => {
     const account = fakeAccount();
-    const escrowed = keyring({ mode: 'escrowed' });
-    const rotated = keyring({ retired: [escrowed.raw] });
+    const older = keyring();
+    const rotated = keyring({ retired: [older.raw] });
     const a = await device(account, rotated, { current: true });
     a.set(KEYS.emojiTone, '3');
     await a.push();
 
-    account.rows[KEYS.prefs] = await forge(escrowed, KEYS.prefs, { theme: 'planted', muted: {}, collapsed: {} });
+    account.rows[KEYS.prefs] = await forge(older, KEYS.prefs, { theme: 'planted', muted: {}, collapsed: {} });
     await a.load(account.api);
     expect(a.get(KEYS.prefs).theme).toBe('dark');
     expect(warn).toHaveBeenCalledWith('retired-key sync value refused', KEYS.prefs);
 
-    account.rows[KEYS.prefs] = await forge(escrowed, KEYS.prefs, { theme: 'planted', muted: {}, collapsed: {} });
+    account.rows[KEYS.prefs] = await forge(older, KEYS.prefs, { theme: 'planted', muted: {}, collapsed: {} });
     const fresh = await device(account, rotated);
     expect(fresh.get(KEYS.prefs).theme).toBe('dark');
     expect(fresh.get(KEYS.emojiTone)).toBe('3');
 
-    account.rows = { [KEYS.prefs]: await forge(escrowed, KEYS.prefs, { theme: 'planted', muted: {}, collapsed: {} }) };
+    account.rows = { [KEYS.prefs]: await forge(older, KEYS.prefs, { theme: 'planted', muted: {}, collapsed: {} }) };
     const reloaded = new SyncStore();
     await reloaded.load(account.api);
     await reloaded.adoptKeyring(rotated);
@@ -383,16 +382,6 @@ describe('sealed sync store', () => {
     expect(draftText(b.get(KEYS.drafts), 'conversation:d1')).toBe('from b');
   });
 
-  it('keeps drafts on the device while the home can open the keyring', async () => {
-    const account = fakeAccount();
-    const a = await device(account, keyring({ mode: 'escrowed' }));
-    a.set(KEYS.drafts, { 'channel:c1': { text: 'unsent', at: Date.now() } });
-    withTheme(a, 'light');
-    await a.push();
-    expect(account.rows[KEYS.drafts]).toBeUndefined();
-    expect(isSealed(account.rows[KEYS.prefs].value)).toBe(true);
-  });
-
   it('deletes the legacy plaintext drafts key unread and keeps what this browser held', async () => {
     localStorage.setItem('telium.sync.v1', JSON.stringify({
       'drafts.v1': { value: { 'channel:local': 'device-local text' }, updated_at: 1 },
@@ -419,7 +408,7 @@ describe('a new device recovers the sealed store wherever the keyring is recover
     const home = new FakeVaultHome();
     const opaque = crypto.getRandomValues(new Uint8Array(32));
     const recovery = generateAccountRecovery();
-    const first = await load(home, null, USER, opaque, recovery.vaultWrapper);
+    const first = await load(home, USER, opaque, recovery.vaultWrapper);
     expect(first.created).toBe(true);
 
     const account = fakeAccount();
@@ -430,7 +419,7 @@ describe('a new device recovers the sealed store wherever the keyring is recover
     await a.push();
 
     globalThis.indexedDB = new IDBFactory();
-    const byPassword = await load(home, null, USER, opaque, null);
+    const byPassword = await load(home, USER, opaque, null);
     const b = await device(account, byPassword);
     expect(b.get(KEYS.prefs).theme).toBe('light');
     expect(draftText(b.get(KEYS.drafts), 'conversation:d1')).toBe('half a thought');
@@ -439,14 +428,14 @@ describe('a new device recovers the sealed store wherever the keyring is recover
     globalThis.indexedDB = new IDBFactory();
     const elsewhere = moved(account);
     const byRecoveryKey = await load(
-      home, null, '@alice:b.example', crypto.getRandomValues(new Uint8Array(32)),
+      home, '@alice:b.example', crypto.getRandomValues(new Uint8Array(32)),
       recoveryVaultWrapper(recovery.text),
     );
     const c = await device(elsewhere, byRecoveryKey, { current: true });
     expect(c.get(KEYS.prefs).theme).toBe('light');
     expect(draftText(c.get(KEYS.drafts), 'conversation:d1')).toBe('half a thought');
 
-    const handed = decodeRecoveryTransfer(encodeRecoveryTransfer(first), 'device_custody');
+    const handed = decodeRecoveryTransfer(encodeRecoveryTransfer(first));
     const d = await device(account, handed);
     expect(d.get(KEYS.prefs).theme).toBe('light');
 

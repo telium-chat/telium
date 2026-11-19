@@ -3,12 +3,13 @@ import { useVoice } from '../../hooks/useVoice.jsx';
 import {
   ChoiceCard, ChoiceList, Hint, MicIcon, MicOffIcon, Section, SignalIcon, Spinner,
 } from '../../components/index.js';
+import { t } from '../../lib/i18n/index.js';
 import { unavailableBecause } from '../../lib/denoise.js';
 
 const MODES = [
   ['off', 'Off', 'Send the microphone as it is.', MicOffIcon],
   ['browser', 'Standard', 'Your browser’s own suppressor. Free, and good at steady noise — a fan, a hum, traffic.', MicIcon],
-  ['neural', 'Neural', 'A small model runs on this device and removes noise the standard one leaves behind.', SignalIcon],
+  ['neural', 'Neural', 'A model runs on this device and removes what the standard one leaves behind: keyboards, hum, other voices.', SignalIcon],
 ];
 
 export function VoicePane() {
@@ -44,9 +45,11 @@ export function VoicePane() {
         ))}
       </ChoiceList>
       <Hint>
-        Neural uses noticeably more battery and CPU, and about 20 ms more delay.
-        If it cannot keep up mid-call, Telium switches back to standard and says so.
+        Neural uses noticeably more battery and CPU, and up to 40 ms more delay than standard.
+        If the device gets busy mid-call, the model steps aside and comes back on its own; your choice here is never changed.
       </Hint>
+      {voice.noiseMode === 'neural' && voice.noiseState && voice.noiseState !== 'active'
+        ? <Hint>{t(`voice.noise.${voice.noiseState}`)}</Hint> : null}
     </Section>
   );
 }

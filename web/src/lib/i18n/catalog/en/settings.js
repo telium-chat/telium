@@ -47,9 +47,9 @@ export const settings = {
   // and a name cited in five translated sentences cannot go on living in a
   // file no translator ever opens.
   //
-  // The five are `chat.encryption.custody.escrowed`,
-  // `chat.encryption.escrowedNote`, `chat.encryption.vaultLocked.body`,
-  // `chat.encryption.recoveryFallback.body` and `security.devices.cannotSign`.
+  // The five are `chat.encryption.custody.retired`,
+  // `chat.encryption.retired.body`, `chat.encryption.vaultLocked.body`,
+  // `auth.reset.historyLocked` and `security.devices.cannotSign`.
   // Each interpolates this entry as `{pane}` instead of spelling it out. That
   // is the whole reason the key exists: an instruction that names a control is
   // wrong the instant the two spellings drift, and two spellings in two
@@ -71,7 +71,7 @@ export const settings = {
   // drawn twice, so there is one key and not a `nav` and a `title`.
   //
   // "Key" here is the recovery key that opens your message history -- not a
-  // password, and not the passphrase, which is one of the ways to get at it.
+  // password.
   // The pane is named for what somebody arrives looking for rather than for
   // the machinery behind it (the keyring, the vault, the recovery parts), so
   // a language with a choice between the everyday word for a key and a
@@ -280,7 +280,38 @@ export const settings = {
   'settings.media.tier3': 'Another host',
   'settings.media.tier3Desc': 'Files go to a third-party host such as Gofile. Those files are public URLs.',
   'settings.media.usage': '{used} of {quota} used on {home}.',
-  'settings.media.usageWarn': '{used} of {quota} used on {home}. Delete files you no longer need from your messages, or move uploads to another host.',
+  'settings.media.usageWarn': '{used} of {quota} used on {home}. Delete files you no longer need under Your uploads in settings, or move uploads to another host.',
+  // The "Your uploads" pane: what is using the quota, and how to give it back.
+  'settings.uploads.title': 'Your uploads',
+  'settings.uploads.intro': 'Files you have sent through {home}, largest first. Deleting one frees its space straight away, and the file disappears from the messages that show it.',
+  'settings.uploads.usageLabel': 'Upload quota used',
+  'settings.uploads.usageNoQuota': '{used} stored. This server sets no upload limit for your account.',
+  'settings.uploads.otherBytes': '{size} more is used by profile pictures, banners and emoji. They are still in use, so they are not listed here; change them from their own settings.',
+  'settings.uploads.emptyTitle': 'No uploaded files',
+  'settings.uploads.emptyBody': 'Files you attach to messages will show up here.',
+  'settings.uploads.selectAll': 'Select all',
+  'settings.uploads.clear': 'Clear selection',
+  'settings.uploads.deleteNone': 'Delete selected',
+  'settings.uploads.deleteSelected': 'Delete {count} selected ({size})',
+  'settings.uploads.inMessages': '{count, plural, one {In # message} other {In # messages}}',
+  'settings.uploads.shared': 'Another account uploaded the same file, so it can\'t be deleted from here',
+  'settings.uploads.unsupported': '{home} is running a version that can\'t list uploads yet. Ask its operator to update.',
+  'settings.uploads.closed': '{used} stored on {home}. New uploads are turned off for your account, so there is no quota to free up, but you can still delete what is here.',
+  'settings.uploads.encrypted': 'Encrypted file (direct message)',
+  'settings.uploads.encryptedNote': 'The server can\'t see its name or whether a message still shows it',
+  'settings.uploads.noExpiry': 'Does not expire',
+  'settings.uploads.expires': 'Expires {when} ({date})',
+  'settings.uploads.expired': 'Expired {when}; being removed',
+  'settings.uploads.show': 'Show in chat',
+  'settings.uploads.showFailed': 'Couldn\'t find that message. It may have been deleted, or you may no longer be in that channel.',
+  'settings.uploads.more': 'Show more',
+  'settings.uploads.retry': 'Try again',
+  'settings.uploads.loadFailed': 'Could not load your uploads.',
+  'settings.uploads.confirmTitle': '{count, plural, one {Delete # file?} other {Delete # files?}}',
+  'settings.uploads.confirmBody': '{count, plural, one {This permanently deletes # file and frees {size}. Messages that show it will lose the file.} other {This permanently deletes # files and frees {size}. Messages that show them will lose the files.}} This cannot be undone.',
+  'settings.uploads.confirmAction': 'Delete permanently',
+  'settings.uploads.freed': '{count, plural, one {Deleted # file, freed {freed}.} other {Deleted # files, freed {freed}.}}',
+  'settings.uploads.partial': '{count, plural, one {Deleted # file, freed {freed}.} other {Deleted # files, freed {freed}.}} {skipped} could not be deleted.',
   'settings.media.savedToast': 'Upload host saved.',
   'settings.media.saveFailed': 'Could not save upload host',
   'settings.media.hostLabel': 'Media host',

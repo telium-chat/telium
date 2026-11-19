@@ -1,6 +1,45 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Which HTTPS front end this host should use. Read-only: inspects what is
+# installed and which programs already own ports 80/443, changes nothing.
+# Sets PROXY_OPTIONS (valid choices), PROXY_RECOMMENDED and PROXY_NOTE.
+#   caddy-new       nothing is using 80/443: install Caddy (like the native server installer)
+#   caddy-existing  Caddy is already installed: add one file, never replace its config
+#   nginx-existing  nginx is already installed: add one server file, never touch other sites
+detect_proxy() {
+  local has_caddy=0 has_nginx=0 busy="" caddy_live=0 nginx_live=0 other=""
+  command -v caddy >/dev/null 2>&1 && has_caddy=1
+  command -v nginx >/dev/null 2>&1 && has_nginx=1
+  if command -v ss >/dev/null 2>&1; then
+    busy="$(ss -ltnpH '( sport = :80 or sport = :443 )' 2>/dev/null || true)"
+  fi
+  grep -q '"caddy"' <<<"$busy" && caddy_live=1
+  grep -q '"nginx"' <<<"$busy" && nginx_live=1
+  other="$(grep -v -e '"caddy"' -e '"nginx"' <<<"$busy" | grep -o '"[^"]*"' | sort -u | tr -d '"' | paste -sd, - || true)"
+  PROXY_OPTIONS=()
+  PROXY_NOTE=""
+  (( has_caddy )) && PROXY_OPTIONS+=(caddy-existing)
+  (( has_nginx )) && PROXY_OPTIONS+=(nginx-existing)
+  if (( ! has_caddy && ! has_nginx )); then
+    if [[ -n "$other" ]]; then
+      PROXY_NOTE="Port 80 or 443 is already used by: $other. The installer will not take it over; use the portable installation with your own reverse proxy."
+    else
+      PROXY_OPTIONS+=(caddy-new)
+    fi
+  fi
+  PROXY_RECOMMENDED="${PROXY_OPTIONS[0]:-}"
+  if (( nginx_live && ! caddy_live && has_nginx )); then PROXY_RECOMMENDED=nginx-existing; fi
+}
+
+if [[ "${1:-}" == "--detect-proxy" ]]; then
+  detect_proxy
+  echo "options=$(IFS=,; echo "${PROXY_OPTIONS[*]:-}")"
+  echo "recommended=$PROXY_RECOMMENDED"
+  echo "note=$PROXY_NOTE"
+  exit 0
+fi
+
 if [[ ${EUID} -ne 0 ]]; then
   echo "Please run this installer with sudo/root." >&2
   echo "Example: sudo ./sfu/install.sh" >&2
@@ -8,38 +47,73 @@ if [[ ${EUID} -ne 0 ]]; then
 fi
 
 export DEBIAN_FRONTEND=noninteractive
+CADDYFILE=/etc/caddy/Caddyfile
+CADDY_SNIPPET=/etc/caddy/telium-sfu.caddy
+die() { echo "error: $*" >&2; exit 1; }
+
+# The browser installer asks the operator and passes the answer in
+# TELIUM_SFU_PROXY (and TELIUM_SFU_CADDYFILE_EDIT=yes if they agreed to the
+# one line added to their Caddyfile). Run directly, ask here; with no way to
+# ask, stop rather than guess.
+PROXY="${TELIUM_SFU_PROXY:-}"
+if [[ -z "$PROXY" && -f /etc/telium/sfu-proxy ]]; then
+  # A rerun on a host that is already set up keeps its existing front end.
+  case "$(cat /etc/telium/sfu-proxy)" in
+    caddy) PROXY=caddy-existing ;;
+    nginx) PROXY=nginx-existing ;;
+  esac
+  [[ -z "$PROXY" ]] || echo "Keeping the HTTPS front end chosen earlier: $PROXY"
+fi
+if [[ -z "$PROXY" ]]; then
+  detect_proxy
+  [[ -n "$PROXY_RECOMMENDED" ]] || die "${PROXY_NOTE:-no supported HTTPS front end found}"
+  [[ -t 0 && -t 1 ]] || die "cannot ask which HTTPS front end to use without a terminal. Set TELIUM_SFU_PROXY to one of: ${PROXY_OPTIONS[*]}"
+  echo "Detected HTTPS front end options: ${PROXY_OPTIONS[*]} (recommended: $PROXY_RECOMMENDED)"
+  read -r -p "Use $PROXY_RECOMMENDED? [y/N] " answer
+  [[ "$answer" =~ ^[Yy] ]] || die "cancelled; nothing was changed"
+  PROXY="$PROXY_RECOMMENDED"
+  if [[ "$PROXY" == caddy-existing && ! -f /etc/telium/sfu-proxy ]]; then
+    read -r -p "Add 'import $CADDY_SNIPPET' to the end of your existing $CADDYFILE (a backup is saved first)? [y/N] " answer
+    [[ "$answer" =~ ^[Yy] ]] && TELIUM_SFU_CADDYFILE_EDIT=yes
+  fi
+fi
+case "$PROXY" in
+  caddy-new|caddy-existing|nginx-existing) ;;
+  *) die "unknown TELIUM_SFU_PROXY '$PROXY' (use caddy-new, caddy-existing or nginx-existing)" ;;
+esac
+echo "HTTPS front end: $PROXY"
 
 echo "[1/7] Installing system packages..."
 apt-get update -y
-apt-get install -y curl ca-certificates nginx certbot python3-certbot-nginx   build-essential pkg-config libssl-dev openssl git python3 sudo tar
+packages=(curl ca-certificates openssl python3 sudo tar)
+# nginx and Caddy are never installed here when they are already present: the
+# only extra package for nginx is Certbot's nginx plugin.
+[[ "$PROXY" != nginx-existing ]] || packages+=(certbot python3-certbot-nginx)
+apt-get install -y "${packages[@]}"
 
 if ! id telium-sfu >/dev/null 2>&1; then
   useradd --system --home /var/lib/telium-sfu --create-home --shell /usr/sbin/nologin telium-sfu
 fi
 
-echo "[2/7] Locating Telium source..."
+echo "[2/7] Locating installer files..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "$SCRIPT_DIR/Cargo.toml" && -f "$SCRIPT_DIR/../telium-protocol/Cargo.toml" ]]; then
-  SRC_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-else
-  TMP_SRC="$(mktemp -d)"
-  trap 'rm -rf "$TMP_SRC"' EXIT
-  curl -fsSL https://github.com/telium-chat/telium/archive/refs/heads/main.tar.gz -o "$TMP_SRC/telium.tar.gz"
-  tar xzf "$TMP_SRC/telium.tar.gz" -C "$TMP_SRC"
-  SRC_ROOT="$TMP_SRC/telium-main"
-  SCRIPT_DIR="$SRC_ROOT/sfu"
-fi
 
-echo "[3/7] Building telium-sfu..."
-if ! command -v cargo >/dev/null 2>&1 || ! rustc --version 2>/dev/null | grep -Eq 'rustc 1\.(8[2-9]|9[0-9])|rustc [2-9]\.'; then
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-  source /root/.cargo/env
-fi
-(
-  cd "$SCRIPT_DIR"
-  cargo build --release --bin telium-sfu
-)
-install -m 0755 "$SCRIPT_DIR/target/release/telium-sfu" /usr/local/bin/telium-sfu
+echo "[3/7] Downloading the telium-sfu release..."
+case "$(uname -m)" in
+  x86_64|amd64) sfu_arch="x86_64" ;;
+  aarch64|arm64) sfu_arch="aarch64" ;;
+  *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+sfu_asset="telium-sfu-linux-${sfu_arch}.tar.gz"
+sfu_base="https://github.com/telium-chat/telium/releases/download/sfu-latest"
+sfu_tmp="$(mktemp -d)"
+trap 'rm -rf "$sfu_tmp"' EXIT
+curl -fsSL --retry 3 --max-time 900 "$sfu_base/$sfu_asset" -o "$sfu_tmp/$sfu_asset"
+curl -fsSL --retry 3 --max-time 60 "$sfu_base/$sfu_asset.sha256" -o "$sfu_tmp/$sfu_asset.sha256"
+( cd "$sfu_tmp" && sha256sum -c "$sfu_asset.sha256" )
+tar -xzf "$sfu_tmp/$sfu_asset" -C "$sfu_tmp" telium-sfu
+install -m 0755 "$sfu_tmp/telium-sfu" /usr/local/bin/telium-sfu
+rm -rf "$sfu_tmp"; trap - EXIT
 
 echo "[4/7] Installing LiveKit..."
 if ! command -v livekit-server >/dev/null 2>&1; then
@@ -145,7 +219,7 @@ fi
 cat > /etc/systemd/system/telium-sfu.service <<'EOF'
 [Unit]
 Description=Telium SFU
-After=network-online.target nginx.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -163,35 +237,66 @@ PrivateTmp=true
 WantedBy=multi-user.target
 EOF
 
-if [[ ! -f /var/lib/telium-sfu/state/admin-password && ! -e /etc/nginx/sites-enabled/telium-sfu.conf ]]; then  cat > /etc/nginx/sites-available/telium-sfu-bootstrap.conf <<'EOF'
-server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-    server_name _;
-
-    location /admin {
-        proxy_pass http://127.0.0.1:7891;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location / {
-        default_type text/plain;
-        return 200 "Telium SFU setup is available at /admin\n";
-    }
+# --- HTTPS front end -------------------------------------------------------
+# Nothing here removes or replaces an existing proxy's configuration. The
+# dashboard adds the real domains later (sfu/scripts/admin-helper.sh).
+install -d -m 0755 /etc/telium
+case "$PROXY" in
+  caddy-new|caddy-existing)
+    if [[ "$PROXY" == caddy-new ]] && ! command -v caddy >/dev/null 2>&1; then
+      echo "Installing Caddy (apt-get install caddy)..."
+      apt-get install -y caddy || die "could not install Caddy; install it yourself (https://caddyserver.com/docs/install) and rerun"
+    fi
+    systemctl cat caddy.service >/dev/null 2>&1 ||
+      die "Caddy is installed but has no caddy.service. Add 'import $CADDY_SNIPPET' to your Caddyfile yourself, then rerun"
+    install -d -m 0755 /etc/caddy
+    [[ -e "$CADDY_SNIPPET" ]] || {
+      if [[ "$PROXY" == caddy-new ]]; then
+        # Setup page on this machine's address until the domains are entered.
+        cat > "$CADDY_SNIPPET" <<'SNIP'
+# Written by Telium SFU setup. Replaced by the dashboard once you enter domains.
+:80 {
+	handle /admin* {
+		reverse_proxy 127.0.0.1:7891
+	}
+	handle {
+		respond "Telium SFU setup is available at /admin" 200
+	}
 }
-EOF
-  rm -f /etc/nginx/sites-enabled/default
-  ln -sfn /etc/nginx/sites-available/telium-sfu-bootstrap.conf /etc/nginx/sites-enabled/telium-sfu-bootstrap.conf
-  nginx -t
-fi
+SNIP
+      else
+        printf '# Written by Telium SFU setup. The dashboard adds your SFU and LiveKit sites here.\n' > "$CADDY_SNIPPET"
+      fi
+    }
+    import_line="import $CADDY_SNIPPET"
+    if ! grep -qxF "$import_line" "$CADDYFILE" 2>/dev/null; then
+      if [[ ! -s "$CADDYFILE" ]] || grep -q 'The Caddyfile is an easy way to configure your Caddy web server' "$CADDYFILE"; then
+        printf '# Written by Telium SFU setup.\n{\n\tadmin 127.0.0.1:2019\n}\n%s\n' "$import_line" > "$CADDYFILE"
+      else
+        [[ "${TELIUM_SFU_CADDYFILE_EDIT:-}" == yes ]] ||
+          die "your $CADDYFILE has its own settings and you did not agree to change it, so it was left untouched. Add this line to it yourself, then rerun: $import_line"
+        cp -p "$CADDYFILE" "$CADDYFILE.telium-sfu.bak"
+        printf '\n%s\n' "$import_line" >> "$CADDYFILE"
+        if ! caddy validate --config "$CADDYFILE" --adapter caddyfile >/dev/null 2>&1; then
+          cp -p "$CADDYFILE.telium-sfu.bak" "$CADDYFILE"
+          die "Caddy rejected the configuration, so $CADDYFILE was restored from its backup (nothing changed)"
+        fi
+        echo "Added '$import_line' to $CADDYFILE (backup: $CADDYFILE.telium-sfu.bak)"
+      fi
+    fi
+    caddy validate --config "$CADDYFILE" --adapter caddyfile >/dev/null 2>&1 ||
+      die "Caddy rejected its configuration; see: caddy validate --config $CADDYFILE --adapter caddyfile"
+    systemctl enable --now caddy
+    systemctl reload caddy || systemctl restart caddy
+    echo caddy > /etc/telium/sfu-proxy
+    ;;
+  nginx-existing)
+    nginx -t >/dev/null 2>&1 || echo "warning: 'nginx -t' reports a problem with your existing nginx configuration; fix it before configuring domains"
+    echo nginx > /etc/telium/sfu-proxy
+    ;;
+esac
 
 systemctl daemon-reload
-systemctl enable --now nginx
-systemctl reload nginx
 systemctl enable telium-sfu
 systemctl restart telium-sfu
 
@@ -234,16 +339,24 @@ else
   line="$(journalctl -u telium-sfu -n 100 --no-pager 2>/dev/null | grep 'FIRST-RUN SETUP:' | tail -1 || true)"
   if [[ -n "$line" ]]; then
     url="$(printf '%s\n' "$line" | sed -n 's/.*open \(http[^ ]*\).*/\1/p')"
-    url="${url/http:\/\/SERVER_IP:7891/http:\/\/$public_ip}"
+    if [[ "$PROXY" == caddy-new ]]; then
+      url="${url/http:\/\/SERVER_IP:7891/http:\/\/$public_ip}"
+    else
+      # Your existing proxy is not touched before you enter domains, so the
+      # setup page is reached over an SSH tunnel to the dashboard's local port.
+      url="${url/http:\/\/SERVER_IP:7891/http:\/\/localhost:7891}"
+      tunnel_hint="  From your own computer first run: ssh -L 7891:127.0.0.1:7891 USER@$public_ip"
+    fi
     echo
     echo "=============================================================="
     echo "Telium SFU is installed."
     echo
     echo "Open this one-time setup URL:"
     echo "  $url"
+    [[ -z "${tunnel_hint:-}" ]] || echo "$tunnel_hint"
     echo
     echo "The wizard will create your admin password, configure the SFU,"
-    echo "set up nginx + Let's Encrypt, and leave you with a dashboard."
+    echo "set up HTTPS through $PROXY, and leave you with a dashboard."
     echo "=============================================================="
   else
     echo "Telium SFU started, but the setup URL was not found in the journal yet."

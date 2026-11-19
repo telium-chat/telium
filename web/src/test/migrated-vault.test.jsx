@@ -64,7 +64,7 @@ async function migrated() {
   const recovery = generateAccountRecovery();
   const oldWrapper = crypto.getRandomValues(new Uint8Array(32));
   const old = new FakeVaultHome();
-  const original = await load(old, null, OLD_USER, oldWrapper, recovery.vaultWrapper);
+  const original = await load(old, OLD_USER, oldWrapper, recovery.vaultWrapper);
   expect(old.held.mode).toBe('opaque_custody');
   expect(old.held.independent_ciphertext).toMatch(/^k1\./);
 
@@ -87,18 +87,18 @@ describe('a vault that moved with its account', () => {
   it('is locked at the new server until the recovery key opens it, then re-wrapped', async () => {
     const { recovery, original, destination, newWrapper } = await migrated();
 
-    const locked = await load(destination, null, NEW_USER, newWrapper);
+    const locked = await load(destination, NEW_USER, newWrapper);
     expect(locked.locked).toBe(true);
     expect(locked.needs_recovery_key).toBe(true);
     expect(locked.needs_password).toBe(false);
     expect(destination.modeChanges).toBe(0);
 
     const other = generateAccountRecovery();
-    const wrong = await load(destination, null, NEW_USER, newWrapper, other.vaultWrapper);
+    const wrong = await load(destination, NEW_USER, newWrapper, other.vaultWrapper);
     expect(wrong.locked).toBe(true);
     expect(wrong.needs_recovery_key).toBe(true);
 
-    const opened = await load(destination, null, NEW_USER, newWrapper, recovery.vaultWrapper);
+    const opened = await load(destination, NEW_USER, newWrapper, recovery.vaultWrapper, { reseal: true });
     expect(opened.locked).toBeFalsy();
     expect(b64(opened.raw)).toBe(b64(original.raw));
     expect(destination.modeChanges).toBe(1);
@@ -107,7 +107,7 @@ describe('a vault that moved with its account', () => {
     await expect(open(newWrapper, destination.held.ciphertext)).resolves.toBeTruthy();
 
     globalThis.indexedDB = new IDBFactory();
-    const routine = await load(destination, null, NEW_USER, newWrapper);
+    const routine = await load(destination, NEW_USER, newWrapper);
     expect(routine.locked).toBeFalsy();
     expect(b64(routine.raw)).toBe(b64(original.raw));
   });
@@ -118,10 +118,11 @@ describe('a vault that moved with its account', () => {
     store.session = { home: { user_id: NEW_USER, device_id: 'd1' } };
     store.home = destination;
     store.authRecoveryWrapper = newWrapper;
-    store.vault = await load(destination, null, NEW_USER, newWrapper);
+    store.vault = await load(destination, NEW_USER, newWrapper);
     expect(store.vault.locked).toBe(true);
 
-    await expect(store.unlockVault('not the key')).rejects.toThrow(/passphrase/);
+    // Only a recovery key opens a vault now; anything else is refused as not being one (it used to be tried as a passphrase).
+    await expect(store.unlockVault('not the key')).rejects.toThrow(/not a recovery key/);
     await expect(store.unlockVault('telium-recovery-v1-AA')).rejects.toThrow(/malformed/i);
     const otherKey = generateAccountRecovery().text;
     await expect(store.unlockVault(otherKey)).rejects.toThrow(/recovery key did not open/);
@@ -141,7 +142,7 @@ describe('a vault that moved with its account', () => {
     store.session = { home: { user_id: NEW_USER, device_id: 'd1' } };
     store.home = destination;
     store.authRecoveryWrapper = newWrapper;
-    store.vault = await load(destination, null, NEW_USER, newWrapper);
+    store.vault = await load(destination, NEW_USER, newWrapper);
     store.custody = await destination.vaultMode();
     store.friendsIn = () => [];
 

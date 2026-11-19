@@ -95,8 +95,11 @@ pub async fn control_handler(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     maybe_discover(&state.trust, &body).await;
 
-    if !state.trust.read().await.verify_json(&body) {
-        return Err((StatusCode::FORBIDDEN, Json(json!({ "error": "bad signature" }))));
+    {
+        let trust = state.trust.read().await;
+        if !trust.verify_json(&body) {
+            return Err((StatusCode::FORBIDDEN, Json(trust.rejection(&body))));
+        }
     }
 
     // Replay inside the window is accepted: commands are idempotent, and a nonce store is an allocation DoS.

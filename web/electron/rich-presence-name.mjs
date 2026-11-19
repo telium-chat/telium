@@ -256,8 +256,9 @@ export function createApplicationNameResolver({
     const needsApplicationBadge = Boolean(
       customLarge && !customSmall && externalArtworkUrl(assets.large_image),
     );
-    if ((!customLarge || needsApplicationBadge) && !known?.icon) {
-      known = await ensureRemote(id);
+    // Asked once per session even when the bundled list has an icon: those hashes go stale when a game changes its icon (THE FINALS' did), and a stale one is a 404 on Discord's CDN. Showing the icon fetches it from that CDN anyway, so the lookup tells Discord nothing new; if it fails, the bundled hash is still tried.
+    if (!customLarge || needsApplicationBadge) {
+      known = (await ensureRemote(id)) || known;
     }
 
     const applicationIcon = appIconUrl(id, known?.icon);

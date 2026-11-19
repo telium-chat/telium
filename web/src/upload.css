@@ -172,6 +172,12 @@
   cursor: default;
 }
 
+.upload-info {
+  display: inline-flex;
+  cursor: help;
+  color: var(--muted);
+}
+
 .upload-note {
   max-width: 260px;
   padding-block: 6px 4px;

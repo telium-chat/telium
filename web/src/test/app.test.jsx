@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from '../App.jsx';
@@ -342,6 +342,24 @@ describe('the client', () => {
     expect(await within(dialog).findByRole('button', { name: 'Open Carol’s profile' })).toBeTruthy();
     expect(within(dialog).queryByText('@carol:home.example')).toBeNull();
 
+    // A mutual friend opens as a full card, not the popover.
+    await user.click(within(dialog).getByRole('button', { name: 'Open Carol’s profile' }));
+    await waitFor(() => {
+      const open = screen.getAllByRole('dialog');
+      expect(open.some((d) => !d.closest('.popover') && /Carol/.test(d.textContent))).toBe(true);
+      expect(open.some((d) => d.closest('.popover'))).toBe(false);
+    });
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await user.click(within(members).getByText('Bob'));
+    await user.click(await within(await screen.findByRole('dialog')).findByRole('button', { name: 'Open full profile' }));
+    dialog = await waitFor(() => {
+      const full = screen.getAllByRole('dialog').find((d) => !d.closest('.popover'));
+      expect(full).toBeTruthy();
+      return full;
+    });
+    await user.click(within(dialog).getByRole('tab', { name: /mutual friends?$/i }));
+
     await user.click(within(dialog).getByRole('tab', { name: /mutual servers?$/i }));
     expect(await within(dialog).findByTitle(/\(guilds\.example\)$/)).toBeTruthy();
 
@@ -454,6 +472,50 @@ describe('the client', () => {
     expect(banner.textContent).toMatch(/Other servers are unaffected/);
     expect(store.signedIn).toBe(true);
     expect(screen.getByTitle(/Telium - guilds\.example is degraded/)).toBeTruthy();
+  });
+
+  it('says so when the homeserver cannot be reached for the encryption keys, and offers a retry', async () => {
+    const { store, user } = await boot();
+    expect(screen.queryByText(/Can't reach/)).toBeNull();
+    const retry = vi.spyOn(store, 'retryStartup').mockResolvedValue();
+
+    act(() => {
+      store.vaultPending = true;
+      store.emit('startup');
+    });
+
+    const banner = await screen.findByText(/to unlock your encrypted messages/, {}, { timeout: 5000 });
+    expect(banner.textContent).toMatch(/Can't reach home\.example/);
+    await user.click(screen.getByRole('button', { name: 'Try again now' }));
+    expect(retry).toHaveBeenCalled();
+
+    act(() => {
+      store.vaultPending = false;
+      store.emit('startup');
+    });
+    await waitFor(() => expect(screen.queryByText(/Can't reach/)).toBeNull());
+  });
+
+  it('says so, with the age of the saved view, when the start itself could not reach the homeserver', async () => {
+    const { store } = await boot();
+    act(() => {
+      store.cachedAt = Date.now() - 60_000;
+      store.startDegraded = true;
+      store.emit('startup');
+    });
+    const banner = await screen.findByText(/Showing your last saved view/, {}, { timeout: 5000 });
+    expect(banner.textContent).toMatch(/Can't reach home\.example/);
+    act(() => { store.startDegraded = false; store.cachedAt = null; store.emit('startup'); });
+  });
+
+  it('does not blame the network for an encryption failure that is not about it', async () => {
+    const { store } = await boot();
+    act(() => {
+      store.mls = null;
+      store.encryptionUnanswered = false;
+      store.emit('startup');
+    });
+    expect(store.homeUnreachable()).toBe(false);
   });
 
 function seedSession(origins, { expiresAt = Date.now() + 3_600_000 } = {}) {
@@ -624,12 +686,13 @@ function seedSession(origins, { expiresAt = Date.now() + 3_600_000 } = {}) {
     expect(receive.textContent).toContain('Nothing has moved yet.');
     expect(receive.textContent).toContain('Now go back to the old server.');
   });
-  it('falls back to trusted-device recovery on a pre-OPAQUE homeserver', async () => {
+  it('creates no recovery vault on a pre-OPAQUE homeserver', async () => {
+    // Used to fall back to a `device_custody` vault. Custody is made only with the password-derived wrapper now, and a
+    // pre-OPAQUE login has none: the vault stays locked and nothing is written.
     const { server, store, user } = await boot({ opaqueAuth: false });
-    await waitFor(() => expect(store.vault?.raw).toBeTruthy());
-    const held = server.state.vaults.get('@alice:home.example');
-    expect(held.mode).toBe('device_custody');
-    expect(held.escrow_key).toBe(null);
+    await waitFor(() => expect(store.vault?.locked).toBe(true));
+    expect(store.vault.needs_password).toBe(true);
+    expect(server.state.vaults.get('@alice:home.example')).toBeUndefined();
 
     await user.click(screen.getByTitle('Settings'));
     const dialog = await screen.findByRole('dialog');
@@ -638,7 +701,8 @@ function seedSession(origins, { expiresAt = Date.now() + 3_600_000 } = {}) {
     ));
 
     const how = await within(dialog).findByText('How this account recovers');
-    expect(how.nextElementSibling.textContent).toMatch(/^Trusted-device recovery\./);
+    // Was /^Trusted-device recovery\./ while the fallback vault existed.
+    expect(how.nextElementSibling.textContent).toBe('Not established yet');
     expect(within(dialog).queryByText(/server-assisted recovery is still active/i)).toBeNull();
   });
 
@@ -825,17 +889,19 @@ function seedSession(origins, { expiresAt = Date.now() + 3_600_000 } = {}) {
     expect(await synced(server, store, 'emoji.tone.v1')).toBe('\u{1F3FD}');
   });
 
-  it('knows who holds the key even when the vault itself would not open', async () => {
+  it('knows the custody a vault is stored in even when it will not be opened, and shows it as retired and locked', async () => {
+    // Phase 4: an escrowed vault is refused. The server no longer serves a key for it, and the client never opens it.
     const { store } = await boot({
       vaults: new Map([['@alice:home.example', {
         mode: 'escrowed',
-        escrow_key: btoa(String.fromCharCode(...new Uint8Array(32))),
         ciphertext: 'AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAAAAAAAA',
       }]]),
     });
     await waitFor(() => expect(store.custody?.mode).toBe('escrowed'));
-    expect(store.custody.server_can_recover).toBe(true);
-    expect(store.vault).toBe(null);
+    expect(store.custody.server_can_recover).toBeUndefined();
+    await waitFor(() => expect(store.vault?.retiredMode).toBe('escrowed'));
+    expect(store.vault.locked).toBe(true);
+    expect(store.vault.key).toBeNull();
   });
 
   it('keeps paging past the hot window when cold segments say there is more', async () => {

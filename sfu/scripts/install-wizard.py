@@ -34,6 +34,66 @@ def validate_directory(value):
     return value.rstrip("/")
 
 
+PROXY_CHOICES = {
+    "caddy-new": ("Install Caddy",
+        "Nothing is using ports 80/443, so Caddy is installed and gets the HTTPS certificates itself "
+        "(the same as the homeserver installer)."),
+    "caddy-existing": ("Use your existing Caddy",
+        "Caddy stays as it is. Telium adds one new file, /etc/caddy/telium-sfu.caddy, for its two sites."),
+    "nginx-existing": ("Use your existing nginx",
+        "nginx stays as it is: no default site is removed or replaced. Telium adds one new server file for "
+        "its two hostnames and installs Certbot's nginx plugin to get certificates for those two names only."),
+}
+
+
+def detect_proxy(source):
+    """Ask install-full.sh what is installed. Read-only: changes nothing."""
+    script = source / "sfu" / "install-full.sh"
+    try:
+        out = subprocess.run(["bash", str(script), "--detect-proxy"], capture_output=True,
+                             text=True, timeout=20, check=True).stdout
+    except (OSError, subprocess.SubprocessError):
+        return [], "", "Could not inspect this machine."
+    values = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+    options = [o for o in values.get("options", "").split(",") if o in PROXY_CHOICES]
+    recommended = values.get("recommended", "")
+    return options, recommended if recommended in options else "", values.get("note", "")
+
+
+def full_section(source):
+    options, recommended, note = detect_proxy(source)
+    if not options:
+        return f"""<section><strong>Full installation is not available</strong>
+<small>{html.escape(note or "No supported HTTPS front end was found.")}</small></section>""", False
+    radios = []
+    for option in options:
+        title, text = PROXY_CHOICES[option]
+        checked = " checked" if option == recommended else ""
+        suffix = " (recommended)" if option == recommended else ""
+        radios.append(f"""<label><input type="radio" name="proxy" value="{option}"{checked}>
+<strong>{html.escape(title)}</strong>{suffix}</label>
+<small>{html.escape(text)}</small>""")
+    extra = ""
+    if "caddy-existing" in options:
+        extra = """<label><input name="caddyfile_edit" type="checkbox" value="yes">
+Existing Caddy only: add the line <code>import /etc/caddy/telium-sfu.caddy</code> to the end of my
+/etc/caddy/Caddyfile. A backup is saved as Caddyfile.telium-sfu.bak first, and the change is rolled back
+if Caddy rejects it. Without this the installer stops and tells you the line to add yourself.</label>"""
+    return f"""<section><label><input type="radio" name="mode" value="full" checked>
+<strong>Full installation — Telium manages the HTTPS front end</strong></label>
+<small>Installs the packages it needs, systemd units, firewall rules where UFW is active, and automatic
+updates. Existing web server configuration is never deleted or overwritten. Choose the HTTPS front end:</small>
+{"".join(radios)}{extra}</section>""", True
+
+
+def _read(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as stream:
+            return stream.read()
+    except OSError:
+        return ""
+
+
 def page(body):
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -87,14 +147,12 @@ def serve(source):
             with lock:
                 mode, rc, directory = state["mode"], state["returncode"], state["directory"]
             if mode is None:
+                full_html, full_ok = full_section(source)
                 self.send_html(f"""
 <p>Choose how this machine should host the SFU. Nothing has been installed yet.</p>
 <form method="post" action="/choose?token={token}">
-<section><label><input type="radio" name="mode" value="full" checked>
-<strong>Full installation — fresh VPS</strong></label>
-<small>Installs system packages, nginx, Certbot, firewall rules and automatic updates.
-Best when Telium can manage the whole VPS.</small></section>
-<section><label><input type="radio" name="mode" value="portable">
+{full_html}
+<section><label><input type="radio" name="mode" value="portable"{"" if full_ok else " checked"}>
 <strong>Portable native installation — shared machine</strong></label>
 <small>SFU, LiveKit, config, updater and state stay in one folder. Reuses your existing HTTPS
 reverse proxy; does not change nginx or firewall settings. Only a dedicated service
@@ -130,6 +188,15 @@ I understand the selected installation will make the system changes described ab
                 if mode not in ("full", "portable") or params.get("confirm") != ["yes"]:
                     raise ValueError("Choose an installation mode and confirm the changes.")
                 directory = validate_directory(params.get("directory", [""])[0]) if mode == "portable" else None
+                proxy = params.get("proxy", [""])[0] if mode == "full" else ""
+                if mode == "full":
+                    if proxy not in detect_proxy(source)[0]:
+                        raise ValueError("Choose one of the HTTPS front ends offered for this machine.")
+                    # An existing Caddyfile is only edited with explicit consent.
+                    if (proxy == "caddy-existing" and params.get("caddyfile_edit") != ["yes"]
+                            and not Path("/etc/telium/sfu-proxy").exists()
+                            and "import /etc/caddy/telium-sfu.caddy" not in _read("/etc/caddy/Caddyfile")):
+                        raise ValueError("To use your existing Caddy, tick the box that allows adding one import line to your Caddyfile, or choose the portable installation.")
                 with lock:
                     if state["mode"] is not None:
                         raise ValueError("Installation already started.")
@@ -140,7 +207,12 @@ I understand the selected installation will make the system changes described ab
                 def launch():
                     try:
                         with open(logfile, "a", encoding="utf-8") as output:
-                            rc = subprocess.call(command, cwd=source, stdout=output, stderr=subprocess.STDOUT)
+                            env = dict(os.environ)
+                            if proxy:
+                                env["TELIUM_SFU_PROXY"] = proxy
+                                if params.get("caddyfile_edit") == ["yes"]:
+                                    env["TELIUM_SFU_CADDYFILE_EDIT"] = "yes"
+                            rc = subprocess.call(command, cwd=source, stdout=output, stderr=subprocess.STDOUT, env=env)
                     except OSError as exc:
                         with open(logfile, "a", encoding="utf-8") as output:
                             output.write(str(exc) + "\n")

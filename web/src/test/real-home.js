@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +9,10 @@ import { Api, HttpError } from '../lib/api.js';
 
 export const BINARY = resolve(dirname(fileURLToPath(import.meta.url)), '../../../server/target/debug/telium-server');
 export const haveServer = existsSync(BINARY);
+// CI sets this, so a missing build fails loudly instead of skipping every real-server test.
+if (!haveServer && process.env.TELIUM_REQUIRE_SERVER === '1') {
+  throw new Error(`TELIUM_REQUIRE_SERVER is set but no server binary at ${BINARY}`);
+}
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -74,6 +79,18 @@ export class RealHome {
       await gone;
     }
     rmSync(this.dir, { recursive: true, force: true });
+  }
+
+  /// Writes straight to the server's database, to put an account in a state the API now refuses to make (a retired
+  /// custody mode, a `device-v1:` root). Only for setup: the assertions of a test still go through the API.
+  sql(statement, ...params) {
+    const db = new DatabaseSync(join(this.dir, 'telium.db'));
+    try {
+      db.exec('PRAGMA busy_timeout = 5000');
+      return db.prepare(statement).run(...params);
+    } finally {
+      db.close();
+    }
   }
 
   api(session) {

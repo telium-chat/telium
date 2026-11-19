@@ -186,7 +186,6 @@ export const onboarding = {
   // part" is deliberately vague about the rest of it: the homeserver half is
   // decided by the field further down and explaining both at once is what the
   // old copy did.
-  'onboarding.invite.usernameHint': 'This becomes the first part of your Telium account id.',
 
   // The second factor, asked for only after a server has said it needs one.
   // The label names the thing; the placeholder shows both accepted shapes,

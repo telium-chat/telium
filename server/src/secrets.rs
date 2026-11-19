@@ -105,16 +105,25 @@ pub const INVENTORY: &[SecretEntry] = &[
                         session signed under it.",
     },
     SecretEntry {
-        heading: "Per-user escrow keys",
-        protects: "each user's encrypted direct-message history",
-        home: Home::Database("key_vault.escrow_key"),
-        if_lost: "those users lose their encrypted DM history; nothing else on the server is \
-                  affected",
-        if_disclosed: "read access to that user's encrypted DM history",
+        heading: "Archived legacy escrow keys",
+        protects: "the encrypted direct-message history of accounts that were on the retired escrow custody",
+        home: Home::Database("key_vault_legacy_archive.escrow_key"),
+        if_lost: "nothing: no client reads it. It exists only so the phase 4 withdrawal of `key_vault.escrow_key` \
+                  can be undone",
+        if_disclosed: "read access to the history of those accounts, as with the escrow keys it was copied from",
         rotation: Rotation::Impossible,
-        how_to_rotate: "Not an operator-rotatable secret. The material is per-user and the \
-                        ciphertext it opens was written under it; replacing it discards the \
-                        history rather than re-keying it.",
+        how_to_rotate: "Not rotatable. Once no account needs the withdrawal undone, drop the table in a migration; \
+                        erasing an account removes its row.",
+    },
+    SecretEntry {
+        heading: "Per-user escrow keys (withdrawn)",
+        protects: "nothing now: the column is emptied by migration 0099 and nothing writes it",
+        home: Home::Database("key_vault.escrow_key"),
+        if_lost: "nothing; the copies made at withdrawal are in the archive entry above",
+        if_disclosed: "nothing: the column is NULL for every account",
+        rotation: Rotation::Impossible,
+        how_to_rotate: "Not applicable; the column is kept only so older rows and the archive restore \
+                        have somewhere to go back to.",
     },
     SecretEntry {
         heading: "Cross-signing sealed secrets",

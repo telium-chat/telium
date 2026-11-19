@@ -95,7 +95,12 @@ export function AnimatedImage({
 }) {
   const shouldPause = animated ?? isAnimatedImageSource(src);
   const active = useWindowActive(shouldPause);
-  const controlledGif = gif && isNativeShellRuntime() && !isAndroid;
+  const [controlFailed, setControlFailed] = useState(false);
+  const controlledGif = gif && isNativeShellRuntime() && !isAndroid && !controlFailed;
+
+  useEffect(() => {
+    setControlFailed(false);
+  }, [src]);
 
   if (controlledGif) {
     return (
@@ -107,6 +112,7 @@ export function AnimatedImage({
         style={style}
         onError={onError}
         onLoad={onLoad}
+        onDecodeFailed={() => setControlFailed(true)}
         {...props}
       />
     );

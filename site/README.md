@@ -35,7 +35,7 @@ src/
 | Command | |
 |---|---|
 | `bun run validate` | Check `registry/servers.json`. Runs on every pull request. |
-| `bun run probe` | Poll every listed homeserver and rewrite `data/`. Runs hourly in CI. |
+| `bun run probe` | Poll every listed homeserver and rewrite `data/`. Runs every 6 hours in CI. |
 | `bun run recommendations:keygen` | Generate a new Ed25519 feed signing seed and matching public pin. |
 | `bun run recommendations:check` | Evaluate the current registry/probe data without publishing. |
 | `bun run test:recommendations` | Test eligibility, signatures, signing-pin consistency and feed construction. |
@@ -60,8 +60,8 @@ most of what the table shows. So each column has a different and stated provenan
 |---|---|
 | Name, description, region | The registry. Operator-supplied. |
 | Accounts | The registry, as a band. Nothing in Telium exposes a count, so it is self-declared and labelled as such on the page. |
-| Registration, version, roles, features, upload limit | Probed hourly from the server's own endpoints. |
-| Recommendation eligibility | The public registry plus the same hourly measured status used by the signed recommendation generator. |
+| Registration, version, roles, features, upload limit | Probed every 6 hours from the server's own endpoints. |
+| Recommendation eligibility | The public registry plus the same measured status used by the signed recommendation generator. |
 | Uptime (30d) | Our record of those probes — honestly "reachable from a GitHub runner", which the page says. |
 | Latency | Measured in your browser when you open the page. |
 

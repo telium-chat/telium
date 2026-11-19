@@ -24,6 +24,39 @@ case "$cmd" in
     valid_domain "$livekit_domain" || fail "invalid LiveKit domain"
     [[ "$email" == *@*.* ]] || fail "invalid Let's Encrypt email"
 
+    proxy_kind="$(cat /etc/telium/sfu-proxy 2>/dev/null || echo nginx)"
+    if [[ "$proxy_kind" == caddy ]]; then
+      snippet=/etc/caddy/telium-sfu.caddy
+      previous=""
+      if [[ -f "$snippet" ]]; then previous="$(mktemp)"; cp -p "$snippet" "$previous"; fi
+      cat > "$snippet" <<CADDY
+# Written by Telium SFU setup. Caddy gets and renews the certificates itself.
+$sfu_domain {
+	handle /admin* {
+		reverse_proxy 127.0.0.1:7891
+	}
+	handle {
+		reverse_proxy 127.0.0.1:7890
+	}
+}
+
+$livekit_domain {
+	reverse_proxy 127.0.0.1:7880 {
+		transport http {
+			read_timeout 0
+			write_timeout 0
+		}
+	}
+}
+CADDY
+      if ! caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1; then
+        if [[ -n "$previous" ]]; then cp -p "$previous" "$snippet"; else rm -f "$snippet"; fi
+        rm -f "$previous"
+        fail "Caddy rejected the new site configuration; the previous one was restored"
+      fi
+      rm -f "$previous"
+      systemctl reload caddy
+    else
     cat > /etc/nginx/sites-available/telium-sfu.conf <<EOF
 server {
     listen 80;
@@ -80,6 +113,8 @@ EOF
 
     nginx -t
     systemctl reload nginx
+
+    fi
 
     if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
       ufw allow 80/tcp >/dev/null

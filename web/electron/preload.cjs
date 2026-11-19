@@ -52,7 +52,6 @@ const bridge = Object.freeze({
   prepareGofilePlayback: (source, token) => ipcRenderer.invoke('telium:prepare-gofile', { source, token }),
   fetchGifBytes: (url) => ipcRenderer.invoke('telium:fetch-gif', url),
   windowFocus: () => ipcRenderer.invoke('telium:window-focus'),
-  importDiscordGifs: () => ipcRenderer.invoke('telium:import-discord-gifs'),
   screenShareAudioStart: () => ipcRenderer.invoke('telium:screen-share-audio-start'),
   screenShareAudioStop: () => ipcRenderer.invoke('telium:screen-share-audio-stop'),
 
@@ -81,6 +80,9 @@ const bridge = Object.freeze({
       video: kinds.video !== false,
     } : null,
   ),
+  setCustomPrograms: (programs) => ipcRenderer.invoke('telium:set-custom-programs', Array.isArray(programs) ? programs : []),
+  programIcons: (rows) => ipcRenderer.invoke('telium:program-icons', Array.isArray(rows) ? rows : []),
+  listProcesses: () => ipcRenderer.invoke('telium:list-processes'),
   richPresenceActivity: () => ipcRenderer.invoke('telium:rich-presence-activity'),
   readRichPresenceArtwork: (handle) => ipcRenderer.invoke('telium:read-rich-presence-artwork', handle),
   wineRichPresenceStatus: () => ipcRenderer.invoke('telium:wine-rich-presence-status'),

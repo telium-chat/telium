@@ -6,14 +6,14 @@ import { reportError, toast } from '../../hooks/useToast.jsx';
 import { participants, shortName } from '../../lib/util.js';
 import { POSTURE_COPY, POSTURES } from '../../lib/callmode.js';
 import {
-  Avatar, Button, ChoiceCard, ChoiceList, Hint, IconButton, isBotAccount, ModalShell, Notice,
+  Avatar, Button, ChoiceCard, ChoiceList, Hint, IconButton, isBotAccount, ModalShell,
   PlusIcon, RemoveFriendIcon, Switch, useDialogs,
 } from '../../components/index.js';
 import { Advanced, Verdict } from '../user-settings/RecoveryParts.jsx';
 import { useProfileCard } from '../../hooks/useProfileCard.js';
 import { VerifyDialog } from './VerifyDialog.jsx';
 import { AddPeopleDialog } from './AddPeopleDialog.jsx';
-import { custodyNote, ESCROWED_NOTE, useDeviceTrust } from '../chat/encryption.jsx';
+import { custodyNote, useDeviceTrust } from '../chat/encryption.jsx';
 
 const POLICY_ROWS = [
   { rule: 'add', label: 'Who can add people' },
@@ -98,7 +98,6 @@ export function ConversationDialog({ convo: opened, close, refresh }) {
     },
   });
 
-  const escrowed = store.custody?.mode === 'escrowed';
   let state = 'plain';
   let title = 'Encrypted end to end';
   let note = null;
@@ -113,9 +112,6 @@ export function ConversationDialog({ convo: opened, close, refresh }) {
     state = 'todo';
     title = `${unverified} device${unverified === 1 ? '' : 's'} you have not verified`;
     note = 'They can read what you send here. This is a check, not a gate.';
-  } else if (escrowed) {
-    state = 'attention';
-    title = 'Your home server can read this';
   } else if (devices.size) {
     state = 'ok';
     title = 'Everyone here is verified';
@@ -140,7 +136,36 @@ export function ConversationDialog({ convo: opened, close, refresh }) {
       <Verdict state={state} title={title}>
         {note || act ? <>{note}{act}</> : null}
       </Verdict>
-      {escrowed ? <Notice tone="warn">{ESCROWED_NOTE}</Notice> : null}
+
+      {group ? (
+        <div>
+          <div className="eyebrow pb-1.5">Group name</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="min-w-0 flex-1 truncate text-sm">
+              {store.groupNameIn(convo.id) || <span className="text-muted">No name. It shows who is in it.</span>}
+            </span>
+            <Button
+              size="sm"
+              disabled={!can('policy')}
+              onClick={() => dialogs.prompt({
+                title: 'Rename this group',
+                label: 'Group name',
+                value: store.groupNameIn(convo.id) || '',
+                onSubmit: async (text) => {
+                  try {
+                    await store.setGroupName(convo.id, text);
+                    bump((n) => n + 1);
+                    refresh?.();
+                  } catch (e) { reportError(e, 'Could not rename the group'); }
+                },
+              })}
+            >
+              Rename
+            </Button>
+          </div>
+          {can('policy') ? null : <Hint>This group’s rules let only certain people rename it.</Hint>}
+        </div>
+      ) : null}
 
       <div className="flex flex-col rounded-card bg-surface-secondary p-1">
         {participants(convo).map((m) => {

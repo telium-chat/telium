@@ -60,6 +60,17 @@ export const FRAME_MS = 10;
 /// Fraction of one core the model may take (laptop ~1.4%, mid phone ~10%).
 export const BENCHMARK_CEILING = 0.25;
 
+/// DeepFilterNet3 costs about eleven times what RNNoise does (about 3% of a core on a current desktop CPU, 0.3 ms a frame, against under 1% for RNNoise). A frame does not have to fit in the 2.67 ms render quantum it runs in: the device takes about 10 ms of audio per callback, so a slow frame borrows from the quanta around it. What breaks is a share that leaves no slack when the rest of the machine is busy too: measured in Chromium, frames at a third of a core played clean on an idle machine and dropped out hundreds of times in ten seconds with every core loaded. 0.15 keeps that slack.
+export const DEEPFILTER_CEILING = 0.15;
+
+/// The ladder: each engine yields to the next when a call cannot afford it, and the one after the last is the browser's own suppressor.
+export const ENGINES = ['dfn3', 'rnnoise'];
+
+export function nextEngine(engine) {
+  const at = ENGINES.indexOf(engine);
+  return at >= 0 && at + 1 < ENGINES.length ? ENGINES[at + 1] : null;
+}
+
 export function benchmarkVerdict({ frames, cpuMs }, ceiling = BENCHMARK_CEILING) {
   if (!Number.isFinite(frames) || frames <= 0 || !Number.isFinite(cpuMs) || cpuMs < 0) {
     return { ok: false, load: null, reason: 'no-measurement' };
@@ -70,17 +81,65 @@ export function benchmarkVerdict({ frames, cpuMs }, ceiling = BENCHMARK_CEILING)
     : { ok: true, load, reason: null };
 }
 
-/// Three consecutive bad windows, not one: a single one is usually GC or a screen share starting.
-export const OVERLOAD = { load: 0.6, underruns: 0.02, strikes: 3 };
-
-export function overloadStrike(strikes, { load = null, underrunRatio = null } = {}, limits = OVERLOAD) {
-  const measured = Number.isFinite(load) || Number.isFinite(underrunRatio);
-  if (!measured) return { strikes, bail: false };
-  const bad = (Number.isFinite(load) && load > limits.load)
-    || (Number.isFinite(underrunRatio) && underrunRatio > limits.underruns);
-  const next = bad ? strikes + 1 : 0;
-  return { strikes: next, bail: next >= limits.strikes };
+/// The `prefs` event fires for every preference there is. A call must act on the noise setting only when it is the *setting* that changed: re-applying an unchanged `neural` would undo a call's own decision to stand down (it keeps what the person chose and runs something else for that call), and leave the microphone with no suppression at all.
+export function noiseChange(applied, wanted) {
+  const mode = normalizeNoiseMode(wanted);
+  return mode === applied ? null : mode;
 }
+
+/// What a busy machine looks like. `load` is the model's own share of the audio thread (worklet clock); `underruns` is Chromium's whole-context underrun ratio, a hint that only counts when the worklet cannot report its own load, because it also rises when something else starves the audio thread, which dropping the model does not fix.
+export const OVERLOAD = { load: 0.6, underruns: 0.05 };
+
+/// Judged over a sliding window rather than in a row, and answered by pausing with a growing delay rather than by giving up: a game launching or a screen share starting is a bad half minute, not a verdict on the device.
+export const GOVERNOR = {
+  /// Windows are about a second long.
+  window: 8,
+  /// Bad windows out of `window` that pause the model.
+  bad: 5,
+  /// How long each successive pause lasts; running out of them is the only way to give up for the call.
+  pauseMs: [15_000, 45_000, 120_000],
+  /// Consecutive good windows after which earlier pauses are forgotten.
+  calm: 60,
+};
+
+/// `true` bad, `false` good, `null` not measured (the count must not move). The slowest single quantum is not judged: one long quantum is the machine pausing the audio thread, which a lighter model does not fix.
+export function judgeSample({ load = null, underrunRatio = null } = {}, limits = OVERLOAD) {
+  if (Number.isFinite(load)) return load > limits.load;
+  if (Number.isFinite(underrunRatio)) return underrunRatio > limits.underruns;
+  return null;
+}
+
+/// Pure state machine; the chain owns the timers.
+export function createGovernor(limits = GOVERNOR) {
+  let history = [];
+  let pauses = 0;
+  let calm = 0;
+  return {
+    get pauses() { return pauses; },
+    /// Returns `null`, `{ pauseMs }` or `{ giveUp: true }`.
+    push(sample, overload = OVERLOAD) {
+      const bad = judgeSample(sample, overload);
+      if (bad === null) return null;
+      history.push(bad);
+      if (history.length > limits.window) history.shift();
+      calm = bad ? 0 : calm + 1;
+      if (calm >= limits.calm) pauses = 0;
+      if (history.filter(Boolean).length < limits.bad) return null;
+      history = [];
+      pauses += 1;
+      if (pauses > limits.pauseMs.length) return { giveUp: true };
+      return { pauseMs: limits.pauseMs[pauses - 1] };
+    },
+    /// A resumed model is judged afresh.
+    resumed() { history = []; calm = 0; },
+  };
+}
+
+/// Only these end neural for the rest of the call. Everything else is a bad moment.
+export const PERMANENT_REASONS = new Set([
+  'no-audio-worklet', 'no-audio-context', 'insecure-context', 'no-wasm', 'one-core', 'no-48k',
+  'load-failed', 'worklet-error',
+]);
 
 export function unavailableBecause(reason) {
   return {

@@ -1,6 +1,6 @@
 import { micConstraints } from '../../lib/denoise.js';
 import { t } from '../../lib/i18n/index.js';
-import { DESKTOP_AUDIO_OUTPUT_KEY } from '../../components/DesktopAudioDevices.jsx';
+import { DESKTOP_AUDIO_OUTPUT_KEY } from '../../components/AudioQuickMenu.jsx';
 
 export function desktopAudioPreference(key) {
   try { return localStorage.getItem(key) || 'default'; } catch { return 'default'; }

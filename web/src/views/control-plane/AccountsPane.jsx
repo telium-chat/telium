@@ -5,6 +5,7 @@ import {
 } from '../../components/index.js';
 import { Fact, Facts, Pager, Tile, usePages } from './Bits.jsx';
 import { DangerAction, Elevation } from './StepUp.jsx';
+import { displayId } from '../../lib/util.js';
 import { useControlPlane } from './context.js';
 import { useLive } from './useLive.js';
 import { ABSENT, clock, count, present } from './format.js';
@@ -167,7 +168,7 @@ function AccountRow({ account, me, onChanged }) {
           {account.moved_to ? <Pill>moved</Pill> : null}
           <span className="truncate">{account.display_name || account.localpart}</span>
         </span>
-        <span className="cp-report__meta">{account.user_id}</span>
+        <span className="cp-report__meta">{displayId(account.user_id)}</span>
       </button>
       {open ? (
         <AccountDetail account={account} me={me} state={state} onChanged={onChanged} />

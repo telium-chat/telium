@@ -1,8 +1,9 @@
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
-import { Mls, wipe } from '../lib/mls.js';
+import { Mls, heldSecret, wipe } from '../lib/mls.js';
 import { Backup } from '../lib/backup.js';
 import { Trust, Verification } from '../lib/verify.js';
+import { seal } from '../lib/vault.js';
 
 export async function mirrored(home, userId, deviceId, key) {
   const api = home.for(userId, deviceId);
@@ -46,6 +47,17 @@ export async function legacyPut(storeName, key, value) {
   } finally { db.close(); }
 }
 
+/// The root as clients before phase 1 could leave it: sealed under a throwaway key only the device that made it ever
+/// held (`device-v1:`). Clients no longer write this, so tests that need the state put it on the server directly.
+export async function sealRootUnderThrowaway(home, userId) {
+  const held = await heldSecret(userId);
+  const row = home.cross.get(userId);
+  home.cross.set(userId, {
+    ...row,
+    sealed_secret: `device-v1:${await seal(crypto.getRandomValues(new Uint8Array(32)), held)}`,
+  });
+}
+
 export async function trustFor(home, mls, userId, deviceId, key = null) {
   const recovery = key ? {
     key,
@@ -57,7 +69,7 @@ export async function trustFor(home, mls, userId, deviceId, key = null) {
   const trust = new Trust(home.for(userId, deviceId), {
     userId, deviceId, recovery,
   });
-  await trust.start(mls.cs, key, await mls.leafKey(), 'device_custody');
+  await trust.start(mls.cs, key, await mls.leafKey());
   return trust;
 }
 

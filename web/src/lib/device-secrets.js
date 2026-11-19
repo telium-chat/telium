@@ -51,6 +51,12 @@ export async function rememberRecoveryKeyring(userId, keyring) {
   }, slot(userId)));
 }
 
+/// Only the ring slot: a ring this device made for a vault create the server then refused is not the account's.
+export async function forgetRecoveryKeyring(userId) {
+  if (!userId || typeof indexedDB === 'undefined') return;
+  await tx('readwrite', (store) => store.delete(slot(userId))).catch(() => {});
+}
+
 export async function heldRecoveryKeyring(userId) {
   if (!userId || typeof indexedDB === 'undefined') return null;
   const row = await tx('readonly', (store) => store.get(slot(userId))).catch(() => null);
@@ -61,24 +67,8 @@ export async function heldRecoveryKeyring(userId) {
   };
 }
 
-// Escrow-exit pin: a server reporting an escrowed vault under another key after this device left escrow is a downgrade; only choosing escrow clears it.
-const pin = (userId) => `escrow-exit:${userId}`;
-
-export async function pinOutOfEscrow(userId) {
-  if (!userId || typeof indexedDB === 'undefined') return;
-  await tx('readwrite', (store) => store.put({ at: Date.now() }, pin(userId))).catch(() => {});
-}
-
-export async function unpinOutOfEscrow(userId) {
-  if (!userId || typeof indexedDB === 'undefined') return;
-  await tx('readwrite', (store) => store.delete(pin(userId))).catch(() => {});
-}
-
-export async function pinnedOutOfEscrow(userId) {
-  if (!userId || typeof indexedDB === 'undefined') return false;
-  const row = await tx('readonly', (store) => store.get(pin(userId))).catch(() => null);
-  return Boolean(row);
-}
+// Rows older builds wrote beside the ring: the escrow-exit pin, retired with escrow. Dropped when an account's secrets are.
+const retiredPin = (userId) => `escrow-exit:${userId}`;
 
 export async function forgetDeviceSecrets(userId) {
   if (!userId || typeof indexedDB === 'undefined') return;
@@ -89,7 +79,7 @@ export async function forgetDeviceSecrets(userId) {
       .catch(() => {})
     : Promise.resolve();
   const recoveryCleanup = tx('readwrite', (store) => {
-    store.delete(pin(userId));
+    store.delete(retiredPin(userId));
     return store.delete(slot(userId));
   }).catch(() => {});
   await Promise.allSettled([recoveryCleanup, androidCleanup]);

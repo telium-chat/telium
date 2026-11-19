@@ -6,7 +6,7 @@
 //! obligation: it becomes call traffic only when a guild's voice mode resolves
 //! to it, and it stops being suggested the moment the publisher stops listing
 //! it. There is no background probing of listed relays — health comes from the
-//! publisher's hourly checker, the joining client's own measurements, and the
+//! publisher's periodic checker, the joining client's own measurements, and the
 //! relay's admission refusals; this module only fetches and holds the list.
 
 use crate::config::VoiceDirectory;

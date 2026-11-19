@@ -135,7 +135,7 @@ const MIGRATED = [
   'views/guild-settings/BotsPane.jsx',
   'components/BotCapabilityChecklist.jsx',
   'components/DataTable.jsx',
-  'components/DesktopAudioDevices.jsx',
+  'components/AudioQuickMenu.jsx',
   'hooks/useVoice.jsx',
   'hooks/useWatch.jsx',
   'views/CallStage.jsx',
@@ -237,6 +237,13 @@ describe('the error-code contract', () => {
   const CODES = new Set(
     [...registry.matchAll(/^pub const [A-Z0-9_]+: &str = "([a-z0-9_]+)";/gm)].map((m) => m[1]),
   );
+  // A voice relay (telium-sfu) is a second server the client talks to; its codes live in its own source.
+  const RELAY_SRC = join(process.cwd(), '..', 'sfu', 'src');
+  const RELAY = new Set(
+    readdirSync(RELAY_SRC)
+      .filter((f) => f.endsWith('.rs'))
+      .flatMap((f) => [...readFileSync(join(RELAY_SRC, f), 'utf8').matchAll(/"code":\s*"([a-z0-9_]+)"/g)].map((m) => m[1])),
+  );
   const CLIENT_ORIGIN = new Set([
     'opaque_downgrade', 'legacy_auth_required',
     'offline', 'offlineDevice', 'generic', 'context', 'serverFault',
@@ -247,8 +254,14 @@ describe('the error-code contract', () => {
     const invented = Object.keys(EN)
       .filter((key) => /^errors\.[a-z][a-zA-Z0-9_]*$/.test(key))
       .map((key) => key.slice('errors.'.length))
-      .filter((c) => !CODES.has(c) && !CLIENT_ORIGIN.has(c));
+      .filter((c) => !CODES.has(c) && !RELAY.has(c) && !CLIENT_ORIGIN.has(c));
     expect(invented).toEqual([]);
+  });
+
+  it('knows the voice relay codes the client translates', () => {
+    for (const c of ['sfu_origin_unverified', 'sfu_bad_signature', 'origin_blocked']) {
+      expect(RELAY.has(c), `${c} is a real relay code`).toBe(true);
+    }
   });
 
   it('covers the codes a person can be shown', () => {

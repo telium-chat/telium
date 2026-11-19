@@ -4,12 +4,12 @@ import { has } from '../../lib/perms.js';
 import { copyToClipboard } from '../../lib/clipboard.js';
 import { faceOf } from '../../lib/faces.js';
 import { mediaUrl } from '../../lib/media.js';
-import { colourOf, participants, shortName, tint } from '../../lib/util.js';
+import { colourOf, displayId, participants, shortName, tint } from '../../lib/util.js';
 import { AnimatedImage } from '../../components/AnimatedImage.jsx';
 import {
   AddFriendIcon, AdvancedIcon, Avatar, BanIcon, CheckIcon, CloseIcon, CopyIcon, DeafenIcon, EditIcon,
   EmojiIcon, EmojiText, HeadphonesIcon, StatusText, KeyIcon, KickIcon, ListIcon, MentionIcon, MenuItem,
-  MenuSection, MenuSeparator, MenuSub, MessageIcon, MicIcon, MicOffIcon, PrivacyNote, PRESENCE,
+  MenuSection, MenuSeparator, MenuSub, MessageIcon, MicIcon, MicOffIcon, PinIcon, PrivacyNote, PRESENCE,
   PRESENCE_STATES, PlusIcon, ServerIcon, SettingsIcon, SignOutIcon, SwitchAccountIcon, UserIcon,
   botMember,
 } from '../../components/index.js';
@@ -19,6 +19,7 @@ import { ConversationDialog } from '../dialogs/ConversationDialog.jsx';
 import { CustomStatusDialog } from '../dialogs/CustomStatusDialog.jsx';
 import { AccountFace, AccountsDialog } from '../dialogs/AccountsDialog.jsx';
 import { MAX_ACCOUNTS } from '../../lib/accounts.js';
+import { publicProfileLink } from '../PublicProfileLanding.jsx';
 import { openFullProfile } from '../profile/ProfileBody.jsx';
 import { subLabel } from './common.jsx';
 
@@ -60,7 +61,14 @@ function AccountCard() {
         </div>
         <div className="account-card__text">
           <div className="account-card__name"><EmojiText>{name}</EmojiText></div>
-          <div className="account-card__handle">{me?.user_id}</div>
+          <button
+            type="button"
+            className="account-card__handle account-card__copy"
+            title="Click to copy your username"
+            onClick={() => copyToClipboard(displayId(me?.user_id), 'Username')}
+          >
+            {displayId(me?.user_id)}
+          </button>
           {custom ? (
             <div className="account-card__status"><StatusText store={store}>{custom}</StatusText></div>
           ) : null}
@@ -310,6 +318,15 @@ export const conversation = (env, convo) => {
     >
       Open
     </MenuItem>
+    <MenuItem
+      icon={PinIcon}
+      onAction={() => {
+        const pin = !store.isConversationPinned(convo.id);
+        if (!store.setConversationPinned(convo.id, pin)) toast('You can pin up to 20 conversations.', { error: true });
+      }}
+    >
+      {store.isConversationPinned(convo.id) ? 'Unpin from top' : 'Pin to top'}
+    </MenuItem>
     {peerId ? (
       <MenuItem icon={UserIcon} onAction={() => openFullProfile(modal, peerId)}>
         View profile
@@ -327,6 +344,24 @@ export const conversation = (env, convo) => {
     >
       Conversation details
     </MenuItem>
+    {convo.kind === 'gc' ? (
+      <MenuItem
+        icon={EditIcon}
+        isDisabled={!store.mls || (store.mls.permits ? !store.mls.permits(convo.id, 'policy') : false)}
+        onAction={() => dialogs.prompt({
+          title: 'Rename this group',
+          label: 'Group name',
+          value: store.groupNameIn(convo.id) || '',
+          onSubmit: async (text) => {
+            try {
+              await store.setGroupName(convo.id, text);
+            } catch (e) { reportError(e, 'Could not rename the group'); }
+          },
+        })}
+      >
+        Rename group
+      </MenuItem>
+    ) : null}
     {convo.kind === 'gc' && !convo.promoted_to ? (
       <MenuItem
         icon={ServerIcon}
@@ -412,7 +447,7 @@ export const account = (env) => {
             <span className="flex min-w-0 items-center gap-2">
               <AccountFace account={a} size="xxs" />
               <span className="truncate">{a.card?.name || shortName(a.user_id)}</span>
-              <span className="truncate text-muted">{a.user_id}</span>
+              <span className="truncate text-muted">{displayId(a.user_id)}</span>
             </span>
           </MenuItem>
         ))}
@@ -432,6 +467,12 @@ export const account = (env) => {
           onAction={() => copyToClipboard(store.me?.user_id || '', 'Your user ID')}
         >
           Copy user ID
+        </MenuItem>
+        <MenuItem
+          icon={CopyIcon}
+          onAction={() => copyToClipboard(publicProfileLink(store.me?.user_id || ''), 'Profile link')}
+        >
+          Copy profile link
         </MenuItem>
         <MenuItem icon={KeyIcon} onAction={() => settings('recovery')}>
           Manage encryption key

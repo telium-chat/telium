@@ -99,7 +99,13 @@ const getJson = async (url) => {
     const req = httpsRequest(url, {
       method: 'GET',
       headers: { accept: 'application/json', 'user-agent': 'telium-sfu-directory-probe/1.0' },
-      lookup: (_host, _options, callback) => callback(null, pinned.address, pinned.family),
+      lookup: (_host, options, callback) => {
+        // Node 20+ may ask for every address (`all: true`) and then expects an
+        // array; answering with the bare tuple fails with "Invalid IP address".
+        const family = pinned.family ?? isIP(pinned.address)
+        if (options?.all) callback(null, [{ address: pinned.address, family }])
+        else callback(null, pinned.address, family)
+      },
     }, (response) => {
       if (response.statusCode !== 200) {
         response.resume()

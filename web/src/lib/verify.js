@@ -1,25 +1,36 @@
 // Cross-signing: one key per account, with domain-separated payloads (`telium-device-sig` vs `telium-user-sig`), signing MLS leaf keys. Device-held by default; verifying a person covers all their devices. The SAS can't be steered: the responder commits before seeing the initiator's contribution.
 
-import { heldSecret, keepSecret } from './mls.js';
+import {
+  dropPendingSecret, heldSecret, keepPendingSecret, keepSecret, pendingSecret,
+} from './mls.js';
+import { exclusive } from './mls-store.js';
 import {
   deviceRevocationPayload,
   ensureOwnIdentityContinuity,
+  identityAnchorPayload,
+  identityResetPayload,
   identityRotationPayload,
+  immutableIdentityId,
+  isFreshGenesis,
   pinIdentity,
   pinnedIdentity,
   recoveryPolicyPayload,
+  replaceIdentityPin,
   verifiedRevocations,
   verifyIdentityDocument,
 } from './identity-continuity.js';
 import { clearPinConflict, markPinVerified, pinConflict } from './identity-pins.js';
 import { open as unseal, seal } from './vault.js';
-import { b64, unb64 } from './util.js';
+import { b64, storage, unb64 } from './util.js';
 
 export { SAS_EMOJI, VERIFY_TIMEOUT, Verification, emojiFor } from './verify-sas.js';
 
 const te = new TextEncoder();
-const DEVICE_SEAL = 'device-v1:';
+// Sticky per home domain: once this account's home has advertised identity continuity, it cannot quietly stop.
+const CONTINUITY_DOMAIN = 'telium.identity.continuity-domain.v1:';
 const RECOVERY_SEAL = 'recovery-v1:';
+/// The only custody a ring is the account key in (not a throwaway or server-readable one), so a root may be sealed under it.
+const ringIsAccountKey = (mode) => mode === 'opaque_custody';
 
 // Every signature is over a string that says what it means (domain separation).
 
@@ -27,6 +38,11 @@ const RECOVERY_SEAL = 'recovery-v1:';
 function unanswered(e) {
   const status = e?.status;
   return !status || status === 408 || status === 429 || status >= 500;
+}
+
+function domainOf(userId) {
+  const at = String(userId || '').indexOf(':');
+  return at < 0 ? null : String(userId).slice(at + 1) || null;
 }
 
 function devicePayload(userId, deviceId, mlsKey) {
@@ -65,6 +81,8 @@ export class Trust {
     this.onSecretAdopted = null;
     this.onRecoveryAdopted = null;
     this.identityMismatch = false;
+    // Own homeserver's `identity.continuity` capability, once asked this session.
+    this.homeContinuity = null;
   }
 
   get ready() { return !!this.identityKey; }
@@ -84,8 +102,95 @@ export class Trust {
     ) || null;
   }
 
-  /// Creates the key on first use; legacy unprefixed rows are opened once and moved to the current form.
-  async start(cs, recoveryKey, mlsKey, mode = 'device_custody') {
+  /// Whether `secret` is the private half of `publicKey`, by default the published account key.
+  async binds(secret, publicKey = this.identityKey) {
+    if (!publicKey || !secret) return false;
+    const probe = te.encode(`telium-crosssign-key-binding:v1|${this.userId}`);
+    try {
+      const proof = await this.cs.signature.sign(secret, probe);
+      return await this.cs.signature.verify(publicKey, probe, proof);
+    } catch {
+      return false;
+    }
+  }
+
+  /// Creates the key on first use. `recoveryKey` is the ring the vault opened to, which is the account key: the vault
+  /// yields a ring only in `opaque_custody`, so a key in hand is always one a root may be sealed under. One start per
+  /// account at a time across tabs: two tabs creating at once each made a key, and the one the server refused had already
+  /// stored its own, leaving that browser holding a key its account does not publish.
+  async start(cs, recoveryKey, mlsKey) {
+    return exclusive(`telium-crosssign:${this.userId}`, () => this.startOnce(cs, recoveryKey, mlsKey));
+  }
+
+  /// Creates the account's signing key if it has none, sealed under the account key, and nothing else. Run by sign-in
+  /// and sign-up, which hold the password, before the session is saved. Returns whether this call made it. The secret
+  /// is kept here before the request goes out and stays after, so a tab closed mid-request loses nothing, and a key
+  /// another device created first is left alone.
+  async ensureRoot(cs, recoveryKey) {
+    if (!recoveryKey) throw new Error('The account key is needed to create the identity signing key.');
+    return exclusive(`telium-crosssign:${this.userId}`, async () => {
+      const doc = await this.home.crossSigning();
+      if (doc.exists) return false;
+      const pair = await cs.signature.keygen();
+      const identityKeyText = b64(pair.publicKey);
+      await keepPendingSecret(this.userId, identityKeyText, pair.signKey);
+      try {
+        await this.home.putCrossSigning({
+          identity_key: identityKeyText,
+          sealed_secret: RECOVERY_SEAL + await seal(recoveryKey, pair.signKey),
+          create_only: true,
+        });
+      } catch (e) {
+        if (e?.status === 409) {
+          await dropPendingSecret(this.userId, identityKeyText);
+          return false;
+        }
+        throw e;
+      }
+      await keepSecret(this.userId, pair.signKey);
+      await dropPendingSecret(this.userId, identityKeyText);
+      return true;
+    });
+  }
+
+  /// I4 for a root that arrived after start (sibling approval, or the ring arriving after the root): if this device holds
+  /// the root and the account key and the server's copy is not `recovery-v1:`, seal it under the account key. Changes
+  /// nothing otherwise; the only custody write allowed without the password.
+  async sealRootProperly(recoveryKey) {
+    if (!recoveryKey || !this.signKey || !this.identityKey) return false;
+    return exclusive(`telium-crosssign:${this.userId}`, async () => {
+      const doc = await this.home.crossSigning();
+      if (!doc.exists || doc.identity_key !== b64(this.identityKey)) return false;
+      if (String(doc.sealed_secret || '').startsWith(RECOVERY_SEAL)) return false;
+      if (!await this.binds(this.signKey)) return false;
+      await this.home.putCrossSigning({
+        identity_key: doc.identity_key,
+        sealed_secret: RECOVERY_SEAL + await seal(recoveryKey, this.signKey),
+      });
+      return true;
+    });
+  }
+
+  /// For a device that holds the root after a new vault replaced a retired one (`startNewVault`): the server's copy of the
+  /// root may already say `recovery-v1:`, but under the old ring, which nothing can open now, so the prefix check of
+  /// `sealRootProperly` would leave it. The held root is sealed under the new account key, only if it is the one the
+  /// account publishes. Without this, a new device could never sign and the user would be sent to an identity reset they
+  /// do not need.
+  async resealRoot(recoveryKey) {
+    if (!recoveryKey || !this.signKey || !this.identityKey) return false;
+    return exclusive(`telium-crosssign:${this.userId}`, async () => {
+      const doc = await this.home.crossSigning();
+      if (!doc.exists || doc.identity_key !== b64(this.identityKey)) return false;
+      if (!await this.binds(this.signKey)) return false;
+      await this.home.putCrossSigning({
+        identity_key: doc.identity_key,
+        sealed_secret: RECOVERY_SEAL + await seal(recoveryKey, this.signKey),
+      });
+      return true;
+    });
+  }
+
+  async startOnce(cs, recoveryKey, mlsKey, retried = false) {
     this.cs = cs;
     const doc = await this.home.crossSigning();
     for (const d of doc.devices || []) this.own.set(d.device_id, d);
@@ -109,69 +214,78 @@ export class Trust {
       return null;
     };
 
+    let madeHere = false;
     if (doc.exists) {
       this.identityKey = unb64(doc.identity_key);
       const stored = String(doc.sealed_secret || '');
-      const deviceWrapped = stored.startsWith(DEVICE_SEAL);
       const recoveryWrapped = stored.startsWith(RECOVERY_SEAL);
 
-      if (held) {
-        this.signKey = held;
-      } else if (recoveryWrapped && recoveryKeys.length) {
-        this.signKey = await openWithRecovery(stored.slice(RECOVERY_SEAL.length));
-      } else if (!deviceWrapped && !recoveryWrapped && recoveryKeys.length) {
-        // The original format used the MLS recovery key; try the whole ring in case it rotated.
-        this.signKey = await openWithRecovery(stored);
+      // A homeserver can swap the public identity row but not make our secret match; check the pair. A held key that does
+      // not match does not hide a sealed copy that does.
+      let tried = false;
+      const take = async (secret) => {
+        if (!secret || this.signKey) return;
+        tried = true;
+        if (await this.binds(secret)) this.signKey = secret;
+      };
+      await take(held);
+      // A create this device made but never heard back about: the server may have kept it.
+      const pending = await pendingSecret(this.userId, doc.identity_key);
+      await take(pending);
+      // Only a key this device made itself (filed before it was sent) may stand behind an unconfirmed reset.
+      madeHere = Boolean(pending && await this.binds(pending));
+      // Only `recovery-v1:` opens. The throwaway-key seal (`device-v1:`) and the unprefixed original format are retired:
+      // nothing opens them, so a device that does not already hold such a root has none, and #74 starts a new one.
+      if (recoveryWrapped && recoveryKeys.length) {
+        await take(await openWithRecovery(stored.slice(RECOVERY_SEAL.length)));
       }
-
-      if (this.signKey) {
-        // A homeserver can swap the public identity row but not make our secret match; check the pair.
-        const probe = te.encode(`telium-crosssign-key-binding:v1|${this.userId}`);
-        const proof = await this.cs.signature.sign(this.signKey, probe);
-        const matches = await this.cs.signature.verify(
-          this.identityKey, probe, proof,
-        ).catch(() => false);
-        if (!matches) {
-          this.signKey = null;
-          this.identityMismatch = true;
-        }
-      }
+      if (!this.signKey && tried) this.identityMismatch = true;
 
       if (this.signKey) {
         await keepSecret(this.userId, this.signKey);
-        const wantRecovery = (mode === 'opaque_custody' || mode === 'self_custody') && recoveryKey;
-        if (wantRecovery && !recoveryWrapped) {
+        // The pending copy is what proves this device made a reset; it goes only once the identity is accepted (below).
+        // "Seal it properly now" (I4): a held root the server keeps in any other form (a legacy `device-v1:` or unprefixed
+        // seal) is sealed under the account key as soon as a device that holds both has the account key. Needs no
+        // password, only the token.
+        if (recoveryKey && !recoveryWrapped) {
           await this.home.putCrossSigning({
             identity_key: b64(this.identityKey),
             sealed_secret: RECOVERY_SEAL + await seal(recoveryKey, this.signKey),
           });
-        } else if (!wantRecovery && !deviceWrapped) {
-          const throwaway = crypto.getRandomValues(new Uint8Array(32));
-          await this.home.putCrossSigning({
-            identity_key: b64(this.identityKey),
-            sealed_secret: DEVICE_SEAL + await seal(throwaway, this.signKey),
-          });
         }
+        // Never re-sealed under anything but the account key. A start that could not read the vault (an outage, a
+        // locked vault) has no key in hand and used to re-seal the server's copy under a throwaway key, which no new
+        // device can ever open; it now leaves the server's copy as it is.
       }
     } else if (recoveryKey) {
+      // Created only with the account key in hand, and sealed under it alone.
       const pair = await cs.signature.keygen();
+      identityKeyText = b64(pair.publicKey);
+      const sealed = RECOVERY_SEAL + await seal(recoveryKey, pair.signKey);
+      // Kept aside before it is sent, so closing the tab mid-request cannot leave a published key held nowhere, and
+      // outside the account-key slot, so a refused create never displaces the key the account does publish.
+      await keepPendingSecret(this.userId, identityKeyText, pair.signKey);
+      try {
+        // `create_only`: the server refuses if any key exists, so another device creating at the same moment (a desktop
+        // client beside this browser, where no lock reaches) cannot be overwritten, nor overwrite us.
+        await this.home.putCrossSigning({ identity_key: identityKeyText, sealed_secret: sealed, create_only: true });
+      } catch (e) {
+        if (e?.status === 409) {
+          // Another device made the account's key first: take that one as it stands, and keep nothing of ours.
+          await dropPendingSecret(this.userId, identityKeyText);
+          if (!retried) {
+            this.own.clear();
+            this.requests.clear();
+            return this.startOnce(cs, recoveryKey, mlsKey, true);
+          }
+        }
+        // Anything else may have reached the server; the next start finds the pending copy if it did.
+        throw e;
+      }
+      await keepSecret(this.userId, pair.signKey);
+      await dropPendingSecret(this.userId, identityKeyText);
       this.identityKey = pair.publicKey;
       this.signKey = pair.signKey;
-      await keepSecret(this.userId, pair.signKey);
-      if (mode === 'opaque_custody' || mode === 'self_custody') {
-        identityKeyText = b64(pair.publicKey);
-        await this.home.putCrossSigning({
-          identity_key: identityKeyText,
-          sealed_secret: RECOVERY_SEAL + await seal(recoveryKey, pair.signKey),
-        });
-      } else {
-        const throwaway = crypto.getRandomValues(new Uint8Array(32));
-        identityKeyText = b64(pair.publicKey);
-        await this.home.putCrossSigning({
-          identity_key: identityKeyText,
-          sealed_secret: DEVICE_SEAL + await seal(throwaway, pair.signKey),
-        });
-      }
     }
 
     if (this.identityKey && identityKeyText) {
@@ -185,10 +299,22 @@ export class Trust {
         );
         this.continuity = continuity;
         this.immutableId = continuity.immutableId || null;
+        // Keys from a chain that did not check out (or that this device has not accepted) are the server's word only.
         this.identityHistoryKeys = new Set(
-          continuity.keys ? [...continuity.keys.values()] : [],
+          continuity.valid && continuity.keys ? [...continuity.keys.values()] : [],
         );
-        if (continuity.supported && !continuity.valid) {
+        // This device reset the identity but never heard back (or closed before re-pinning): it holds the private half of
+        // the new published root, which only the device that made it can, and that identity checks out on its own.
+        if (
+          continuity.supported && !continuity.valid && continuity.reason === 'immutable-id-changed'
+          && this.signKey && madeHere && continuity.currentKey === identityKeyText
+          && isFreshGenesis(continuity)
+        ) {
+          replaceIdentityPin(this.userId, continuity, { verified: true });
+          this.continuity = { ...continuity, valid: true, reason: null };
+          this.immutableId = continuity.immutableId;
+          this.identityHistoryKeys = new Set(continuity.keys ? [...continuity.keys.values()] : []);
+        } else if (continuity.supported && !continuity.valid) {
           this.signKey = null;
           this.identityMismatch = true;
         }
@@ -199,6 +325,10 @@ export class Trust {
           this.identityMismatch = true;
         }
       }
+    }
+
+    if (doc.exists && this.signKey && !this.identityMismatch && this.continuity?.valid !== false) {
+      await dropPendingSecret(this.userId, doc.identity_key);
     }
 
     // Re-check each stored signature so the homeserver can't invent who we verified; legacy accounts accept only the current key.
@@ -261,8 +391,9 @@ export class Trust {
     return { signed: true, mlsKey };
   }
 
-  /// Signed by both old and new roots. Without `recoveryKey` the new secret stays on this device.
+  /// Signed by both old and new roots, and sealed under the account key (`recoveryKey`), which is required.
   async rotateRoot({ recoveryKey = null } = {}) {
+    if (!recoveryKey) throw new Error('The account key is needed to seal a new identity key.');
     if (!this.canSign || !this.continuity?.valid || !this.immutableId) {
       throw new Error('This device does not currently hold your identity signing key.');
     }
@@ -271,9 +402,7 @@ export class Trust {
     const next = b64(pair.publicKey);
     const sequence = Number(this.continuity.sequence || 0) + 1;
     const payload = identityRotationPayload(this.immutableId, sequence, previous, next);
-    const sealed = recoveryKey
-      ? RECOVERY_SEAL + await seal(recoveryKey, pair.signKey)
-      : DEVICE_SEAL + await seal(crypto.getRandomValues(new Uint8Array(32)), pair.signKey);
+    const sealed = RECOVERY_SEAL + await seal(recoveryKey, pair.signKey);
     const deviceSignatures = [];
     for (const [deviceId, d] of this.own) {
       if (!d.mls_key || this.isRevokedKey(this.userId, d.mls_key)) continue;
@@ -315,10 +444,102 @@ export class Trust {
     return verified;
   }
 
+  /// Takes the identity this device just started (a reset) as its own: it must check out on its own, and replaces the pin.
+  async adoptResetDocument(doc) {
+    const verified = await verifyIdentityDocument(this.cs, doc, this.userId);
+    if (!verified.valid) throw new Error('The homeserver returned an identity that does not check out.');
+    replaceIdentityPin(this.userId, verified, { verified: true });
+    this.continuity = { supported: true, ...verified };
+    this.immutableId = verified.immutableId;
+    this.identityHistoryKeys = new Set([...verified.keys.values()]);
+    this.peers.delete(this.userId);
+    return verified;
+  }
+
+  /// For an account key lost on every device: starts a new immutable identity, authorised by the account recovery key
+  /// (the server checks it against the account row). Contacts' pins name the old identity, so they see the account as
+  /// changed and must compare emoji again: from where they stand, a server could have done the same.
+  async recoverWithRecoveryKey(recoveryKeyText, { mlsKey = null, sealKey = null } = {}) {
+    const { normalizeRecoveryKey, signWithRecoveryKey } = await import('./account-recovery.js');
+    if (!sealKey) throw new Error('The account key is needed to seal a new identity key.');
+    const text = normalizeRecoveryKey(recoveryKeyText);
+    return exclusive(`telium-crosssign:${this.userId}`, async () => {
+      const pair = await this.cs.signature.keygen();
+      const next = b64(pair.publicKey);
+      const sealed = RECOVERY_SEAL + await seal(sealKey, pair.signKey);
+      const leaf = mlsKey ? (typeof mlsKey === 'string' ? mlsKey : b64(mlsKey)) : null;
+      const deviceSignatures = leaf ? [{
+        device_id: this.deviceId,
+        mls_key: leaf,
+        signature: b64(await this.cs.signature.sign(pair.signKey, devicePayload(this.userId, this.deviceId, leaf))),
+      }] : [];
+      // As for a first key: filed before it is sent, so a lost answer leaves it findable.
+      await keepPendingSecret(this.userId, next, pair.signKey);
+
+      const immutableId = immutableIdentityId(next);
+      const started = await this.home.identityResetStart();
+      const doc = await this.home.identityResetFinish({
+        attempt_id: started.attempt_id,
+        immutable_id: immutableId,
+        identity_key: next,
+        anchor_signature: b64(await this.cs.signature.sign(
+          pair.signKey, identityAnchorPayload(this.userId, immutableId, next),
+        )),
+        sealed_secret: sealed,
+        signature: signWithRecoveryKey(
+          text, identityResetPayload(this.userId, started.attempt_id, started.challenge, immutableId, next),
+        ),
+        device_signatures: deviceSignatures,
+      });
+      const verified = await this.adoptResetDocument(doc);
+      if (verified.currentKey !== next) throw new Error('The homeserver did not take the new account key.');
+
+      await keepSecret(this.userId, pair.signKey);
+      await dropPendingSecret(this.userId, next);
+      this.identityKey = pair.publicKey;
+      this.signKey = pair.signKey;
+      this.identityMismatch = false;
+      // Nothing the old root signed survives a reset; the server dropped it too.
+      this.signed.clear();
+      this.own.clear();
+      for (const d of deviceSignatures) {
+        this.own.set(d.device_id, { device_id: d.device_id, mls_key: d.mls_key, cross_sig: d.signature });
+      }
+      return { reset: true };
+    });
+  }
+
+  /// A handed-over key is kept only if it is the private half of the key this account publishes.
   async adoptSecret(secret, identityKey) {
+    if (identityKey && this.identityKey && identityKey !== b64(this.identityKey)) {
+      throw new Error('the other device holds a different account key from the one this account publishes');
+    }
+    const published = this.identityKey || (identityKey ? unb64(identityKey) : null);
+    if (!await this.binds(secret, published)) {
+      throw new Error('the account key the other device sent does not match the one this account publishes');
+    }
+    this.identityKey = published;
     this.signKey = secret;
-    if (identityKey) this.identityKey = unb64(identityKey);
+    // The sibling we just compared emoji with reset the identity with the recovery key: the published identity is new,
+    // checks out on its own, and that device holds its root. That comparison is the confirmation the pin waits for.
+    const c = this.continuity;
+    if (
+      c && !c.valid && c.reason === 'immutable-id-changed' && c.currentKey === b64(published)
+      && isFreshGenesis(c)
+    ) {
+      replaceIdentityPin(this.userId, c, { verified: true });
+      this.continuity = { ...c, valid: true, reason: null };
+      this.immutableId = c.immutableId;
+      this.identityHistoryKeys = new Set(c.keys ? [...c.keys.values()] : []);
+    }
+    // Only a mismatch from a wrong held key clears; one set because continuity failed or could not be checked stays.
+    if (this.continuity?.valid) this.identityMismatch = false;
     await keepSecret(this.userId, secret);
+    // The ring may already be here (the password opened it); if it arrives later, onRecoveryAdopted does this.
+    if (this.recovery?.key && ringIsAccountKey(this.recovery.mode)) {
+      await this.sealRootProperly(this.recovery.key)
+        .catch((e) => console.warn('could not seal the account key under the recovery key', e));
+    }
     await this.onSecretAdopted?.(secret);
   }
 
@@ -334,9 +555,22 @@ export class Trust {
     this.peers.delete(this.userId);
   }
 
-  async vouchForUser(userId, identityKey) {
+  /// `comparedNow`: set only by a finished emoji comparison with this person, the one thing allowed to accept a changed identity.
+  async vouchForUser(userId, identityKey, { comparedNow = false } = {}) {
     const key = typeof identityKey === 'string' ? identityKey : b64(identityKey);
-    const peer = await this.refresh(userId).catch(() => null);
+    let peer = await this.refresh(userId).catch(() => null);
+    // They reset their identity (lost key, recovery key): their pin names the old one. Emoji compared just now against
+    // the identity they publish, whose chain checks out, is the confirmation a changed identity needs.
+    if (
+      comparedNow
+      && peer?.pinRejected === 'immutable-id-changed'
+      && peer.continuity?.valid && peer.continuity.currentKey === key
+    ) {
+      replaceIdentityPin(userId, peer.continuity, { verified: true });
+      clearPinConflict(userId);
+      this.peers.delete(userId);
+      peer = await this.refresh(userId).catch(() => null);
+    }
     if (peer?.identityKey && peer.identityKey !== key) {
       throw new Error('The identity shown during verification no longer matches the published identity.');
     }
@@ -391,6 +625,14 @@ export class Trust {
     this.requests.delete(userId);
   }
 
+  /// Whether a device is signed by its account's current, continuous identity: what a group build requires of it.
+  async deviceConfirmed(userId, deviceId) {
+    const peer = await this.refresh(userId);
+    if (!peer || peer.continuityRejected || peer.continuityUnknown) return false;
+    const device = peer.devices.get(deviceId);
+    return Boolean(device?.ok && device.active !== false && !this.isRevokedKey(userId, device.mls_key));
+  }
+
   /// null only for a legacy account with no root; otherwise a hard boolean so a server can't smuggle in an unsigned leaf.
   async verifyClaimedPackage(userId, deviceId, signatureKey) {
     const peer = await this.refresh(userId);
@@ -403,7 +645,7 @@ export class Trust {
       );
     }
     // A missing key is "legacy" only if never expected; otherwise the server is hiding it.
-    if (!peer?.identityKey) return this.expectsIdentity(userId) ? false : null;
+    if (!peer?.identityKey) return (await this.continuityExpected(userId)) ? false : null;
     if (this.isRevokedKey(userId, signatureKey)) return false;
     const device = peer.devices.get(deviceId);
     return Boolean(
@@ -416,6 +658,54 @@ export class Trust {
   /// So a missing identity key is a change, not legacy.
   expectsIdentity(userId) {
     return this.signed.has(userId) || Boolean(pinnedIdentity(userId));
+  }
+
+  /// Whether `userId` must have an identity: they were signed or pinned, or this account's own home advertises
+  /// `identity.continuity`. That holds for every contact, same-domain or remote: every identity document reaches this
+  /// client through its own home, peers are expected to run continuity-capable releases, and a remote "legacy" answer
+  /// is indistinguishable from a stripped one. Throws `unknown` when the capability itself could not be read, so a
+  /// broken capabilities endpoint is never a way back to legacy.
+  async continuityExpected(userId) {
+    if (this.expectsIdentity(userId)) return true;
+    return this.homeAdvertisesContinuity();
+  }
+
+  /// A peer with no identity document: rejected where one is expected, unknown where that could not be decided.
+  async missingIdentity(userId) {
+    try {
+      return { rejected: await this.continuityExpected(userId), unknown: false };
+    } catch {
+      return { rejected: false, unknown: true };
+    }
+  }
+
+  /// No `capabilities()` (a test fake) or a 404 is a legacy home; any other failure is unknown, never legacy.
+  async homeAdvertisesContinuity() {
+    if (this.homeContinuity != null) return this.homeContinuity;
+    const own = domainOf(this.userId);
+    // Sticky: a home that once advertised continuity cannot quietly stop.
+    if (own && storage.get(CONTINUITY_DOMAIN + own, false) === true) {
+      this.homeContinuity = true;
+      return true;
+    }
+    if (typeof this.home?.capabilities !== 'function') {
+      this.homeContinuity = false;
+      return false;
+    }
+    let caps;
+    try {
+      caps = await this.home.capabilities();
+    } catch (e) {
+      if (e?.status === 404) {
+        this.homeContinuity = false;
+        return false;
+      }
+      throw Object.assign(e ?? new Error('no answer'), { unknown: true });
+    }
+    const advertised = caps?.identity?.continuity === true;
+    if (advertised && own) storage.set(CONTINUITY_DOMAIN + own, true);
+    this.homeContinuity = advertised;
+    return advertised;
   }
 
   /// Each guardian must publish a valid continuity chain; signed with the current root.
@@ -512,6 +802,7 @@ export class Trust {
     let continuityValid = false;
     let continuityRejected = false;
     let continuityUnknown = false;
+    let pinRejected = null;
     let immutableId = null;
     if (userId === this.userId && this.continuity?.valid) {
       continuity = this.continuity;
@@ -526,14 +817,16 @@ export class Trust {
       } catch (e) {
         // No answer: neither trusted nor changed.
         if (unanswered(e)) continuityUnknown = true;
-        // A legacy homeserver with no continuity endpoint is usable until pinned.
-        else if (e?.status !== 404 || pinnedIdentity(userId)) continuityRejected = true;
+        else if (e?.status !== 404) continuityRejected = true;
+        // A 404 is legacy only where no identity is expected (see `continuityExpected`).
+        else ({ rejected: continuityRejected, unknown: continuityUnknown } = await this.missingIdentity(userId));
       }
       if (fetched) {
         try {
           continuity = await verifyIdentityDocument(this.cs, identityDoc, userId);
           if (continuity?.exists) {
             const pin = pinIdentity(userId, continuity);
+            if (!pin.ok) pinRejected = pin.reason || 'identity-checkpoint-rejected';
             continuityValid = Boolean(
               continuity.valid
               && pin.ok
@@ -541,8 +834,8 @@ export class Trust {
             );
             continuityRejected = !continuityValid;
             immutableId = continuity.immutableId || null;
-          } else if (pinnedIdentity(userId)) {
-            continuityRejected = true;
+          } else {
+            ({ rejected: continuityRejected, unknown: continuityUnknown } = await this.missingIdentity(userId));
           }
         } catch {
           // The document came back and does not check out.
@@ -581,6 +874,7 @@ export class Trust {
       continuityValid,
       continuityRejected,
       continuityUnknown,
+      pinRejected,
       devices,
       // Devices pinned this person differently (identity-pins.js).
       pinConflict: userId === this.userId ? null : pinConflict(userId),

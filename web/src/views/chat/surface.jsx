@@ -4,7 +4,7 @@ import { useModal } from '../../hooks/useModal.jsx';
 import { useMenus } from '../menus.jsx';
 import { shortName } from '../../lib/util.js';
 import { has, PERMISSION_MASKS } from '../../lib/perms.js';
-import { narrowestLimit, uploadAttachment, uploadEncrypted } from '../../lib/upload.js';
+import { mediaAgeCapSecs, narrowestLimit, uploadAttachment, uploadEncrypted } from '../../lib/upload.js';
 import { faceOf } from '../../lib/faces.js';
 import { InfoIcon, MenuItem, MenuSeparator } from '../../components/index.js';
 import { useT } from '../../lib/i18n/react.jsx';
@@ -104,6 +104,7 @@ export function useChannelSurface(channelId) {
     channel?.media_expiry_limit_secs ?? null,
     store.guilds.get(guildId)?.media_expiry_limit_secs ?? null,
     store.caps.get(origin)?.media?.max_expiry_secs || null,
+    mediaAgeCapSecs(store.caps.get(origin)?.media),
   );
   const uploadLimit = narrowestLimit(
     channel?.media_max_file_bytes ?? null,
@@ -232,7 +233,10 @@ export function useDmSurface(convo) {
           : null,
     mayAttach: true,
     stickers: false,
-    expiryCap: store.caps.get(store.session?.home?.domain)?.media?.max_expiry_secs || null,
+    expiryCap: narrowestLimit(
+      store.caps.get(store.session?.home?.domain)?.media?.max_expiry_secs || null,
+      mediaAgeCapSecs(store.caps.get(store.session?.home?.domain)?.media),
+    ),
     uploadLimit: store.caps.get(store.session?.home?.domain)?.media?.max_file_bytes || null,
     mediaTier: 1,
     externalHosts: EMPTY,
@@ -246,8 +250,9 @@ export function useDmSurface(convo) {
     remove: (msg) => store.deleteDm(conversationId, msg.id),
     edit: (msg, content) => store.editDm(conversationId, msg.id, content),
     mayEdit: (msg) => msg.author === store.me?.user_id,
-    canJump: false,
-    jump: () => false,
+    // The timeline pages back through history until the quoted message is loaded (see `JUMP_PAGES`).
+    canJump: true,
+    jump: (msg) => Boolean(msg.reply_to) && store.jumpTo(conversationId, msg.reply_to),
     ack: () => store.markConversationRead(conversationId),
     menu: (msg, handlers) => (
       <>
@@ -347,6 +352,17 @@ export function useDmItems(frames, convo, mls, me, callLogs = []) {
       durationMs: entry.durationMs ?? null,
     }));
   }
+  for (const r of mls?.renamesIn?.(conversationId) || []) {
+    items.push(hold(cache.current, seen, {
+      kind: 'rename',
+      id: `rename:${r.id}`,
+      channel_id: conversationId,
+      guild_id: null,
+      author: r.by,
+      created_at: r.at,
+      name: r.name,
+    }));
+  }
   items.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
   return items;
 }
@@ -396,6 +412,9 @@ function same(a, b) {
       && a.created_at === b.created_at
       && a.author === b.author
       && (a.durationMs ?? null) === (b.durationMs ?? null);
+  }
+  if (a.kind === 'rename') {
+    return a.name === b.name && a.author === b.author && a.created_at === b.created_at;
   }
   return a.content === b.content
     && a.nonce === b.nonce

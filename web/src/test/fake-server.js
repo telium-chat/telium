@@ -186,6 +186,7 @@ export function createFakeServer(overrides = {}) {
     uploadGate: null,
     mediaUploads: [],
     storedMedia: new Map(),
+    ownMedia: [],
     blackhole: new Set(),
     expired: new Set(),
     minted: new Map(),
@@ -565,6 +566,9 @@ export function createFakeServer(overrides = {}) {
         },
         profile: { bio_max_chars: state.bioMaxChars ?? 1024 },
         registration_open: true,
+        ...(typeof state.registrationCodeRequired === 'boolean'
+          ? { registration_code_required: state.registrationCodeRequired }
+          : {}),
         auth: state.opaqueAuth
           ? {
             opaque: true,
@@ -606,9 +610,24 @@ export function createFakeServer(overrides = {}) {
         member_count: 1,
       });
     }
+    if (path === '/_telium/v1/account/media' && method === 'GET') {
+      const offset = Number(query.get('offset') || 0);
+      const limit = Number(query.get('limit') || 50);
+      const page = state.ownMedia.slice(offset, offset + limit);
+      return json({
+        used_bytes: state.ownMedia.reduce((n, f) => n + f.size, 0),
+        quota_bytes: state.serverQuotaBytes,
+        breakdown: {},
+        files: page,
+        next_offset: offset + limit < state.ownMedia.length ? offset + limit : null,
+      });
+    }
     const mediaDelete = path.match(/^\/_telium\/v1\/media\/([\w-]+)$/);
     if (mediaDelete && method === 'DELETE') {
-      if (!state.storedMedia.delete(mediaDelete[1])) return json({ error: 'not_found', message: 'no such media' }, 404);
+      const owned = state.ownMedia.find((f) => f.hash === mediaDelete[1]);
+      if (owned && !owned.deletable) return json({ error: 'conflict', message: 'shared bytes' }, 409);
+      if (owned) state.ownMedia = state.ownMedia.filter((f) => f !== owned);
+      if (!state.storedMedia.delete(mediaDelete[1]) && !owned) return json({ error: 'not_found', message: 'no such media' }, 404);
       return json({ ok: true, hash: mediaDelete[1] });
     }
     if (path === '/_telium/v1/media/preference') {
@@ -829,14 +848,21 @@ export function createFakeServer(overrides = {}) {
       const stale = () => json({
         error: 'conflict', code: 'vault_version_conflict', version: held?.version || 0,
       }, 409);
+      const retired = (mode) => json({
+        error: 'bad_request', code: 'custody_retired', mode: mode || '',
+        message: 'this server keeps only the account-password key vault (opaque_custody)',
+      }, 400);
       if (method === 'PUT') {
+        // As the real server (phase 4): only opaque custody, only a recovery-key second copy, never a server key.
+        if (body.mode !== 'opaque_custody') return retired(body.mode);
+        if (body.independent_ciphertext && !String(body.independent_ciphertext).startsWith('k1.')) return retired(body.mode);
+        if (body.escrow_key) return json({ error: 'bad_request', message: 'client-held custody means we must not be given the key' }, 400);
         if (typeof body.expected_version === 'number'
           && body.expected_version !== (held?.version || 0)) return stale();
         state.vaults.set(who, {
           version: (held?.version || 0) + 1,
           ciphertext: body.ciphertext,
-          mode: body.mode || (body.escrow_key ? 'escrowed' : 'device_custody'),
-          escrow_key: body.escrow_key || null,
+          mode: 'opaque_custody',
           independent_ciphertext: body.independent_ciphertext || null,
         });
         return json({ ok: true, version: state.vaults.get(who).version });
@@ -849,13 +875,10 @@ export function createFakeServer(overrides = {}) {
         mode: held.mode,
         version: held.version,
         ciphertext: held.ciphertext,
-        escrow_key: held.escrow_key || undefined,
         independent_ciphertext: held.independent_ciphertext || null,
-        server_can_recover: Boolean(held.escrow_key),
         backup: {
           items: rows.length,
           updated_at: rows.reduce((n, r) => Math.max(n, r.updated_at), 0) || null,
-          server_can_read: Boolean(held.escrow_key) && rows.length > 0,
         },
       });
     }
@@ -868,16 +891,19 @@ export function createFakeServer(overrides = {}) {
           error: 'conflict', code: 'vault_version_conflict', version: held?.version || 0,
         }, 409);
       }
-      const independent = body.mode !== 'opaque_custody'
-        ? held?.independent_ciphertext || null
-        : body.clear_independent
-          ? null
-          : body.independent_ciphertext || held?.independent_ciphertext || null;
+      if (body.mode !== 'opaque_custody') {
+        return json({ error: 'bad_request', code: 'custody_retired', mode: body.mode || '', message: 'retired custody mode' }, 400);
+      }
+      if (body.independent_ciphertext && !String(body.independent_ciphertext).startsWith('k1.')) {
+        return json({ error: 'bad_request', code: 'custody_retired', message: 'passphrase copies are retired' }, 400);
+      }
+      const independent = body.clear_independent
+        ? null
+        : body.independent_ciphertext || held?.independent_ciphertext || null;
       state.vaults.set(who, {
         version: (held?.version || 0) + 1,
         ciphertext: body.ciphertext,
-        mode: body.mode,
-        escrow_key: body.mode === 'escrowed' ? (body.escrow_key || null) : null,
+        mode: 'opaque_custody',
         independent_ciphertext: independent,
       });
       return json({ mode: body.mode, version: state.vaults.get(who).version });

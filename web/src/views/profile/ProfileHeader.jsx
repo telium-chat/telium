@@ -4,7 +4,7 @@ import {
 } from '../../components/index.js';
 import { copyToClipboard } from '../../lib/clipboard.js';
 import { mediaUrl } from '../../lib/media.js';
-import { shortName } from '../../lib/util.js';
+import { displayId, shortName } from '../../lib/util.js';
 import { TrustMark } from './ProfileFacts.jsx';
 
 export function trustMarkShown(showTrust, verification) {
@@ -87,12 +87,12 @@ export function ProfileHeader({
             type="button"
             className="pc__handle"
             data-guest={guest ? 'true' : 'false'}
-            title={`${userId} — copy`}
-            aria-label={`${userId}, copy username`}
-            onClick={() => copyToClipboard(userId, 'Username')}
+            title={`${displayId(userId)} — copy`}
+            aria-label={`${displayId(userId)}, copy username`}
+            onClick={() => copyToClipboard(displayId(userId), 'Username')}
           >
-            <span className="pc__handle-local">{full ? `@${local}` : local}</span>
-            <span className="pc__handle-domain">{`:${domain}`}</span>
+            <span className="pc__handle-local">{local}</span>
+            <span className="pc__handle-domain">{`@${domain}`}</span>
           </button>
           {friendship === 'accepted' || trustMarkShown(showTrust, verification) ? (
             <span className="pc__badges">

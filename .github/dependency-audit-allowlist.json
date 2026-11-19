@@ -53,6 +53,15 @@
       "reviewed": "2026-11-13",
       "expires": "2027-01-13",
       "reviewer": "@20plays"
+    },
+    {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "ecosystem": "npm",
+      "package": "picomatch",
+      "reason": "The ReDoS in picomatch <= 4.0.7 has no patched release: GitHub lists first_patched_version as null and 4.0.7 (published 2026-08-24) is the latest version on npm, so there is nothing to upgrade or override to. picomatch is reached in web, web/electron and site only as a build-time glob matcher, through vite, vitest, tinyglobby/fdir, astro and node-gyp, and the patterns it compiles are written in this repository's own configs rather than taken from users or network input; none of it is bundled into the shipped web app, server or SFU. The remaining exposure is a developer or CI run matching a maliciously crafted extglob pattern, which can only stall that process. Renew by checking `npm view picomatch versions` for a release above 4.0.7; once one exists, bump it in web, web/electron and site (bun update picomatch, or an overrides entry for the transitive uses) and delete this entry.",
+      "reviewed": "2026-11-17",
+      "expires": "2027-01-17",
+      "reviewer": "@20plays"
     }
   ]
 }

@@ -303,6 +303,23 @@ async fn an_avatar_is_capped_far_below_the_general_attachment_limit() {
 }
 
 #[tokio::test]
+async fn the_default_profile_ceiling_leaves_room_for_an_animated_avatar() {
+    let s = start_with(|_| {}).await;
+    let alice = s.user("alice").await;
+    let upload = |len: usize| {
+        s.client
+            .post(format!("{}/_telium/v1/media", s.base))
+            .bearer_auth(&alice.home)
+            .header("X-Telium-Purpose", "profile")
+            .header("Content-Type", "image/webp")
+            .body("x".repeat(len))
+            .send()
+    };
+    assert_eq!(upload(400 * 1024).await.unwrap().status().as_u16(), 200);
+    assert_eq!(upload(600 * 1024).await.unwrap().status().as_u16(), 413);
+}
+
+#[tokio::test]
 async fn guild_emoji_uploads_cannot_bypass_server_media_capacity() {
     let s = start_with(|cfg| cfg.media_policy.max_total_bytes = 1).await;
     let alice = s.user("alice").await;
@@ -1418,4 +1435,186 @@ async fn media_row(s: &Server, hash: &str) -> (String, i64, Option<i64>, Option<
         .fetch_one(&s.state.pool)
         .await
         .unwrap()
+}
+
+#[tokio::test]
+async fn an_account_lists_only_its_own_uploads_largest_first_and_the_totals_agree() {
+    let s = start().await;
+    let alice = s.user("alice").await;
+    let bob = s.user("bob").await;
+
+    let small = upload_attachment(&s, &alice, None, "tiny").await;
+    let big = upload_attachment(&s, &alice, None, "a rather larger body of bytes").await;
+    upload_attachment(&s, &bob, None, "bob's own file").await;
+
+    let (status, list) = s.get("/_telium/v1/account/media", Some(&alice.home)).await;
+    assert_eq!(status, 200, "{list}");
+    let files = list["files"].as_array().unwrap();
+    assert_eq!(files.len(), 2, "{list}");
+    assert_eq!(files[0]["hash"], big["hash"], "largest first");
+    assert_eq!(files[1]["hash"], small["hash"]);
+    assert_eq!(files[0]["deletable"], true);
+    let listed: i64 = files.iter().map(|f| f["size"].as_i64().unwrap()).sum();
+    assert_eq!(list["used_bytes"].as_i64().unwrap(), listed);
+    assert_eq!(list["breakdown"]["attachment"]["count"], 2);
+
+    // The figure the settings page shows as "used" is the same one.
+    let (_, caps) = s.get("/_telium/v1/capabilities", Some(&alice.home)).await;
+    assert_eq!(caps["account"]["used_bytes"], list["used_bytes"]);
+
+    let (status, paged) = s.get("/_telium/v1/account/media?limit=1", Some(&alice.home)).await;
+    assert_eq!(status, 200);
+    assert_eq!(paged["files"].as_array().unwrap().len(), 1);
+    assert_eq!(paged["next_offset"], 1);
+    let (_, rest) = s.get("/_telium/v1/account/media?limit=1&offset=1", Some(&alice.home)).await;
+    assert_eq!(rest["files"][0]["hash"], small["hash"]);
+    assert!(rest["next_offset"].is_null());
+
+    let hash = big["hash"].as_str().unwrap();
+    let (status, gone) = s.delete(&format!("/_telium/v1/media/{hash}"), &alice.home).await;
+    assert_eq!(status, 200, "{gone}");
+    let (_, after) = s.get("/_telium/v1/account/media", Some(&alice.home)).await;
+    assert_eq!(after["files"].as_array().unwrap().len(), 1);
+    assert!(after["used_bytes"].as_i64().unwrap() < list["used_bytes"].as_i64().unwrap());
+}
+
+#[tokio::test]
+async fn shared_bytes_are_listed_but_not_offered_for_deletion() {
+    let s = start().await;
+    let alice = s.user("alice").await;
+    let bob = s.user("bob").await;
+    upload_attachment(&s, &alice, None, "identical bytes").await;
+    upload_attachment(&s, &bob, None, "identical bytes").await;
+
+    // One row holds the bytes, owned by whoever uploaded first; the second
+    // uploader has nothing of their own to list or free.
+    let (_, theirs) = s.get("/_telium/v1/account/media", Some(&bob.home)).await;
+    assert!(theirs["files"].as_array().unwrap().is_empty(), "{theirs}");
+    let (_, list) = s.get("/_telium/v1/account/media", Some(&alice.home)).await;
+    assert_eq!(list["files"][0]["shared"], true);
+    assert_eq!(list["files"][0]["deletable"], false);
+
+    let (status, _) = s.get("/_telium/v1/account/media", None).await;
+    assert_eq!(status, 401);
+}
+
+#[tokio::test]
+async fn the_list_says_when_uploads_are_closed_and_when_they_are_merely_unlimited() {
+    let open = start().await;
+    let alice = open.user("alice").await;
+    let (_, list) = open.get("/_telium/v1/account/media", Some(&alice.home)).await;
+    assert_eq!(list["tier1_upload"], true, "{list}");
+
+    let closed = start_with(|cfg| cfg.media_policy.default = MediaDefault::Disabled).await;
+    let bob = closed.user("bob").await;
+    let avatar = closed
+        .client
+        .post(format!("{}/_telium/v1/media", closed.base))
+        .bearer_auth(&bob.home)
+        .header("X-Telium-Purpose", "profile")
+        .header("Content-Type", "image/png")
+        .body("pretend png")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(avatar.status().as_u16(), 200);
+    let (status, list) = closed.get("/_telium/v1/account/media", Some(&bob.home)).await;
+    assert_eq!(status, 200, "{list}");
+    assert_eq!(list["tier1_upload"], false, "{list}");
+    assert!(list["quota_bytes"].is_null());
+    assert_eq!(list["breakdown"]["profile"]["count"], 1);
+}
+
+#[tokio::test]
+async fn re_uploading_your_own_bytes_keeps_the_row_yours_to_delete() {
+    // Shared means another account uploaded the bytes, not that the same
+    // account sent them twice.
+    let s = start().await;
+    // Not the first account: that one is the operator and may delete anything.
+    let _operator = s.user("alice").await;
+    let bob = s.user("bob").await;
+    let first = upload_attachment(&s, &bob, None, "sent twice").await;
+    upload_attachment(&s, &bob, None, "sent twice").await;
+    let (_, list) = s.get("/_telium/v1/account/media", Some(&bob.home)).await;
+    assert_eq!(list["files"].as_array().unwrap().len(), 1);
+    assert_eq!(list["files"][0]["shared"], false, "{list}");
+    assert_eq!(list["files"][0]["deletable"], true, "{list}");
+    let hash = first["hash"].as_str().unwrap();
+    let (status, gone) = s.delete(&format!("/_telium/v1/media/{hash}"), &bob.home).await;
+    assert_eq!(status, 200, "{gone}");
+}
+
+#[tokio::test]
+async fn another_accounts_upload_of_the_same_bytes_still_blocks_the_owners_delete() {
+    let s = start().await;
+    // The first account on a fresh server is its operator, whose takedown
+    // skips the shared check, so the owner here is the second account.
+    let _operator = s.user("alice").await;
+    let bob = s.user("bob").await;
+    let carol = s.user("carol").await;
+    let first = upload_attachment(&s, &bob, None, "identical again").await;
+    upload_attachment(&s, &bob, None, "identical again").await;
+    upload_attachment(&s, &carol, None, "identical again").await;
+    let (_, list) = s.get("/_telium/v1/account/media", Some(&bob.home)).await;
+    assert_eq!(list["files"][0]["deletable"], false, "{list}");
+    let hash = first["hash"].as_str().unwrap();
+    let (status, refused) = s.delete(&format!("/_telium/v1/media/{hash}"), &bob.home).await;
+    assert_eq!(status, 409, "{refused}");
+}
+
+#[tokio::test]
+async fn an_upload_can_be_traced_to_the_message_that_carries_it() {
+    let (s, alice, bob, _gid, cid) = social_fixture().await;
+    let (media, entry) = attachment_entry(&s, &alice, Some(&cid), "trace me").await;
+    let hash = media["hash"].as_str().unwrap().to_string();
+    let path = format!("/_telium/v1/account/media/{hash}/message");
+
+    let (status, none) = s.get(&path, Some(&alice.home)).await;
+    assert_eq!(status, 404, "not sent yet: {none}");
+
+    let (status, msg) = s
+        .post(&format!("/_telium/v1/channels/{cid}/messages"), Some(&alice.token), json!({
+            "content": "here", "attachments": [entry],
+        }))
+        .await;
+    assert_eq!(status, 200, "{msg}");
+    let (status, found) = s.get(&path, Some(&alice.home)).await;
+    assert_eq!(status, 200, "{found}");
+    assert_eq!(found["message_id"], msg["id"]);
+    assert_eq!(found["channel_id"], cid.as_str());
+
+    // Only the uploader may ask.
+    let (status, _) = s.get(&path, Some(&bob.home)).await;
+    assert_eq!(status, 404);
+
+    // Deleting the message takes it out of the lookup.
+    let mid = msg["id"].as_str().unwrap();
+    let (status, _) = s.delete(&format!("/_telium/v1/channels/{cid}/messages/{mid}"), &alice.token).await;
+    assert!(status == 200 || status == 204, "{status}");
+    let (status, _) = s.get(&path, Some(&alice.home)).await;
+    assert_eq!(status, 404, "a deleted message is not where the file lives");
+}
+
+#[tokio::test]
+async fn shared_bytes_expire_with_the_shortest_life_and_free_the_first_uploaders_quota() {
+    let s = start().await;
+    let alice = s.user("alice").await;
+    let bob = s.user("bob").await;
+    let a = upload_as(&s, &alice, "attachment", b"same bytes".to_vec(), &[("X-Telium-Ttl-Secs", "1")]).await;
+    let b = upload_as(&s, &bob, "attachment", b"same bytes".to_vec(), &[("X-Telium-Ttl-Secs", "2592000")]).await;
+    let hash = a["hash"].as_str().unwrap().to_string();
+    assert_eq!(a["hash"], b["hash"]);
+    assert_eq!(a["expires_at"], b["expires_at"], "the shorter life wins for both");
+    let (_, before) = s.get("/_telium/v1/account/media", Some(&alice.home)).await;
+    assert_eq!(before["files"][0]["expires_at"], a["expires_at"]);
+    assert!(before["used_bytes"].as_i64().unwrap() > 0);
+
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    telium_server::routes::media::sweep_expired(&s.state).await.unwrap();
+
+    let (_, list) = s.get("/_telium/v1/account/media", Some(&alice.home)).await;
+    assert_eq!(list["used_bytes"], 0, "the owner's space comes back");
+    let cap = b["capability"].as_str().unwrap();
+    let (status, _) = s.get(&format!("/_telium/v1/media/{hash}?cap={cap}"), None).await;
+    assert_eq!(status, 404);
 }

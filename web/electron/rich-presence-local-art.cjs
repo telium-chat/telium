@@ -57,10 +57,28 @@ function createLocalArtworkRegistry() {
       return handle;
     },
 
+    /// An image already in memory (a program's icon): same opaque handle, no file behind it. PNG only.
+    registerBytes(key, bytes, mime = 'image/png') {
+      if (!bytes || bytes.length < 12) return null;
+      if (mime === 'image/svg+xml') {
+        // Only ever drawn by the window through an <img> and re-encoded to a raster before it is shared; see program-icons.cjs.
+        if (!startsLikeSvg(Buffer.from(bytes).subarray(0, 2048).toString('utf8'))) return null;
+      } else if (imageMime(bytes) !== 'image/png') {
+        return null;
+      }
+      const handle = `program-icon:${createHash('sha256').update(String(key)).digest('hex').slice(0, 32)}`;
+      touch(handle, { bytes, mime });
+      return handle;
+    },
+
     async read(handle) {
       const item = entries.get(handle);
       if (!item) return null;
       touch(handle, item);
+      if (item.bytes) {
+        const copy = item.bytes.buffer.slice(item.bytes.byteOffset, item.bytes.byteOffset + item.bytes.byteLength);
+        return { bytes: copy, mime: item.mime, name: item.mime === 'image/svg+xml' ? 'program-icon.svg' : 'program-icon.png' };
+      }
       const filename = fileURLToPath(item.url);
       const info = await stat(filename);
       if (!info.isFile() || info.size <= 0 || info.size > MAX_LOCAL_ART_BYTES) return null;
@@ -78,6 +96,27 @@ function createLocalArtworkRegistry() {
 
     clear() { entries.clear(); },
   });
+}
+
+/// Whether text opens like an SVG document: optional XML declaration, comments and doctype, then `<svg`.
+/// A plain scan, so hostile input can't make it backtrack.
+function startsLikeSvg(text) {
+  let at = 0;
+  const skipSpace = () => { while (at < text.length && /\s/.test(text[at])) at += 1; };
+  const skipPast = (open, close) => {
+    if (!text.slice(at, at + open.length).toLowerCase().startsWith(open.toLowerCase())) return false;
+    const end = text.indexOf(close, at + open.length);
+    if (end < 0) { at = text.length; return true; }
+    at = end + close.length;
+    return true;
+  };
+  skipSpace();
+  skipPast('<?xml', '>');
+  skipSpace();
+  while (skipPast('<!--', '-->')) skipSpace();
+  skipPast('<!doctype', '>');
+  skipSpace();
+  return /^<svg[\s>]/i.test(text.slice(at, at + 6));
 }
 
 module.exports = { createLocalArtworkRegistry, localFileUrl, imageMime };

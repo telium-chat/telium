@@ -73,5 +73,8 @@ export function fullId(typed, domain) {
   if (!raw) return '';
   const local = raw.startsWith('@') ? raw.slice(1) : raw;
   if (local.includes(':')) return `@${local}`;
+  // `ada@server.com`, as people now write it, is the same account as `@ada:server.com`.
+  const at = local.indexOf('@');
+  if (at > 0 && at < local.length - 1) return `@${local.slice(0, at)}:${local.slice(at + 1)}`;
   return domain ? `@${local}:${domain}` : `@${local}`;
 }

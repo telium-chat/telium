@@ -14,7 +14,7 @@ import { shortName, storage } from '../util.js';
 import * as vault from '../vault.js';
 import {
   encryption, LOCAL_DM_DRAFTS_KEY, OPAQUE_PIN_PREFIX,
-  PENDING_RECOVERY_KEY, secureAuth, SESSION_KEY,
+  PENDING_RECOVERY_KEY, secureAuth, SESSION_KEY, verification,
 } from './shared.js';
 
 /// Both keys are read and written, or a pin under the old key would lapse and allow the downgrade.
@@ -28,6 +28,22 @@ function authError(code, message, extra = {}) {
   error.code = code;
   Object.assign(error, extra);
   return error;
+}
+
+/// Sign-in waits on custody for at most this long; a hung request then costs the setup, never the sign-in.
+export const CUSTODY_TIMEOUT_MS = 15_000;
+
+/// Gives up on `work` after `ms`, and cancels the requests behind it (`abort`): a hung one would otherwise keep holding the
+/// account-key lock, and the next `Trust.start` in this tab would wait on it for good.
+function withTimeout(work, ms, label, abort) {
+  let timer;
+  const expired = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${ms} ms`));
+      abort.abort();
+    }, ms);
+  });
+  return Promise.race([work, expired]).finally(() => clearTimeout(timer));
 }
 
 export const sessionMethods = {
@@ -150,10 +166,11 @@ export const sessionMethods = {
     let recoveryWrapper = null;
     let accountRecoveryWrapper = null;
     let recoveryKey = null;
+    let ksfBehind = false;
 
     if (supportsOpaque) {
       const {
-        enrollOpaque, loginOpaque, registerOpaque,
+        enrollOpaque, KSF_CURRENT, loginOpaque, registerOpaque,
       } = await secureAuth();
       if (register) {
         const min = Number(caps?.registration_min_password_len) || 8;
@@ -208,6 +225,7 @@ export const sessionMethods = {
         } else {
           resp = secure.session;
           recoveryWrapper = secure.recoveryWrapper;
+          ksfBehind = secure.ksfVersion < KSF_CURRENT;
         }
       }
     } else {
@@ -223,6 +241,21 @@ export const sessionMethods = {
         : reactivate
           ? await Api.reactivate(normalized, user, password, deviceName, mfaCode)
           : await Api.login(normalized, user, password, deviceName, mfaCode);
+    }
+
+    // The vault and the account key are made here, with the password in hand and before the session is saved: once it
+    // is saved a second tab can restore it, and a restored session has no password to make either with.
+    if (!handoffOnly && recoveryWrapper) {
+      await this.createCustody(resp, normalized, recoveryWrapper, accountRecoveryWrapper);
+      if (ksfBehind) {
+        const upgraded = await this.upgradeKsf(resp, normalized, password, recoveryWrapper, accountRecoveryWrapper);
+        if (upgraded) recoveryWrapper = upgraded.recoveryWrapper;
+      }
+      // A new account does not finish signing up until the recovery copy is on the server and read back. The user's
+      // "yes, I saved it" is a separate fact (confirmRecoveryKey) and never stands in for it.
+      if (register && accountRecoveryWrapper) {
+        await this.confirmRecoveryCopyWritten(resp, normalized, recoveryWrapper, accountRecoveryWrapper);
+      }
     }
 
     if (handoffOnly) {
@@ -268,6 +301,73 @@ export const sessionMethods = {
     return recoveryKey ? { ...resp, recovery_key: recoveryKey } : resp;
   },
 
+  /// Vault first (its ring is kept on this device before the write), then the account key under that ring. Best effort:
+  /// a failure or a request that does not answer in time leaves the account without them, which the next sign-in with the password retries (`vault.load` and
+  /// `ensureRoot` both only create what is missing), and never stops the sign-in.
+  async createCustody(resp, base, recoveryWrapper, accountRecoveryWrapper) {
+    const abort = new AbortController();
+    try {
+      const api = new Api({
+        base,
+        token: resp.access_token,
+        domain: resp.server_name || new URL(base).host,
+        signal: abort.signal,
+      });
+      const ring = await withTimeout(
+        vault.load(api, resp.user_id, recoveryWrapper, accountRecoveryWrapper, { reseal: true }),
+        this.custodyTimeoutMs ?? CUSTODY_TIMEOUT_MS,
+        'loading the recovery vault',
+        abort,
+      );
+      if (!ring?.key) return;
+      const [{ loadCiphersuite }, { Trust }] = await Promise.all([encryption(), verification()]);
+      const trust = new Trust(api, { userId: resp.user_id, deviceId: resp.device_id, recovery: ring });
+      await withTimeout(
+        trust.ensureRoot(await loadCiphersuite(), ring.key),
+        this.custodyTimeoutMs ?? CUSTODY_TIMEOUT_MS,
+        'setting up the account key',
+        abort,
+      );
+    } catch (e) {
+      console.warn('could not set up encrypted-message custody at sign-in', e);
+    }
+  },
+
+  /// Sign-up only: the vault write that carries the recovery copy has been accepted and the copy reads back and opens to
+  /// this device's ring. Retried, since a lost answer or a busy server is common; if it still is not there, sign-up fails
+  /// here, before the session is saved or the recovery key is shown, instead of leaving "Recovery key: Not made yet"
+  /// behind a success. The account exists; the user signs in with the password and makes a new recovery key in Settings.
+  async confirmRecoveryCopyWritten(resp, base, recoveryWrapper, accountRecoveryWrapper) {
+    const attempts = this.recoveryCopyAttempts ?? 3;
+    let last = null;
+    for (let i = 0; i < attempts; i += 1) {
+      const abort = new AbortController();
+      try {
+        const api = new Api({
+          base,
+          token: resp.access_token,
+          domain: resp.server_name || new URL(base).host,
+          signal: abort.signal,
+        });
+        await withTimeout((async () => {
+          const ring = await vault.load(api, resp.user_id, recoveryWrapper, accountRecoveryWrapper, { reseal: true });
+          if (!ring?.key) throw new Error('the recovery vault did not open');
+          await vault.confirmRecoveryCopy(api, ring, recoveryWrapper, accountRecoveryWrapper, resp.user_id);
+        })(), this.custodyTimeoutMs ?? CUSTODY_TIMEOUT_MS, 'saving the recovery copy', abort);
+        return;
+      } catch (e) {
+        last = e;
+        console.warn('recovery copy not confirmed at sign-up', e);
+      }
+    }
+    throw authError(
+      'recovery_copy_unconfirmed',
+      'Your account was created, but the recovery copy of your encrypted-message key could not be saved on the server, so '
+      + 'sign-up did not finish. Sign in with your password, then make a new recovery key in Settings.',
+      { cause: last },
+    );
+  },
+
   async confirmRecoveryKey(recoveryKey = null) {
     const pending = recoveryKey
       || (typeof sessionStorage !== 'undefined'
@@ -298,11 +398,6 @@ export const sessionMethods = {
     if (this.vault.recoveryKey && !replace) {
       throw new Error('This account already has a generated recovery key.');
     }
-    if (this.vault.legacyIndependent
-      || (this.vault.independent && !this.vault.recoveryKey)) {
-      throw new Error('Remove the legacy independent recovery passphrase before adding a generated recovery key.');
-    }
-
     const { generateAccountRecovery } = await import('../account-recovery.js');
     const { reauthenticateOpaque } = await secureAuth();
     const accountRecovery = generateAccountRecovery();
@@ -324,7 +419,6 @@ export const sessionMethods = {
       ...this.vault,
       independent: true,
       recoveryKey: true,
-      legacyIndependent: false,
       independentCiphertext,
     };
     if (typeof sessionStorage !== 'undefined') {
@@ -363,7 +457,6 @@ export const sessionMethods = {
       ...this.vault,
       independent: true,
       recoveryKey: true,
-      legacyIndependent: false,
       independentCiphertext,
     };
     this.emit('vault', this.vault);
@@ -387,8 +480,22 @@ export const sessionMethods = {
     }
 
     const { resetPasswordOpaque } = await secureAuth();
+    // The vault is re-wrapped under the new password in the same request that replaces it (I5); the fallback in
+    // vault.load stays for resets made before this.
     const recovered = await resetPasswordOpaque(
       normalized, user, recoveryKey, newPassword, deviceName,
+      {
+        vaultRewrap: async (wrapper, copy) => {
+          if (!copy) return null;
+          try {
+            return await vault.rewrapFromRecoveryCopy(copy, wrapper);
+          } catch (e) {
+            // A copy made under another recovery key (an account moved here): say so, signed, instead of being locked out.
+            if (e?.code === 'recovery_copy_unopenable') return { unopenable: true };
+            throw e;
+          }
+        },
+      },
     );
     const resp = recovered.session;
     for (const key of pinKeys(normalized, home)) storage.set(key, true);
@@ -410,7 +517,83 @@ export const sessionMethods = {
     };
     this.save();
     rememberSession(this.session, { touch: true });
-    return resp;
+    // `vault_unopenable` says the reset went through but the vault's recovery copy did not open under this recovery key (an
+    // account moved here carries the source server's copy), so it was left as it is and stays locked: the caller tells the user.
+    return recovered.vaultUnopenable ? { ...resp, vault_unopenable: true } : resp;
+  },
+
+  /// Changes the account password and re-wraps the vault under it in one server write, so the OPAQUE record and the vault
+  /// never disagree (I5). Needs the vault open on this device. The server ends every other session and every outstanding
+  /// reauth proof with the change, so a device still holding the old password's key can no longer reach the vault; this
+  /// session stays. If the answer to the write is lost the new password may already be in force, so the old key is
+  /// dropped from memory here: nothing may seal the vault under it again.
+  async changePassword(currentPassword, newPassword) {
+    if (!currentPassword) throw new Error('Enter your current account password.');
+    if (!this.home || !this.opaqueAuth) {
+      throw new Error('Changing the password requires a current OPAQUE homeserver.');
+    }
+    const caps = await this.home.capabilities().catch(() => null);
+    const min = Number(caps?.registration_min_password_len) || 8;
+    if (!newPassword || newPassword.length < min) {
+      throw new Error(`Password must be at least ${min} characters.`);
+    }
+    const current = this.vault;
+    if (current && (!current.raw || current.mode !== 'opaque_custody')) {
+      throw new Error('The encrypted recovery vault must be unlocked before the password can change.');
+    }
+    const { changePasswordOpaque } = await secureAuth();
+    let changed;
+    try {
+      changed = await changePasswordOpaque(this.home, currentPassword, newPassword, {
+        vault: current ? { version: current.version, rewrap: (wrapper) => vault.rewrapCiphertext(current, wrapper) } : null,
+      });
+    } catch (e) {
+      if (e?.finishUnanswered) this.authRecoveryWrapper = null;
+      throw e;
+    }
+    this.authRecoveryWrapper = changed.recoveryWrapper;
+    if (current) {
+      this.vault = {
+        ...current,
+        primaryCiphertext: changed.ciphertext,
+        version: changed.vaultVersion ?? current.version,
+      };
+      this.emit('vault', this.vault);
+    }
+    return { ksfVersion: changed.ksfVersion };
+  },
+
+  /// Moves an account still on an older key-stretching set to the current one, at a sign-in, while the password is in
+  /// hand: the new record and the re-wrapped vault go up in one write. Returns `{ recoveryWrapper }`, the wrapper the
+  /// password makes under the record now in force, or null when nothing changed. Best effort: the old set still works, so
+  /// a failure is logged and tried again at the next sign-in.
+  ///
+  /// A write whose answer is lost may have landed, and then the wrapper this sign-in holds is the old set's: keeping it
+  /// would seal the vault under a key the record no longer makes. So the record in force is read back with the password;
+  /// if that cannot be read either, no wrapper is returned at all (`recoveryWrapper: null`), which leaves this session
+  /// with a locked vault until the next password sign-in rather than one resealed under the wrong key.
+  async upgradeKsf(resp, base, password, recoveryWrapper, accountRecoveryWrapper) {
+    const api = new Api({ base, token: resp.access_token, domain: resp.server_name || new URL(base).host });
+    try {
+      const ring = await vault.load(api, resp.user_id, recoveryWrapper, accountRecoveryWrapper, { reseal: true });
+      if (!ring?.raw || ring.mode !== 'opaque_custody') return null;
+      const { changePasswordOpaque } = await secureAuth();
+      return await changePasswordOpaque(api, password, password, {
+        vault: { version: ring.version, rewrap: (wrapper) => vault.rewrapCiphertext(ring, wrapper) },
+      });
+    } catch (e) {
+      console.warn('could not move the account to the current key-stretching settings', e);
+      // Refused, or failed before the write was sent: nothing changed, and the wrapper in hand is still right.
+      if (!e?.finishUnanswered) return null;
+      try {
+        const { currentWrapperOpaque, KSF_CURRENT } = await secureAuth();
+        const now = await currentWrapperOpaque(api, password);
+        return now.ksfVersion >= KSF_CURRENT ? { recoveryWrapper: now.recoveryWrapper, ksfVersion: now.ksfVersion } : null;
+      } catch (readBack) {
+        console.warn('could not tell whether the key-stretching move landed; using no vault key this session', readBack);
+        return { recoveryWrapper: null, ksfVersion: null };
+      }
+    }
   },
 
   signOut() {

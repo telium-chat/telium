@@ -88,6 +88,23 @@ export async function heldSecret(userId) {
   return stored ? new Uint8Array(stored.secret) : null;
 }
 
+/// A new account key waiting for the server to accept it, filed under its own public half so a second tab or a refused
+/// create never overwrites the key the account actually publishes. The user id comes last so sign-out's `wipeScope` clears it.
+const pendingKey = (userId, publicKey) => `crosssign-pending:${publicKey}:${userId}`;
+
+export async function keepPendingSecret(userId, publicKey, secret) {
+  await put(IDENTITY, pendingKey(userId, publicKey), { secret, created_at: Date.now() });
+}
+
+export async function pendingSecret(userId, publicKey) {
+  const stored = await get(IDENTITY, pendingKey(userId, publicKey)).catch(() => null);
+  return stored ? new Uint8Array(stored.secret) : null;
+}
+
+export async function dropPendingSecret(userId, publicKey) {
+  await del(IDENTITY, pendingKey(userId, publicKey)).catch(() => {});
+}
+
 /// A leftover group state is a readable copy of its conversations.
 export async function wipe() {
   if (typeof indexedDB === 'undefined') return;

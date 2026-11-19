@@ -109,6 +109,14 @@ COPY --from=web    /src/web/dist      /srv/telium/web
 COPY deploy/compose.yml            /usr/share/telium/deploy/compose.yml
 COPY server/telium.example.toml    /usr/share/telium/deploy/telium.example.toml
 
+# The Compose kit's update logic. The kit's `updater` service copies this out
+# of the running server container before every pass, so each release brings
+# its own updater and the updater container never has to replace itself. The
+# kit's compose.yml rides along as the reference copy of what a release
+# expects (the updater does not rewrite yours).
+COPY deploy/compose/update.sh      /usr/share/telium/deploy/compose/update.sh
+COPY deploy/compose/compose.yml    /usr/share/telium/deploy/compose/compose.yml
+
 # The data: the SQLite database and its -wal/-shm siblings, uploaded media, the
 # read-through caches for remote media and embeds, and cold archive segments.
 RUN install -d -o telium -g telium /var/lib/telium

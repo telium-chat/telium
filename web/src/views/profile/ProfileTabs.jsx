@@ -43,7 +43,7 @@ function ActivityPanel({ activities, displayName, isMe }) {
   const rich = activities?.rich || [];
   if (voice || rich.length) {
     return (
-      <div className="grid gap-2">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2">
         {voice ? <VoiceActivityCard activity={voice} /> : null}
         {rich.map((activity) => (
           <RichActivityCard

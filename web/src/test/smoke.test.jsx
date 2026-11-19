@@ -8,10 +8,12 @@ import { signIn } from './sign-in.js';
 import { KEYS } from '../lib/sync.js';
 import { open, syncKeys } from '../lib/sealed-sync.js';
 import { stubMedia } from './fake-webrtc.js';
+import { displayId } from '../lib/util.js';
+import { publicProfileLink } from '../views/PublicProfileLanding.jsx';
 
 const GUILD_PANES = ['Overview', 'Roles', 'Channel permissions',
   'Gates and origins', 'Moderation queue', 'Bans', 'Emoji', 'Audit log'];
-const USER_PANES = ['Profile', 'Account', 'Messages', 'Calls & audio', 'Profile lookups',
+const USER_PANES = ['Profile', 'Account', 'Messages & calls', 'Profile lookups',
   'Network privacy', 'Connected servers', 'Notifications', 'Appearance', 'Extras', 'Local data'];
 
 async function boot({ strict = false } = {}) {
@@ -265,7 +267,7 @@ describe('every screen mounts', () => {
     expect(pill.getAttribute('title')).toBe('@alice:home.example');
     await user.click(pill);
     const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByRole('button', { name: /^@alice:home\.example, copy username$/ })).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: /^alice@home\.example, copy username$/ })).toBeTruthy();
     expect(dialog.closest('.popover')).toBeTruthy();
     await dismiss(user);
 
@@ -663,7 +665,7 @@ describe('links and stickers', () => {
     await waitFor(() => expect(server.state.sent.at(-1)?.content).toBe(shareUrl));
     await waitFor(() => expect(screen.getByAltText('GIF').getAttribute('src'))
       .toBe('https://media.klipy.com/test/celebrate.gif'));
-    expect(server.state.klipyRequests.some(({ query }) => query.q === 'big-brother-is-watching-you-5')).toBe(true);
+    expect(server.state.klipyRequests.some(({ query }) => query.slugs === 'big-brother-is-watching-you-5')).toBe(true);
     expect(server.state.embedRequests).not.toContain(shareUrl);
   });
 
@@ -694,6 +696,22 @@ describe('links and stickers', () => {
       .toBe('https://media.giphy.com/media/GAXXHdS0zXawVLOJLY/giphy.gif'));
     expect(server.state.embedRequests).not.toContain(shareUrl);
     expect(screen.getByTitle('Favorite GIF')).toBeTruthy();
+  });
+
+  it('copies your username from the account menu, and your profile link from Advanced', async () => {
+    const { store, user } = await boot();
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+
+    await user.click(await screen.findByRole('button', { name: 'Account menu' }));
+    await user.click(await screen.findByTitle('Click to copy your username'));
+    const [handle] = writeText.mock.calls.at(-1);
+    expect(handle).toBe(displayId(store.me.user_id));
+
+    await user.click(await screen.findByRole('menuitem', { name: 'Advanced' }));
+    const copyUrl = await screen.findByRole('menuitem', { name: 'Copy profile link' });
+    fireEvent.click(copyUrl);
+    expect(writeText.mock.calls.at(-1)[0]).toBe(publicProfileLink(store.me.user_id));
   });
 
   it('publishes a custom status, and withholds it from a guild switched off', async () => {

@@ -69,7 +69,7 @@ export const notifications = {
   // needs a server subscription -- so the section titles have to be
   // distinguishable at a glance and not both be some word for "notifications".
   'notifications.local.title': 'Local notifications',
-  'notifications.local.description': 'Alerts from this browser or desktop app while Telium is running in the background.',
+  'notifications.local.description': 'Receive notifications from Telium while the app is running in the background.',
 
   // Two keys for what English would call one row, because the thing being
   // named is genuinely different: on the web it is a permission the *browser*
@@ -146,14 +146,14 @@ export const notifications = {
   // "Push providers" means Apple, Google and whoever else carries the
   // doorbell; naming them generically is deliberate, because which one is in
   // use depends on the build.
-  'notifications.push.title': 'Background push',
-  'notifications.push.description': 'Push providers only wake Telium. Notification content stays inside Telium’s encrypted inbox.',
+  'notifications.push.title': 'Background notifications',
+  'notifications.push.description': 'Wake Telium when a new notification arrives, even while it is fully closed. Message content stays inside Telium’s encrypted inbox.',
 
   // The footnote under the whole section. One key and one sentence pair, not
   // two: the second half ("pulls an opaque inbox row…") is the evidence for
   // the first ("carry no message content"), and a translator handed them
   // separately cannot see that the second is explaining the first.
-  'notifications.push.privacyHint': 'Provider wake-ups carry no message content. Android and supported browsers pull opaque inbox rows, decrypt them on-device, and acknowledge only rows they successfully process.',
+  'notifications.push.privacyHint': 'Notifications only carry an alert that something new arrived — never message content. Android and supported browsers pull opaque inbox rows, decrypt them on this device, and acknowledge only rows they successfully process.',
 
   'notifications.push.android.label': 'Android background notifications',
 
@@ -217,7 +217,7 @@ export const notifications = {
   // version is not a failure and is not phrased as one -- desktop
   // notifications do work, the gap is only the closed-app case -- which is why
   // it is drawn in a neutral notice and the browser one in a warning.
-  'notifications.push.desktopOnly': 'Desktop notifications work while Telium is running. Waking a fully closed desktop app is not implemented yet.',
+  'notifications.push.desktopOnly': 'Desktop notifications work while Telium is running. A fully closed desktop app cannot be woken yet.',
   'notifications.push.unsupported': 'This browser cannot register background push on this device.',
 
   // -------------------------------------------------------------- alerts
@@ -233,7 +233,7 @@ export const notifications = {
   // somewhere". The second clause is the one to preserve if a language needs
   // to shorten.
   'notifications.alerts.preview.label': 'Notification previews',
-  'notifications.alerts.preview.hint': 'Controls what system notifications reveal on this device. The preference syncs with your account; message content still stays inside Telium’s encrypted notification path.',
+  'notifications.alerts.preview.hint': 'Controls how much of a message notifications show on this device. The choice syncs across your devices; messages stay encrypted in the notification path.',
 
   // The three modes, in decreasing order of what they disclose. Their values
   // (`full`, `sender`, `hidden`) are persisted preference tokens and are not
@@ -248,7 +248,7 @@ export const notifications = {
   'notifications.alerts.preview.hidden': 'Hide sender and content',
 
   'notifications.alerts.mentions.label': 'Notify on mentions',
-  'notifications.alerts.mentions.hint': 'Shows a notification when you are mentioned while Telium is in the background.',
+  'notifications.alerts.mentions.hint': 'Shows a notification when someone mentions you in a channel while Telium is in the background.',
 
   'notifications.alerts.dms.label': 'Notify on direct messages',
   // Two hints for one switch, picked by build rather than by language. The
@@ -258,7 +258,7 @@ export const notifications = {
   // DMs, and somebody who turns this on expecting it to is going to miss
   // messages. Neither sentence is a shortened version of the other, so they
   // are two keys.
-  'notifications.alerts.dms.hint': 'Every message in a DM is addressed to you, so mentions do not cover them.',
+  'notifications.alerts.dms.hint': 'Shows a notification for every new direct message. Each one is addressed to you, so mentions do not cover them.',
   'notifications.alerts.dms.hintAndroid': 'Shows encrypted DM/group-chat alerts while Telium is backgrounded or fully closed. Killed-app alerts stay generic until MLS is running again.',
 
   // Three keys where there was one, because the sound preference grew two more
@@ -269,7 +269,7 @@ export const notifications = {
   // must survive translation -- somebody who reads this as "plays while you
   // are looking at Telium" has been told the opposite of what the switch does.
   'notifications.alerts.sound.label': 'Play a sound for mentions and DMs',
-  'notifications.alerts.sound.hint': 'Plays while the client is running, whether or not it is in front.',
+  'notifications.alerts.sound.hint': 'Plays a sound when a mention or direct message arrives, even when Telium is running in the background.',
 
   // The second half of the same preference, and the reason the first is worth
   // having separately: a chime for every line in a busy guild is the setting
@@ -281,7 +281,7 @@ export const notifications = {
   // read on its own, and a translation that drops the word leaves two
   // sound switches with no stated relationship between them.
   'notifications.alerts.soundMessages.label': 'Also for ordinary messages',
-  'notifications.alerts.soundMessages.hint': 'Every message in a channel you are reading, not only the ones addressed to you.',
+  'notifications.alerts.soundMessages.hint': 'Plays a sound for regular channel messages too, not only the ones addressed to you.',
 
   // The ringtone, which is on unless it is turned off -- the one switch in
   // this section that defaults the other way. A chime for a message that will
@@ -294,7 +294,7 @@ export const notifications = {
   // over. The card with Answer on it appears either way; this is only the
   // sound.
   'notifications.alerts.callRing.label': 'Ring for incoming calls',
-  'notifications.alerts.callRing.hint': 'A repeating ringtone while somebody is calling you in a conversation. Stops when you answer, decline, or they give up.',
+  'notifications.alerts.callRing.hint': 'Plays a repeating ringtone when an incoming call arrives. Stops when you answer, decline, or the caller gives up.',
 
   // ------------------------------------------ the notification's own words
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { defaultExpiry, describeLimit, expiryOptions, narrowestLimit } from '../lib/upload.js';
+import { defaultExpiry, describeLimit, expiryOptions, mediaAgeCapSecs, narrowestLimit } from '../lib/upload.js';
 import { createFakeServer } from './fake-server.js';
 import { signedInApp } from './harness.jsx';
 
@@ -17,8 +17,15 @@ describe('expiry option arithmetic', () => {
       .toEqual(['1 hour', '1 day', '1 week', '30 days', 'Never']);
     const twoDays = 2 * 24 * 60 * 60;
     expect(expiryOptions(twoDays).map((o) => o.label)).toContain('2 days');
-    expect(expiryOptions(twoDays).some((o) => o.secs === null)).toBe(false);
+    expect(expiryOptions(twoDays).find((o) => o.secs === null).disabled).toBe(true);
+    expect(expiryOptions(twoDays).find((o) => o.secs === twoDays).disabled).toBe(false);
     expect(expiryOptions(hour).map((o) => o.secs)).toContain(hour);
+  });
+
+  it('treats the server-wide attachment age ceiling as a cap', () => {
+    expect(mediaAgeCapSecs({ attachment_max_age_days: 30 })).toBe(30 * 24 * 60 * 60);
+    expect(mediaAgeCapSecs({ attachment_max_age_days: 0 })).toBeNull();
+    expect(mediaAgeCapSecs(undefined)).toBeNull();
   });
 
   it('defaults to 30 days when allowed, else to the cap itself', () => {
@@ -109,7 +116,10 @@ describe('the staged-file tray', () => {
 
     const menu = await openExpiryMenu(user);
     expect(within(menu).getByRole('menuitem', { name: 'Expires in 1 hour' })).toBeTruthy();
-    expect(within(menu).queryByRole('menuitem', { name: 'Keeps forever' })).toBeNull();
+    const forever = within(menu).getByRole('menuitem', { name: /Keeps forever/ });
+    expect(forever.getAttribute('aria-disabled')).toBe('true');
+    expect(within(forever).getByRole('img', { name: 'Why is this unavailable?' })).toBeTruthy();
+    expect(within(menu).getByRole('menuitem', { name: /Expires in 1 week/ }).getAttribute('aria-disabled')).toBe('true');
     expect(within(menu).getByText(/deleted after at most an hour/)).toBeTruthy();
   });
 

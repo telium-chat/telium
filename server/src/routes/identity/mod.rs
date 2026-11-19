@@ -887,6 +887,10 @@ async fn revoke_session(state: &AppState, user_id: &str, device_id: &str) -> Api
 pub struct CrossSigningUpload {
     pub identity_key: String,
     pub sealed_secret: String,
+    /// Set by a client making the account's first key: refused with 409 if any key is already stored, so two devices
+    /// creating at once cannot silently overwrite each other's root.
+    #[serde(default)]
+    pub create_only: bool,
 }
 
 #[derive(Deserialize)]
@@ -963,6 +967,23 @@ pub async fn get_cross_signing(State(state): State<AppState>, auth: HomeAuth) ->
     })))
 }
 
+/// The throwaway-key seal (`device-v1:`) wrapped the identity root under a key nobody kept, so no new device could ever
+/// open it. Retired in phase 4 of the key-custody design: a root is sealed under the account key (`recovery-v1:`)
+/// from the moment it exists. Only an incoming value is refused; a root already stored that way stays readable, and a
+/// device holding it re-seals it properly.
+pub(crate) fn refuse_retired_seal(sealed_secret: &str) -> ApiResult<()> {
+    if sealed_secret.trim_start().starts_with("device-v1:") {
+        return Err(ApiError::BadRequest(
+            "the throwaway-key seal for the identity key is retired; seal it under the account key (recovery-v1:), \
+             or update Telium"
+                .into(),
+        )
+        .with_code(crate::errcodes::CUSTODY_RETIRED)
+        .with_detail("seal", "device-v1"));
+    }
+    Ok(())
+}
+
 pub async fn put_cross_signing(
     State(state): State<AppState>,
     auth: HomeAuth,
@@ -971,6 +992,7 @@ pub async fn put_cross_signing(
     if body.identity_key.trim().is_empty() || body.sealed_secret.trim().is_empty() {
         return Err(ApiError::BadRequest("cross-signing key and sealed secret are required".into()));
     }
+    refuse_retired_seal(&body.sealed_secret)?;
     if let Some(protected) =
         super::identity_continuity::current_key(&state, &auth.user_id).await?
     {
@@ -980,12 +1002,42 @@ pub async fn put_cross_signing(
             ));
         }
     }
+    let now = now_ms();
+    if body.create_only {
+        // One statement, so the check and the write cannot interleave with another device's create.
+        let created = sqlx::query(
+            "INSERT INTO cross_signing (user_id, identity_key, sealed_secret, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id) DO NOTHING",
+        )
+        .bind(&auth.user_id)
+        .bind(&body.identity_key)
+        .bind(&body.sealed_secret)
+        .bind(now)
+        .bind(now)
+        .execute(&state.pool)
+        .await?
+        .rows_affected();
+        if created == 0 {
+            return Err(ApiError::Conflict(
+                "this account already has a cross-signing key; load it instead of making another".into(),
+            ));
+        }
+        // As for any new root below: nothing signed by an earlier one stands.
+        sqlx::query("UPDATE devices SET cross_sig = NULL WHERE user_id = ?")
+            .bind(&auth.user_id)
+            .execute(&state.pool)
+            .await?;
+        sqlx::query("DELETE FROM user_signatures WHERE signer = ?")
+            .bind(&auth.user_id)
+            .execute(&state.pool)
+            .await?;
+        return Ok(Json(json!({ "ok": true, "identity_key": body.identity_key })));
+    }
     let existing: Option<String> =
         sqlx::query_scalar("SELECT identity_key FROM cross_signing WHERE user_id = ?")
             .bind(&auth.user_id)
             .fetch_optional(&state.pool)
             .await?;
-    let now = now_ms();
     if existing.as_deref() != Some(body.identity_key.as_str()) {
         sqlx::query("UPDATE devices SET cross_sig = NULL WHERE user_id = ?")
             .bind(&auth.user_id)

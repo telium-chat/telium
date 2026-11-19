@@ -12,34 +12,42 @@ Write for the people using the app, not the repo: what changed in their
 hands, not which PRs merged.
 -->
 
+## 17 November 2026
+
+- Both the desktop app and server must be updated to the newest version.
+- Users can now recover their account with a recovery key if they lose access to all their devices.
+
+## 15 November 2026
+
+- Users can now manage and delete their uploaded files in settings.
+
 ## 26 October 2026
 
-- Fixed: calls in a voice channel now stay up through server trouble. If a server the call runs on goes down or restarts for a few minutes, the call waits for it and rejoins on its own when it's back, instead of ending and taking everyone out of the voice channel. And a call that drops twice in a row now pauses briefly and tries again, instead of removing you from the channel.
-- Fixed: long calls no longer reconnect out of nowhere. A call that had been going for a while used to be knocked into a full reconnect — join sound and all — by the first small network hiccup. The call now renews its connection quietly in the background, and the conversation just continues.
-- Fixed: sound that breaks mid-call now repairs itself. If a glitch left you unable to hear the call, or the call unable to hear you, it used to stay broken until everyone left the channel and joined again. The call now fixes itself in place — usually within seconds, at most within a minute.
-- Fixed: being removed from a voice channel now ends the call clearly. If a moderator disconnects you, the app tells you what happened and leaves the call with you, instead of leaving you sitting in a call that has quietly gone silent.
+- Voice calls stay connected even if the server goes down temporarily.
+- Long calls no longer restart randomly because of internet problems.
+- Fixed audio problems that could cause people to stop hearing each other in calls.
 
 ## 22 October 2026
 
-- Servers now update to releases rather than to whatever was last merged. A server release is a `server-v<version>` tag, built once and published once, and both update paths move to the newest release. `telium-server version` reports the release version alongside the commit it was built from, so "which release is this?" has an answer you can read off the box.
+- Users can now check which version of Telium they are running.
 
 ## 21 October 2026
 
-- An Android preview build is now downloadable from the download page. It is early — expect rough edges — and it installs and updates like a normal app, signed with Telium's own release key rather than a debug one.
-- Windows and Linux releases are unchanged and still get the desktop download. Android is built and released separately, so a desktop release no longer implies an Android one.
+- An early Android version of Telium is now out.
+
+(Android version is still being worked on, users might run into bugs.)
 
 ## 15 October 2026
 
-- Report bugs and send feedback from inside the client: Settings → Help & feedback assembles a pre-filled issue, shows you exactly what would be attached, and keeps a full copy on your clipboard either way.
-- The desktop app's address field now opens the web client, the way a browser would.
+- Users can now report bugs and send feedback directly through the app.
 
 ## 14 October 2026
 
-- Native installs — no Docker — get a real update path: the CI publishes a static server build for x86_64 and aarch64 (Raspberry Pi included), and a systemd timer keeps the box on the current release.
-- Fixed: a DM frame sent from a session the account no longer remembers could stall message delivery instead of being stepped over.
-- Fixed: DM frames that arrive out of order no longer bury each other.
+- Users now install the server directly without needing to use Docker.
+- Fixed an issue where private messages could get stuck when sent from an old account session.
+- Fixed an issue where messages arriving out of order could interfere with each other.
 
 ## Earlier in October
 
-- Guild calls stay up through the faults that used to end them — network blips and relay handover included.
-- Calls answer cleanly when someone's signal arrives before your device has finished dialling.
+- Guild calls are now more reliable and stay connected through internet problems and server changes.
+- Calls now connect properly even when someone answers before the other person's device finishes dialing.

@@ -242,20 +242,22 @@ export const dmMethods = {
     const {
       looksLikeRecoveryKey, recoveryVaultWrapper,
     } = await import('../account-recovery.js');
-    const recoveryWrapper = looksLikeRecoveryKey(secret) ? recoveryVaultWrapper(secret) : null;
+    // Only the account recovery key opens a vault now; the old recovery passphrase is retired.
+    if (!looksLikeRecoveryKey(secret)) throw new Error('that is not a recovery key');
+    const recoveryWrapper = recoveryVaultWrapper(secret);
     const opened = await vault.load(
       this.home,
-      recoveryWrapper ? null : secret,
       userId,
       this.authRecoveryWrapper,
       recoveryWrapper,
+      // The user typed the recovery key to bring a moved vault under this server's password key. The session that holds
+      // that key is live, so a password change elsewhere has not ended it (a change ends every other session).
+      { reseal: true },
     );
     if (opened.locked || !opened.key) {
-      throw new Error(recoveryWrapper
-        ? 'that recovery key did not open the vault'
-        : 'that recovery passphrase did not open the key');
+      throw new Error('that recovery key did not open the vault');
     }
-    if (recoveryWrapper) this.accountRecoveryWrapper = recoveryWrapper;
+    this.accountRecoveryWrapper = recoveryWrapper;
 
     this.vault = opened;
     this.sync.adoptKeyring(opened, { current: true }).catch(() => {});
@@ -267,6 +269,35 @@ export const dmMethods = {
     const id = this.route.conversationId;
     if (id && this.mls) await this.openConversation(id);
     return opened;
+  },
+
+  /// For a vault left in a retired custody mode (`vault.retiredMode`) that nothing can open: replaces it with a new one under
+  /// the account password. The old history stays locked for good; the caller has said so and asked. Needs the password's
+  /// key, so a session restored without the password signs in again first.
+  async startNewVault() {
+    if (!this.home) throw new Error('sign in before starting a new encrypted-message vault');
+    if (!this.authRecoveryWrapper) {
+      throw new Error('Sign in with your password to start a new encrypted-message vault.');
+    }
+    if (!this.vault?.retiredMode) throw new Error('This account\'s encrypted-message vault is not in a retired mode.');
+    const userId = this.session?.home?.user_id || null;
+    const created = await vault.replaceRetiredVault(
+      this.home, userId, this.authRecoveryWrapper, this.accountRecoveryWrapper,
+    );
+    this.vault = created;
+    if (this.trust) {
+      this.trust.recovery = created;
+      // A device that holds the root keeps it usable: sealed under the new account key, so a new device with only the
+      // password signs, and nobody has to reset an identity that is not lost.
+      await this.trust.resealRoot(created.key)
+        .catch((e) => console.warn('could not seal the account key under the new vault', e));
+    }
+    this.sync.adoptKeyring(created, { current: true }).catch(() => {});
+    await this.mls?.adoptRecoveryKey(created);
+    this.emit('vault', created);
+    await this.refreshCustody().catch(() => {});
+    await this.startTrust().catch(() => {});
+    return created;
   },
 
   async openConversation(id) {
@@ -346,6 +377,7 @@ export const dmMethods = {
       }
       // No automatic repair of a stopped walk: `forget` would delete the creator's only group state.
       await this.mendConversation(id, convo, window).catch(() => {});
+      await this.retryHeldBack(id).catch(() => {});
       this.scheduleSignals(id);
       await this.answerRejoins(id);
       await this.settleDepartures(id, convo).catch(() => {});
@@ -470,6 +502,20 @@ export const dmMethods = {
     await this.rebased(id, () => this.mls.addMembers(id, absent, { lenient: true }));
   },
 
+  /// A device left out because its identity could not be confirmed joins by itself once it is: checked against the
+  /// identity record first, so an unconfirmed device costs no key package.
+  async retryHeldBack(id) {
+    const held = this.mls?.heldBackIn?.(id) || [];
+    if (!held.length || !this.trust?.deviceConfirmed || !this.mls.joined(id)) return;
+    const ready = [];
+    for (const row of held) {
+      if (await this.trust.deviceConfirmed(row.userId, row.deviceId).catch(() => false)) ready.push(row.userId);
+    }
+    if (!ready.length) return;
+    await this.rebased(id, () => this.mls.addMembers(id, [...new Set(ready)], { lenient: true }));
+    this.emit('dm', { conversation_id: id });
+  },
+
   /// On a 409 walk to the newest epoch and rebuild; if the walk does not move the epoch, report instead of retrying.
   async rebased(id, commit, attempts = 3) {
     for (let attempt = 1; ; attempt += 1) {
@@ -533,6 +579,7 @@ export const dmMethods = {
   async installBeginning(id, built, answer, fallback = null) {
     const taken = answer ? (Number.isInteger(answer.generation) ? answer.generation : null) : fallback;
     await this.mls.install(id, { ...built.entry, generation: taken });
+    this.mls.noteHeldBack?.(id, built.unconfirmed, { fresh: true });
     const fresh = this.loadFrames(id, await readWindow(this.home, id));
     await this.mls.sync(id, fresh).catch(() => {});
     this.emit('dm', { conversation_id: id });

@@ -102,7 +102,7 @@ export function PersistentMediaMiniView({ hidden = false, onExpand }) {
   const convo = !room && voice.channelId
     ? store.conversations.find((item) => item.id === voice.channelId)
     : null;
-  const roomName = room?.name || conversationName(convo, me) || t('voice.mini.call');
+  const roomName = room?.name || (convo?.kind === 'gc' && store.groupNameIn?.(convo.id)) || conversationName(convo, me) || t('voice.mini.call');
 
   const expand = () => {
     if (onExpand) {

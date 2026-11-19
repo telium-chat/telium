@@ -34,12 +34,10 @@ const envInt = (name, fallback) => {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
 }
 
-export const MIN_OBSERVED_AGE_DAYS = envInt('SFU_DIRECTORY_MIN_OBSERVED_AGE_DAYS', 7)
-export const MIN_UPTIME_PERCENT = envInt('SFU_DIRECTORY_MIN_UPTIME_PERCENT', 99)
-export const MAX_PROBE_AGE_MINUTES = envInt('SFU_DIRECTORY_MAX_PROBE_AGE_MINUTES', 180)
-export const MIN_SAMPLES = envInt('SFU_DIRECTORY_MIN_PROBE_SAMPLES', 72)
+export const MAX_PROBE_AGE_MINUTES = envInt('SFU_DIRECTORY_MAX_PROBE_AGE_MINUTES', 24 * 60)
 export const MAX_WEIGHT = 3
-export const DEFAULT_VALIDITY_MINUTES = 120
+// The site only rebuilds when main changes, and the probe (every 6 hours) commits only when its results change, so a short window lets the feed lapse. Servers refetch every few hours and replace the list wholesale, so a long window costs nothing but the outage case.
+export const DEFAULT_VALIDITY_MINUTES = 7 * 24 * 60
 
 export const CAPACITY_BANDS = ['<100m', '100m', '1g', '10g']
 
@@ -48,12 +46,6 @@ export const sfuPublicKeyFromSeed = publicKeyFromSeed
 const clampWeight = (value) => {
   if (!Number.isInteger(value) || value <= 0) return 1
   return Math.min(value, MAX_WEIGHT)
-}
-
-const parseAdded = (value) => {
-  if (typeof value !== 'string') return null
-  const time = Date.parse(`${value}T00:00:00Z`)
-  return Number.isFinite(time) ? time : null
 }
 
 const parseTimestamp = (value) => {
@@ -86,28 +78,14 @@ export const sfuEligibility = (entry, probe, nowMs = Date.now()) => {
   if (!validHttpsOrigin(entry?.url)) reasons.push('insecure_or_invalid_relay_url')
   if (!CAPACITY_BANDS.includes(entry?.capacity_band)) reasons.push('unknown_capacity_band')
 
-  const observedMs = MIN_OBSERVED_AGE_DAYS * 24 * 60 * 60 * 1000
-
-  // Two independent ages, like the server registry: the declared listing date
-  // and the observed first probe. Backdating `added` cannot skip the latter.
-  const added = parseAdded(entry?.added)
-  if (added === null || nowMs - added < observedMs) reasons.push('listing_too_new')
-
-  const firstProbeAt = parseTimestamp(probe?.first_probe_at)
-  if (firstProbeAt === null || nowMs - firstProbeAt < observedMs || firstProbeAt > nowMs + 5 * 60 * 1000) {
-    reasons.push('insufficient_observed_age')
-  }
+  // Maturation (listing age, observed age, probe samples, 30-day uptime) is
+  // not enforced: new relays are approved manually before they are listed.
 
   if (probe?.ok !== true) reasons.push('unreachable')
 
   const checkedAt = parseTimestamp(probe?.checked_at ?? null)
   if (!Number.isFinite(checkedAt) || nowMs - checkedAt > MAX_PROBE_AGE_MINUTES * 60 * 1000 || checkedAt > nowMs + 5 * 60 * 1000) {
     reasons.push('stale_probe')
-  }
-
-  if (!Number.isInteger(probe?.samples) || probe.samples < MIN_SAMPLES) reasons.push('insufficient_probe_history')
-  if (typeof probe?.uptime_30d !== 'number' || probe.uptime_30d < MIN_UPTIME_PERCENT) {
-    reasons.push('uptime_below_minimum')
   }
 
   // The weight is the publisher's own ranking judgement, declared in the
@@ -162,8 +140,8 @@ export const buildUnsignedSfuDirectory = (registry, status, { nowMs = Date.now()
       issued_at: nowMs,
       expires_at: nowMs + validityMinutes * 60 * 1000,
       criteria: {
-        min_observed_age_days: MIN_OBSERVED_AGE_DAYS,
-        min_uptime_percent: MIN_UPTIME_PERCENT,
+        min_observed_age_days: 0,
+        min_uptime_percent: 0,
         max_probe_age_minutes: MAX_PROBE_AGE_MINUTES,
       },
       sfus,

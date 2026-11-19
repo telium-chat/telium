@@ -119,3 +119,60 @@ describe('GIF focus behavior', () => {
     expect(image.getAttribute('src')).toBeNull();
   });
 });
+
+describe('GIF focus behavior on the desktop shell', () => {
+  it('still freezes a GIF the desktop player cannot decode', async () => {
+    let focused = true;
+    vi.spyOn(document, 'hasFocus').mockImplementation(() => focused);
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({ drawImage: vi.fn() }));
+    window.teliumDesktop = {
+      runtime: 'electron',
+      onWindowFocusChanged: () => () => {},
+      windowFocus: () => Promise.resolve(true),
+      fetchGifBytes: () => Promise.reject(new Error('too large')),
+    };
+
+    try {
+      const { AnimatedImage } = await import('../components/AnimatedImage.jsx');
+      const url = 'https://media.example/provider/content/too-big.gif';
+      render(<AnimatedImage src={url} alt="big" animated gif />);
+
+      // Decode fails, so the plain image takes over and must still obey focus.
+      await waitFor(() => expect(document.querySelectorAll('img').length).toBe(1));
+      const image = screen.getByAltText('big');
+      Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 320 });
+      Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 180 });
+
+      focused = false;
+      window.dispatchEvent(new CustomEvent('telium:native-window-focus', { detail: false }));
+      await waitFor(() => expect(image.getAttribute('src')).toBeNull());
+      const canvas = document.querySelector('canvas[aria-label="big"]');
+      expect(canvas).toBeTruthy();
+    } finally {
+      delete window.teliumDesktop;
+    }
+  });
+});
+
+describe('GIF focus behavior while the desktop player is still decoding', () => {
+  it('hides the self-animating fallback image while the window is unfocused', async () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    window.teliumDesktop = {
+      runtime: 'electron',
+      onWindowFocusChanged: () => () => {},
+      windowFocus: () => Promise.resolve(false),
+      fetchGifBytes: () => new Promise(() => {}),
+    };
+    try {
+      const { AnimatedImage } = await import('../components/AnimatedImage.jsx');
+      render(<AnimatedImage src="https://media.example/x/loading.gif" alt="slow" animated gif />);
+      const image = screen.getByAltText('slow');
+      window.dispatchEvent(new CustomEvent('telium:native-window-focus', { detail: false }));
+      await waitFor(() => expect(image.style.visibility).toBe('hidden'));
+      window.dispatchEvent(new CustomEvent('telium:native-window-focus', { detail: true }));
+      await waitFor(() => expect(image.style.visibility).not.toBe('hidden'));
+    } finally {
+      delete window.teliumDesktop;
+    }
+  });
+});

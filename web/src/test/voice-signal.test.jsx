@@ -34,13 +34,14 @@ vi.mock('../hooks/useVoice.jsx', async (importOriginal) => ({
 
 import { VoiceBar, connectionLevel } from '../views/VoiceBar.jsx';
 import { StoreProvider } from '../hooks/useStore.jsx';
+import { ModalProvider } from '../hooks/useModal.jsx';
 import { PING_WINDOW, recordPing } from '../hooks/useVoice.jsx';
 import { expectNoViolations } from './a11y.js';
 
 function meter(ping) {
   voice.ping = ping;
   const { container, unmount } = render(
-    <StoreProvider store={store}><VoiceBar /></StoreProvider>,
+    <StoreProvider store={store}><ModalProvider><VoiceBar /></ModalProvider></StoreProvider>,
   );
   const svg = container.querySelector('.signal');
   const result = {
@@ -100,7 +101,7 @@ describe('the voice bar meter', () => {
 
   it('leaves the sentence beside the meter in the plain foreground', () => {
     voice.ping = 30;
-    render(<StoreProvider store={store}><VoiceBar /></StoreProvider>);
+    render(<StoreProvider store={store}><ModalProvider><VoiceBar /></ModalProvider></StoreProvider>);
     const line = screen.getByText('Voice connected');
     expect(line.className).toContain('text-foreground');
     expect(line.className).not.toContain('text-success');
@@ -110,7 +111,7 @@ describe('the voice bar meter', () => {
     const user = userEvent.setup();
     voice.ping = 60;
     voice.pingHistory = [30, 45, 60];
-    render(<StoreProvider store={store}><VoiceBar /></StoreProvider>);
+    render(<StoreProvider store={store}><ModalProvider><VoiceBar /></ModalProvider></StoreProvider>);
     const trigger = screen.getByRole('button', { name: '60 ms' });
     const meter = () => trigger.querySelector('svg');
 
@@ -140,7 +141,7 @@ function bar({ local = {}, mine = null } = {}) {
   voice.ping = 30;
   voice.local = { self_mute: false, self_deaf: false, self_video: false, streaming: false, ...local };
   store.voice = new Map([['voice-1', mine ? [{ user_id: '@alice:home.example', ...mine }] : []]]);
-  const { unmount } = render(<StoreProvider store={store}><VoiceBar /></StoreProvider>);
+  const { unmount } = render(<StoreProvider store={store}><ModalProvider><VoiceBar /></ModalProvider></StoreProvider>);
   return { unmount };
 }
 
@@ -202,7 +203,7 @@ describe('the voice bar microphone square', () => {
       { user_id: '@bob:home.example', server_mute: true, server_deaf: true },
       { user_id: '@alice:home.example' },
     ]]]);
-    const { unmount } = render(<StoreProvider store={store}><VoiceBar /></StoreProvider>);
+    const { unmount } = render(<StoreProvider store={store}><ModalProvider><VoiceBar /></ModalProvider></StoreProvider>);
     const button = mic();
     expect(button.getAttribute('aria-label')).toBe('Mute');
     expect(glyphOf(button)).not.toContain('mic-off');
@@ -251,7 +252,7 @@ function renderMeter(history, ping) {
   voice.ping = ping;
   voice.pingHistory = history;
   voice.local = { self_mute: false, self_deaf: false, self_video: false, streaming: false };
-  return render(<StoreProvider store={store}><VoiceBar /></StoreProvider>);
+  return render(<StoreProvider store={store}><ModalProvider><VoiceBar /></ModalProvider></StoreProvider>);
 }
 
 function figure(dialog, label) {
@@ -307,7 +308,7 @@ describe('the ping history panel', () => {
     expect(figure(dialog, 'Average')).toBe('40 ms');
 
     voice.pingHistory = [40, 60];
-    view.rerender(<StoreProvider store={store}><VoiceBar /></StoreProvider>);
+    view.rerender(<StoreProvider store={store}><ModalProvider><VoiceBar /></ModalProvider></StoreProvider>);
     expect(figure(dialog, 'Average')).toBe('50 ms');
     expect(figure(dialog, 'Last ping')).toBe('60 ms');
     expect(dialog.querySelectorAll('rect')).toHaveLength(2);
@@ -344,5 +345,21 @@ describe('the ping history panel', () => {
     await user.click(screen.getByRole('button', { name: '60 ms' }));
     await screen.findByRole('dialog', { name: 'Ping history' });
     await expectNoViolations(view, 'the open ping history panel');
+  });
+});
+
+describe('the call bar audio popover', () => {
+  it('opens on the button it was opened from, not at the top-left of the window', async () => {
+    voice.local = { self_mute: false, self_deaf: false, self_video: false, streaming: false };
+    voice.noiseSupport = { neural: true };
+    const user = userEvent.setup();
+    const { unmount } = render(<StoreProvider store={store}><ModalProvider><VoiceBar /></ModalProvider></StoreProvider>);
+    const button = screen.getByRole('button', { name: /audio|device|microphone/i });
+    await user.click(button);
+    await screen.findByRole('dialog');
+    // The popover is positioned against this element; had it been swapped for a new one, it would be measured as zero size at (0, 0).
+    expect(screen.getByRole('button', { name: button.getAttribute('aria-label') })).toBe(button);
+    expect(button.isConnected).toBe(true);
+    unmount();
   });
 });

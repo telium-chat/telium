@@ -531,6 +531,7 @@ fn federation_routes() -> Router<AppState> {
         .route("/_telium/v1/channels/{id}/voice/stream", post(voice::set_stream))
         .route("/_telium/v1/channels/{id}/voice/watch", post(voice::watch))
         .route("/_telium/v1/channels/{id}/voice/signal", post(voice::signal))
+        .route("/_telium/v1/channels/{id}/voice/invite", post(voice::invite))
         .route("/_telium/v1/channels/{id}/voice/e2ee", get(voice::e2ee_state).post(voice::e2ee_commit))
         .route("/_telium/v1/channels/{id}/voice/e2ee/commits", get(voice::e2ee_commits))
         .route("/_telium/v1/channels/{id}/voice/e2ee/refuse", post(voice::e2ee_refuse))
@@ -602,6 +603,14 @@ fn identity_routes() -> Router<AppState> {
         .route("/_telium/v1/auth/opaque/reauth/start", post(opaque::reauth_start))
         .route("/_telium/v1/auth/opaque/reauth/finish", post(opaque::reauth_finish))
         .route(
+            "/_telium/v1/auth/opaque/password/change/start",
+            post(opaque::password_change_start),
+        )
+        .route(
+            "/_telium/v1/auth/opaque/password/change/finish",
+            post(opaque::password_change_finish),
+        )
+        .route(
             "/_telium/v1/auth/recovery-key/vault-copy/start",
             post(opaque::recovery_copy_start),
         )
@@ -650,6 +659,14 @@ fn identity_routes() -> Router<AppState> {
         .route(
             "/_telium/v1/identity/rotate",
             post(identity_continuity::rotate),
+        )
+        .route(
+            "/_telium/v1/identity/reset/start",
+            post(identity_continuity::reset_start),
+        )
+        .route(
+            "/_telium/v1/identity/reset/finish",
+            post(identity_continuity::reset_finish),
         )
         .route("/_telium/v1/profile", patch(identity::patch_profile))
         .route("/_telium/v1/profile/update", post(identity::inbound_profile))
@@ -838,6 +855,8 @@ fn media_routes(state: &AppState) -> Router<AppState> {
             "/_telium/v1/media",
             post(media::upload).layer(DefaultBodyLimit::max(state.cfg.media_policy.max_file_bytes)),
         )
+        .route("/_telium/v1/account/media", get(media::list_own))
+        .route("/_telium/v1/account/media/{hash}/message", get(media::own_message))
         .route("/_telium/v1/media/{hash}", get(media::fetch).delete(media::delete))
         .route("/_telium/v1/media/{hash}/meta", get(media::meta))
 }

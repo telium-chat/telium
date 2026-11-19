@@ -2878,15 +2878,11 @@ export const messages = {
   // before the actor -- the reordering the English note says a translator must
   // be free to make, and which the discarded glued version could not.
   'chat.encryption.custody.unknown': 'الرسائل هنا إطارات MLS. يُمرّرها خادمك الرئيسي، وهو يرى دائمًا من يخاطب من، ومتى.',
-  'chat.encryption.custody.escrowed': 'الرسائل هنا إطارات MLS. يُمرّرها خادمك الرئيسي، وهو يرى دائمًا من يخاطب من، ومتى. يستخدم هذا الحساب استعادةً قديمة للرسائل المباشرة بمساعدة الخادم: يحتفظ خادمك الرئيسي بمفتاح يفتح خزنة الاستعادة ومرآة السجلّ، فيستطيع مشغّل الخادم قراءة هذه الرسائل. انقل الاستعادة إلى أجهزتك الموثوقة من الإعدادات ← {pane}.',
   'chat.encryption.custody.opaque': 'الرسائل هنا إطارات MLS. يُمرّرها خادمك الرئيسي، وهو يرى دائمًا من يخاطب من، ومتى. تستعيد كلمة مرور Telium رسائلك المباشرة المشفّرة عبر OPAQUE. لا تُرسَل كلمة المرور إلى خادمك الرئيسي أبدًا، ولا يحصل على مفتاح الخزنة ومرآة السجلّ سوى تطبيقك.',
-  'chat.encryption.custody.device': 'الرسائل هنا إطارات MLS. يُمرّرها خادمك الرئيسي، وهو يرى دائمًا من يخاطب من، ومتى. مفاتيح استعادة رسائلك المباشرة تبقى على أجهزة توافق عليها أنت. يخزّن خادمك الرئيسي مرآة السجلّ المشفّرة ولا يملك أي مفتاح يفتحها.',
-  'chat.encryption.custody.self': 'الرسائل هنا إطارات MLS. يُمرّرها خادمك الرئيسي، وهو يرى دائمًا من يخاطب من، ومتى. تحتفظ أجهزتك الموثوقة بمفاتيح رسائلك المباشرة، وهناك عبارة استعادة منفصلة تُرجعها إن فُقدت كل الأجهزة. ولا يُرسَل أيٌّ منهما إلى خادمك الرئيسي أبدًا.',
 
   // Word for word the second half of `custody.escrowed`, as the English note
   // requires: a reader may see both, and two accounts of one arrangement read
   // as two arrangements. Any future edit has to touch both entries together.
-  'chat.encryption.escrowedNote': 'يستخدم هذا الحساب استعادةً قديمة للرسائل المباشرة بمساعدة الخادم: يحتفظ خادمك الرئيسي بمفتاح يفتح خزنة الاستعادة ومرآة السجلّ، فيستطيع مشغّل الخادم قراءة هذه الرسائل. انقل الاستعادة إلى أجهزتك الموثوقة من الإعدادات ← {pane}.',
 
   // The second clause is what stops this reading as an apology for a bug: MLS
   // withholding old messages from a new device is the design working. The
@@ -2904,8 +2900,7 @@ export const messages = {
   // «المفتاح مودَع», which is accurate and tells a reader nothing. «طرف إلى
   // طرف» is the established Arabic for end-to-end and is three short words
   // that set narrower than the English.
-  'chat.encryption.chip.keyChanged': 'تغيّر المفتاح',
-  'chat.encryption.chip.serverCanRead': 'الخادم يقرأ',
+  'chat.encryption.chip.keyChanged': 'مفتاح جديد',
   'chat.encryption.chip.endToEnd': 'طرف إلى طرف',
   'chat.encryption.chip.encrypted': 'مشفَّر',
 
@@ -2935,9 +2930,10 @@ export const messages = {
   'chat.encryption.chip.open': 'تفاصيل التشفير',
 
   // The same two sentences as the banner, as one string, because a `title` is
-  // one string. Neither reading is chosen between: «تبدو هكذا، وكذلك انتحال
-  // الشخصية» keeps both on the table in the English's order of likelihood.
-  'chat.encryption.chip.keyChangedTooltip': 'أحد الموجودين هنا يستخدم مفتاح حساب مختلفًا. إعادة تعيين المفتاح تبدو هكذا، وكذلك انتحال الشخصية. أعد التوثيق قبل أن تثق به.',
+  // one string. Calm and plain: a new key usually just means
+  // the account was set up again, then that messages stay encrypted, then how
+  // to be sure, by comparing keys.
+  'chat.encryption.chip.keyChangedTooltip': 'لدى أحد الموجودين هنا مفتاح حساب جديد، وهذا يعني عادةً أنه أعدّ حسابه من جديد. تبقى الرسائل مشفّرة. وللتأكد من أنه هو، قارن المفاتيح من ملفه الشخصي.',
 
   // ------------------------------------------------------------- اللافتات
 
@@ -2964,11 +2960,10 @@ export const messages = {
   'chat.encryption.rejoinUndeliverable.title': 'لم يُطلَب من أحد إدخال هذا الجهاز.',
   'chat.encryption.rejoinUndeliverable.body': 'الخادم الذي يرتّب هذه المحادثة غير متاح، فلم يغادر الطلب أصلًا. والبدء من جديد يمنح كل من يمكن الوصول إليه مجموعة جديدة.',
 
-  'chat.encryption.changedIdentity.title': 'أحد الموجودين هنا يستخدم مفتاح حساب مختلفًا.',
-  'chat.encryption.changedIdentity.body': 'إعادة تعيين المفتاح تبدو هكذا، وكذلك انتحال الشخصية. أعد التوثيق قبل أن تثق به.',
+  'chat.encryption.changedIdentity.title': 'لدى أحد الموجودين هنا مفتاح حساب جديد.',
+  'chat.encryption.changedIdentity.body': 'هذا يعني عادةً أنه أعدّ حسابه من جديد. تبقى الرسائل مشفّرة. وللتأكد من أنه هو، قارن المفاتيح من ملفه الشخصي.',
 
   'chat.encryption.vaultLocked.title': 'رسائلك الأقدم مقفلة على هذا الجهاز.',
-  'chat.encryption.vaultLocked.body': 'أدخل عبارة الاستعادة من الإعدادات ← {pane} لاستعادتها.',
 
   'chat.encryption.deviceApproval.title': 'هذا الجهاز لا يملك مفاتيحك بعد.',
   // «تنتقل المفاتيح مباشرةً بين أجهزتك» is a claim about where the keys go and
@@ -2977,9 +2972,9 @@ export const messages = {
   // forbids.
   'chat.encryption.deviceApproval.body': 'وافق عليه من جهاز تستخدمه بالفعل. تنتقل المفاتيح مباشرةً بين أجهزتك.',
 
-  'chat.encryption.recoveryFallback.title': 'تسجيل الدخول لم يفتح رسائلك الأقدم.',
-  'chat.encryption.recoveryFallback.body': 'أدخل عبارة الاستعادة من الإعدادات ← {pane}، أو وافق على هذا الجهاز من جهاز تستخدمه بالفعل.',
 
+  'chat.encryption.heldBack.own': 'جهازك الآخر ليس في هذه المحادثة بعد. سينضم من تلقاء نفسه حالما يُؤكَّد أنه جهازك.',
+  'chat.encryption.heldBack.other': 'أحد أجهزته ليس في هذه المحادثة بعد. سينضم من تلقاء نفسه حالما يُؤكَّد أنه جهازه.',
   // «محجوزة» -- held back on purpose -- and not «لم تصل», which would be the
   // "messages are being lost" reading this banner exists to refuse.
   'chat.encryption.syncFailed.title': 'التشفير غير متزامن على هذا الجهاز.',
@@ -5486,12 +5481,7 @@ export const messages = {
   // ---- auth
   'auth.advanced.identityMismatch': 'تعذّر التحقّق من سجلّ هوية هذا الحساب.',
   'auth.advanced.identityName': 'هوية الحساب',
-  'auth.advanced.legacyPassphraseBody': 'لا يزال هذا الحساب يحمل عبارة مرور من إصدار أقدم من Telium. وكلمة مرورك تقوم بالمهمة نفسها بالفعل.',
-  'auth.advanced.legacyPassphraseName': 'عبارة الاستعادة القديمة',
   'auth.advanced.modeName': 'كيف يستعيد هذا الحساب',
-  'auth.advanced.passphraseRemoved': 'أُزيلت عبارة المرور القديمة. وما زالت كلمة مرورك تستعيد رسائلك.',
-  'auth.advanced.removeFailed': 'تعذّرت إزالة عبارة الاستعادة القديمة: {detail}',
-  'auth.advanced.removePassphrase': 'إزالة عبارة المرور القديمة',
   'auth.advanced.rootSequence': ' · تسلسل الجذر {sequence}',
   'auth.backup.delete': 'حذف النسخة الاحتياطية',
   'auth.backup.deleteBody': 'تبقى الرسائل الموجودة أصلًا على هذا الجهاز. ولن يستطيع جهاز جديد استعادة الأقدم.',
@@ -5499,7 +5489,6 @@ export const messages = {
   'auth.backup.deleted': 'حُذفت النسخة الاحتياطية.',
   'auth.backup.deleteFailed': 'تعذّر حذف النسخة الاحتياطية: {detail}',
   'auth.backup.deleteTitle': 'حذف النسخة الاحتياطية',
-  'auth.backup.detail': '{count, plural, zero {# عنصر مختوم.} one {# عنصر مختوم.} two {# عنصران مختومان.} few {# عناصر مختومة.} many {# عنصرًا مختومًا.} other {# عنصر مختوم.}} {readable, select, yes {يستطيع خادمك الرئيسي فتحه.} other {لا يستطيع خادمك الرئيسي فتحه.}}',
   'auth.backup.detailName': 'نسخة احتياطية',
   'auth.backup.empty': 'لم يُخزَّن شيء بعد. سيبدأ جهاز جديد من اليوم.',
   'auth.backup.explain': 'تُحفظ نسخة مشفّرة حتى يتمكّن جهاز جديد من اللحاق. آخر كتابة {at, relative}.',
@@ -5509,15 +5498,9 @@ export const messages = {
   'auth.crumb.recoveryKey': 'مفتاح الاستعادة',
   'auth.crumb.username': 'اسم المستخدم',
   'auth.crumb.welcome': 'ترحيب',
-  'auth.custody.device.name': 'استعادة عبر الأجهزة الموثوقة',
-  'auth.custody.device.note': 'تعيش مفاتيحك على الأجهزة التي وافقت عليها، ولا مكان آخر.',
-  'auth.custody.escrowed.name': 'استعادة بمساعدة الخادم (قديمة)',
-  'auth.custody.escrowed.note': 'يحتفظ خادمك الرئيسي بمفتاح يفتح هذه الرسائل.',
   'auth.custody.line': '{name}. {note}',
   'auth.custody.opaque.name': 'استعادة كلمة المرور (مفتاح تصدير OPAQUE)',
   'auth.custody.opaque.note': 'يكفي تسجيل الدخول بكلمة مرورك لاستعادة رسائلك.',
-  'auth.custody.self.name': 'عبارة مرور مستقلة (قديمة)',
-  'auth.custody.self.note': 'تعيش مفاتيحك على أجهزتك، مع عبارة مرور كطريق للعودة.',
   'auth.custody.unknown': 'لم تُنشأ بعد',
   'auth.encryption.backupEmpty': 'لا شيء مخزّن',
   'auth.encryption.backupFact': 'نسخة احتياطية من الرسائل الأقدم',
@@ -5527,10 +5510,7 @@ export const messages = {
   'auth.encryption.devicesHint': 'الأجهزة هو المكان الذي توثّق فيه جهازًا أو تسجّل خروج أحدها.',
   'auth.encryption.devicesSignedIn': '{count, plural, zero {# مسجَّل للدخول} one {# مسجَّل للدخول} two {# مسجَّلان للدخول} few {# مسجَّلة للدخول} many {# مسجَّلًا للدخول} other {# مسجَّل للدخول}}',
   'auth.encryption.devicesVerified': '{total, plural, zero {{verified} من # موثَّق} one {{verified} من # موثَّق} two {{verified} من # موثَّقَين} few {{verified} من # موثّقة} many {{verified} من # موثَّقًا} other {{verified} من # موثَّق}}',
-  'auth.encryption.escrowed.note': 'لا يزال هذا الحساب على إعداد الاستعادة القديم. إيقافه يستغرق ضغطة واحدة ولا يحتاج كلمة مرور ثانية.',
-  'auth.encryption.escrowed.title': 'يستطيع خادمك الرئيسي قراءة رسائلك الخاصة.',
   'auth.encryption.keyFact': 'مفتاح الاستعادة',
-  'auth.encryption.keyLegacy': 'عبارة المرور القديمة',
   'auth.encryption.keyMissing': 'لم يُنشأ بعد',
   'auth.encryption.keySaved': 'محفوظ',
   'auth.encryption.locked.note': 'الرسائل الجديدة تعمل. لاستعادة الأقدم، استخدم مفتاح استعادتك أدناه، أو وافق على هذا الجهاز من جهاز تستخدمه بالفعل.',
@@ -5539,13 +5519,6 @@ export const messages = {
   'auth.encryption.ok.title': 'رسائلك الخاصة محمية.',
   'auth.encryption.settingUp.note': 'يستغرق هذا لحظة بعد تسجيل الدخول.',
   'auth.encryption.settingUp.title': 'إعداد التشفير على هذا الجهاز.',
-  'auth.escrow.button': 'إيقافه',
-  'auth.escrow.doneDevices': 'تم. مفاتيحك على أجهزتك الآن.',
-  'auth.escrow.doneRefresh': 'تم، وإن كانت بضع محادثات ما زالت تحتاج تجديد مفتاح.',
-  'auth.escrow.doneServer': 'تم. لم يعد خادمك قادرًا على فتح رسائل جديدة.',
-  'auth.escrow.explain': 'يتوقف خادمك عن القدرة على فتح أي شيء يُرسل بعد هذا. وما رآه بالفعل فقد رآه.',
-  'auth.escrow.failed': 'تعذّر إيقاف الاستعادة بمساعدة الخادم: {detail}',
-  'auth.escrow.title': 'إيقاف الاستعادة بمساعدة الخادم',
   'auth.find.afterColon': 'أو اكتبه بعد نقطتين، مثل @{user}:your.server',
   'auth.find.busy': 'جارٍ البحث…',
   'auth.find.changeAddress': 'استخدام عنوان مختلف',
@@ -5624,7 +5597,6 @@ export const messages = {
   'auth.localData.identity.confirmTitle': 'لا يمكن التراجع عن هذا. ستفقد:',
   'auth.localData.identity.cost1': 'هوية توقيع MLS لهذا الجهاز. سيكون جهازًا جديدًا عند كل من تحدّثه، وسيرونه غير موثّق حتى توثّقه من جديد.',
   'auth.localData.identity.cost2': 'حالة المجموعة المخزّنة لكل محادثة مشفّرة. لا تبقى الرسائل الموجودة أصلًا على هذا الجهاز قابلة للقراءة إلا إذا استطاع مفتاح استعادة الحساب إعادة فتحها؛ وكل ما هو هذا الجهاز آخر من يحتفظ به يزول.',
-  'auth.localData.identity.cost3': 'حلقة مفاتيح استعادة الرسائل المباشرة المخزّنة مؤقتًا، فيجب على تسجيل الدخول التالي فتح خزنة المفاتيح من جديد — بمفتاح استعادتك أو عبارة المرور، ويلزم أن تكون بحوزتك.',
   'auth.localData.identity.cost4': 'جلستك. سيُسجَّل خروجك على هذا الجهاز.',
   'auth.localData.identity.open': 'محو هوية الجهاز…',
   'auth.localData.identity.title': 'محو هوية هذا الجهاز',
@@ -5710,14 +5682,10 @@ export const messages = {
   'auth.start.title': 'مرحبًا بك في Telium',
   'auth.unlock.button': 'فتح',
   'auth.unlock.done': 'تم الفتح. تكفي كلمة مرورك من الآن فصاعدًا.',
-  'auth.unlock.doneDevice': 'تم الفتح على هذا الجهاز.',
   'auth.unlock.enterKey': 'أدخل مفتاح الاستعادة.',
-  'auth.unlock.enterPassphrase': 'أدخل عبارة الاستعادة.',
   'auth.unlock.failed': 'تعذّر فتح رسائلك: {detail}',
   'auth.unlock.keyHint': 'المفتاح الذي أُعطي لك عند إنشاء هذا الحساب.',
   'auth.unlock.otherDevice': 'يمكنك أيضًا فتح Telium على جهاز تستخدمه بالفعل والموافقة على هذا الجهاز من هناك. لا يُكتب أي شيء، ولا يرى خادمك المفاتيح أبدًا.',
-  'auth.unlock.passphraseHint': 'عبارة المرور التي أضفتها إلى هذا الحساب بنفسك.',
-  'auth.unlock.passphraseLabel': 'عبارة الاستعادة',
   'auth.unlock.title': 'افتح رسائلك الأقدم',
 
   // ---- chat
@@ -6007,7 +5975,6 @@ export const messages = {
   'onboarding.invite.unopenableTitle': 'تعذّر فتح هذه الدعوة',
   'onboarding.invite.unreachable': 'تعذّر الوصول إلى خادم النقابة.',
   'onboarding.invite.useAnotherAccount': 'استخدام حساب مختلف',
-  'onboarding.invite.usernameHint': 'يصبح هذا الجزء الأول من معرّف حساب Telium.',
   'onboarding.invite.usernamePlaceholder': 'yourname',
   'onboarding.recoveryKey.body': 'يمكنه إعادة تعيين كلمة مرورك واستعادة حسابك المشفّر.',
   'onboarding.recoveryKey.clipboardLabel': 'مفتاح الاستعادة',

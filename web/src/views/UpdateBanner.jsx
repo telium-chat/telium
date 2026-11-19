@@ -7,7 +7,7 @@ import { t } from '../lib/i18n/index.js';
 import { useT } from '../lib/i18n/react.jsx';
 import { bytes } from '../lib/util.js';
 import {
-  Blocked, Delivery, assess, fetchManifest, readDismissal, updateNotice, writeDismissal,
+  Blocked, Delivery, assess, fetchManifest, readDismissal, subscribeChecks, updateNotice, writeDismissal,
 } from '../lib/updates.js';
 
 const POLL_MS = 6 * 60 * 60 * 1000;
@@ -37,7 +37,13 @@ export function UpdateBanner() {
     };
     ask();
     const timer = setInterval(ask, POLL_MS);
-    return () => { live = false; clearInterval(timer); };
+    // A check made elsewhere (settings) updates the banner at once.
+    const off = subscribeChecks((result) => {
+      if (!live) return;
+      setManifest(result.manifest);
+      setNow(Date.now());
+    });
+    return () => { live = false; clearInterval(timer); off(); };
   }, []);
 
   useEffect(() => {

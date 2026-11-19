@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button, CloseIcon, IconButton } from '../../components/index.js';
 import { useModal } from '../../hooks/useModal.jsx';
-import { useProfileCard } from '../../hooks/useProfileCard.js';
 import { profileActivitiesFor } from '../../lib/voice-activity.js';
 import { VerifyDialog } from '../dialogs/VerifyDialog.jsx';
 import { Composer } from './ProfileComposer.jsx';
@@ -17,7 +16,6 @@ export function ProfileBody({
 }) {
   const full = surface === 'full';
   const modal = useModal();
-  const profiles = useProfileCard();
   const {
     store, member, guild, live, domain, isMe, guest, identity, displayName, alias,
     avatarRef, accent, theme, bannerRef, mediaBase, mediaOrigin,
@@ -37,9 +35,10 @@ export function ProfileBody({
     openFullProfile(modal, userId, { guildId, openOn });
   };
 
-  const openPerson = (otherId, anchor) => {
-    if (full) close();
-    profiles.open(otherId, { guildId, anchor });
+  // A mutual friend opens as their full card, not the popover this one is.
+  const openPerson = (otherId) => {
+    close();
+    openFullProfile(modal, otherId, { guildId });
   };
 
   const openGuild = (otherGuildId) => {

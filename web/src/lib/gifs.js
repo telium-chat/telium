@@ -7,6 +7,8 @@ export const DEFAULT_KLIPY_BASE_URL = 'https://api.klipy.com/api/v1';
 export const DEFAULT_KLIPY_MEDIA_HOSTS = [
   'klipy.com',
   'static.klipy.com',
+  'static1.klipy.com',
+  'static2.klipy.com',
   'static.klipy.co',
   'media.klipy.com',
   'media.giphy.com',
@@ -460,6 +462,19 @@ export class KlipyProvider {
   async resolveShareUrl(value, { signal } = {}) {
     const slug = klipyShareSlug(value);
     if (!slug) return null;
+    const wanted = slug.toLowerCase();
+    const matches = (item) => {
+      const candidate = item.slug?.toLowerCase();
+      return candidate === wanted || candidate?.startsWith(`${wanted}--`);
+    };
+    // The exact lookup first: searching for a slug's words says nothing about whether it ranks.
+    let exact = null;
+    try {
+      exact = await this.bySlug(slug, { signal });
+    } catch (error) {
+      if (error?.name === 'AbortError') throw error;
+    }
+    if (exact && matches(exact)) return exact.url;
     const result = await this.list({
       query: slug,
       page: 1,
@@ -467,11 +482,42 @@ export class KlipyProvider {
       signal,
       requestKey: `resolve:${slug}`,
     });
-    const wanted = slug.toLowerCase();
-    return result.items.find((item) => {
-      const candidate = item.slug?.toLowerCase();
-      return candidate === wanted || candidate?.startsWith(`${wanted}--`);
-    })?.url || null;
+    return result.items.find(matches)?.url || null;
+  }
+
+  /// One GIF by slug, or null when Klipy doesn't know it.
+  async bySlug(slug, { signal } = {}) {
+    if (!this.config.enabled || !this.config.apiKey || typeof this.fetcher !== 'function') return null;
+    const cacheKey = `slug ${slug}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached) {
+      this.remember(cacheKey, cached);
+      return cached;
+    }
+    const kind = `slug:${slug}`;
+    this.cancel(kind);
+    const controller = new AbortController();
+    this.controllers.set(kind, controller);
+    const onAbort = () => controller.abort();
+    if (signal) {
+      if (signal.aborted) controller.abort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    }
+    try {
+      const endpoint = `${this.config.apiBaseUrl}/${encodeURIComponent(this.config.apiKey)}/gifs/items`;
+      const response = await this.fetcher(`${endpoint}?${new URLSearchParams({ slugs: slug })}`, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: { Accept: 'application/json' },
+      });
+      if (!response?.ok) return null;
+      const item = resultArray(await response.json()).map(normalizeKlipyResult).find(Boolean) || null;
+      if (item) this.remember(cacheKey, item);
+      return item;
+    } finally {
+      if (signal) signal.removeEventListener('abort', onAbort);
+      if (this.controllers.get(kind) === controller) this.controllers.delete(kind);
+    }
   }
 }
 

@@ -49,6 +49,9 @@ export const chat = {
   // direction: this button never means "right" or "left", and in a vertical
   // script it does not mean "down" either.
   'chat.timeline.jumpToBottom': 'Jump to bottom',
+  // The pill above the composer while scrolled up: how many messages arrived since, or, far up with nothing new, the way back.
+  'chat.timeline.newMessages': '{count, plural, one {# new message} other {# new messages}}',
+  'chat.timeline.jumpToPresent': 'Jump to present',
 
   // The rule drawn across the stream at the first message you have not read.
   // One word, upper-cased by the stylesheet rather than by the string, because
@@ -173,6 +176,9 @@ export const chat = {
   'chat.message.actions.pin': 'Pin',
   'chat.message.actions.unpin': 'Unpin',
   'chat.message.actions.delete': 'Delete',
+  'chat.message.actions.hideMedia': 'Hide Media',
+  'chat.message.actions.showMedia': 'Show Media',
+  'chat.message.media.hidden': 'Media hidden. Click to show.',
   'chat.message.pinned': 'Pinned.',
   'chat.message.unpinned': 'Unpinned.',
   'chat.message.pinFailed': 'Pin failed',
@@ -191,6 +197,8 @@ export const chat = {
   // hand, and the server keeps the one it stored) is a different sentence
   // rather than a sentence with the name left out of it. The name itself is a
   // placeholder, filled the way `quickReact` above fills its emoji.
+  'chat.timeline.renameNotice.named': '{name} renamed the group to “{group}”',
+  'chat.timeline.renameNotice.cleared': '{name} removed the group name',
   'chat.timeline.pinNotice.named': '{name} pinned a message',
   'chat.timeline.pinNotice.anonymous': 'A message was pinned',
   'chat.timeline.pinNotice.seeAll': 'See all pins',
@@ -405,13 +413,13 @@ export const chat = {
   // What the servers in the path can see, in every custody mode plus the mode
   // this build does not recognise.
   //
-  // Five whole paragraphs, with the relay sentence written out in each, rather
+  // Three whole paragraphs, with the relay sentence written out in each, rather
   // than one relay key glued to one custody key at run time. The glue was the
   // bug: two sentences joined by a space in JavaScript is an order no
   // translator can change, and here the order genuinely moves -- a language
   // that leads with the consequence and follows with the mechanism has to be
   // able to say "the operator can read these" first. Duplicating the relay
-  // sentence four times is the cheap half of that trade.
+  // sentence is the cheap half of that trade.
   //
   // `unknown` is the mode a newer server named and this client has not met. It
   // says the weaker true thing and stops: claiming end-to-end because the
@@ -419,17 +427,8 @@ export const chat = {
   // reassuring direction, which is the one direction security copy may never
   // guess in.
   'chat.encryption.custody.unknown': 'Messages here are MLS frames. Your home server relays them, and always sees who is talking to whom, and when.',
-  'chat.encryption.custody.escrowed': 'Messages here are MLS frames. Your home server relays them, and always sees who is talking to whom, and when. This account uses legacy server-assisted DM recovery: your home server holds a key that opens the recovery vault and history mirror, so the operator can read these messages. Move recovery to your trusted devices under Settings → {pane}.',
   'chat.encryption.custody.opaque': 'Messages here are MLS frames. Your home server relays them, and always sees who is talking to whom, and when. Your Telium password restores encrypted DMs through OPAQUE. The password is never sent to your home server, and only your client gets the key to the vault and history mirror.',
-  'chat.encryption.custody.device': 'Messages here are MLS frames. Your home server relays them, and always sees who is talking to whom, and when. Your DM recovery keys live on devices you approve. Your home server stores the encrypted history mirror but holds no key that opens it.',
-  'chat.encryption.custody.self': 'Messages here are MLS frames. Your home server relays them, and always sees who is talking to whom, and when. Trusted devices hold your DM keys, and a separate recovery passphrase can restore them if every device is lost. Neither is ever sent to your home server.',
-
-  // The escrow disclosure on its own, for the conversation dialog, which draws
-  // it as a warning of its own rather than as part of the paragraph above.
-  // Identical wording to the second half of `custody.escrowed` on purpose:
-  // the reader may well see both, and two different accounts of the same
-  // arrangement would read as two different arrangements.
-  'chat.encryption.escrowedNote': 'This account uses legacy server-assisted DM recovery: your home server holds a key that opens the recovery vault and history mirror, so the operator can read these messages. Move recovery to your trusted devices under Settings → {pane}.',
+  'chat.encryption.custody.retired': 'Messages here are MLS frames. Your home server relays them, and always sees who is talking to whom, and when. This account’s DM keys are in a setup Telium has retired and no longer opens, so older history here stays locked until you start a new vault under Settings → {pane}.',
 
   // Why the history above this point is closed on this device, drawn with the
   // history rather than as a banner, because it is a fact about what you are
@@ -450,8 +449,7 @@ export const chat = {
   // Named for what it means rather than for the mechanism. "Key escrowed" is
   // accurate and tells the reader nothing; what they need off a glance is
   // whether anybody else can read this.
-  'chat.encryption.chip.keyChanged': 'Key changed',
-  'chat.encryption.chip.serverCanRead': 'Server can read',
+  'chat.encryption.chip.keyChanged': 'New key',
   'chat.encryption.chip.endToEnd': 'End-to-end',
   'chat.encryption.chip.encrypted': 'Encrypted',
 
@@ -472,7 +470,7 @@ export const chat = {
   // one string. One entry rather than the banner's two joined by a space: the
   // order of a headline and its explanation is a thing a language gets to
   // decide, and joining them in JavaScript decides it for them.
-  'chat.encryption.chip.keyChangedTooltip': 'Someone here is using a different account key. A key reset looks like this; so does an impersonation. Verify them again before trusting it.',
+  'chat.encryption.chip.keyChangedTooltip': 'Someone here has a new account key, which usually means they set their account up again. Messages stay encrypted. To be sure it’s them, compare keys from their profile.',
 
   // --------------------------------------------------------- the banners
   //
@@ -513,11 +511,11 @@ export const chat = {
   // and refuses to choose between them, which is the honest position -- this
   // client cannot tell them apart, and a sentence that picked one would be
   // either crying wolf or covering for an attacker.
-  'chat.encryption.changedIdentity.title': 'Someone here is using a different account key.',
-  'chat.encryption.changedIdentity.body': 'A key reset looks like this; so does an impersonation. Verify them again before trusting it.',
+  'chat.encryption.changedIdentity.title': 'Someone here has a new account key.',
+  'chat.encryption.changedIdentity.body': 'That usually means they set their account up again. Messages stay encrypted. To be sure it’s them, compare keys from their profile.',
 
   'chat.encryption.vaultLocked.title': 'Your older messages are locked on this device.',
-  'chat.encryption.vaultLocked.body': 'Enter your recovery passphrase under Settings → {pane} to get them back.',
+  'chat.encryption.vaultLocked.body': 'Enter your recovery key under Settings → {pane} to get them back.',
 
   'chat.encryption.deviceApproval.title': 'This device does not have your keys yet.',
   // "travel directly between your devices" is a claim about where the keys go
@@ -525,15 +523,19 @@ export const chat = {
   // safe to do. Do not reduce it to "your keys will be copied".
   'chat.encryption.deviceApproval.body': 'Approve it from a device you already use. The keys travel directly between your devices.',
 
-  // Signing in worked and did not unlock the history, which is the state that
-  // most looks like a failure and is not one. Two ways out, both real, in the
-  // order of how much they cost.
-  'chat.encryption.recoveryFallback.title': 'Signing in did not unlock your older messages.',
-  'chat.encryption.recoveryFallback.body': 'Enter your recovery passphrase under Settings → {pane}, or approve this device from one you already use.',
+  // The vault was made under a custody mode Telium has retired, and nothing on
+  // this device can convert it. A banner rather than a line in the history,
+  // because there is one thing to do about it and it is in Settings. The
+  // second sentence says what is lost and what is not, in that order: the
+  // older messages stay locked, and encryption itself can be started again.
+  'chat.encryption.retired.title': 'This account’s message keys use a setup Telium has retired.',
+  'chat.encryption.retired.body': 'Sign in with your password, then try your recovery key under Settings → {pane}. Only if that does not open them, start a new vault there; the older encrypted messages then stay locked for good.',
 
   // Messages are being held back on purpose. The body says so rather than
   // leaving the reader to conclude that messages are being lost, which is the
   // fear this banner exists to answer.
+  'chat.encryption.heldBack.own': 'Your other device isn’t in this chat yet. It joins by itself once it’s confirmed as yours.',
+  'chat.encryption.heldBack.other': 'One of their devices isn’t in this chat yet. It joins by itself once it’s confirmed as theirs.',
   'chat.encryption.syncFailed.title': 'Encryption is out of sync on this device.',
   'chat.encryption.syncFailed.body': 'Newer messages are held back while Telium retries the MLS key schedule.',
 
@@ -600,6 +602,11 @@ export const chat = {
   // data, moved but never translated.
   'chat.invite.join': 'Join {guild}',
   'chat.invite.joinUnnamed': 'Join',
+
+  // A call's invite, which stops working when the call ends. The label sits above the guild name so the card
+  // reads as a call, not a standing guild invite; the button names the same thing.
+  'chat.invite.callLabel': 'Voice call invite',
+  'chat.invite.joinCall': 'Join call',
 
   // ------------------------------------------------------------ the surface
 
@@ -780,6 +787,8 @@ export const chat = {
   // Whose rule cut the list short. Worth a sentence rather than a silently
   // shorter menu: policy you have to infer from a missing option is policy
   // nobody knows about until a file disappears.
+  'chat.staged.overLimit': 'This server limits files here to {duration} at most.',
+  'chat.staged.overLimitLabel': 'Why is this unavailable?',
   'chat.staged.cappedNote': 'Files sent here are deleted after at most {duration}.',
 
   // The article forms, for that sentence only.

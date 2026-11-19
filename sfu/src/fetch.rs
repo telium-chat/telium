@@ -15,6 +15,11 @@ pub const MAX_DOCUMENT_BYTES: usize = 256 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddressPolicy {
     Untrusted,
+    /// A server named like this machine (its hostname). The machine's own name resolving to a local
+    /// address is the operator's configuration (Debian writes `127.0.1.1 <hostname>` into /etc/hosts),
+    /// not a stranger's DNS, and nobody outside can rename the machine. Still https only, with the
+    /// certificate checked, so it reaches nothing but this machine's own web server for that name.
+    ThisMachine,
     OperatorConfigured,
 }
 
@@ -24,7 +29,7 @@ impl AddressPolicy {
     }
 
     fn allows_private_addresses(self) -> bool {
-        matches!(self, Self::OperatorConfigured)
+        matches!(self, Self::OperatorConfigured | Self::ThisMachine)
     }
 }
 
@@ -147,7 +152,9 @@ pub fn parse_authority(origin: &str) -> Option<(String, Option<u16>)> {
 }
 
 /// Every resolved address is checked: mixed public/private is a race attempt.
-async fn vet_destination(url: &Url, policy: AddressPolicy) -> Result<SocketAddr> {
+/// All vetted addresses are returned, so the connection can fall back to the next one when the
+/// first is unreachable (an IPv6 address first on a host with no IPv6 route, say).
+async fn vet_destination(url: &Url, policy: AddressPolicy) -> Result<Vec<SocketAddr>> {
     let host = match url.host_str() {
         Some(h) => h,
         None => bail!("discovery URL has no host"),
@@ -175,7 +182,7 @@ async fn vet_destination(url: &Url, policy: AddressPolicy) -> Result<SocketAddr>
             }
         }
     }
-    Ok(addrs[0])
+    Ok(addrs)
 }
 
 /// Hardened GET: scheme and address vetting first, no redirects, DNS pinned
@@ -196,7 +203,7 @@ pub async fn get_bytes(
         other => bail!("refusing to fetch discovery over {other}"),
     }
 
-    let addr = vet_destination(&parsed, policy).await?;
+    let addrs = vet_destination(&parsed, policy).await?;
     let host = parsed.host_str().unwrap_or_default().to_string();
 
     let mut builder = reqwest::Client::builder()
@@ -207,9 +214,11 @@ pub async fn get_bytes(
         // Bare product name: no version, no host. What we fetch says nothing about who is fetching.
         .user_agent("telium-sfu");
 
-    // Pin the vetted address, or reqwest re-resolves and DNS rebinding wins.
+    // Pin the vetted addresses, or reqwest re-resolves and DNS rebinding wins. Every one was
+    // vetted, so the connector may try each in turn; pinning only the first made one
+    // unreachable address (commonly IPv6) fail a lookup that another address would serve.
     if !host.is_empty() && host.parse::<IpAddr>().is_err() {
-        builder = builder.resolve(&host, addr);
+        builder = builder.resolve_to_addrs(&host, &addrs);
     }
 
     let resp = builder.build()?.get(parsed.clone()).send().await?.error_for_status()?;
@@ -234,6 +243,33 @@ pub async fn get_json(url: &str, policy: AddressPolicy, max_bytes: usize) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `localhost` resolves to both `::1` and `127.0.0.1`, and this server listens on IPv4 only:
+    /// a fetch pinned to a single address would fail whenever `::1` came first.
+    #[tokio::test]
+    async fn a_fetch_falls_back_to_another_resolved_address() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = socket.read(&mut buf).await;
+                let _ = socket
+                    .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok")
+                    .await;
+            }
+        });
+        let body = get_bytes(
+            &format!("http://localhost:{port}/"),
+            AddressPolicy::OperatorConfigured,
+            16,
+            Duration::from_secs(5),
+        )
+        .await
+        .expect("a reachable address should be used even when another resolves first");
+        assert_eq!(body, b"ok");
+    }
 
     #[test]
     fn address_policy_refuses_non_public_ranges() {
@@ -271,6 +307,10 @@ mod tests {
         for url in ["https://localhost:9/x", "https://169.254.169.254/x", "https://[::1]:9/x"] {
             assert!(err(url, AddressPolicy::Untrusted).await.contains("non-public address"), "{url}");
         }
+        // This machine's own name may resolve locally, but stays https only.
+        assert!(err("http://localhost:9/x", AddressPolicy::ThisMachine).await.contains("over http"));
+        let e = err("https://localhost:9/x", AddressPolicy::ThisMachine).await;
+        assert!(!e.contains("non-public address"), "{e}");
         let e = err("http://127.0.0.1:9/x", AddressPolicy::OperatorConfigured).await;
         assert!(!e.contains("non-public address") && !e.contains("refusing to fetch"), "{e}");
     }

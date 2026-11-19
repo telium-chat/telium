@@ -1,3 +1,4 @@
+import { AnimatedImage } from '../AnimatedImage.jsx';
 import { EmojiText } from '../Twemoji.jsx';
 import { AppsIcon } from '../icons.jsx';
 import { ImagePreview } from '../../views/chat/ImagePreview.jsx';
@@ -37,7 +38,7 @@ export function AppCard({ card, appName }) {
           {card.author ? (
             <div className="appcard__author">
               {card.author.icon ? (
-                <img className="appcard__author-icon" src={card.author.icon} alt="" loading="lazy" />
+                <AnimatedImage className="appcard__author-icon" src={card.author.icon} alt="" loading="lazy" />
               ) : null}
               {card.author.url ? (
                 <a
@@ -93,20 +94,20 @@ export function AppCard({ card, appName }) {
         </div>
 
         {card.thumbnail ? (
-          <img className="appcard__thumb" src={card.thumbnail} alt="" loading="lazy" />
+          <AnimatedImage className="appcard__thumb" src={card.thumbnail} alt="" loading="lazy" />
         ) : null}
       </div>
 
       {card.image ? (
         <div className="appcard__media">
-          <ImagePreview src={card.image} alt="" />
+          <ImagePreview src={card.image} alt="" animated />
         </div>
       ) : null}
 
       {card.footer || card.timestamp ? (
         <div className="appcard__foot">
           {card.footer?.icon ? (
-            <img className="appcard__foot-icon" src={card.footer.icon} alt="" loading="lazy" />
+            <AnimatedImage className="appcard__foot-icon" src={card.footer.icon} alt="" loading="lazy" />
           ) : null}
           {card.footer?.text ? (
             <span className="appcard__foot-text"><EmojiText>{card.footer.text}</EmojiText></span>

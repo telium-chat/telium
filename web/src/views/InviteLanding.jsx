@@ -4,6 +4,8 @@ import { Api, discover } from '../lib/api.js';
 import { shortName } from '../lib/util.js';
 import { displayHomeserver, isPortalHost, normalizeHomeserver, prettyHost } from '../lib/homeserver.js';
 import { findHome } from '../lib/account-address.js';
+import { hasPinnedRecommendationKey } from '../lib/account-home-recommendations.js';
+import { isTauriRuntime } from '../lib/platform.js';
 import { copyToClipboard } from '../lib/clipboard.js';
 import { PENDING_RECOVERY_STORAGE_KEY } from '../lib/account-recovery.js';
 import { useStore } from '../hooks/useStore.jsx';
@@ -12,7 +14,7 @@ import {
   Avatar, Button, EmojiText, Hint, Notice, PasswordInput, TextInput,
 } from '../components/index.js';
 import { AccountHomePicker } from './AccountHomePicker.jsx';
-import { AccountAddress, HomeChip, useAlternativeHomesOffered } from './AccountHome.jsx';
+import { AccountAddress, HomeChip, UsernamePreview, useAlternativeHomesOffered } from './AccountHome.jsx';
 import { downloadRecoveryKey, recoveryKeyNote } from './user-settings/RecoveryParts.jsx';
 import { ScreeningDialog } from './dialogs/ScreeningDialog.jsx';
 import { Trans, useT } from '../lib/i18n/react.jsx';
@@ -103,6 +105,8 @@ export function InviteLanding({
   );
   const [customHome, setCustomHome] = useState(initialHome);
   const [changingHome, setChangingHome] = useState(false);
+  // The recommended home's account domain, which can differ from its API origin's host.
+  const [pickedHome, setPickedHome] = useState(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState(null);
   const fail = (text) => setNotice({ tone: 'danger', text });
@@ -116,6 +120,34 @@ export function InviteLanding({
   );
   const [sessionReady, setSessionReady] = useState(Boolean(store.signedIn && store.home));
   const offerAlternatives = useAlternativeHomesOffered(initialHome);
+  // Like regular sign-up: where the page is not itself a homeserver (the portal, the desktop
+  // app) a new account gets a recommended home rather than the guild's server by default.
+  // A home remembered from an earlier attempt is kept, as sign-up keeps it.
+  const [recommendHome] = useState(() => (isPortalHost() || isTauriRuntime())
+    && hasPinnedRecommendationKey()
+    && !sessionStorage.getItem('telium.lastHome'));
+  const showHomePicker = offerAlternatives || recommendHome;
+
+  // Whether the chosen home wants a registration code. Unknown (null) keeps the field
+  // visible, so a failed probe never hides the only way to register on a closed server.
+  const [codeRequired, setCodeRequired] = useState(null);
+  useEffect(() => {
+    // Forget the last home's answer first: it must never hide the field for this one.
+    setCodeRequired(null);
+    if (mode !== 'register' || !customHome.trim()) return undefined;
+    let live = true;
+    const timer = setTimeout(async () => {
+      try {
+        const { caps } = await resolveHomeServer(customHome, { registering: false, t });
+        const required = caps?.registration_code_required;
+        if (live) setCodeRequired(typeof required === 'boolean' ? required : null);
+      } catch {
+        if (live) setCodeRequired(null);
+      }
+    }, 400);
+    return () => { live = false; clearTimeout(timer); };
+  }, [mode, customHome, t]);
+  const askForCode = mode === 'register' && codeRequired !== false;
 
   useEffect(() => {
     let live = true;
@@ -253,7 +285,7 @@ export function InviteLanding({
       sessionStorage.setItem('telium.lastHome', home.api);
       const auth = await store.signIn(home.api, username.trim(), password, {
         register: registering,
-        registrationCode: registering ? registrationCode.trim() : null,
+        registrationCode: registering && codeRequired !== false ? registrationCode.trim() : null,
         mfaCode: requiresMfa ? mfaCode.trim() : null,
         allowLegacyAuth,
       });
@@ -526,15 +558,17 @@ export function InviteLanding({
               placeholder={mode === 'register'
                 ? t('onboarding.invite.usernamePlaceholder')
                 : t('onboarding.invite.accountIdPlaceholder')}
-              hint={mode === 'register' ? t('onboarding.invite.usernameHint') : null}
               onChange={(e) => {
                 setUsername(e.target.value);
                 setLegacyAuth(null);
                 setLegacyApproved(false);
               }}
             />
-
             {mode === 'register' ? (
+              <UsernamePreview user={username} host={pickedHome?.domain || prettyHost(customHome)} />
+            ) : null}
+
+            {askForCode ? (
               <TextInput
                 label={t('auth.password.registrationCodeLabel')}
                 autoComplete="off"
@@ -567,12 +601,13 @@ export function InviteLanding({
               />
             ) : null}
 
-            {mode === 'register' && offerAlternatives ? (
+            {mode === 'register' && showHomePicker ? (
               <AccountHomePicker
                 value={customHome}
                 disabled={busy}
                 loadRecommendations={loadHomeRecommendations}
                 random={homeRandom}
+                onSelect={setPickedHome}
                 onChange={(value) => {
                   setCustomHome(value);
                   setLegacyAuth(null);

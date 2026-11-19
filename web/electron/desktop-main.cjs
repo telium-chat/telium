@@ -28,6 +28,22 @@ ipcMain.handle('telium:set-rich-presence-enabled', (event, enabled, kinds) => {
   return true;
 });
 
+ipcMain.handle('telium:set-custom-programs', (event, programs) => {
+  assertTeliumWindow(event);
+  richPresence?.setPrograms(programs);
+  return true;
+});
+
+ipcMain.handle('telium:list-processes', async (event) => {
+  assertTeliumWindow(event);
+  return (await richPresence?.listProcesses()) || [];
+});
+
+ipcMain.handle('telium:program-icons', async (event, rows) => {
+  assertTeliumWindow(event);
+  return (await richPresence?.programIcons(rows)) || {};
+});
+
 ipcMain.handle('telium:rich-presence-activity', (event) => {
   assertTeliumWindow(event);
   return richPresence?.activity() || null;

@@ -6,7 +6,8 @@ set -euo pipefail
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 say() { printf '  %s\n' "$*"; }
 
-[ "$#" -eq 1 ] || { echo "usage: bash bootstrap-native.sh <domain>   e.g. bash bootstrap-native.sh chat.example.com" >&2; exit 2; }
+# The domain is asked for by install-native.sh, as one of its questions.
+[ "$#" -le 1 ] || { echo "usage: bash bootstrap-native.sh" >&2; exit 2; }
 
 # A VPS root shell needs no sudo. For ordinary login accounts, use sudo when
 # available, rather than requiring it on machines with no sudo package.

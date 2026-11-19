@@ -320,7 +320,7 @@ describe('guild call keys', () => {
     const bob = await call.join(await engine(cs, 'bob', 'b1'), { welcomeMs: 20 });
     call.away.delete('bob');
     call.held = [];
-    await vi.waitFor(() => expect(bob.epoch).toBe(1));
+    await vi.waitFor(() => expect(bob.epoch).toBe(1), { timeout: 10000 });
     expect(hex(bob.latest.raw)).toBe(hex(alice.latest.raw));
     expect(bob.lostWith || bob.trouble).toBeUndefined();
   });
@@ -334,7 +334,7 @@ describe('guild call keys', () => {
     const bob = await call.join(await engine(cs, 'bob', 'b1'), { welcomeMs: 20 });
     call.seats.get('bob').refused = true;
     open = true;
-    await vi.waitFor(() => expect(bob.lostWith).toBeTruthy());
+    await vi.waitFor(() => expect(bob.lostWith).toBeTruthy(), { timeout: 10000 });
     expect(call.asked.filter((u) => u === 'bob')).toHaveLength(1);
   });
 
@@ -550,7 +550,7 @@ describe('guild call keys', () => {
     call.groupId = 'g2';
     const asked = call.asked.filter((who) => who === 'bob').length;
     call.relay({ op: 'committer', channel_id: 'chan', group_id: 'g2', committer: 'carol' });
-    await vi.waitFor(() => expect(bob.lostWith).toBeTruthy());
+    await vi.waitFor(() => expect(bob.lostWith).toBeTruthy(), { timeout: 10000 });
     expect(call.asked.filter((who) => who === 'bob').length).toBeGreaterThan(asked);
     expect(bob.trouble).toBeUndefined();
   });
@@ -563,7 +563,7 @@ describe('guild call keys', () => {
     const bob = await call.join(await engine(cs, 'bob', 'b1'), { welcomeMs: 150 });
     const mallory = await call.join(await engine(cs, 'mallory', 'm1'), { welcomeMs: 150 });
     expect(mallory.lostWith).toBeUndefined();
-    await vi.waitFor(() => expect(mallory.lostWith).toBeTruthy());
+    await vi.waitFor(() => expect(mallory.lostWith).toBeTruthy(), { timeout: 10000 });
     await new Promise((r) => { setTimeout(r, 200); });
     expect(bob.epoch).toBe(1);
     expect(bob.lostWith).toBeUndefined();

@@ -4,15 +4,20 @@ import { cn } from '../lib/cn.js';
 import { useStore, useStoreEventFor } from '../hooks/useStore.jsx';
 import { conversationName, shortName } from '../lib/util.js';
 import { roomFace } from '../lib/faces.js';
+import { channelRoute } from '../lib/channels.js';
 import { VoiceStatusLine } from './dialogs/VoiceStatusDialog.jsx';
 import { PING_WINDOW, useVoice } from '../hooks/useVoice.jsx';
 import { t } from '../lib/i18n/index.js';
 import { formatCallElapsed } from '../lib/call-elapsed.js';
 import { useT } from '../lib/i18n/react.jsx';
-import { Avatar, EmojiText, IconButton, SpinnerIcon } from '../components/index.js';
-import { Tooltip } from '../components/Tooltip.jsx';
 import {
-  HeadphoneOffIcon, HeadphonesIcon, MicIcon, MicOffIcon,
+  Avatar, ContextMenu, EmojiText, IconButton, MenuSeparator, MenuSlider, SpinnerIcon,
+} from '../components/index.js';
+import { useMenus } from './menus.jsx';
+import { Tooltip } from '../components/Tooltip.jsx';
+import { AudioQuickMenu } from '../components/AudioQuickMenu.jsx';
+import {
+  AdvancedIcon, HeadphoneOffIcon, HeadphonesIcon, MicIcon, MicOffIcon,
   PhoneOffIcon, ScreenIcon, ScreenOffIcon, VideoIcon, VideoOffIcon,
 } from '../components/index.js';
 
@@ -163,39 +168,88 @@ function PingHistoryPanel({ samples }) {
   );
 }
 
+function toolClass({ on, danger, disabled }) {
+  return cn(
+    'flex min-w-0 items-center justify-center rounded-row px-2 py-2',
+    'transition-colors duration-[var(--dur-1)] ease-[var(--ease)]',
+    disabled && 'cursor-not-allowed opacity-50',
+    on
+      ? danger
+        ? cn('bg-danger text-danger-foreground', !disabled && 'hover:opacity-90')
+        : cn('bg-accent text-accent-foreground', !disabled && 'hover:bg-accent-hover')
+      : cn(
+        'bg-surface-secondary text-muted',
+        !disabled && 'hover:bg-surface-tertiary hover:text-foreground',
+      ),
+  );
+}
+
 function Tool({ title, icon: Glyph, on, danger, disabled, onClick }) {
   return (
-    <button
-      type="button"
-      title={title}
-      aria-label={title}
-      aria-pressed={on}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        'flex min-w-0 items-center justify-center gap-1.5 rounded-row px-2 py-1.5',
-        'text-xs font-medium transition-colors duration-[var(--dur-1)] ease-[var(--ease)]',
-        disabled && 'cursor-not-allowed opacity-50',
-        on
-          ? danger
-            ? cn('bg-danger text-danger-foreground', !disabled && 'hover:opacity-90')
-            : cn('bg-accent text-accent-foreground', !disabled && 'hover:bg-accent-hover')
-          : cn(
-            'bg-surface-secondary text-muted',
-            !disabled && 'hover:bg-surface-tertiary hover:text-foreground',
-          ),
-      )}
-    >
-      <Glyph className="size-[15px] shrink-0" />
-      <span className="truncate">{title}</span>
-    </button>
+    <Tooltip label={title} side="top">
+      <button
+        type="button"
+        title={title}
+        aria-label={title}
+        aria-pressed={on}
+        disabled={disabled}
+        onClick={onClick}
+        className={toolClass({ on, danger, disabled })}
+      >
+        <Glyph className="size-[17px] shrink-0" />
+      </button>
+    </Tooltip>
+  );
+}
+
+// The audio popover: microphone, noise suppression and output, one click from the call controls.
+// The tooltip stays mounted while the popover is open: dropping it swapped the trigger element, and the popover, still anchored to the old one, opened in the window's top-left corner.
+function AudioTool({ voice }) {
+  const [open, setOpen] = useState(false);
+  const title = t('voice.devices.open');
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Tooltip label={title} side="top">
+        <Popover.Trigger
+          render={<button type="button" />}
+          aria-label={title}
+          title={title}
+          className={toolClass({ on: false })}
+        >
+          <AdvancedIcon className="size-[17px] shrink-0" />
+        </Popover.Trigger>
+      </Tooltip>
+      <Popover.Portal>
+        <Popover.Positioner
+          side="top"
+          align="end"
+          positionMethod="fixed"
+          sideOffset={8}
+          collisionPadding={12}
+          className="popover z-50"
+        >
+          <Popover.Popup aria-label={title} className="popup popup--panel w-[280px]">
+            <AudioQuickMenu
+              devicePicking={Boolean(voice.chooseInput)}
+              onInput={(id) => voice.chooseInput?.(id)}
+              onOutput={(id) => voice.chooseOutput?.(id)}
+              noiseMode={voice.noiseMode}
+              noiseSupport={voice.noiseSupport}
+              noiseState={voice.noiseState}
+              onNoise={voice.setNoiseMode}
+            />
+          </Popover.Popup>
+        </Popover.Positioner>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 
 const FACE_LIMIT = 7;
 
-function Roster({ participants, store, channel, speaking }) {
+function Roster({ participants, store, channel, speaking, voice }) {
   useT();
+  const menus = useMenus();
   if (!participants.length) return null;
   const live = speaking instanceof Set ? speaking : new Set();
   const shown = participants.slice(0, FACE_LIMIT);
@@ -214,18 +268,40 @@ function Roster({ participants, store, channel, speaking }) {
           guildId: channel?.guild_id, guildBase, guildDomain, state: v,
         });
         const label = face?.name || shortName(v.user_id);
+        const mine = v.user_id === store.me?.user_id;
+        // Right-click for the same menu as the channel list, with their volume on it.
+        const menu = () => (
+          <>
+            {menus.voice(v, channel?.guild_id)}
+            {mine ? null : (
+              <>
+                <MenuSeparator />
+                <MenuSlider
+                  label={t('voice.tile.volume')}
+                  value={voice.volumeFor?.(v.user_id) ?? 100}
+                  max={200}
+                  onChange={(value) => voice.setUserVolume?.(v.user_id, value)}
+                />
+              </>
+            )}
+          </>
+        );
         return (
-          <Tooltip key={v.user_id} label={label} side="top">
-            <Avatar
-              id={v.user_id}
-              name={face?.name}
-              size="sm"
-              mediaRef={face.mediaRef}
-              base={face.base}
-              mediaOrigin={face.mediaOrigin}
-              className={cn('voice-face', live.has(v.user_id) && 'is-talking')}
-            />
-          </Tooltip>
+          <ContextMenu key={v.user_id} content={menu}>
+            <span className="inline-flex">
+              <Tooltip label={label} side="top">
+                <Avatar
+                  id={v.user_id}
+                  name={face?.name}
+                  size="sm"
+                  mediaRef={face.mediaRef}
+                  base={face.base}
+                  mediaOrigin={face.mediaOrigin}
+                  className={cn('voice-face', live.has(v.user_id) && 'is-talking')}
+                />
+              </Tooltip>
+            </span>
+          </ContextMenu>
         );
       })}
       {rest > 0 ? (
@@ -259,13 +335,18 @@ export function VoiceBar() {
   const convo = !channel && voice.channelId
     ? store.conversations.find((c) => c.id === voice.channelId)
     : null;
-  const name = channel?.name || conversationName(convo, store.me?.user_id) || t('voice.bar.channel');
+  const name = channel?.name || (convo?.kind === 'gc' && store.groupNameIn(convo.id)) || conversationName(convo, store.me?.user_id) || t('voice.bar.channel');
   const guild = channel?.guild_id ? store.guilds.get(channel.guild_id) : null;
   const where = guild?.name || (convo ? t('voice.bar.directMessage') : null);
   const signal = connectionLevel(voice.ping);
   const history = voice.pingHistory || [];
   const connecting = voice.phase === 'connecting';
   const local = voice.local;
+  // The call's own screen: its channel in a guild, its conversation for a DM.
+  const goToCall = () => {
+    if (channel) store.navigate(channelRoute(channel));
+    else if (convo) store.navigate({ view: 'dms', conversationId: convo.id });
+  };
 
   const mine = (store.voice.get(voice.channelId) || [])
     .find((v) => v.user_id === store.me?.user_id);
@@ -342,7 +423,13 @@ export function VoiceBar() {
           </IconButton>
         </div>
 
-        <div className="mt-0.5 flex min-w-0 items-baseline gap-1 text-xs">
+        <button
+          type="button"
+          title={t('voice.bar.goTo')}
+          aria-label={t('voice.bar.goToLabel', { name, where: where || '' })}
+          onClick={goToCall}
+          className="mt-0.5 flex w-full min-w-0 items-baseline gap-1 rounded text-start text-xs hover:underline focus-visible:underline"
+        >
           <span className="min-w-0 truncate font-medium text-foreground"><EmojiText>{name}</EmojiText></span>
           {where ? (
             <>
@@ -350,7 +437,7 @@ export function VoiceBar() {
               <span className="min-w-0 truncate text-muted"><EmojiText>{where}</EmojiText></span>
             </>
           ) : null}
-        </div>
+        </button>
         {channel?.type === 'voice' && channel?.voice_status ? (
           <div className="mt-0.5 min-w-0" title={channel.voice_status}>
             <VoiceStatusLine channel={channel} className="block" />
@@ -362,8 +449,9 @@ export function VoiceBar() {
           store={store}
           channel={channel}
           speaking={voice.speaking}
+          voice={voice}
         />
-        <div role="toolbar" aria-label={t('voice.bar.toolbar')} className="mt-2 grid grid-cols-2 gap-1.5">
+        <div role="toolbar" aria-label={t('voice.bar.toolbar')} className="mt-2 grid grid-cols-5 gap-1.5">
           <Tool
             title={micLabel}
             icon={silent ? MicOffIcon : MicIcon}
@@ -392,6 +480,7 @@ export function VoiceBar() {
             on={local.streaming}
             onClick={voice.toggleStream}
           />
+          <AudioTool voice={voice} />
         </div>
       </div>
     </div>

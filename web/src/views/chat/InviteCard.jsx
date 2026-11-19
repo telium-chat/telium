@@ -59,6 +59,9 @@ export function InviteCard({ url }) {
     <div className="invite-card embed embed--row">
       <Avatar id={guild.id} name={guild.name} mediaRef={guild.icon_ref} base={preview.base} />
       <div className="min-w-[10rem] flex-1 basis-40">
+        {preview.call && (
+          <div className="text-xs font-medium uppercase tracking-wide text-muted">{t('chat.invite.callLabel')}</div>
+        )}
         <div className="text-sm font-medium break-words"><EmojiText>{guild.name}</EmojiText></div>
         <div className="text-xs text-muted break-words">
           {preview.domain
@@ -70,7 +73,9 @@ export function InviteCard({ url }) {
         variant="primary"
         onClick={() => joinInvite(store, modal, preview.code, url, preview.domain)}
       >
-        {guild.name ? t('chat.invite.join', { guild: guild.name }) : t('chat.invite.joinUnnamed')}
+        {preview.call
+          ? t('chat.invite.joinCall')
+          : guild.name ? t('chat.invite.join', { guild: guild.name }) : t('chat.invite.joinUnnamed')}
       </Button>
     </div>
   );

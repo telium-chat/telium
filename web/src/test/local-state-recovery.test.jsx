@@ -320,7 +320,7 @@ describe('the fault ledger', () => {
 
 describe('a server that is down is not a corrupt disk', () => {
   const OUTAGE_SCREEN_MS = 10_000;
-  const openedScreen = (re = /Could not reach dead\.example|Showing your last state/) =>
+  const openedScreen = (re = /Could not reach dead\.example|Showing your last state|Can't reach dead\.example/) =>
     screen.findByText(re, {}, { timeout: OUTAGE_SCREEN_MS });
 
   it('clears the ledger on every load for as long as the outage lasts', async () => {

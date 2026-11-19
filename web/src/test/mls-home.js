@@ -84,7 +84,14 @@ export class FakeHome {
           err.status = 409;
           throw err;
         }
-        home.cross.set(userId, body);
+        // As the real route: a first-key create is refused once any key is stored.
+        if (body.create_only && home.cross.has(userId)) {
+          const err = new Error('this account already has a cross-signing key');
+          err.status = 409;
+          throw err;
+        }
+        const { create_only: _, ...row } = body;
+        home.cross.set(userId, row);
         return { ok: true };
       },
       identityContinuity: async () => home.identities.get(userId) || {

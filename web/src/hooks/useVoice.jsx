@@ -12,7 +12,7 @@ import {
 import {
   displayAudioFailureReason, displayAudioSupport, withScreenShareConstraints,
 } from '../lib/screenShare.js';
-import { neuralCapability, normalizeNoiseMode } from '../lib/denoise.js';
+import { neuralCapability, noiseChange, normalizeNoiseMode } from '../lib/denoise.js';
 import { chooseGuildVoiceRegion } from '../lib/voiceRegion.js';
 import { sleep } from '../lib/util.js';
 import { ScreenShareDialog } from '../views/dialogs/ScreenShareDialog.jsx';
@@ -25,13 +25,25 @@ import {
 import { t, tOrNull } from '../lib/i18n/index.js';
 import {
   DESKTOP_AUDIO_INPUT_KEY,
-  DesktopAudioDevices,
-} from '../components/DesktopAudioDevices.jsx';
+} from '../components/AudioQuickMenu.jsx';
 import {
   applyDesktopAudioOutput, desktopAudioPreference, playCallTone, switchCallInput,
 } from './voice/callAudio.js';
 
 const VoiceContext = createContext(null);
+
+
+/// Relays tried for one call start before giving up: the first choice and two more.
+const MAX_RELAY_FALLBACKS = 3;
+
+/// A refusal another relay would not repeat: this relay cannot verify, or will not serve, the
+/// guild's server, or it could not be reached at all. A full relay (503) has its own path.
+const RELAY_REFUSAL_CODES = new Set(['sfu_origin_unverified', 'sfu_bad_signature', 'origin_blocked']);
+
+export function relayWillNotServe(error) {
+  if (error?.relayUnreachable) return true;
+  return error?.status === 403 && RELAY_REFUSAL_CODES.has(error?.body?.code);
+}
 
 export const PING_WINDOW = 40;
 
@@ -101,6 +113,7 @@ export function VoiceProvider({ children }) {
   const [joinedAt, setJoinedAt] = useState(null);
   const [ping, setPing] = useState(null);
   const [pingHistory, setPingHistory] = useState([]);
+  const [noiseState, setNoiseState] = useState('active');
   const [noiseMode, setNoise] = useState(() => normalizeNoiseMode(store.prefs.micNoise));
 
   const callRef = useRef(null);
@@ -351,12 +364,19 @@ export function VoiceProvider({ children }) {
     return run;
   }, [store]);
 
-  const noteNoiseFallback = useCallback(() => {
+  // `micNoise` is what the person chose and is never rewritten by a call: a busy machine or a failed load is a fact about this call. The next call asks for the model again.
+  const noteNoiseFallback = useCallback((reason) => {
     if (normalizeNoiseMode(store.prefs.micNoise) !== 'neural') return;
-    store.prefs.micNoise = 'browser';
-    store.savePrefs();
-    toast(t('voice.noise.fellBack'));
+    setNoiseState('off');
+    const why = tOrNull(`voice.noise.reason.${reason}`);
+    toast(reason === 'too-slow' || !why
+      ? t('voice.noise.fellBack')
+      : t('voice.noise.fellBackFor', { reason: why }));
   }, [store]);
+
+  const noteNoiseState = useCallback((state) => {
+    setNoiseState(state === 'paused' ? 'paused' : 'active');
+  }, []);
 
   const setNoiseMode = useCallback(async (next) => {
     const mode = normalizeNoiseMode(next);
@@ -387,6 +407,7 @@ export function VoiceProvider({ children }) {
     // A fresh call owes its user a fresh notice: whatever the previous relay
     // said is not this relay's news.
     store.setSfuNotice(null);
+    setNoiseState('active');
     const me = store.me?.user_id;
     const api = store.voiceApi(targetChannelId);
     const onError = (e) => reportError(e, t('voice.error.trouble'));
@@ -412,6 +433,7 @@ export function VoiceProvider({ children }) {
       onError,
       noiseMode: normalizeNoiseMode(store.prefs.micNoise),
       onNoiseFallback: via(noteNoiseFallback),
+      onNoiseState: via(noteNoiseState),
     };
     let call;
 
@@ -656,7 +678,7 @@ export function VoiceProvider({ children }) {
         toast(t('voice.call.shareStoppedOnMove'));
       }
     }
-  }, [store, setScreen, setCamera, settleStreamOff, settleVideoOff, sealMedia, noteNoiseFallback]);
+  }, [store, setScreen, setCamera, settleStreamOff, settleVideoOff, sealMedia, noteNoiseFallback, noteNoiseState]);
 
   const coreLeave = useCallback(async (target) => {
     const targetChannelId = typeof target === 'string' ? target : channelRef.current;
@@ -698,12 +720,14 @@ export function VoiceProvider({ children }) {
   leaveRef.current = coreLeave;
   useEffect(() => store.beforeAway(() => leaveRef.current?.()), [store]);
 
-  const join = useCallback(async (targetChannelId, { quiet = false } = {}) => {
+  const join = useCallback(async (targetChannelId, { quiet = false, exclude = [], cause = null } = {}) => {
     if (callRef.current && channelRef.current === targetChannelId) return;
     if (callRef.current) await coreLeave();
     const me = store.me?.user_id;
     let joinedOnServer = false;
     let attemptedRelay = null;
+    let startedCall = false;
+    const automatic = (store.prefs.voiceRegion || 'auto') === 'auto';
     try {
       setPhase('connecting');
       const body = {
@@ -713,8 +737,11 @@ export function VoiceProvider({ children }) {
           ? (store.prefs.voiceRegion || 'auto')
           : await chooseGuildVoiceRegion(
             store.apiForChannel(targetChannelId), targetChannelId, store.prefs.voiceRegion || 'auto',
+            { exclude },
           ),
       };
+      // Every relay worth trying has refused this call: report the last refusal, not a new one.
+      if (body.region === null) throw cause || new Error(t('voice.error.join'));
       hellosRef.current = new Map();
       greetedRef.current = new Set();
       epochRef.current = null;
@@ -747,6 +774,7 @@ export function VoiceProvider({ children }) {
       setServer(resp.voice_server);
       const beforeJoin = (store.voice.get(targetChannelId) || [])
         .filter((v) => v.user_id !== me).length;
+      startedCall = beforeJoin === 0;
       const list = (store.voice.get(targetChannelId) || []).filter((v) => v.user_id !== me);
       list.push(resp.voice_state);
       store.voice.set(targetChannelId, list);
@@ -811,6 +839,14 @@ export function VoiceProvider({ children }) {
       setPrivacy(null);
       generationRef.current = null;
       dropGuildKeys();
+      // The person starting a call on an automatically chosen relay that refused this server, or
+      // could not be reached, moves the call to the next-closest relay instead of failing. Later
+      // joiners never do: the call is already running there for everyone else.
+      if (attemptedRelay && startedCall && automatic && !migrated && !conversationCall(targetChannelId)
+        && relayWillNotServe(e) && exclude.length + 1 < MAX_RELAY_FALLBACKS) {
+        console.warn(`Voice relay ${attemptedRelay} refused this call; trying the next closest.`, e);
+        return join(targetChannelId, { quiet, exclude: [...exclude, attemptedRelay], cause: e });
+      }
       if (!quiet) reportError(e, t('voice.error.join'));
       setPhase('idle');
       if (migrated) {
@@ -1330,11 +1366,15 @@ export function VoiceProvider({ children }) {
     return () => { alive = false; clearInterval(id); };
   }, [phase]);
 
+  const appliedNoise = useRef(normalizeNoiseMode(store.prefs.micNoise));
   useEffect(() => {
     const apply = () => {
       const mode = normalizeNoiseMode(store.prefs.micNoise);
       setNoise(mode);
-      const changing = callRef.current?.setNoiseMode?.(mode);
+      const change = noiseChange(appliedNoise.current, mode);
+      if (change === null) return;
+      appliedNoise.current = change;
+      const changing = callRef.current?.setNoiseMode?.(change);
       changing?.catch?.((error) => reportError(error, t('voice.error.noiseChange')));
     };
     apply();
@@ -1372,7 +1412,11 @@ export function VoiceProvider({ children }) {
     privacy,
     noiseMode,
     noiseSupport: neuralCapability(),
+    noiseState,
     setNoiseMode,
+    // Switching the running call's devices is wired for the desktop app only.
+    chooseInput: isElectronRuntime() ? chooseDesktopInput : null,
+    chooseOutput: isElectronRuntime() ? chooseDesktopOutput : null,
     join,
     leave: coreLeave,
     volumeFor,
@@ -1392,16 +1436,6 @@ export function VoiceProvider({ children }) {
   return (
     <VoiceContext.Provider value={value}>
       {children}
-      {isElectronRuntime() ? (
-        <DesktopAudioDevices
-          active={Boolean(channelId)}
-          onInput={chooseDesktopInput}
-          onOutput={chooseDesktopOutput}
-          noiseMode={noiseMode}
-          noiseSupport={value.noiseSupport}
-          onNoise={setNoiseMode}
-        />
-      ) : null}
     </VoiceContext.Provider>
   );
 }

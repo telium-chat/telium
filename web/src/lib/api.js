@@ -20,7 +20,7 @@ export class HttpError extends Error {
   }
 }
 
-export async function request(base, method, path, { token, body, query } = {}) {
+export async function request(base, method, path, { token, body, query, signal } = {}) {
   let url = `${base}${path}`;
   if (query) {
     const params = new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined && v !== null));
@@ -35,6 +35,7 @@ export async function request(base, method, path, { token, body, query } = {}) {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
+    ...(signal ? { signal } : {}),
   }, { purpose: 'API request' });
   let payload = null;
   try { payload = await resp.json(); } catch { payload = null; }
@@ -237,7 +238,9 @@ export async function discover(domain) {
 
 export class Api {
   /// `renew` mints a new guild session and the refused request retries once; the home connection has none (refused token is a sign-out).
-  constructor({ base, token, domain, gateway, renew = null }) {
+  /// `signal` cancels every request this client sends (a caller that gives up on a slow one, so nothing it started lingers).
+  constructor({ base, token, domain, gateway, renew = null, signal = null }) {
+    this.signal = signal;
     this.base = base;
     this.token = token;
     this.domain = domain;
@@ -249,13 +252,13 @@ export class Api {
     // Inner: 401 session retry, safe because the server did nothing. Outer: network retry, decided per route by `retry.js`.
     return withRetry(method, path, async () => {
       try {
-        return await request(this.base, method, path, { token: this.token, ...opts });
+        return await request(this.base, method, path, { token: this.token, ...(this.signal ? { signal: this.signal } : {}), ...opts });
       } catch (e) {
         if (e.status !== 401 || !this.renew) throw e;
         const token = await this.renew().catch(() => null);
         if (!token || token === this.token) throw e;
         this.token = token;
-        return request(this.base, method, path, { token, ...opts });
+        return request(this.base, method, path, { token, ...(this.signal ? { signal: this.signal } : {}), ...opts });
       }
     }, { body: opts.body });
   }
@@ -321,6 +324,8 @@ export class Api {
     return this.put('/_telium/v1/identity/recovery-policy', body);
   }
   rotateIdentity(body) { return this.post('/_telium/v1/identity/rotate', body); }
+  identityResetStart() { return this.post('/_telium/v1/identity/reset/start', {}); }
+  identityResetFinish(body) { return this.post('/_telium/v1/identity/reset/finish', body); }
   identityDocument(userId) {
     return request(
       this.base,
@@ -435,6 +440,8 @@ export class Api {
     return this.patch(`/_telium/v1/channels/${channelId}/messages/${id}`, { content });
   }
   deleteMessage(channelId, id) { return this.del(`/_telium/v1/channels/${channelId}/messages/${id}`); }
+  listOwnMedia(query) { return this.get('/_telium/v1/account/media', query); }
+  ownMediaMessage(hash) { return this.get(`/_telium/v1/account/media/${encodeURIComponent(hash)}/message`); }
   deleteMedia(hash) { return this.del(`/_telium/v1/media/${encodeURIComponent(hash)}`); }
   typing(channelId) { return this.post(`/_telium/v1/channels/${channelId}/typing`, {}); }
 
@@ -548,15 +555,15 @@ export class Api {
     return {
       exists: Boolean(v.exists),
       mode: v.mode || 'none',
-      server_can_recover: Boolean(v.server_can_recover),
       // A recovery key with no vault copy beside it resets the password and opens nothing.
       recovery_copy_missing: v.mode === 'opaque_custody'
         && Boolean(v.recovery_key_enrolled) && !v.independent_ciphertext,
-      // Backup extent and server readability, reported with custody as one disclosure.
+      // Whether the account holds a recovery key at all: the one thing that can replace a lost account key.
+      recovery_key_enrolled: Boolean(v.recovery_key_enrolled),
+      // Backup extent, reported with custody as one disclosure.
       backup: {
         items: Number(v.backup?.items || 0),
         updated_at: v.backup?.updated_at || null,
-        server_can_read: Boolean(v.backup?.server_can_read),
       },
     };
   }
@@ -580,6 +587,8 @@ export class Api {
 
   regions() { return this.get('/_telium/v1/voice/regions'); }
   voiceStates(channelId) { return this.get(`/_telium/v1/channels/${channelId}/voice`); }
+  /// The invite link for the call you are in: one per call, and the server deletes it when the call ends.
+  voiceInvite(channelId) { return this.post(`/_telium/v1/channels/${channelId}/voice/invite`, {}); }
   voiceJoin(channelId, body) { return this.post(`/_telium/v1/channels/${channelId}/voice/join`, body || {}).then(joined); }
   voiceRelayFull(channelId, region) { return this.post(`/_telium/v1/channels/${channelId}/voice/relay-full`, { region }); }
   voiceLeave(channelId) { return this.post(`/_telium/v1/channels/${channelId}/voice/leave`, {}); }

@@ -227,7 +227,7 @@ export function Composer({ surface, replyTo, onCancelReply, onEditLast, send, mo
 
   const expiries = useMemo(() => expiryOptions(surface.expiryCap), [surface.expiryCap, t]);
   const [expiry, setExpiry] = useState(undefined);
-  const chosen = expiries.some((o) => o.secs === expiry) ? expiry : defaultExpiry(expiries);
+  const chosen = expiries.some((o) => o.secs === expiry && !o.disabled) ? expiry : defaultExpiry(expiries);
   const [externalHost, setExternalHost] = useState(null);
   const host = surface.mediaTier === 3
     ? (surface.externalHosts.find((h) => h.id === externalHost) || surface.externalHosts[0] || null)
