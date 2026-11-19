@@ -82,7 +82,7 @@ test('the document matches the shape the Rust verifier reads', () => {
   assert.deepEqual(document.criteria, {
     min_observed_age_days: 0,
     min_uptime_percent: 0,
-    max_probe_age_minutes: 180,
+    max_probe_age_minutes: 12 * 60,
   })
   assert.equal(document.sfus.length, 1)
   assert.equal(document.sfus[0].url, 'https://sfu.example')

@@ -34,9 +34,9 @@ const envInt = (name, fallback) => {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
 }
 
-export const MAX_PROBE_AGE_MINUTES = envInt('SFU_DIRECTORY_MAX_PROBE_AGE_MINUTES', 180)
+export const MAX_PROBE_AGE_MINUTES = envInt('SFU_DIRECTORY_MAX_PROBE_AGE_MINUTES', 12 * 60)
 export const MAX_WEIGHT = 3
-// The site only rebuilds when main changes, and the hourly probe commits only when status changes, so a short window lets the feed lapse. Servers refetch every few hours and replace the list wholesale, so a long window costs nothing but the outage case.
+// The site only rebuilds when main changes, and the probe (every 6 hours) commits only when its results change, so a short window lets the feed lapse. Servers refetch every few hours and replace the list wholesale, so a long window costs nothing but the outage case.
 export const DEFAULT_VALIDITY_MINUTES = 7 * 24 * 60
 
 export const CAPACITY_BANDS = ['<100m', '100m', '1g', '10g']
