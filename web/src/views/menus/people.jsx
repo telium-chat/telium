@@ -19,6 +19,7 @@ import { ConversationDialog } from '../dialogs/ConversationDialog.jsx';
 import { CustomStatusDialog } from '../dialogs/CustomStatusDialog.jsx';
 import { AccountFace, AccountsDialog } from '../dialogs/AccountsDialog.jsx';
 import { MAX_ACCOUNTS } from '../../lib/accounts.js';
+import { publicProfileLink } from '../PublicProfileLanding.jsx';
 import { openFullProfile } from '../profile/ProfileBody.jsx';
 import { subLabel } from './common.jsx';
 
@@ -60,7 +61,14 @@ function AccountCard() {
         </div>
         <div className="account-card__text">
           <div className="account-card__name"><EmojiText>{name}</EmojiText></div>
-          <div className="account-card__handle">{displayId(me?.user_id)}</div>
+          <button
+            type="button"
+            className="account-card__handle account-card__copy"
+            title="Click to copy your username"
+            onClick={() => copyToClipboard(displayId(me?.user_id), 'Username')}
+          >
+            {displayId(me?.user_id)}
+          </button>
           {custom ? (
             <div className="account-card__status"><StatusText store={store}>{custom}</StatusText></div>
           ) : null}
@@ -459,6 +467,12 @@ export const account = (env) => {
           onAction={() => copyToClipboard(store.me?.user_id || '', 'Your user ID')}
         >
           Copy user ID
+        </MenuItem>
+        <MenuItem
+          icon={CopyIcon}
+          onAction={() => copyToClipboard(publicProfileLink(store.me?.user_id || ''), 'Profile link')}
+        >
+          Copy profile link
         </MenuItem>
         <MenuItem icon={KeyIcon} onAction={() => settings('recovery')}>
           Manage encryption key

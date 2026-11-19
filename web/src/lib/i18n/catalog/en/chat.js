@@ -603,6 +603,11 @@ export const chat = {
   'chat.invite.join': 'Join {guild}',
   'chat.invite.joinUnnamed': 'Join',
 
+  // A call's invite, which stops working when the call ends. The label sits above the guild name so the card
+  // reads as a call, not a standing guild invite; the button names the same thing.
+  'chat.invite.callLabel': 'Voice call invite',
+  'chat.invite.joinCall': 'Join call',
+
   // ------------------------------------------------------------ the surface
 
   // What the composer's box says before anything is typed in it.

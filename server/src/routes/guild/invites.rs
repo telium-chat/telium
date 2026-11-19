@@ -155,6 +155,10 @@ pub async fn invite_preview(
         return Err(ApiError::NotFound("invite has expired".into()));
     }
 
+    // A call's link is an ordinary invite plus a `call_invites` row; say so, or a card cannot tell it from a guild invite.
+    let call: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM call_invites WHERE code = ?)")
+        .bind(&code).fetch_one(&state.pool).await?;
+
     let g: Option<(String, Option<String>)> =
         sqlx::query_as("SELECT name, icon_ref FROM guilds WHERE id = ?")
             .bind(&guild_id).fetch_optional(&state.pool).await?;
@@ -173,6 +177,7 @@ pub async fn invite_preview(
         "channel_id": channel_id,
         "inviter": creator,
         "expires_at": expires_at,
+        "call": call,
     })))
 }
 

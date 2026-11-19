@@ -1,6 +1,6 @@
 import { Avatar, ContextMenu, EmojiText, StatusLine } from '../components/index.js';
 import { useStore, useStoreEventFor } from '../hooks/useStore.jsx';
-import { useProfileCard } from '../hooks/useProfileCard.js';
+import { useOpenProfile, useProfileCard } from '../hooks/useProfileCard.js';
 import { useConversationPeer } from '../hooks/useConversationPeer.js';
 import { dmPeer } from '../lib/conversations.js';
 import { faceOf } from '../lib/faces.js';
@@ -32,10 +32,13 @@ export function DmSidePanel({ convo }) {
   return <DmMembers store={store} peers={peers} typing={typing} />;
 }
 
+const RAIL = 'dm-member-rail';
+
 const offline = (p) => !p.presence || p.presence === 'offline' || p.presence === 'invisible';
 
 function DmMembers({ store, peers, typing }) {
   const profiles = useProfileCard();
+  const showing = useOpenProfile();
   const menus = useMenus();
   const me = store.me?.user_id;
   // Our own row follows what we publish, game or song included, as a guild's member list does; the peer hook only listens for the others.
@@ -69,7 +72,9 @@ function DmMembers({ store, peers, typing }) {
           <button
             type="button"
             aria-haspopup="dialog"
-            onClick={(e) => profiles.open(p.id, { anchor: e.currentTarget })}
+            onClick={(e) => (showing?.source === RAIL && showing.userId === p.id
+              ? profiles.close()
+              : profiles.open(p.id, { anchor: e.currentTarget, source: RAIL }))}
             onPointerEnter={() => profiles.prefetch(p.id)}
             onPointerLeave={profiles.cancel}
             className={cn(
