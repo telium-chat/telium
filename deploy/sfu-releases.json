@@ -1,7 +1,29 @@
 {
   "channel": "releases",
-  "generated_at": 1794801208055,
+  "generated_at": 1795069648970,
   "releases": [
+    {
+      "version": "0.2.2",
+      "commit": "b725217bd6e33d8dd19d0036d4d6b2cd35ceaad6",
+      "released_at": 1795069269000,
+      "security": false,
+      "summary": "sfu: bump version to 0.2.2 (#101)",
+      "image": "sha256:43479e9cb7ae3fa8d04fd009d39ecd6cf81b829a8b7cc4616834d9ca533cb011",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "sfu-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/sfu-v0.2.2/telium-sfu-linux-x86_64.tar.gz",
+          "sha256": "d722d75d051715c098e07951b39966e13d4237a62d96ed06b7f588730a088ee9",
+          "size": 4128790
+        },
+        "sfu-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/sfu-v0.2.2/telium-sfu-linux-aarch64.tar.gz",
+          "sha256": "90379b340c2ebe8dffdb30914d186ce705acb4cbdf7540953aaf270dd5ed3162",
+          "size": 3987619
+        }
+      }
+    },
     {
       "version": "0.2.1",
       "commit": "12c48b316292fc13efc9867df90930ebfaed4a42",
