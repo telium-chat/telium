@@ -167,9 +167,9 @@ impl TrustedKeys {
 
 async fn discover_keys(origin: &str, policy: AddressPolicy) -> Option<(String, Vec<(String, String)>)> {
     let base = match discover_base(origin, policy).await {
-        Some(b) => b,
-        None => {
-            tracing::warn!(origin, "could not resolve origin via well-known discovery");
+        Ok(b) => b,
+        Err(reason) => {
+            tracing::warn!(origin, %reason, "could not resolve origin via well-known discovery");
             return None;
         }
     };
@@ -244,8 +244,10 @@ fn parse_txt_pointer(line: &str, origin: &str) -> Option<String> {
 }
 
 /// Untrusted origins get https only; falling back to http would undo the domain-key binding.
-async fn discover_base(origin: &str, policy: AddressPolicy) -> Option<String> {
-    let (host, port) = fetch::parse_authority(origin)?;
+///
+/// `Err` carries the last step's failure, so the log can say why discovery stopped.
+async fn discover_base(origin: &str, policy: AddressPolicy) -> Result<String, String> {
+    let (host, port) = fetch::parse_authority(origin).ok_or_else(|| "not a valid server name".to_string())?;
     let authority = match port {
         Some(p) => format!("{host}:{p}"),
         None => host,
@@ -255,13 +257,18 @@ async fn discover_base(origin: &str, policy: AddressPolicy) -> Option<String> {
         AddressPolicy::Untrusted => &["https"],
         AddressPolicy::OperatorConfigured => &["https", "http"],
     };
+    let mut last = "no discovery document found".to_string();
     for scheme in schemes {
         let url = format!("{scheme}://{authority}/.well-known/telium/server");
-        if let Ok(doc) = fetch::get_json(&url, policy, MAX_DOCUMENT_BYTES).await {
-            if let Some(api) = doc.get("api").and_then(Value::as_str) {
-                // The key fetcher re-validates the API's address and signed keys.
-                return Some(api.to_string());
+        match fetch::get_json(&url, policy, MAX_DOCUMENT_BYTES).await {
+            Ok(doc) => {
+                if let Some(api) = doc.get("api").and_then(Value::as_str) {
+                    // The key fetcher re-validates the API's address and signed keys.
+                    return Ok(api.to_string());
+                }
+                last = format!("{url} has no \"api\" field");
             }
+            Err(e) => last = format!("{url}: {e}"),
         }
 
         // A static website may only contain /telium.txt; load live discovery
@@ -269,22 +276,35 @@ async fn discover_base(origin: &str, policy: AddressPolicy) -> Option<String> {
         let pointer_url = format!("{scheme}://{authority}/telium.txt");
         let bytes = match fetch::get_bytes(&pointer_url, policy, 512, Duration::from_secs(8)).await {
             Ok(bytes) => bytes,
-            Err(_) => continue,
+            Err(e) => {
+                last = format!("{pointer_url}: {e}");
+                continue;
+            }
         };
         let pointer = match std::str::from_utf8(&bytes) {
             Ok(text) => text.trim(),
-            Err(_) => continue,
-        };
-        let Some(target) = parse_txt_pointer(pointer, origin) else { continue };
-        let live = format!("{target}/.well-known/telium/server");
-        if let Ok(doc) = fetch::get_json(&live, policy, MAX_DOCUMENT_BYTES).await {
-            if doc.get("server_name").and_then(Value::as_str) == Some(origin)
-                && doc.get("api").and_then(Value::as_str).map(|api| api.trim_end_matches('/')) == Some(target.as_str()) {
-                return Some(target);
+            Err(_) => {
+                last = format!("{pointer_url} is not text");
+                continue;
             }
+        };
+        let Some(target) = parse_txt_pointer(pointer, origin) else {
+            last = format!("{pointer_url} does not point at {origin} or a subdomain of it");
+            continue;
+        };
+        let live = format!("{target}/.well-known/telium/server");
+        match fetch::get_json(&live, policy, MAX_DOCUMENT_BYTES).await {
+            Ok(doc)
+                if doc.get("server_name").and_then(Value::as_str) == Some(origin)
+                    && doc.get("api").and_then(Value::as_str).map(|api| api.trim_end_matches('/')) == Some(target.as_str()) =>
+            {
+                return Ok(target);
+            }
+            Ok(_) => last = format!("{live} does not name {origin} with a matching api"),
+            Err(e) => last = format!("{live}: {e}"),
         }
     }
-    None
+    Err(last)
 }
 
 /// The self-signature proves consistency, not domain ownership; the caller compares `server_name`.
