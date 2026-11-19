@@ -402,12 +402,21 @@ jobs:
               apt-get install -y -qq --no-install-recommends musl-tools >/dev/null
               rustup target add "$triple"
               u="${triple//-/_}"
-              export RUSTFLAGS="-C target-feature=+crt-static"
+              # relocation-model=static keeps rustc from asking for static-pie,
+              # which the musl-gcc wrapper does not implement: without it the
+              # x86_64 binary links as a pie executable that names the musl
+              # loader and fails to exec on any glibc host (see release-server.yml).
+              export RUSTFLAGS="-C target-feature=+crt-static -C relocation-model=static"
               export "CC_$u=musl-gcc"
               export "AR_$u=ar"
               export "CARGO_TARGET_${u^^}_LINKER=musl-gcc"
               cargo build --release --locked --manifest-path sfu/Cargo.toml \
                 --target "$triple"
+              # Refuse to ship a binary that needs a dynamic loader.
+              if readelf -l "/target/$triple/release/telium-sfu" | grep -q INTERP; then
+                echo "telium-sfu is dynamically linked; refusing to release" >&2
+                exit 1
+              fi
               install -Dm755 "/target/$triple/release/telium-sfu" \
                 "/src/.sfu-native/stage/$NATIVE_ARCH/telium-sfu"
               chown -R "$HOST_UID:$HOST_GID" /src/.sfu-native /usr/local/cargo/registry /target
