@@ -58,7 +58,7 @@ export class MeshCall {
   /// `onScreenEnd`/`onCameraEnd` fire when a capture ends outside our control.
   constructor({
     me, signal, onSpeaking, onPeers, onScreen, onCamera, onScreenEnd, onCameraEnd, onError,
-    onAudioBlocked, onNoiseFallback, policy, noiseMode,
+    onAudioBlocked, onNoiseFallback, onNoiseState, policy, noiseMode,
   }) {
     this.me = me;
     this.sessionId = meshId();
@@ -75,6 +75,7 @@ export class MeshCall {
     this.onAudioBlocked = onAudioBlocked || (() => {});
     // Fired once if the model is abandoned mid-call; never for a chosen mode.
     this.onNoiseFallback = onNoiseFallback || (() => {});
+    this.onNoiseState = onNoiseState || (() => {});
 
     this.peers = new Map();
     this.self = { analyser: null, buffer: null };
@@ -154,6 +155,12 @@ export class MeshCall {
       return;
     }
 
+    // A chain this call already retired is not a working one, whatever else says `neural`.
+    if (this.denoiser?.spent) {
+      await this.denoiser.stop?.().catch?.(() => {});
+      this.denoiser = null;
+    }
+
     if (this.denoiser) {
       this.denoiser.setBypass(false);
       this.stream = new MediaStream([await this.denoiser.replace(track)]);
@@ -162,7 +169,11 @@ export class MeshCall {
 
     // A model load failure must not fail the call.
     try {
-      const chain = await openDenoiser((reason) => this.surrender(reason));
+      const chain = await openDenoiser({
+        onOverload: (reason) => this.surrender(reason),
+        onPause: (info) => this.pauseNoise(info),
+        onResume: () => this.resumeNoise(),
+      });
       const processed = await chain.start(track);
       this.denoiser = chain;
       this.stream = new MediaStream([processed]);
@@ -216,10 +227,25 @@ export class MeshCall {
     this.micError = null;
   }
 
+  /// The model stood aside because the machine is busy; the browser's own suppressor covers the gap, and `resumeNoise` undoes it. The choice itself (`noiseMode`) is untouched.
+  pauseNoise(info) {
+    if (this.noiseMode !== 'neural') return;
+    const track = this.raw?.getAudioTracks()?.[0];
+    track?.applyConstraints?.(micConstraints('browser', this.deviceId))?.catch?.(() => {});
+    try { this.onNoiseState('paused', info); } catch { /* a UI callback must not break the call */ }
+  }
+
+  resumeNoise() {
+    if (this.noiseMode !== 'neural') return;
+    const track = this.raw?.getAudioTracks()?.[0];
+    track?.applyConstraints?.(micConstraints('neural', this.deviceId))?.catch?.(() => {});
+    try { this.onNoiseState('active'); } catch { /* as above */ }
+  }
+
   surrender(reason) {
     if (this.noiseMode !== 'neural') return;
     this.noiseMode = 'browser';
-    this.denoiser?.setBypass?.(true);
+    this.denoiser?.retire?.();
     const [track] = this.raw?.getAudioTracks() || [];
     track?.applyConstraints?.(micConstraints('browser', this.deviceId))?.catch?.(() => {});
     try { this.onNoiseFallback(reason); } catch { /* a UI callback must not break the call */ }

@@ -1,5 +1,5 @@
 import { Avatar, ContextMenu, EmojiText, StatusLine } from '../components/index.js';
-import { useStore } from '../hooks/useStore.jsx';
+import { useStore, useStoreEventFor } from '../hooks/useStore.jsx';
 import { useProfileCard } from '../hooks/useProfileCard.js';
 import { useConversationPeer } from '../hooks/useConversationPeer.js';
 import { dmPeer } from '../lib/conversations.js';
@@ -38,12 +38,15 @@ function DmMembers({ store, peers, typing }) {
   const profiles = useProfileCard();
   const menus = useMenus();
   const me = store.me?.user_id;
+  // Our own row follows what we publish, game or song included, as a guild's member list does; the peer hook only listens for the others.
+  useStoreEventFor((e) => Boolean(me) && e?.user_id === me, 'presence');
   const self = me ? faceOf(store, me) : null;
+  const status = store.prefs.presence || 'online';
   const everyone = [
     ...(self ? [{
       ...self,
-      presence: store.prefs.presence || 'online',
-      live: { status: store.prefs.presence || 'online', custom_status: store.prefs.status?.text },
+      presence: status,
+      live: { ...(store.presence?.get?.(me) || {}), status, custom_status: store.prefs.status?.text },
     }] : []),
     ...peers.map((id) => dmPeer(store, id)).filter(Boolean),
   ];

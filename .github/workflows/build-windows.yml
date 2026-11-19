@@ -106,6 +106,12 @@ jobs:
       - name: Install web dependencies
         run: bun install --frozen-lockfile
 
+      # The DeepFilterNet3 noise-suppression engine is build output, not a committed binary: `web/dsp/deepfilter` is compiled here and its weights are fetched at a pinned commit and checked against a pinned hash (`web/scripts/build-deepfilter.mjs`). Without it the client falls back to RNNoise, so a failure here is loud rather than a quietly worse release.
+      - name: Build the DeepFilterNet3 engine
+        run: |
+          rustup target add wasm32-unknown-unknown
+          bun run dsp:build
+
       - name: Install Electron desktop dependencies
         run: bun run desktop:install
 

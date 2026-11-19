@@ -357,6 +357,19 @@ export async function fetchManifest({
   }
 }
 
+/// A manifest check made anywhere (the settings footer asks on open) is news for everyone: the banner would otherwise sit on its own six-hour poll and show nothing until the next launch.
+const checkListeners = new Set();
+
+export function publishCheck(result) {
+  if (!result?.manifest) return;
+  for (const listener of [...checkListeners]) listener(result);
+}
+
+export function subscribeChecks(listener) {
+  checkListeners.add(listener);
+  return () => { checkListeners.delete(listener); };
+}
+
 /// Shorter than `lib/version.js`; it always comes back.
 const SNOOZE_MS = {
   quiet: 3 * 24 * 60 * 60 * 1000,

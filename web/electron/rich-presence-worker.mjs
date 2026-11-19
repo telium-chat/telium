@@ -6,6 +6,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import RPCServer from 'arrpc';
 import { createMprisSource } from './mpris-source.mjs';
 import {
+  cleanCustomPrograms, createExtraGameScanner, customGames, EXTRA_GAMES,
+} from './rich-presence-extra-games.mjs';
+import {
   cleanApplicationName,
   createApplicationNameResolver,
 } from './rich-presence-name.mjs';
@@ -28,6 +31,9 @@ let windowsRpcPromoter = null;
 let ipcServerClassPromise = null;
 let stopping = false;
 let detectableMetadataPromise = null;
+let extraGames = null;
+let listProcesses = null;
+let customPrograms = [];
 const activityRevisions = new Map();
 
 function post(message) {
@@ -47,6 +53,47 @@ async function ipcServerClass() {
     })();
   }
   return ipcServerClassPromise;
+}
+
+async function initializeExtraGames(server) {
+  try {
+    const packageJson = require.resolve('arrpc/package.json');
+    const natives = await import(pathToFileURL(
+      join(dirname(packageJson), 'src', 'process', 'native', 'index.js'),
+    ).href);
+    const native = natives[process.platform];
+    if (!native?.getProcesses) return;
+    listProcesses = native.getProcesses;
+    extraGames = createExtraGameScanner({
+      getProcesses: native.getProcesses,
+      send: (socket, message) => server.onMessage(socket, message),
+      sendCustom: (data) => { void forwardActivity(data); },
+      games: [...EXTRA_GAMES, ...customGames(customPrograms)],
+    });
+    extraGames.start();
+  } catch (error) {
+    console.warn('[Telium rich presence worker] extra game detection unavailable:', error?.message || error);
+  }
+}
+
+/// Every running program, one row per distinct executable, for the picker. The renderer gets the file name, one example path and a count (shown locally in the picker, never sent anywhere), and never a pid.
+async function answerProcessList(requestId) {
+  let rows = [];
+  try {
+    const processes = listProcesses ? await listProcesses() : [];
+    const byName = new Map();
+    for (const [, path] of processes) {
+      if (!path) continue;
+      const file = String(path).replaceAll('\\', '/').split('/').pop();
+      if (!file) continue;
+      const key = file.toLowerCase();
+      const entry = byName.get(key) || { executable: file, path: String(path), count: 0 };
+      entry.count += 1;
+      byName.set(key, entry);
+    }
+    rows = [...byName.values()];
+  } catch { /* an empty list is the honest answer */ }
+  post({ type: 'processes', requestId, rows });
 }
 
 async function replacementIpcServer(server) {
@@ -126,7 +173,7 @@ async function forwardActivity(data) {
   });
 
   // Native sources bring their own identity and artwork; no Discord id to resolve.
-  if (data?.source === 'mpris' || data?.source === 'windows-media') return;
+  if (data?.source === 'mpris' || data?.source === 'windows-media' || data?.source === 'custom-program') return;
 
   const [resolvedName, artwork] = await Promise.all([
     cachedName ? Promise.resolve(cachedName) : applications.resolve(applicationId),
@@ -154,6 +201,7 @@ async function shutdown(code = 0) {
   try { await mprisSource?.stop(); } catch { /* best effort during shutdown */ }
   try { await windowsMediaSource?.stop(); } catch { /* best effort during shutdown */ }
   try { windowsRpcPromoter?.stop(); } catch { /* best effort during shutdown */ }
+  try { extraGames?.stop(); } catch { /* best effort during shutdown */ }
   try { await wineBridge?.stop(); } catch { /* best effort during shutdown */ }
   process.exit(code);
 }
@@ -177,6 +225,11 @@ parent?.on('message', (event) => {
     if (ready) post({ type: 'ready' });
     else probePending = true;
   }
+  if (op === 'programs') {
+    customPrograms = cleanCustomPrograms(event.data.programs);
+    extraGames?.setGames([...EXTRA_GAMES, ...customGames(customPrograms)]);
+  }
+  if (op === 'list-processes') void answerProcessList(event.data.requestId);
 });
 
 async function initializeWineBridge(server) {
@@ -327,6 +380,7 @@ try {
     post({ type: 'ready' });
   }
 
+  void initializeExtraGames(server);
   void initializeWineBridge(server);
   void initializeMpris();
   void initializeWindowsMedia();

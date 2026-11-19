@@ -15,6 +15,7 @@ const TARGETS = [
   { ecosystem: 'cargo', name: 'sfu', lock: 'sfu/Cargo.lock' },
   { ecosystem: 'cargo', name: 'telium-protocol', lock: 'telium-protocol/Cargo.lock' },
   { ecosystem: 'cargo', name: 'web/src-tauri', lock: 'web/src-tauri/Cargo.lock' },
+  { ecosystem: 'cargo', name: 'web/dsp/deepfilter', lock: 'web/dsp/deepfilter/Cargo.lock' },
   { ecosystem: 'npm', name: 'web', dir: 'web' },
   { ecosystem: 'npm', name: 'web/electron', dir: 'web/electron' },
   { ecosystem: 'npm', name: 'site', dir: 'site' },

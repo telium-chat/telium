@@ -66,7 +66,7 @@ export function ProfileAbout({
       ) : null}
 
       {activityShown ? (
-        <div className="grid gap-2">
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2">
           {activities.voice ? <VoiceActivityCard activity={activities.voice} /> : null}
           {(activities.rich || []).map((activity) => (
             <RichActivityCard

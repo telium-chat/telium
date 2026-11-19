@@ -95,3 +95,48 @@ button.msg-reply:focus-visible {
   outline-offset: 1px;
   border-radius: var(--radius-sm);
 }
+
+/* The "new messages" / "jump to present" pill. The dock is zero-height and sticky, so it rides the bottom of the scroller (just above the composer, clear of the typing strip) without adding a line to the stream or moving it. */
+.timeline-pill-dock {
+  position: sticky;
+  bottom: calc(var(--typing-strip, 0px) + 0.5rem);
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  height: 0;
+  overflow: visible;
+  overflow-anchor: none;
+  pointer-events: none;
+}
+
+.timeline-pill {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  transform: translateY(-100%);
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  background: var(--surface);
+  color: var(--foreground, inherit);
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.18);
+  cursor: pointer;
+  transition: background var(--dur-2, 120ms) var(--ease, ease);
+}
+
+.timeline-pill:hover {
+  background: var(--surface-secondary);
+}
+
+.timeline-pill--new {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.timeline-pill--new:hover {
+  background: var(--accent-hover);
+}

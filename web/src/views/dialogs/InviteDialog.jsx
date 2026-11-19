@@ -25,7 +25,10 @@ function admits(maxUses) {
   return maxUses === 1 ? 'One use' : `${maxUses} uses`;
 }
 
-export function InviteDialog({ guild, invite: initialInvite = null, close }) {
+/// `call` is the voice channel when the link is the one for a call in progress: the server
+/// ends it with the call, so there are no terms to pick, and a friend who is already in the
+/// guild is still worth sending it to (the message is the notification).
+export function InviteDialog({ guild, invite: initialInvite = null, call = null, close }) {
   const store = useStore();
   useStoreEvent('friends', 'members', 'presence');
   const [invited, setInvited] = useState(() => new Set());
@@ -103,7 +106,7 @@ export function InviteDialog({ guild, invite: initialInvite = null, close }) {
 
   return (
     <ModalShell
-      title={`Invite to ${guild.name}`}
+      title={call ? `Invite to ${call.name}` : `Invite to ${guild.name}`}
       footer={<Button variant="primary" onClick={close}>Done</Button>}
     >
       {invite ? (
@@ -129,7 +132,12 @@ export function InviteDialog({ guild, invite: initialInvite = null, close }) {
               {copied ? 'Copied' : 'Copy'}
             </Button>
           </div>
-          <Hint>Anyone with this link can join.</Hint>
+          <Hint>
+            {call
+              ? 'Anyone with this link can join the server and this call. It stops working when the call ends.'
+              : 'Anyone with this link can join.'}
+          </Hint>
+          {call ? null : (
           <div className="invite-terms">
             <Pill>{lasts(invite.expires_at)}</Pill>
             <Pill>{admits(invite.max_uses)}</Pill>
@@ -146,6 +154,7 @@ export function InviteDialog({ guild, invite: initialInvite = null, close }) {
               New link
             </Button>
           </div>
+          )}
         </div>
       ) : (
         <div className="invite-share">
@@ -183,7 +192,7 @@ export function InviteDialog({ guild, invite: initialInvite = null, close }) {
           <div className="invite-list">
             {friends.map((f) => {
               const id = f.user_id;
-              const here = Boolean(members?.has(id));
+              const here = !call && Boolean(members?.has(id));
               const face = faceOf(store, id);
               return (
                 <div key={id} className="invite-friend">

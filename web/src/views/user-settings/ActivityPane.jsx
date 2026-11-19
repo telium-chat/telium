@@ -3,6 +3,7 @@ import { useStore, useStoreEvent } from '../../hooks/useStore.jsx';
 import { Hint, Notice, Section, Switch } from '../../components/index.js';
 import { RichActivityCard } from '../../components/RichActivityCard.jsx';
 import { richPresenceKinds } from '../../lib/rich-presence.js';
+import { ProgramPicker } from './ProgramPicker.jsx';
 
 function wineBridgeMessage(status) {
   if (!status) return 'Wine/Proton bridge: starting…';
@@ -272,6 +273,8 @@ export function ActivityPane() {
           Servers where status sharing is hidden are not sent your desktop activity.
         </Hint>
       </Section>
+
+      {kinds.game && window.teliumDesktop?.listProcesses ? <ProgramPicker /> : null}
 
       <Section title="Privacy">
         <Hint>

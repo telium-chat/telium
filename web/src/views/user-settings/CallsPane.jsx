@@ -7,12 +7,13 @@ import {
 } from '../../components/index.js';
 import { POSTURE_COPY, POSTURE_OBSERVERS, POSTURES } from '../../lib/callmode.js';
 import { conversationTitle } from '../../lib/conversations.js';
+import { t } from '../../lib/i18n/index.js';
 import { unavailableBecause } from '../../lib/denoise.js';
 
 const MODES = [
   ['off', 'Off', 'Send the microphone as it is.', MicOffIcon],
   ['browser', 'Standard', 'Your browser’s own suppressor. Free, and good at steady noise — a fan, a hum, traffic.', MicIcon],
-  ['neural', 'Neural', 'A small model runs on this device and removes noise the standard one leaves behind.', SignalIcon],
+  ['neural', 'Neural', 'A model runs on this device and removes what the standard one leaves behind: keyboards, hum, other voices.', SignalIcon],
 ];
 
 function Observers({ posture }) {
@@ -68,7 +69,8 @@ export function CallsPane() {
         <ChoiceList value={voice.noiseMode} onChange={chooseNoise}>
           {MODES.map(([key, label, description, Glyph]) => <ChoiceCard key={key} value={key} icon={Glyph} label={label} description={key === 'neural' && blocked ? blocked : description} disabled={key === 'neural' && (Boolean(blocked) || busy)} trailing={key === 'neural' && busy ? <Spinner /> : undefined} />)}
         </ChoiceList>
-        <Hint>Neural uses noticeably more battery and CPU, and about 20 ms more delay. If it cannot keep up mid-call, Telium switches back to standard and says so.</Hint>
+        <Hint>Neural uses noticeably more battery and CPU, and up to 40 ms more delay than standard. If the device gets busy mid-call, the model steps aside and comes back on its own; your choice here is never changed.</Hint>
+        {voice.noiseMode === 'neural' && voice.noiseState && voice.noiseState !== 'active' ? <Hint>{t(`voice.noise.${voice.noiseState}`)}</Hint> : null}
       </Section>
     </Section>
   );

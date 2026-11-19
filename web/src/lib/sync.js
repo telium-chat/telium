@@ -68,6 +68,7 @@ const DEVICE_FIELDS = {
     'richPresenceGameEnabled',
     'richPresenceMusicEnabled',
     'richPresenceVideoEnabled',
+    'customPrograms',
     'micNoise',
     'gifSize',
     'dateFormat',

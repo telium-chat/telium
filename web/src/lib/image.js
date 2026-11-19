@@ -1,11 +1,12 @@
 /// Client-side re-encoding of avatars, banners and emoji. The ceilings are a courtesy; the origin enforces them again.
 
 export const PRESETS = {
-  // Animated avatars upload unchanged, so this must match the origin's profile-asset ceiling.
-  avatar: { size: 256, maxBytes: 256 * 1024 },
-  // Banners share the profile-asset 256 KB ceiling.
+  // A still avatar stays small. An animated one gets more room, up to what the origin's profile-asset ceiling
+  // allows (`animatedLimit`), because a GIF squeezed to 256 KB loses most of its frames or colour.
+  avatar: { size: 256, maxBytes: 256 * 1024, animatedMaxBytes: 512 * 1024 },
+  // Banners stay at 256 KB even though the origin's profile-asset ceiling now allows 512 KB (that room is for animated avatars).
   banner: { width: 600, height: 200, aspect: 3, maxBytes: 256 * 1024 },
-  // Guild icons share the profile-asset ceiling.
+  // Guild icons likewise stay at 256 KB, under the origin's profile-asset ceiling.
   icon: { size: 256, maxBytes: 256 * 1024 },
   emoji: { size: 128, maxBytes: 96 * 1024 },
   // The guild server caps a sticker's pack entry at 256 KB.
@@ -137,6 +138,188 @@ export async function reencodeAnimatedGif(file, crop, preset) {
     }
   }
   throw new Error(`could not compress this animated GIF under ${Math.round(preset.maxBytes / 1024)} KB`);
+}
+
+/// What an animated upload may weigh: the preset's animated allowance, held to the origin's own ceiling. An origin that
+/// does not say what its ceiling is predates the larger one, so the ordinary limit applies.
+export function animatedLimit(preset, originCap) {
+  if (!preset.animatedMaxBytes) return preset.maxBytes;
+  return originCap > 0 ? Math.min(originCap, preset.animatedMaxBytes) : preset.maxBytes;
+}
+
+/// Pixels an animated WebP may decode to in one go when the browser has no frame-by-frame decoder (all frames are held
+/// at once): 64 Mpx is 256 MB of RGBA.
+const MAX_ANIMATION_PIXELS = 64 * 1024 * 1024;
+const MAX_ANIMATION_FRAMES = 2000;
+
+/// Any animated image: cropped and re-encoded as an animated WebP, so the crop applies and none of the original file
+/// (its metadata, anything appended to it) is uploaded. GIFs take the GIF decoder; animated WebP and APNG are read by
+/// the browser's `ImageDecoder` where there is one, and animated WebP by libwebp where there isn't. Null when this
+/// browser can read no frames of it (an APNG without `ImageDecoder`): the caller keeps the first frame instead.
+export async function reencodeAnimation(file, crop, preset) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (isAnimatedGif(bytes)) return reencodeAnimatedGif(file, crop, preset);
+  const type = animatedType(bytes);
+  if (!type) throw new Error('this image is not animated');
+  const top = animationCandidates(preset)[0];
+  const aspect = preset.aspect || 1;
+  const decoded = await framesFromImageDecoder(bytes, type, crop, top, aspect)
+    ?? (type === 'image/webp' ? await framesFromLibwebp(bytes, crop, top, aspect) : null);
+  if (!decoded) return null;
+  if (decoded.frames.length < 2) throw new Error('the image has no usable animation frames');
+  return encodeAnimatedFrames(file, decoded, preset);
+}
+
+/// Whether `reencodeAnimation` can keep this image's animation in this browser.
+export async function canKeepAnimation(bytes) {
+  const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  if (isAnimatedGif(b)) return true;
+  const type = animatedType(b);
+  if (type === 'image/webp') return true;
+  if (type !== 'image/png' || typeof ImageDecoder !== 'function') return false;
+  return ImageDecoder.isTypeSupported(type).catch(() => false);
+}
+
+function animatedType(b) {
+  if (!isAnimated(b)) return null;
+  if (ascii(b, 0, 4) === 'RIFF') return 'image/webp';
+  if (b[0] === 0x89) return 'image/png';
+  return null;
+}
+
+/// Decodes one frame at a time, keeping only the frames the largest output samples, already cropped to its size.
+async function framesFromImageDecoder(bytes, type, crop, top, aspect) {
+  if (typeof ImageDecoder !== 'function') return null;
+  if (!(await ImageDecoder.isTypeSupported(type).catch(() => false))) return null;
+  const decoder = new ImageDecoder({ data: bytes, type });
+  try {
+    await decoder.tracks.ready;
+    const count = decoder.tracks.selectedTrack?.frameCount || 0;
+    if (count > MAX_ANIMATION_FRAMES) throw new Error('this animation has too many frames to process');
+    const indexes = sampleFrameIndexes(count, top.maxFrames);
+    const selected = new Map(indexes.map((index, i) => [index, i]));
+    const output = makeCanvas(top.width, top.height);
+    const durations = [];
+    const frames = [];
+    for (let i = 0; i < count; i += 1) {
+      const { image } = await decoder.decode({ frameIndex: i, completeFramesOnly: true });
+      try {
+        durations.push(Math.max(10, Math.round((image.duration || 100_000) / 1000)));
+        const at = selected.get(i);
+        if (at !== undefined) {
+          frames[at] = drawCropped(output, image, image.displayWidth, image.displayHeight, crop, top, aspect);
+        }
+      } finally {
+        image.close?.();
+      }
+    }
+    return withDurations(frames, indexes, durations);
+  } finally {
+    decoder.close?.();
+  }
+}
+
+/// libwebp hands back every frame at full size at once, so the canvas and frame count are checked first.
+async function framesFromLibwebp(bytes, crop, top, aspect) {
+  const { width, height, frames: count } = webpAnimationInfo(bytes);
+  if (!width || !height || count < 2) throw new Error('the image has invalid dimensions');
+  if (count > MAX_ANIMATION_FRAMES || width * height * count > MAX_ANIMATION_PIXELS) {
+    throw new Error('this animation is too large to process in the browser');
+  }
+  const { decodeAnimation } = await import('wasm-webp');
+  const decoded = await decodeAnimation(bytes, true);
+  if (!decoded?.length) throw new Error('could not read this animated WebP');
+  const indexes = sampleFrameIndexes(decoded.length, top.maxFrames);
+  const source = makeCanvas(width, height);
+  const output = makeCanvas(top.width, top.height);
+  const frames = indexes.map((index) => {
+    const frame = decoded[index];
+    const pixels = new Uint8ClampedArray(frame.data.buffer, frame.data.byteOffset, frame.data.byteLength);
+    source.context.putImageData(makeImageData(source.context, pixels, frame.width, frame.height), 0, 0);
+    return drawCropped(output, source.canvas, frame.width, frame.height, crop, top, aspect);
+  });
+  return withDurations(frames, indexes, decoded.map((frame) => Math.max(10, frame.duration || 100)));
+}
+
+/// Canvas size and frame count from the RIFF container: VP8X carries the canvas, each frame is an ANMF chunk.
+export function webpAnimationInfo(b) {
+  let width = 0;
+  let height = 0;
+  let frames = 0;
+  let p = 12;
+  while (p + 8 <= b.length) {
+    const type = ascii(b, p, 4);
+    const size = (b[p + 4] | (b[p + 5] << 8) | (b[p + 6] << 16) | (b[p + 7] << 24)) >>> 0;
+    if (type === 'VP8X' && p + 18 <= b.length) {
+      width = 1 + (b[p + 12] | (b[p + 13] << 8) | (b[p + 14] << 16));
+      height = 1 + (b[p + 15] | (b[p + 16] << 8) | (b[p + 17] << 16));
+    }
+    if (type === 'ANMF') frames += 1;
+    p += 8 + size + (size & 1);
+  }
+  return { width, height, frames };
+}
+
+function drawCropped(output, image, width, height, crop, top, aspect) {
+  const rect = cropRect(width, height, crop, aspect);
+  output.context.clearRect(0, 0, top.width, top.height);
+  output.context.drawImage(
+    image, rect.sx, rect.sy, rect.width || rect.side, rect.height || rect.side, 0, 0, top.width, top.height,
+  );
+  return new Uint8Array(output.context.getImageData(0, 0, top.width, top.height).data);
+}
+
+/// Each kept frame lasts until the next kept one, so dropping frames doesn't change the animation's speed.
+function withDurations(frames, indexes, durations) {
+  const total = (from, to) => durations.slice(from, to).reduce((sum, d) => sum + d, 0);
+  return {
+    frames: frames.map((data, i) => ({ data, duration: Math.max(10, total(indexes[i], indexes[i + 1] ?? durations.length)) })),
+  };
+}
+
+/// The same size and quality ladder as a GIF, scaling down from the frames already drawn at the largest size.
+async function encodeAnimatedFrames(file, decoded, preset) {
+  const { encodeAnimation } = await import('wasm-webp');
+  const candidates = animationCandidates(preset);
+  const top = candidates[0];
+  const source = makeCanvas(top.width, top.height);
+  const hasAlpha = decoded.frames.some(({ data }) => {
+    for (let i = 3; i < data.length; i += 4) if (data[i] !== 255) return true;
+    return false;
+  });
+  for (const candidate of candidates) {
+    const indexes = sampleFrameIndexes(decoded.frames.length, candidate.maxFrames);
+    const output = candidate === top ? null : makeCanvas(candidate.width, candidate.height);
+    const frames = indexes.map((index, i) => {
+      const end = indexes[i + 1] ?? decoded.frames.length;
+      const duration = decoded.frames.slice(index, end).reduce((sum, f) => sum + f.duration, 0);
+      let { data } = decoded.frames[index];
+      if (output) {
+        const pixels = new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength);
+        source.context.putImageData(makeImageData(source.context, pixels, top.width, top.height), 0, 0);
+        output.context.clearRect(0, 0, candidate.width, candidate.height);
+        output.context.drawImage(source.canvas, 0, 0, candidate.width, candidate.height);
+        data = new Uint8Array(output.context.getImageData(0, 0, candidate.width, candidate.height).data);
+      }
+      return { data, duration };
+    });
+    for (const quality of ANIMATION_QUALITY) {
+      const encoded = await encodeAnimation(
+        candidate.width,
+        candidate.height,
+        hasAlpha,
+        frames.map((frame) => ({
+          data: hasAlpha ? frame.data : rgbaToRgb(frame.data),
+          duration: frame.duration,
+          config: { lossless: 0, quality },
+        })),
+      );
+      if (!encoded) continue;
+      const blob = new Blob([encoded], { type: 'image/webp' });
+      if (blob.size <= preset.maxBytes) return named(file, blob);
+    }
+  }
+  throw new Error(`could not compress this animation under ${Math.round(preset.maxBytes / 1024)} KB`);
 }
 
 function animationCandidates(preset) {
@@ -431,5 +614,32 @@ export async function downscaleToFit(file, cap) {
     }
     width = nextWidth;
     height = nextHeight;
+  }
+}
+
+/// Draws an SVG to a PNG through an <img>, which runs no script and loads nothing outside the file, so an icon from another app is safe to rasterize. `createImageBitmap` can't decode SVG, which is why this is separate from `reencode`.
+export async function rasterizeSvg(file, size = 256) {
+  const url = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.decoding = 'async';
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = () => reject(new Error('could not draw this SVG'));
+      image.src = url;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    const ratio = Math.min(size / (image.naturalWidth || size), size / (image.naturalHeight || size));
+    const w = (image.naturalWidth || size) * ratio;
+    const h = (image.naturalHeight || size) * ratio;
+    ctx.drawImage(image, (size - w) / 2, (size - h) / 2, w, h);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) throw new Error('could not draw this SVG');
+    return new File([blob], 'program-icon.png', { type: 'image/png' });
+  } finally {
+    URL.revokeObjectURL(url);
   }
 }

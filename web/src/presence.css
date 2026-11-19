@@ -119,6 +119,7 @@
 .activity-card {
   --activity-card-fill: var(--surface);
   display: flex;
+  min-width: 0;
   gap: 12px;
   padding: 12px 14px;
   border-radius: var(--radius-card);

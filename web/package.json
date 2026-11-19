@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "dsp:build": "node scripts/build-deepfilter.mjs",
     "i18n:status": "node scripts/i18n-status.mjs",
     "desktop:install": "bun install --cwd electron",
     "desktop:dev": "bun run --cwd electron dev",

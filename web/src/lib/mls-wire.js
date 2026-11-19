@@ -69,6 +69,8 @@ export const PIN = 0x06;
 export const CALL_SFU = 0x07;
 /// A device saying it has opened everything up to a point: a machine got the bytes, not that a person looked. It names the one device it speaks for, which must be the MLS leaf the frame came from (`applyAck`). When both are due, the ack rides inside the RECEIPT as `ack`.
 export const DELIVERED = 0x08;
+/// A group's name, set by a member the group's rules allow. The server never sees it: like every frame, it is sealed.
+export const RENAME = 0x09;
 
 
 export function pack(tag, body) {
@@ -103,6 +105,8 @@ export function unpack(bytes) {
       return typedJson('pin', bytes, { type: 'unknown' });
     case CALL_SFU:
       return typedJson('call_sfu', bytes, { type: 'unknown' });
+    case RENAME:
+      return typedJson('rename', bytes, { type: 'unknown' });
     case DELIVERED:
       try { return { type: 'delivered', ack: JSON.parse(td.decode(bytes.subarray(1))) }; }
       catch { return { type: 'delivered', ack: null }; }

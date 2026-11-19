@@ -13,7 +13,7 @@ import { buildTitle } from '../lib/build.js';
 import { UpdateStatus } from './UpdateStatus.jsx';
 
 export function SettingsLayout({
-  id, title, panes, initial, footerLabel, footerValue, onClose,
+  id, title, panes, initial, footerLabel, footerValue, footerDetail, onClose,
 }) {
   const entries = Object.entries(panes);
   const memory = id ? `telium.settings.${id}.pane` : null;
@@ -85,6 +85,9 @@ export function SettingsLayout({
                 <span className="truncate" title={footerValue}>{footerValue}</span>
               </div>
               <div className="settings__host-title truncate" title={title}><EmojiText>{title}</EmojiText></div>
+              {footerDetail ? (
+                <div className="settings__host-title truncate font-mono" title={footerDetail}>{footerDetail}</div>
+              ) : null}
             </div>
             <IconButton
               title="Close settings"

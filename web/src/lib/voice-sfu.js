@@ -23,7 +23,7 @@ const RENEW_RETRY_MS = 30_000;
 export class SfuCall {
   constructor({
     me, onSpeaking, onPeers, onScreen, onCamera, onScreenEnd, onCameraEnd, onError,
-    onAudioBlocked, onNoiseFallback, onDropped, onRemoved, onKeyTrouble, onDrainNotice, onMediaLimit, endpoint, joinToken,
+    onAudioBlocked, onNoiseFallback, onNoiseState, onDropped, onRemoved, onKeyTrouble, onDrainNotice, onMediaLimit, endpoint, joinToken,
     iceServers, maxBitrate, policy, e2ee, noiseMode, tokenTtl, renewToken,
   }) {
     this.me = me;
@@ -65,6 +65,7 @@ export class SfuCall {
     this.onError = onError || (() => {});
     this.onAudioBlocked = onAudioBlocked || (() => {});
     this.onNoiseFallback = onNoiseFallback || (() => {});
+    this.onNoiseState = onNoiseState || (() => {});
     // Called when the connection is gone for good, instead of reporting.
     this.onDropped = onDropped || null;
     // The server removed this seat (a moderator, or a sweep that raced a
@@ -228,11 +229,20 @@ export class SfuCall {
       }
       return;
     }
+    // A chain this call already retired is not a working one, whatever else says `neural`.
+    if (this.denoiser?.spent) {
+      await track.stopProcessor?.().catch?.(() => {});
+      this.denoiser = null;
+    }
     if (this.denoiser) return;
 
     try {
       const { neuralProcessor } = await import('./denoise-chain.js');
-      const chain = await openDenoiser((reason) => this.surrender(reason));
+      const chain = await openDenoiser({
+        onOverload: (reason) => this.surrender(reason),
+        onPause: (info) => this.pauseNoise(info),
+        onResume: () => this.resumeNoise(),
+      });
       // `setProcessor` needs an AudioContext already on the track; ours is 48 kHz, which the model needs.
       await chain.open();
       track.setAudioContext?.(chain.context);
@@ -262,11 +272,26 @@ export class SfuCall {
     await this.route();
   }
 
+  /// The model stood aside because the machine is busy; the browser's own suppressor covers the gap, and `resumeNoise` undoes it. The choice itself (`noiseMode`) is untouched.
+  pauseNoise(info) {
+    if (this.noiseMode !== 'neural') return;
+    const track = this.micTrack();
+    track?.applyConstraints?.(micConstraints('browser'))?.catch?.(() => {});
+    try { this.onNoiseState('paused', info); } catch { /* a UI callback must not break the call */ }
+  }
+
+  resumeNoise() {
+    if (this.noiseMode !== 'neural') return;
+    const track = this.micTrack();
+    track?.applyConstraints?.(micConstraints('neural'))?.catch?.(() => {});
+    try { this.onNoiseState('active'); } catch { /* as above */ }
+  }
+
   surrender(reason) {
     if (this.noiseMode !== 'neural') return;
     this.noiseMode = 'browser';
     const track = this.micTrack();
-    this.denoiser?.setBypass?.(true);
+    this.denoiser?.retire?.();
     track?.applyConstraints?.(micConstraints('browser'))?.catch?.(() => {});
     try { this.onNoiseFallback(reason); } catch { /* a UI callback must not break the call */ }
   }

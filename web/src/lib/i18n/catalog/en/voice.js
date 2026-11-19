@@ -82,6 +82,10 @@ export const voice = {
   'voice.bar.channel': 'Voice',
   // Said for a direct call, where there is no guild to name underneath.
   'voice.bar.directMessage': 'Direct message',
+  'voice.bar.goTo': 'Go to this call',
+  'voice.invite.open': 'Invite to this call',
+  'voice.invite.failed': 'Could not create the invite',
+  'voice.bar.goToLabel': 'Go to {name} {where}',
 
   // The two states of the line beside the signal meter. "Voice connected" is
   // two words doing one job: it says which subsystem is up, because this bar
@@ -347,7 +351,7 @@ export const voice = {
   // repeating its name.
   'voice.devices.title': 'Audio devices',
   'voice.devices.subtitle': 'What this call listens to, and where it plays.',
-  'voice.devices.open': 'Choose the microphone and output',
+  'voice.devices.open': 'Audio settings',
   'voice.devices.refreshing': 'Refreshing…',
 
   'voice.devices.input': 'Microphone',
@@ -416,11 +420,18 @@ export const voice = {
   'voice.noise.reason.load-failed': 'The neural model could not be loaded.',
   'voice.noise.reason.no-measurement': 'The neural model could not be measured.',
   'voice.noise.cannot': 'This device cannot run the neural model.',
-  // Said once, when a call gives up on the neural model mid-flight and writes
-  // the preference back to `browser`. The second half is the part worth
-  // saying: something is still suppressing noise, so the person does not go
-  // looking for a setting that is already correct.
-  'voice.noise.fellBack': 'The neural model could not keep up, so this call switched to the browser’s noise suppression.',
+  // Said once, when a call stops using the neural model for good: it was busy
+  // so often that asking again would only make the audio worse. Nothing is
+  // written back to the preference, so the second sentence is true and worth
+  // saying; so is the first half of the first, because something is still
+  // suppressing noise and nobody should go looking for a setting that is fine.
+  'voice.noise.fellBack': 'The neural model could not keep up, so this call is using the browser’s noise suppression. It will be tried again on your next call.',
+  // The same, for a reason that is not "busy" (`voice.noise.reason.*`).
+  'voice.noise.fellBackFor': '{reason} This call is using the browser’s noise suppression instead; the neural model will be tried again on your next call.',
+  // Shown beside the setting while the model has stepped aside for a busy
+  // moment. It comes back by itself, which is what the second half is for.
+  'voice.noise.paused': 'Paused while this device is busy — the browser’s suppression is covering, and the neural model will come back on its own.',
+  'voice.noise.off': 'Not running for this call.',
 
   // ---------------------------------------------------- joining and leaving
 

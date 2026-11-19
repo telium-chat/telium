@@ -133,3 +133,14 @@
     opacity: 0.55;
   }
 }
+
+/* A fullscreen share that nobody is touching shows only the share. */
+.screen-tile[data-idle="true"],
+.screen-tile[data-idle="true"] * {
+  cursor: none !important;
+}
+
+.screen-tile[data-idle="true"] .screen-tile__hud {
+  opacity: 0 !important;
+  pointer-events: none;
+}

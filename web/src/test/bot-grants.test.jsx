@@ -36,14 +36,14 @@ describe('the install card never shows the application it is not about to instal
 
     fireEvent.change(field, { target: { value: `bots.example/${PING}` } });
     await screen.findByRole('button', { name: 'Install Ping Bot' });
-    expect(screen.getByText('@ping:bots.example')).toBeTruthy();
+    expect(screen.getByText('ping@bots.example')).toBeTruthy();
 
     fireEvent.change(field, { target: { value: `bots.example/${PONG}` } });
 
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Install Ping Bot' })).toBeNull();
     });
-    expect(screen.queryByText('@ping:bots.example')).toBeNull();
+    expect(screen.queryByText('ping@bots.example')).toBeNull();
     expect(screen.queryByRole('checkbox', { name: 'Send Messages' })).toBeNull();
 
     await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2));

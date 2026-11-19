@@ -877,6 +877,8 @@ impl Default for Klipy {
             media_hosts: vec![
                 "klipy.com".into(),
                 "static.klipy.com".into(),
+                "static1.klipy.com".into(),
+                "static2.klipy.com".into(),
                 "static.klipy.co".into(),
                 "media.klipy.com".into(),
             ],
@@ -1896,7 +1898,7 @@ impl Default for MediaPolicy {
             blocklist: Vec::new(),
             profile_asset_carveout_bytes: 512 * 1024,
             max_file_bytes: 100 * 1024 * 1024,
-            max_profile_asset_bytes: 256 * 1024,
+            max_profile_asset_bytes: 512 * 1024,
             max_expiry_secs: 0,
             default_expiry_secs: 0,
             attachment_max_age_days: 0,

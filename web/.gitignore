@@ -23,3 +23,7 @@ electron/vendor/rpc-bridge/bridge.exe
 # rather than committed, so it has no business in the tree.
 test-results/
 playwright-report/
+
+# DeepFilterNet3 engine: built by scripts/build-deepfilter.mjs, not committed.
+src/assets/dsp/
+dsp/deepfilter/target/

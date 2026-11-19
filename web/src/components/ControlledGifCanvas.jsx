@@ -43,7 +43,7 @@ function frameDelay(frame) {
 }
 
 export function ControlledGifCanvas({
-  src, active, alt = '', className, style, onError, onLoad, onClick, title,
+  src, active, alt = '', className, style, onError, onLoad, onClick, title, onDecodeFailed,
   loading = 'lazy', loader = loadDesktopGif,
 }) {
   const canvasRef = useRef(null);
@@ -164,6 +164,7 @@ export function ControlledGifCanvas({
       } catch {
         if (!live) return;
         setFailed(true);
+        onDecodeFailed?.();
       }
     })();
 
@@ -189,7 +190,11 @@ export function ControlledGifCanvas({
         alt={alt}
         loading={loading}
         className={className}
-        style={showNative ? style : { ...style, display: 'none' }}
+        // The browser animates this one itself and can't be paused, so while the
+        // window is unfocused keep it invisible until the paused canvas takes over.
+        style={!showNative
+          ? { ...style, display: 'none' }
+          : (!active && !failed ? { ...style, visibility: 'hidden' } : style)}
         title={title}
         onClick={onClick}
         onError={onError}

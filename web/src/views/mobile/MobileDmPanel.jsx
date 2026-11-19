@@ -15,20 +15,16 @@ import { MobileContextMenu } from './MobileActionSheet.jsx';
 export function MobileDmPanel({ onSelectConversation, onClose }) {
   const store = useStore();
   const modal = useModal();
-  useStoreEvent('conversations', 'friends', 'presence', 'unread', 'route');
+  useStoreEvent('conversations', 'friends', 'presence', 'unread', 'route', 'prefs');
   const route = store.route;
   const pending = store.pendingFriendCount?.() || 0;
   const messageRequests = store.pendingMessageRequestCount?.() || 0;
   const [searchQuery, setSearchQuery] = useState('');
 
   const filteredConversations = useMemo(() => {
-    const visible = store.conversations
-      .filter((convo) => convo.request_state !== 'pending')
-      .slice()
-      .sort((a, b) => (
-        (b.last_activity_at || b.created_at || 0)
-        - (a.last_activity_at || a.created_at || 0)
-      ));
+    const visible = store.orderConversations(
+      store.conversations.filter((convo) => convo.request_state !== 'pending'),
+    );
     if (!searchQuery.trim()) return visible;
     const q = searchQuery.toLowerCase();
     return visible.filter((convo) => {

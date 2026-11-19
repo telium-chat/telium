@@ -2,7 +2,7 @@ import { isElectronRuntime } from './platform.js';
 import {
   encodeRichActivity, normalizeRichActivities, richActivitiesOf,
 } from './activity.js';
-import { PRESETS, reencode } from './image.js';
+import { PRESETS, rasterizeSvg, reencode } from './image.js';
 import { uploadMedia } from './upload.js';
 
 const PRESENCE_ART_TTL_SECS = 6 * 60 * 60;
@@ -34,6 +34,36 @@ export function richPresenceActivityAllowed(store, activity) {
   return richPresenceKinds(store)[richPresenceActivityKind(activity)] !== false;
 }
 
+export const MAX_CUSTOM_PROGRAMS = 20;
+
+/// Programs picked by hand to show as "Playing". Device-only (an executable name means nothing on another machine); each is `{ name, executable }`.
+export function customPrograms(store) {
+  const list = store?.prefs?.customPrograms;
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((p) => p && typeof p.name === 'string' && typeof p.executable === 'string' && p.name && p.executable)
+    .slice(0, MAX_CUSTOM_PROGRAMS)
+    .map((p) => ({ name: p.name.slice(0, 64), executable: p.executable.slice(0, 128) }));
+}
+
+export function addCustomProgram(store, { name, executable }) {
+  const list = customPrograms(store);
+  const exe = String(executable || '').trim();
+  const label = String(name || '').trim();
+  if (!exe || !label) return false;
+  const key = exe.replaceAll('\\', '/').split('/').pop().toLowerCase();
+  const rest = list.filter((p) => p.executable.replaceAll('\\', '/').split('/').pop().toLowerCase() !== key);
+  if (rest.length >= MAX_CUSTOM_PROGRAMS) return false;
+  store.prefs.customPrograms = [...rest, { name: label, executable: exe }];
+  store.savePrefs();
+  return true;
+}
+
+export function removeCustomProgram(store, executable) {
+  store.prefs.customPrograms = customPrograms(store).filter((p) => p.executable !== executable);
+  store.savePrefs();
+}
+
 function activityList(value) {
   if (Array.isArray(value)) return value.filter(Boolean);
   return value ? [value] : [];
@@ -57,7 +87,7 @@ function withoutLocalArtwork(activity) {
   return { ...activity, assets: Object.keys(safeAssets).length ? safeAssets : null };
 }
 
-async function artworkFile(payload, encodeImage) {
+async function artworkFile(payload, encodeImage, rasterize) {
   if (!payload?.bytes || typeof payload?.mime !== 'string') return null;
   let bytes;
   if (payload.bytes instanceof ArrayBuffer) {
@@ -68,7 +98,9 @@ async function artworkFile(payload, encodeImage) {
     return null;
   }
   if (!bytes.byteLength) return null;
-  const file = new File([bytes], payload.name || 'album-art', { type: payload.mime });
+  let file = new File([bytes], payload.name || 'album-art', { type: payload.mime });
+  // A program's vector icon is drawn to a raster first; what is uploaded is always the re-encoded raster, never the SVG.
+  if (payload.mime === 'image/svg+xml') file = await rasterize(file);
   // Re-encode local file artwork every time rather than uploading verbatim: strips EXIF and polyglot payloads and downsizes.
   return encodeImage(file, {}, PRESETS.icon);
 }
@@ -105,6 +137,7 @@ export async function rehostLocalPresenceArtwork(
   activity,
   cache = new Map(),
   encodeImage = reencode,
+  rasterize = rasterizeSvg,
 ) {
   const handle = activity?.assets?.local_large_image;
   if (!handle || !store.home || !window.teliumDesktop?.readRichPresenceArtwork) return activity;
@@ -114,7 +147,7 @@ export async function rehostLocalPresenceArtwork(
     entry = { settled: false, media: null, pending: null };
     entry.pending = (async () => {
       const payload = await window.teliumDesktop.readRichPresenceArtwork(handle);
-      const file = await artworkFile(payload, encodeImage);
+      const file = await artworkFile(payload, encodeImage, rasterize);
       if (!file) return null;
       return uploadMedia(store.home, file, 'profile', { ttlSecs: PRESENCE_ART_TTL_SECS });
     })();
@@ -248,7 +281,17 @@ export function installDesktopRichPresence(store) {
     });
   };
 
+  let sentPrograms = '';
+  const pushPrograms = () => {
+    const programs = customPrograms(store);
+    const encoded = JSON.stringify(programs);
+    if (encoded === sentPrograms) return;
+    sentPrograms = encoded;
+    window.teliumDesktop.setCustomPrograms?.(programs)?.catch?.(() => {});
+  };
+
   const syncPreference = () => {
+    pushPrograms();
     wanted = richPresenceWanted(store);
     if (activities.some((activity) => !richPresenceActivityAllowed(store, activity))) setActivity(activities);
     syncWorker();
@@ -260,6 +303,7 @@ export function installDesktopRichPresence(store) {
     // Re-read rather than trusting the previous account's value. Game presence defaults on; media presence does not.
     wanted = richPresenceWanted(store);
     authenticated = Boolean(store.session);
+    pushPrograms();
     syncWorker();
     publish();
   };

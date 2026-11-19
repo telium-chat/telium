@@ -23,6 +23,7 @@ const AUDITED = [
   // `unit-tests.yml` builds this crate standalone, so it needs a lockfile.
   'telium-protocol/Cargo.lock',
   'web/src-tauri/Cargo.lock',
+  'web/dsp/deepfilter/Cargo.lock',
   'web/bun.lock',
   'web/electron/bun.lock',
   'site/bun.lock',
@@ -214,7 +215,7 @@ const checkApprovedGitPins = () => {
 
 checkDiscovery()
 checkApprovedGitPins()
-for (const dir of ['server', 'sfu', 'web/src-tauri']) checkCargo(dir)
+for (const dir of ['server', 'sfu', 'web/src-tauri', 'web/dsp/deepfilter']) checkCargo(dir)
 for (const lock of ['web/bun.lock', 'web/electron/bun.lock', 'site/bun.lock']) {
   try {
     checkBunLock(lock)

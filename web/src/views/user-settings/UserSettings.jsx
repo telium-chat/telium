@@ -1,4 +1,5 @@
 import { useStore } from '../../hooks/useStore.jsx';
+import { useServerVersion } from '../../hooks/useServerVersion.js';
 import { useT } from '../../lib/i18n/react.jsx';
 import {
   AdvancedIcon, BellIcon, FolderIcon, GlobeIcon, HelpIcon, HomeIcon, KeyIcon, MembersIcon, MessageIcon, MicIcon,
@@ -181,6 +182,7 @@ const BASE_PANES = {
 
 export function UserSettings({ close, initial }) {
   const store = useStore();
+  const serverVersion = useServerVersion();
   const t = useT();
   const requestedInitial = initial === 'voice' ? 'calls' : initial;
   if (storage.get('telium.settings.user.pane', null) === 'voice') {
@@ -211,6 +213,7 @@ export function UserSettings({ close, initial }) {
       initial={requestedInitial}
       footerLabel="Home server"
       footerValue={store.session?.home?.domain || ''}
+      footerDetail={serverVersion ? `Server v${serverVersion.replace(/^v/, '')}` : ''}
       onClose={close}
     />
   );

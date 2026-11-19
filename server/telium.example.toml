@@ -101,8 +101,9 @@ blocklist = []
 profile_asset_carveout_bytes = "512KiB"
 # Largest single upload this server accepts.
 max_file_bytes = "100MiB"
-# Largest avatar or banner.
-max_profile_asset_bytes = "256KiB"
+# Largest avatar, banner, guild icon or emoji. Clients keep still images to
+# 256 KiB on their own; the extra room is for animated avatars.
+max_profile_asset_bytes = "512KiB"
 # Longest lifetime an attachment may have; zero caps nothing. Avatars,
 # banners, guild icons, emoji and stickers are never capped.
 max_expiry_secs = 0
@@ -699,7 +700,7 @@ invite_portal = "https://telium.chat"
 enabled = true
 api_key = "PUJfq1nYPGGO7gjwx7wqjGJwOzld1FZiyP35kiBa2wnQ6mRD7JrJnfA0mKfLrHKh"
 api_base_url = "https://api.klipy.com/api/v1"
-media_hosts = ["klipy.com", "static.klipy.com", "static.klipy.co", "media.klipy.com"]
+media_hosts = ["klipy.com", "static.klipy.com", "static1.klipy.com", "static2.klipy.com", "static.klipy.co", "media.klipy.com"]
 
 # Outbound email: recovery-address confirmation and security warnings
 # (docs/migration.md, "Migration alerts").

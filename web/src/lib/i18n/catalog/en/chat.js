@@ -49,6 +49,9 @@ export const chat = {
   // direction: this button never means "right" or "left", and in a vertical
   // script it does not mean "down" either.
   'chat.timeline.jumpToBottom': 'Jump to bottom',
+  // The pill above the composer while scrolled up: how many messages arrived since, or, far up with nothing new, the way back.
+  'chat.timeline.newMessages': '{count, plural, one {# new message} other {# new messages}}',
+  'chat.timeline.jumpToPresent': 'Jump to present',
 
   // The rule drawn across the stream at the first message you have not read.
   // One word, upper-cased by the stylesheet rather than by the string, because
@@ -173,6 +176,9 @@ export const chat = {
   'chat.message.actions.pin': 'Pin',
   'chat.message.actions.unpin': 'Unpin',
   'chat.message.actions.delete': 'Delete',
+  'chat.message.actions.hideMedia': 'Hide Media',
+  'chat.message.actions.showMedia': 'Show Media',
+  'chat.message.media.hidden': 'Media hidden. Click to show.',
   'chat.message.pinned': 'Pinned.',
   'chat.message.unpinned': 'Unpinned.',
   'chat.message.pinFailed': 'Pin failed',
@@ -191,6 +197,8 @@ export const chat = {
   // hand, and the server keeps the one it stored) is a different sentence
   // rather than a sentence with the name left out of it. The name itself is a
   // placeholder, filled the way `quickReact` above fills its emoji.
+  'chat.timeline.renameNotice.named': '{name} renamed the group to “{group}”',
+  'chat.timeline.renameNotice.cleared': '{name} removed the group name',
   'chat.timeline.pinNotice.named': '{name} pinned a message',
   'chat.timeline.pinNotice.anonymous': 'A message was pinned',
   'chat.timeline.pinNotice.seeAll': 'See all pins',

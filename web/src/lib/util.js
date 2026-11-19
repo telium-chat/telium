@@ -10,6 +10,12 @@ export function shortName(userId) {
   return m ? m[1] : userId || '';
 }
 
+/// What people see and type: `ada@server.com`. The wire and storage keep `@ada:server.com`; this is display only.
+export function displayId(userId) {
+  const m = /^@([^:]+):(.+)$/.exec(userId || '');
+  return m ? `${m[1]}@${m[2]}` : userId || '';
+}
+
 const GONE = new Set(['left', 'removed']);
 
 export function participants(convo) {

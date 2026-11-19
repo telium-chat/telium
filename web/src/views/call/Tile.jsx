@@ -3,8 +3,8 @@ import { reportError } from '../../hooks/useToast.jsx';
 import { shortName } from '../../lib/util.js';
 import { cn } from '../../lib/cn.js';
 import {
-  Avatar, Button, ContextMenu, DeafenIcon, FullscreenIcon, MenuButton, MenuItem, MenuSeparator, MicOffIcon,
-  MoreIcon, Pill, ScreenIcon, SpinnerIcon, VideoIcon,
+  Avatar, Button, ContextMenu, DeafenIcon, FullscreenIcon, MenuItem, MenuSeparator, MicOffIcon,
+  Pill, ScreenIcon, SpinnerIcon, VideoIcon,
 } from '../../components/index.js';
 import { MobileContextMenu } from '../mobile/MobileNavigation.jsx';
 import { useT } from '../../lib/i18n/react.jsx';
@@ -135,16 +135,6 @@ export function Tile({
               </Pill>
             ) : null}
             {v.region && v.region !== 'auto' && !compact ? <Pill>{v.region}</Pill> : null}
-            {hasMenu && !mobile && !compact ? (
-              <MenuButton
-                label={t('voice.tile.more')}
-                placement="bottom end"
-                className="stage-chip pointer-events-auto size-7 opacity-0 group-hover:opacity-100 data-[popup-open]:opacity-100 focus-visible:opacity-100"
-                content={content()}
-              >
-                <MoreIcon className="size-4" />
-              </MenuButton>
-            ) : null}
           </div>
         ) : null}
 
