@@ -277,6 +277,19 @@ export const voice = {
   'voice.screen.fullscreen': 'Fullscreen',
   'voice.screen.resetZoom': 'Reset zoom',
   'voice.screen.stopSharing': 'Stop sharing',
+  'voice.screen.stats': 'Stats for nerds',
+  'voice.screen.statsHide': 'Hide stats for nerds',
+  'voice.stats.mode': 'Mode',
+  'voice.stats.target': 'Target',
+  'voice.stats.actual': 'Actual',
+  'voice.stats.resolution': 'Resolution',
+  'voice.stats.fps': 'Frame rate',
+  'voice.stats.bitrate': 'Bitrate',
+  'voice.stats.codec': 'Codec',
+  'voice.stats.limit': 'Limited by',
+  'voice.stats.dropped': 'Dropped frames',
+  'voice.stats.layer': 'Layer',
+  'voice.stats.none': 'Waiting for stats…',
 
   // The four ways fullscreen and picture-in-picture can refuse. These are
   // thrown as `Error`s and land in a toast through `reportError`, so they are

@@ -601,6 +601,21 @@ export class SfuCall {
     }
   }
 
+  /// Raw RTCStatsReport for a screen share: our own sender when `identity` is us, else the receiver we watch. Null if there is none.
+  async screenStatsReport(identity) {
+    if (!this.room) return null;
+    const mine = identity === this.me;
+    const participant = mine ? this.room.localParticipant : this.room.remoteParticipants.get(identity);
+    const pub = [...(participant?.trackPublications.values() || [])]
+      .find((p) => p?.source === Track.Source.ScreenShare && p?.kind === Track.Kind.Video);
+    const track = pub?.track;
+    try {
+      return (mine ? await track?.sender?.getStats() : await track?.receiver?.getStats()) || null;
+    } catch {
+      return null;
+    }
+  }
+
   screenShareHasAudio() {
     if (!this.room) return false;
     return [...this.room.localParticipant.audioTrackPublications.values()]

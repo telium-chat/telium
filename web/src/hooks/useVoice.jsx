@@ -901,6 +901,11 @@ export function VoiceProvider({ children }) {
     callRef.current?.setVolume?.(userId, value);
   }, [store]);
 
+  const screenStatsReport = useCallback(
+    (userId) => callRef.current?.screenStatsReport?.(userId) ?? Promise.resolve(null),
+    [],
+  );
+
   const shareVolumeFor = useCallback(
     (userId) => Math.max(0, Math.min(200, Number(
       store.prefs.voiceShareVolumes?.[userId] ?? store.prefs.voiceVolumes?.[userId] ?? 100,
@@ -1010,7 +1015,7 @@ export function VoiceProvider({ children }) {
     try {
       await store.voiceApi(currentChannelId).voiceStream(currentChannelId, {
         enabled: next,
-        preset: next ? (settings?.preset || 'detail') : null,
+        preset: next ? (settings?.preset || 'motion') : null,
       });
     } catch (e) {
       reportError(e, t('voice.error.streamState'));
@@ -1373,6 +1378,7 @@ export function VoiceProvider({ children }) {
     volumeFor,
     setUserVolume,
     shareVolumeFor,
+    screenStatsReport,
     setUserShareVolume,
     setScreenSubscription,
     setWatchQuality,

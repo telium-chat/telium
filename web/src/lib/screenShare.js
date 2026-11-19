@@ -54,11 +54,59 @@ export const SCREEN_SHARE_CONTENT = [
   },
 ];
 
-export const DEFAULT_SCREEN_SHARE_CONTENT = 'detail';
+export const DEFAULT_SCREEN_SHARE_CONTENT = 'motion';
 
 export function contentPreset(content = DEFAULT_SCREEN_SHARE_CONTENT) {
   return SCREEN_SHARE_CONTENT.find((item) => item.value === content)
-    || SCREEN_SHARE_CONTENT[0];
+    || SCREEN_SHARE_CONTENT.find((item) => item.value === DEFAULT_SCREEN_SHARE_CONTENT);
+}
+
+/// Parses the `preset` string a sharer announces (`motion 1080p@60`) into what they asked for; null if it is not that shape.
+export function parseSharePreset(preset) {
+  const match = /^(\w+) (\w+)@(\d+)$/.exec(String(preset || ''));
+  if (!match) return null;
+  const quality = SCREEN_SHARE_QUALITIES.find((item) => item.value === match[2]);
+  return {
+    content: match[1],
+    quality: match[2],
+    width: quality?.width ?? null,
+    height: quality?.height ?? null,
+    fps: Number(match[3]),
+  };
+}
+
+/// Reduces an RTCStatsReport to one row per video RTP stream (a sender has one per simulcast layer) and turns byte counters into a bitrate against `prev` (the last return value's `raw`).
+export function summarizeVideoStats(report, prev = null) {
+  const rows = [];
+  const raw = {};
+  const codecs = new Map();
+  report.forEach((stat) => { if (stat.type === 'codec') codecs.set(stat.id, stat.mimeType); });
+  report.forEach((stat) => {
+    const out = stat.type === 'outbound-rtp';
+    if ((!out && stat.type !== 'inbound-rtp') || (stat.kind || stat.mediaType) !== 'video') return;
+    const key = stat.id;
+    const bytes = out ? stat.bytesSent : stat.bytesReceived;
+    raw[key] = { bytes, at: stat.timestamp };
+    const before = prev?.[key];
+    const dt = before ? (stat.timestamp - before.at) / 1000 : 0;
+    rows.push({
+      direction: out ? 'out' : 'in',
+      rid: stat.rid || null,
+      width: stat.frameWidth ?? null,
+      height: stat.frameHeight ?? null,
+      fps: stat.framesPerSecond ?? null,
+      bitrate: dt > 0 && bytes >= before.bytes ? Math.round(((bytes - before.bytes) * 8) / dt) : null,
+      targetBitrate: stat.targetBitrate ?? null,
+      limit: stat.qualityLimitationReason && stat.qualityLimitationReason !== 'none'
+        ? stat.qualityLimitationReason : null,
+      codec: codecs.get(stat.codecId)?.replace('video/', '') ?? null,
+      dropped: stat.framesDropped ?? null,
+      active: out ? stat.active !== false && (stat.framesPerSecond ?? 1) > 0 : true,
+    });
+  });
+  // Highest layer first.
+  rows.sort((a, b) => (b.width || 0) - (a.width || 0));
+  return { rows, raw };
 }
 
 /// Assigning an unrecognised `contentHint` leaves the old value, so reading it back is the feature detection.

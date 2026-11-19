@@ -45,7 +45,7 @@ describe('screen sharing', () => {
     expect(displayOptions.windowAudio).toBe('system');
 
     await waitFor(() => expect(server.state.streams).toEqual([
-      { enabled: true, preset: 'detail 1080p@15' },
+      { enabled: true, preset: 'motion 1080p@60' },
     ]));
 
     const [pc] = FakePC.all;
@@ -172,7 +172,9 @@ describe('screen sharing', () => {
   it('keeps a document sharp instead of smooth, which is the other half of the choice', async () => {
     const { user, screenVideoTracks } = await joinLounge();
 
-    await startScreenShare(user);
+    await user.click(dock('Share screen'));
+    await user.click(await screen.findByText('A document or code'));
+    await user.click(screen.getByRole('button', { name: 'Choose what to share' }));
 
     await waitFor(() => expect(screenVideoTracks[0].contentHint).toBe('text'));
     await waitFor(() => expect(

@@ -134,7 +134,6 @@ export function Tile({
                 {compact ? null : t('voice.tile.camera')}
               </Pill>
             ) : null}
-            {v.region && v.region !== 'auto' && !compact ? <Pill>{v.region}</Pill> : null}
             {hasMenu && !mobile && !compact ? (
               <MenuButton
                 label={t('voice.tile.more')}

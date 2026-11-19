@@ -305,6 +305,8 @@ export function CallStage({
                   shareVolume={voice.shareVolumeFor?.(id) ?? 100}
                   onShareVolume={(value) => voice.setUserShareVolume?.(id, value)}
                   onStop={toggleStream}
+                  statsReport={voice.screenStatsReport}
+                  preset={participants.find((v) => v.user_id === id)?.stream_preset}
                   mobile={mobile}
                 />
               ))}

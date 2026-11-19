@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { reportError } from '../../hooks/useToast.jsx';
 import { shortName } from '../../lib/util.js';
 import { cn } from '../../lib/cn.js';
@@ -7,6 +7,7 @@ import {
 } from '../../components/index.js';
 import { n } from '../../lib/i18n/index.js';
 import { useT } from '../../lib/i18n/react.jsx';
+import { contentPreset, parseSharePreset, summarizeVideoStats } from '../../lib/screenShare.js';
 import { Picture } from './Picture.jsx';
 import { PipIcon, openFullscreen, openPictureInPicture } from './pictureInPicture.jsx';
 
@@ -167,7 +168,83 @@ function useScreenZoom(containerRef, videoRef, stream) {
   return { chipRef, reset: () => api.current?.reset() };
 }
 
-export function ScreenTile({ id, stream, mine, shareVolume = 100, onShareVolume, onStop, mobile = false }) {
+const fmtRate = (bps) => (bps == null ? '—' : bps >= 1e6 ? `${(bps / 1e6).toFixed(2)} Mbps` : `${Math.round(bps / 1e3)} kbps`);
+const fmtSize = (w, h) => (w && h ? `${w}×${h}` : '—');
+
+/// Polls the receiver (or, on our own share, the sender) once a second while `on`.
+function useShareStats(on, statsReport, id) {
+  const [stats, setStats] = useState(null);
+  useEffect(() => {
+    if (!on || !statsReport) { setStats(null); return undefined; }
+    let alive = true;
+    let prev = null;
+    const tick = async () => {
+      const report = await statsReport(id);
+      if (!alive || !report) return;
+      const next = summarizeVideoStats(report, prev);
+      prev = next.raw;
+      setStats(next.rows);
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [on, statsReport, id]);
+  return stats;
+}
+
+function StatsPanel({ rows, preset }) {
+  const t = useT();
+  const asked = parseSharePreset(preset);
+  const mode = asked ? contentPreset(asked.content) : null;
+  // Our own sender lists every simulcast layer; the top live one is what viewers get at best.
+  const top = rows?.find((r) => r.active && r.width) || rows?.[0];
+  const line = (label, target, actual) => (
+    <div className="contents">
+      <span className="text-white/60">{label}</span>
+      <span>{target ?? '—'}</span>
+      <span>{actual ?? '—'}</span>
+    </div>
+  );
+  return (
+    <div
+      className="pointer-events-auto absolute start-2 top-11 z-10 max-w-[calc(100%-1rem)] rounded-lg bg-black/80 p-2.5 font-mono text-[11px] leading-relaxed text-white backdrop-blur-sm"
+      role="status"
+    >
+      <div className="mb-1 flex gap-2">
+        <span className="text-white/60">{t('voice.stats.mode')}</span>
+        <span>{mode ? `${t(`voice.preset.${mode.value}`)} (${mode.degradation})` : '—'}</span>
+      </div>
+      {top ? (
+        <div className="grid grid-cols-[auto_auto_auto] gap-x-3">
+          <span />
+          <span className="text-white/60">{t('voice.stats.target')}</span>
+          <span className="text-white/60">{t('voice.stats.actual')}</span>
+          {line(t('voice.stats.resolution'), asked ? fmtSize(asked.width, asked.height) : null, fmtSize(top.width, top.height))}
+          {line(t('voice.stats.fps'), asked ? `${asked.fps}` : null, top.fps != null ? `${Math.round(top.fps)}` : null)}
+          {line(t('voice.stats.bitrate'), top.targetBitrate ? fmtRate(top.targetBitrate) : null, fmtRate(top.bitrate))}
+          {line(t('voice.stats.codec'), null, top.codec)}
+          {top.limit ? line(t('voice.stats.limit'), null, top.limit) : null}
+          {top.dropped != null ? line(t('voice.stats.dropped'), null, `${top.dropped}`) : null}
+        </div>
+      ) : <div className="text-white/60">{t('voice.stats.none')}</div>}
+      {rows && rows.length > 1 ? (
+        <div className="mt-1.5 border-t border-white/20 pt-1">
+          {rows.map((r, i) => (
+            <div key={r.rid || i} className={r.active ? '' : 'text-white/40'}>
+              {t('voice.stats.layer')} {r.rid || i}: {fmtSize(r.width, r.height)} @ {r.fps != null ? Math.round(r.fps) : '—'} · {fmtRate(r.bitrate)}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function ScreenTile({
+  id, stream, mine, shareVolume = 100, onShareVolume, onStop, statsReport, preset, mobile = false,
+}) {
+  const [showStats, setShowStats] = useState(false);
+  const stats = useShareStats(showStats, statsReport, id);
   const t = useT();
   const videoRef = useRef(null);
   const containerRef = useRef(null);
@@ -191,6 +268,7 @@ export function ScreenTile({ id, stream, mine, shareVolume = 100, onShareVolume,
         videoRef={videoRef}
         className="screen-zoom max-h-full w-full bg-black object-contain"
       />
+      {showStats ? <StatsPanel rows={stats} preset={preset} /> : null}
       <button
         ref={zoom.chipRef}
         type="button"
@@ -254,6 +332,11 @@ export function ScreenTile({ id, stream, mine, shareVolume = 100, onShareVolume,
               >
                 {t('voice.tile.pip')}
               </MenuItem>
+              {statsReport ? (
+                <MenuItem icon={ScreenIcon} onAction={() => setShowStats((on) => !on)}>
+                  {t(showStats ? 'voice.screen.statsHide' : 'voice.screen.stats')}
+                </MenuItem>
+              ) : null}
               {mine ? <MenuSeparator /> : null}
               {mine ? (
                 <MenuItem icon={ScreenOffIcon} tone="danger" onAction={onStop}>

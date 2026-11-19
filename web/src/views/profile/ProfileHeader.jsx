@@ -89,7 +89,7 @@ export function ProfileHeader({
             data-guest={guest ? 'true' : 'false'}
             title={`${userId} — copy`}
             aria-label={`${userId}, copy username`}
-            onClick={() => copyToClipboard(userId, 'Username copied.')}
+            onClick={() => copyToClipboard(userId, 'Username')}
           >
             <span className="pc__handle-local">{full ? `@${local}` : local}</span>
             <span className="pc__handle-domain">{`:${domain}`}</span>
