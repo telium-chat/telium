@@ -11,35 +11,31 @@ export DEBIAN_FRONTEND=noninteractive
 
 echo "[1/7] Installing system packages..."
 apt-get update -y
-apt-get install -y curl ca-certificates nginx certbot python3-certbot-nginx   build-essential pkg-config libssl-dev openssl git python3 sudo tar
+apt-get install -y curl ca-certificates nginx certbot python3-certbot-nginx openssl python3 sudo tar
 
 if ! id telium-sfu >/dev/null 2>&1; then
   useradd --system --home /var/lib/telium-sfu --create-home --shell /usr/sbin/nologin telium-sfu
 fi
 
-echo "[2/7] Locating Telium source..."
+echo "[2/7] Locating installer files..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "$SCRIPT_DIR/Cargo.toml" && -f "$SCRIPT_DIR/../telium-protocol/Cargo.toml" ]]; then
-  SRC_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-else
-  TMP_SRC="$(mktemp -d)"
-  trap 'rm -rf "$TMP_SRC"' EXIT
-  curl -fsSL https://github.com/telium-chat/telium/archive/refs/heads/main.tar.gz -o "$TMP_SRC/telium.tar.gz"
-  tar xzf "$TMP_SRC/telium.tar.gz" -C "$TMP_SRC"
-  SRC_ROOT="$TMP_SRC/telium-main"
-  SCRIPT_DIR="$SRC_ROOT/sfu"
-fi
 
-echo "[3/7] Building telium-sfu..."
-if ! command -v cargo >/dev/null 2>&1 || ! rustc --version 2>/dev/null | grep -Eq 'rustc 1\.(8[2-9]|9[0-9])|rustc [2-9]\.'; then
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-  source /root/.cargo/env
-fi
-(
-  cd "$SCRIPT_DIR"
-  cargo build --release --bin telium-sfu
-)
-install -m 0755 "$SCRIPT_DIR/target/release/telium-sfu" /usr/local/bin/telium-sfu
+echo "[3/7] Downloading the telium-sfu release..."
+case "$(uname -m)" in
+  x86_64|amd64) sfu_arch="x86_64" ;;
+  aarch64|arm64) sfu_arch="aarch64" ;;
+  *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+sfu_asset="telium-sfu-linux-${sfu_arch}.tar.gz"
+sfu_base="https://github.com/telium-chat/telium/releases/download/sfu-latest"
+sfu_tmp="$(mktemp -d)"
+trap 'rm -rf "$sfu_tmp"' EXIT
+curl -fsSL --retry 3 --max-time 900 "$sfu_base/$sfu_asset" -o "$sfu_tmp/$sfu_asset"
+curl -fsSL --retry 3 --max-time 60 "$sfu_base/$sfu_asset.sha256" -o "$sfu_tmp/$sfu_asset.sha256"
+( cd "$sfu_tmp" && sha256sum -c "$sfu_asset.sha256" )
+tar -xzf "$sfu_tmp/$sfu_asset" -C "$sfu_tmp" telium-sfu
+install -m 0755 "$sfu_tmp/telium-sfu" /usr/local/bin/telium-sfu
+rm -rf "$sfu_tmp"; trap - EXIT
 
 echo "[4/7] Installing LiveKit..."
 if ! command -v livekit-server >/dev/null 2>&1; then
