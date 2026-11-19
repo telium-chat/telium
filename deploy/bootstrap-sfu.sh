@@ -7,14 +7,16 @@ set -euo pipefail
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
-# TELIUM_REF picks the branch or tag the installer files come from (default
-# main). Meant for testing a branch before it is merged.
+# TELIUM_REPO / TELIUM_REF pick where the installer files come from (default
+# telium-chat/telium at main). Meant for testing a branch before it is merged.
+REPO="${TELIUM_REPO:-telium-chat/telium}"
 REF="${TELIUM_REF:-main}"
-[[ "$REF" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "error: invalid TELIUM_REF" >&2; exit 1; }
+[[ "$REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ && "$REF" =~ ^[A-Za-z0-9._/-]+$ ]] ||
+  { echo "error: invalid TELIUM_REPO or TELIUM_REF" >&2; exit 1; }
 
 if [ "$(id -u)" -ne 0 ]; then
   if command -v sudo >/dev/null 2>&1; then
-    exec sudo TELIUM_REF="$REF" bash "$0" "$@"
+    exec sudo TELIUM_REPO="$REPO" TELIUM_REF="$REF" bash "$0" "$@"
   fi
   die "root privileges are needed and sudo is not installed. Log in as root and rerun."
 fi
@@ -41,7 +43,7 @@ fi
 # every file before running anything so a failed download changes nothing.
 tmp="$(mktemp -d)"
 trap 'rm -rf -- "$tmp"' EXIT
-base="https://raw.githubusercontent.com/telium-chat/telium/$REF"
+base="https://raw.githubusercontent.com/$REPO/$REF"
 mkdir -p "$tmp/sfu/scripts" "$tmp/deploy"
 files=(
   sfu/install-full.sh
