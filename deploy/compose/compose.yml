@@ -2,8 +2,12 @@
 #
 #   mkdir telium && cd telium
 #   curl -fsSLO https://raw.githubusercontent.com/telium-chat/telium/main/deploy/compose/compose.yml
-#   printf 'TELIUM_DOMAIN=chat.example.com\nTELIUM_REGISTRATION=open\n' > .env
+#   curl -fsSLo .env https://raw.githubusercontent.com/telium-chat/telium/main/deploy/compose/.env.example
+#   nano .env            # set TELIUM_DOMAIN and TELIUM_REGISTRATION
 #   docker compose up -d
+#
+# Every setting is described in that .env template. You can also write values
+# straight into this file instead, in place of the ${...} defaults below.
 #
 # That is a homeserver on 127.0.0.1:8448 that keeps itself up to date. Point
 # your reverse proxy at it (or add COMPOSE_PROFILES=proxy to .env and the

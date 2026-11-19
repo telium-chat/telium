@@ -3,7 +3,8 @@
 A Telium homeserver that is nothing but a Compose file:
 
     curl -fsSLO https://raw.githubusercontent.com/telium-chat/telium/main/deploy/compose/compose.yml
-    printf 'TELIUM_DOMAIN=chat.example.com\nTELIUM_REGISTRATION=closed\n' > .env
+    curl -fsSLo .env https://raw.githubusercontent.com/telium-chat/telium/main/deploy/compose/.env.example
+    nano .env            # set TELIUM_DOMAIN and TELIUM_REGISTRATION
     docker compose up -d
 
 No installer, no host timer, no files beside it to keep in step. The guide
@@ -11,6 +12,7 @@ is https://docs.telium.chat/self-hosting/install-docker/.
 
 | File | Role |
 |---|---|
+| `.env.example` | The settings template: save it as `.env`. Two required lines, every optional setting described and commented out. |
 | `compose.yml` | The deployment: the server, the updater, and the optional `voice` (SFU) and `proxy` (Caddy) profiles. The server's `telium.toml` is the `TELIUM_CONFIG` block inside it. |
 | `update.sh` | The updater's logic. Shipped inside the server image at `/usr/share/telium/deploy/compose/update.sh`; the `updater` service copies it out of the server container before every run. It is here for review and for the image build, not for running by hand. |
 

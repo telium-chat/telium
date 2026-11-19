@@ -65,11 +65,14 @@ EOF
 }
 release_a="$(build a)"
 
-step "install: compose.yml + .env, nothing else"
+step "install: compose.yml + the .env template, nothing else"
 cp "$repo/deploy/compose/compose.yml" "$work/kit/compose.yml"
-cat > "$work/kit/.env" <<EOF
-TELIUM_DOMAIN=chat.example.org
-TELIUM_REGISTRATION=closed
+# The template as a user gets it, with the two required lines filled in, and
+# the test's own settings (local image, no notice, fast loop) appended.
+sed -e 's/^TELIUM_DOMAIN=.*/TELIUM_DOMAIN=chat.example.org/' \
+    -e 's/^TELIUM_REGISTRATION=.*/TELIUM_REGISTRATION=closed/' \
+    "$repo/deploy/compose/.env.example" > "$work/kit/.env"
+cat >> "$work/kit/.env" <<EOF
 TELIUM_IMAGE=$IMG
 TELIUM_RESTART_NOTICE_SECS=0
 TELIUM_UPDATE_INTERVAL_SECS=5
