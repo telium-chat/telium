@@ -336,6 +336,24 @@ export const conversation = (env, convo) => {
     >
       Conversation details
     </MenuItem>
+    {convo.kind === 'gc' ? (
+      <MenuItem
+        icon={EditIcon}
+        isDisabled={!store.mls || (store.mls.permits ? !store.mls.permits(convo.id, 'policy') : false)}
+        onAction={() => dialogs.prompt({
+          title: 'Rename this group',
+          label: 'Group name',
+          value: store.groupNameIn(convo.id) || '',
+          onSubmit: async (text) => {
+            try {
+              await store.setGroupName(convo.id, text);
+            } catch (e) { reportError(e, 'Could not rename the group'); }
+          },
+        })}
+      >
+        Rename group
+      </MenuItem>
+    ) : null}
     {convo.kind === 'gc' && !convo.promoted_to ? (
       <MenuItem
         icon={ServerIcon}
