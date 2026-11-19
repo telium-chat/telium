@@ -9,6 +9,7 @@ import { KEYS, MAX_GIF_FAVORITES } from '../../lib/sync.js';
 import { uploadMedia } from '../../lib/upload.js';
 import { teliumFetch } from '../../lib/net/transport.js';
 import { DISCORD_GIF_EXPORT_SCRIPT } from '../../lib/discordGifExport.js';
+import { copyToClipboard } from '../../lib/clipboard.js';
 import { downloadText } from './RecoveryParts.jsx';
 
 export function discordGifFavoriteUrls(document) {
@@ -169,14 +170,7 @@ export function GifFavoritesPane() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState('');
   const favorites = gifFavorites(store.sync);
-  const copyScript = async () => {
-    try {
-      await navigator.clipboard.writeText(DISCORD_GIF_EXPORT_SCRIPT);
-      toast('Export script copied. Paste it into the Discord console.');
-    } catch {
-      toast('Could not copy the script.', { error: true });
-    }
-  };
+  const copyScript = () => copyToClipboard(DISCORD_GIF_EXPORT_SCRIPT, 'Export script');
 
   const importFile = async (file) => {
     if (!file) return;
