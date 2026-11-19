@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { decompressFrames, parseGIF } from 'gifuct-js';
 import { decodeAnimation, encodeAnimation } from 'wasm-webp';
 import {
-  PRESETS, canKeepAnimation, clampCrop, cropRect, isAnimated, isAnimatedGif, reencode, reencodeAnimatedGif,
-  reencodeAnimation, webpAnimationInfo,
+  PRESETS, animatedLimit, canKeepAnimation, clampCrop, cropRect, isAnimated, isAnimatedGif, reencode,
+  reencodeAnimatedGif, reencodeAnimation, webpAnimationInfo,
 } from '../lib/image.js';
 
 vi.mock('gifuct-js', () => ({
@@ -89,9 +89,26 @@ describe('isAnimated', () => {
 });
 
 describe('reencode', () => {
-  it('matches the profile asset limit for unchanged animated avatars and icons', () => {
+  it('keeps still avatars, banners and icons at 256 KB', () => {
     expect(PRESETS.avatar.maxBytes).toBe(256 * 1024);
+    expect(PRESETS.banner.maxBytes).toBe(256 * 1024);
     expect(PRESETS.icon.maxBytes).toBe(256 * 1024);
+  });
+
+  it('lets an animated avatar reach 512 KB, never past what the origin allows', () => {
+    expect(animatedLimit(PRESETS.avatar, 512 * 1024)).toBe(512 * 1024);
+    expect(animatedLimit(PRESETS.avatar, 2 * 1024 * 1024)).toBe(512 * 1024);
+    expect(animatedLimit(PRESETS.avatar, 300 * 1024)).toBe(300 * 1024);
+  });
+
+  it('keeps the old limit against an origin that does not say what its ceiling is', () => {
+    expect(animatedLimit(PRESETS.avatar, undefined)).toBe(256 * 1024);
+    expect(animatedLimit(PRESETS.avatar, null)).toBe(256 * 1024);
+  });
+
+  it('gives banners and icons no animated allowance', () => {
+    expect(animatedLimit(PRESETS.banner, 512 * 1024)).toBe(256 * 1024);
+    expect(animatedLimit(PRESETS.icon, 512 * 1024)).toBe(256 * 1024);
   });
 
   it('draws the crop square into a canvas of the preset size', async () => {

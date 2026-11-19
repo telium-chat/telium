@@ -25,8 +25,8 @@ function apng() {
   return new File([new Uint8Array(out)], 'me.png', { type: 'image/png' });
 }
 
-function webp(animated) {
-  const b = new Uint8Array(30);
+function webp(animated, size = 30) {
+  const b = new Uint8Array(size);
   b.set([...'RIFF'].map((c) => c.charCodeAt(0)), 0);
   b.set([...'WEBP'].map((c) => c.charCodeAt(0)), 8);
   b.set([...'VP8X'].map((c) => c.charCodeAt(0)), 12);
@@ -34,7 +34,7 @@ function webp(animated) {
   return new File([b], 'me.webp', { type: 'image/webp' });
 }
 
-async function open(file) {
+async function open(file, originCap) {
   URL.createObjectURL = vi.fn(() => 'blob:x');
   URL.revokeObjectURL = vi.fn();
   const onDone = vi.fn();
@@ -42,8 +42,11 @@ async function open(file) {
     const crop = useImageCrop();
     return <button type="button" onClick={() => crop(file, 'avatar').then(onDone)}>Open crop</button>;
   }
+  const store = freshStore();
+  store.session = { home: { domain: 'home.example' } };
+  if (originCap) store.caps.set('home.example', { media: { max_profile_asset_bytes: originCap } });
   render(
-    <StoreProvider store={freshStore()}>
+    <StoreProvider store={store}>
       <ModalProvider>
         <Opener />
         <ModalHost />
@@ -92,5 +95,30 @@ describe('cropping an animated avatar', () => {
     expect(onDone.mock.calls[0][0]).toBe(still);
     expect(reencodeAnimation).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
+  });
+
+  it('gives an animated avatar up to 512 KB when the origin allows it', async () => {
+    const made = new File([new Uint8Array(300 * 1024)], 'me.webp', { type: 'image/webp' });
+    reencodeAnimation.mockReset().mockResolvedValue(made);
+    const { onDone } = await open(webp(true), 512 * 1024);
+    const use = await screen.findByRole('button', { name: 'Use image' });
+    await waitFor(() => expect(use.disabled).toBe(false));
+    await userEvent.click(use);
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
+    expect(onDone.mock.calls[0][0]).toBe(made);
+    expect(reencodeAnimation.mock.calls[0][2].maxBytes).toBe(512 * 1024);
+  });
+
+  it('holds it to 256 KB when the origin has not said it allows more', async () => {
+    const made = new File([new Uint8Array(300 * 1024)], 'me.webp', { type: 'image/webp' });
+    reencodeAnimation.mockReset().mockResolvedValue(made);
+    const { onDone } = await open(webp(true), undefined);
+    const use = await screen.findByRole('button', { name: 'Use image' });
+    await waitFor(() => expect(use.disabled).toBe(false));
+    await userEvent.click(use);
+    await waitFor(() => expect(reencodeAnimation).toHaveBeenCalled());
+    expect(reencodeAnimation.mock.calls[0][2].maxBytes).toBe(256 * 1024);
+    await waitFor(() => expect(use.disabled).toBe(false));
+    expect(onDone).not.toHaveBeenCalled();
   });
 });

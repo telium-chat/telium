@@ -1,11 +1,12 @@
 /// Client-side re-encoding of avatars, banners and emoji. The ceilings are a courtesy; the origin enforces them again.
 
 export const PRESETS = {
-  // Animated avatars upload unchanged, so this must match the origin's profile-asset ceiling.
-  avatar: { size: 256, maxBytes: 256 * 1024 },
-  // Banners share the profile-asset 256 KB ceiling.
+  // A still avatar stays small. An animated one gets more room, up to what the origin's profile-asset ceiling
+  // allows (`animatedLimit`), because a GIF squeezed to 256 KB loses most of its frames or colour.
+  avatar: { size: 256, maxBytes: 256 * 1024, animatedMaxBytes: 512 * 1024 },
+  // Banners stay at 256 KB even though the origin's profile-asset ceiling now allows 512 KB (that room is for animated avatars).
   banner: { width: 600, height: 200, aspect: 3, maxBytes: 256 * 1024 },
-  // Guild icons share the profile-asset ceiling.
+  // Guild icons likewise stay at 256 KB, under the origin's profile-asset ceiling.
   icon: { size: 256, maxBytes: 256 * 1024 },
   emoji: { size: 128, maxBytes: 96 * 1024 },
   // The guild server caps a sticker's pack entry at 256 KB.
@@ -137,6 +138,13 @@ export async function reencodeAnimatedGif(file, crop, preset) {
     }
   }
   throw new Error(`could not compress this animated GIF under ${Math.round(preset.maxBytes / 1024)} KB`);
+}
+
+/// What an animated upload may weigh: the preset's animated allowance, held to the origin's own ceiling. An origin that
+/// does not say what its ceiling is predates the larger one, so the ordinary limit applies.
+export function animatedLimit(preset, originCap) {
+  if (!preset.animatedMaxBytes) return preset.maxBytes;
+  return originCap > 0 ? Math.min(originCap, preset.animatedMaxBytes) : preset.maxBytes;
 }
 
 /// Pixels an animated WebP may decode to in one go when the browser has no frame-by-frame decoder (all frames are held
