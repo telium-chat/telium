@@ -18,6 +18,12 @@ const BOTTOM_SLACK = 60;
 
 const SKELETON_AFTER_MS = 180;
 
+/// Pages of older history a jump in a conversation may load looking for its message (a channel asks the server for it directly).
+const JUMP_PAGES = 10;
+
+/// Screens above the newest message past which the pill offers the way back even when nothing new has arrived.
+const FAR_SCREENS = 3;
+
 function useSettled(active, ms) {
   const [settled, setSettled] = useState(false);
   useEffect(() => {
@@ -44,6 +50,10 @@ export function Timeline({
   const [wanted, setWanted] = useState(null);
   const [landed, setLanded] = useState(null);
   const [showJump, setShowJump] = useState(false);
+  const [far, setFar] = useState(false);
+  // The newest message when the reader left the bottom: anything after it is new to them.
+  const [leftAt, setLeftAt] = useState(null);
+  const jumpPages = useRef(0);
 
   const scrollerRef = useRef(null);
   const atBottom = useRef(true);
@@ -173,6 +183,15 @@ export function Timeline({
         catch (e) { if (live) reportError(e, t('chat.timeline.jumpFailed')); }
       } else {
         found = items.some((m) => m.id === wanted);
+        if (!found) {
+          // A page is on its way; its arrival runs this again.
+          if (loadingOlder.current || fetchingOlder) return;
+          if (hasMore && onLoadOlder && jumpPages.current < JUMP_PAGES) {
+            jumpPages.current += 1;
+            loadOlder();
+            return;
+          }
+        }
       }
       if (!live) return;
       setWanted(null);
@@ -180,7 +199,9 @@ export function Timeline({
       else toast(t('chat.timeline.messageGone'));
     })();
     return () => { live = false; };
-  }, [store, surfaceId, surface.kind, wanted, loading, items, t]);
+  }, [store, surfaceId, surface.kind, wanted, loading, items, t, hasMore, fetchingOlder, onLoadOlder, loadOlder]);
+
+  useEffect(() => { jumpPages.current = 0; }, [wanted]);
 
   useEffect(() => {
     if (!landed) return undefined;
@@ -224,6 +245,7 @@ export function Timeline({
     atBottom.current = near;
     remember(surfaceId, el.scrollTop, near);
     setShowJump((shown) => (shown === !near ? shown : !near));
+    setFar(gap > FAR_SCREENS * el.clientHeight);
     if (el.scrollTop < 200) loadOlder();
     if (near) surface.ack();
   };
@@ -235,11 +257,26 @@ export function Timeline({
     measured.current = el.scrollHeight;
     remember(surfaceId, el.scrollHeight, true);
     setShowJump(false);
-    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    setFar(false);
+    // Smooth over a long way is a slow crawl through history; from far up it just goes.
+    el.scrollTo({ top: el.scrollHeight, behavior: far ? 'auto' : 'smooth' });
     surface.ack();
-  }, [surface, surfaceId]);
+  }, [surface, surfaceId, far]);
 
   const me = store.me?.user_id;
+  const newest = items.length ? items[items.length - 1].id : null;
+  useEffect(() => {
+    if (!showJump) { setLeftAt(null); return; }
+    setLeftAt((was) => was ?? newest);
+  }, [showJump, surfaceId]);
+  const unseen = (() => {
+    if (!showJump || !leftAt) return 0;
+    const at = items.findIndex((m) => m.id === leftAt);
+    if (at < 0) return 0;
+    // Messages only: a call ending is not a message to catch up on.
+    return items.slice(at + 1)
+      .filter((m) => (m.kind ?? 'msg') === 'msg' && m.author && m.author !== me && !m.deleted).length;
+  })();
   const myRoles = store.myMember(surface.guildId)?.roles || [];
   const byId = new Map(items.map((m) => [m.id, m]));
   const threads = new Map(
@@ -329,6 +366,23 @@ export function Timeline({
           ) : null}
           {/* Outside the row list: ephemeral replies have no position in the ordering. */}
           <EphemeralMessages surface={surface} channelId={surface.id} me={me} />
+          {!mobile && showJump && (unseen > 0 || far) ? (
+            // Zero height and sticky: it rides the bottom edge of the view, just above the composer, without taking a line of the stream.
+            <div className="timeline-pill-dock">
+              <button
+                type="button"
+                onClick={scrollToBottom}
+                className={unseen > 0 ? 'timeline-pill timeline-pill--new' : 'timeline-pill'}
+              >
+                <span>
+                  {unseen > 0 ? t('chat.timeline.newMessages', { count: unseen }) : t('chat.timeline.jumpToPresent')}
+                </span>
+                <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <path d="M12 5v14M5 12l7 7 7-7" />
+                </svg>
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
       {mobile && showJump ? (
