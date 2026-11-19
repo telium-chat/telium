@@ -32,6 +32,19 @@ import {
 
 const VoiceContext = createContext(null);
 
+
+/// Relays tried for one call start before giving up: the first choice and two more.
+const MAX_RELAY_FALLBACKS = 3;
+
+/// A refusal another relay would not repeat: this relay cannot verify, or will not serve, the
+/// guild's server, or it could not be reached at all. A full relay (503) has its own path.
+const RELAY_REFUSAL_CODES = new Set(['sfu_origin_unverified', 'sfu_bad_signature', 'origin_blocked']);
+
+export function relayWillNotServe(error) {
+  if (error?.relayUnreachable) return true;
+  return error?.status === 403 && RELAY_REFUSAL_CODES.has(error?.body?.code);
+}
+
 export const PING_WINDOW = 40;
 
 export const RETAKE_WINDOW_MS = 60_000;
@@ -707,12 +720,14 @@ export function VoiceProvider({ children }) {
   leaveRef.current = coreLeave;
   useEffect(() => store.beforeAway(() => leaveRef.current?.()), [store]);
 
-  const join = useCallback(async (targetChannelId, { quiet = false } = {}) => {
+  const join = useCallback(async (targetChannelId, { quiet = false, exclude = [], cause = null } = {}) => {
     if (callRef.current && channelRef.current === targetChannelId) return;
     if (callRef.current) await coreLeave();
     const me = store.me?.user_id;
     let joinedOnServer = false;
     let attemptedRelay = null;
+    let startedCall = false;
+    const automatic = (store.prefs.voiceRegion || 'auto') === 'auto';
     try {
       setPhase('connecting');
       const body = {
@@ -722,8 +737,11 @@ export function VoiceProvider({ children }) {
           ? (store.prefs.voiceRegion || 'auto')
           : await chooseGuildVoiceRegion(
             store.apiForChannel(targetChannelId), targetChannelId, store.prefs.voiceRegion || 'auto',
+            { exclude },
           ),
       };
+      // Every relay worth trying has refused this call: report the last refusal, not a new one.
+      if (body.region === null) throw cause || new Error(t('voice.error.join'));
       hellosRef.current = new Map();
       greetedRef.current = new Set();
       epochRef.current = null;
@@ -756,6 +774,7 @@ export function VoiceProvider({ children }) {
       setServer(resp.voice_server);
       const beforeJoin = (store.voice.get(targetChannelId) || [])
         .filter((v) => v.user_id !== me).length;
+      startedCall = beforeJoin === 0;
       const list = (store.voice.get(targetChannelId) || []).filter((v) => v.user_id !== me);
       list.push(resp.voice_state);
       store.voice.set(targetChannelId, list);
@@ -820,6 +839,14 @@ export function VoiceProvider({ children }) {
       setPrivacy(null);
       generationRef.current = null;
       dropGuildKeys();
+      // The person starting a call on an automatically chosen relay that refused this server, or
+      // could not be reached, moves the call to the next-closest relay instead of failing. Later
+      // joiners never do: the call is already running there for everyone else.
+      if (attemptedRelay && startedCall && automatic && !migrated && !conversationCall(targetChannelId)
+        && relayWillNotServe(e) && exclude.length + 1 < MAX_RELAY_FALLBACKS) {
+        console.warn(`Voice relay ${attemptedRelay} refused this call; trying the next closest.`, e);
+        return join(targetChannelId, { quiet, exclude: [...exclude, attemptedRelay], cause: e });
+      }
       if (!quiet) reportError(e, t('voice.error.join'));
       setPhase('idle');
       if (migrated) {

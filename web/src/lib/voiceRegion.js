@@ -159,13 +159,19 @@ export async function chooseVoiceRegion(api, preferred = 'auto', options = {}) {
 ///
 /// Directory entries carry the relay's URL as their region name, which is how
 /// the pin round-trips through every later join.
+///
+/// `options.exclude` lists relays that already refused this call. Then the answer is the closest
+/// remaining candidate, never `auto` (the server could hand back the relay that just refused), and
+/// `null` when none is left.
 export async function chooseGuildVoiceRegion(api, channelId, preferred = 'auto', options = {}) {
+  const { exclude: excluded = [], ...probeOptions } = options;
+  const exclude = new Set(excluded);
   const wanted = preferred || 'auto';
   if (wanted !== 'auto') return wanted;
-  if (!api?.regions) return 'auto';
+  if (!api?.regions) return exclude.size ? null : 'auto';
 
   // A call in progress decides for everyone joining it.
-  try {
+  if (!exclude.size) try {
     const listing = await api.voiceStates(channelId);
     const pinned = (Array.isArray(listing) ? listing : listing?.voice_states ?? [])
       .map((state) => state?.region)
@@ -194,7 +200,19 @@ export async function chooseGuildVoiceRegion(api, channelId, preferred = 'auto',
     // configured regions and the server's rotation still apply.
   }
 
-  const candidates = [...regions, ...directory];
+  const candidates = [...regions, ...directory].filter((r) => !exclude.has(r.name));
+  if (exclude.size) {
+    if (!candidates.length) return null;
+    if (candidates.length === 1) return candidates[0].name;
+    let next = null;
+    try {
+      next = await pickRegion(candidates, { ...probeOptions, fallback: null, marginMs: 0 });
+    } catch {
+      next = null;
+    }
+    // Nothing answered a probe: still try one, in the server's order, rather than give up.
+    return next?.name || candidates[0].name;
+  }
   if (!candidates.length) return 'auto';
   const key = candidates.map((r) => r?.sfu).join('|');
   const hit = cache.get(key);
@@ -203,7 +221,7 @@ export async function chooseGuildVoiceRegion(api, channelId, preferred = 'auto',
 
   let choice = null;
   try {
-    choice = await pickRegion(candidates, { fallback: published?.default || null, ...options });
+    choice = await pickRegion(candidates, { fallback: published?.default || null, ...probeOptions });
   } catch {
     choice = null;
   }

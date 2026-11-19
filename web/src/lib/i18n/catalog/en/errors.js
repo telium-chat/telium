@@ -208,6 +208,11 @@ export const errors = {
   'errors.offline': 'Could not reach the server. Nothing was sent; try again in a moment.',
   'errors.offlineDevice': 'This device is offline. Nothing was sent.',
 
+  // Refusals from a voice relay (telium-sfu), keyed by the `code` in its reply.
+  'errors.sfu_origin_unverified': 'The voice relay could not reach this server to check who you are. Try joining again in a minute.',
+  'errors.sfu_bad_signature': 'The voice relay did not accept this server\'s signature. Try joining again; if it keeps happening, the relay may have old keys for this server.',
+  'errors.origin_blocked': 'This voice relay does not serve this server. Pick a different relay in the server settings.',
+
   // ---------------------------------------------------- refusals with no code
 
   // The rung between the server's own sentence and the generic apology, keyed
