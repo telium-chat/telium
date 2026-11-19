@@ -13,6 +13,7 @@ const ALLOWED = {
   'lib/external-upload.js fetch': 'third-party upload host, declared in NOT_COVERED',
   'lib/external-upload.js XMLHttpRequest': 'upload progress for the same host',
   'lib/favicon.js fetch': 'own <link rel=icon>, same origin',
+  'lib/discordGifExport.js fetch': 'text of a console script the user copies into Discord; the client never runs it',
   'lib/gifs.js fetch': 'GIF provider, declared in NOT_COVERED',
   'lib/notify-sound.js fetch': 'bundled sound or user-supplied blob/data URL',
   'lib/upload.js XMLHttpRequest': 'progress path; upload() checks the mode first and uses teliumFetch when protected',

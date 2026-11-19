@@ -52,7 +52,6 @@ const bridge = Object.freeze({
   prepareGofilePlayback: (source, token) => ipcRenderer.invoke('telium:prepare-gofile', { source, token }),
   fetchGifBytes: (url) => ipcRenderer.invoke('telium:fetch-gif', url),
   windowFocus: () => ipcRenderer.invoke('telium:window-focus'),
-  importDiscordGifs: () => ipcRenderer.invoke('telium:import-discord-gifs'),
   screenShareAudioStart: () => ipcRenderer.invoke('telium:screen-share-audio-start'),
   screenShareAudioStop: () => ipcRenderer.invoke('telium:screen-share-audio-stop'),
 

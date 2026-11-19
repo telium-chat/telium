@@ -334,7 +334,7 @@ export const MessageRow = memo(function MessageRow({
               onNavigate: (ch) => store.navigate(channelRoute(ch)),
               onOpenUser: openProfile,
             })}
-            {msg.edited_at ? <span className="text-2xs text-muted"> {t('chat.message.edited')}</span> : null}
+            {msg.edited_at ? <span className="select-none text-2xs text-muted"> {t('chat.message.edited')}</span> : null}
           </div>
         )}
 
