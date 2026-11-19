@@ -4,6 +4,7 @@ import {
   Button, Pill, Section, Switch,
 } from '../../components/index.js';
 import { conversationTitle } from '../../lib/conversations.js';
+import { CallsPane } from './CallsPane.jsx';
 
 export function ConversationSignalsPane() {
   const store = useStore();
@@ -17,25 +18,26 @@ export function ConversationSignalsPane() {
     <Section>
       <div className="divide-y divide-border panel px-3">
         <Switch
-          label="Send and receive read receipts"
-          hint={'You see how far someone has read only while they can see yours. A receipt '
-            + 'is sent encrypted, and the servers carrying it cannot tell it from a message.'}
+          label="Read receipts"
+          hint={'Let others see where you have read up to, and see theirs in return. A '
+            + 'receipt is sent encrypted, and the servers carrying it cannot tell it '
+            + 'from a message.'}
           checked={store.readReceiptsIn(null)}
           onChange={(next) => set(() => store.setSignal('read', next))}
         />
         <Switch
-          label="Acknowledge delivery"
-          hint={'Turn this off and your own messages stop showing Delivered. Like read '
-            + 'receipts, these go out encrypted and look like any other message on the wire.'}
+          label="Delivery receipts"
+          hint={'Tell the other side when your messages arrive. Turn this off and your '
+            + 'own messages stop showing Delivered. Like read receipts, these go out '
+            + 'encrypted and look like any other message on the wire.'}
           checked={store.deliveryAcksIn(null)}
           onChange={(next) => set(() => store.setSignal('delivered', next))}
         />
         <Switch
-          label="Show when I am typing"
-          hint={'This one is not encrypted. Your server, everyone else\u2019s server and '
-            + 'everyone in the conversation can see that you are typing, where, and when. It '
-            + 'is sent in the clear so that it arrives while it still means something; '
-            + 'turning it off stops it being sent at all.'}
+          label="Show when I'm typing"
+          hint={'Let others see when you are typing. This one is not encrypted: your '
+            + 'server, everyone else\u2019s server, and everyone in the conversation can '
+            + 'see it. Turn it off to stop sharing it completely.'}
           checked={store.typingSignalsIn(null)}
           onChange={(next) => set(() => store.setSignal('typing', next))}
         />
@@ -84,6 +86,8 @@ export function ConversationSignalsPane() {
           </div>
         </Section>
       ) : null}
+
+      <CallsPane />
     </Section>
   );
 }

@@ -11,7 +11,7 @@ import { stubMedia } from './fake-webrtc.js';
 
 const GUILD_PANES = ['Overview', 'Roles', 'Channel permissions',
   'Gates and origins', 'Moderation queue', 'Bans', 'Emoji', 'Audit log'];
-const USER_PANES = ['Profile', 'Account', 'Messages', 'Calls & audio', 'Profile lookups',
+const USER_PANES = ['Profile', 'Account', 'Messages & calls', 'Profile lookups',
   'Network privacy', 'Connected servers', 'Notifications', 'Appearance', 'Extras', 'Local data'];
 
 async function boot({ strict = false } = {}) {

@@ -179,13 +179,13 @@ export const privacy = {
   // new warning -- the cheapest kind of honesty there is.
   //
   // Drawn only while this account is actually emitting typing. Somebody who
-  // has already turned the signal off in Conversation signals is not subject to
+  // has already turned the signal off in Messages & calls is not subject to
   // the caveat, and the document says so in as many words: "Turning the typing
-  // toggle off in Conversation signals stops your client emitting it, which is
+  // toggle off in Messages & calls stops your client emitting it, which is
   // a real and complete mitigation for you personally." A disclosure that
   // disappears once it has been dealt with is the opposite of warning fatigue:
   // seeing it means it is true of you right now.
-  'privacy.typing.inEncrypted': 'Typing indicators are the exception: they leave in the clear, so your server, everyone else’s server and everyone in the conversation see them as they happen. Conversation signals turns them off.',
+  'privacy.typing.inEncrypted': 'Typing indicators are the exception: they leave in the clear, so your server, everyone else’s server and everyone in the conversation see them as they happen. Messages & calls turns them off.',
 
   // ----------------------------------------------------------- profile lookups
 

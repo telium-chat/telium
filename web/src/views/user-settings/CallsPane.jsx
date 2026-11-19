@@ -11,8 +11,8 @@ import { t } from '../../lib/i18n/index.js';
 import { unavailableBecause } from '../../lib/denoise.js';
 
 const MODES = [
-  ['off', 'Off', 'Send the microphone as it is.', MicOffIcon],
-  ['browser', 'Standard', 'Your browser’s own suppressor. Free, and good at steady noise — a fan, a hum, traffic.', MicIcon],
+  ['off', 'Off', 'No noise cancellation. Your microphone audio is sent as it is.', MicOffIcon],
+  ['browser', 'Standard', 'Your browser’s built-in noise cancellation. Free, and works well for steady background noise like a fan or traffic.', MicIcon],
   ['neural', 'Neural', 'A model runs on this device and removes what the standard one leaves behind: keyboards, hum, other voices.', SignalIcon],
 ];
 
@@ -41,7 +41,7 @@ export function CallsPane() {
 
   return (
     <Section>
-      <Section title="Call privacy" description="In a call, the strictest choice among the people in it wins.">
+      <Section title="Call privacy" description="Everyone picks their own privacy level, and the call uses the strictest choice among the people in it.">
         <div className="flex flex-col gap-1.5">
           <ChoiceList aria-label="Call privacy" value={store.callPrivacyFor(null)} onChange={(next) => set(() => store.setCallPrivacy(next))}>
             {POSTURES.map((p) => <ChoiceCard key={p} value={p} label={POSTURE_COPY[p].label} description={POSTURE_COPY[p].description} />)}
@@ -65,11 +65,11 @@ export function CallsPane() {
         </Section>
       ) : null}
 
-      <Section title="Microphone" description="Noise cancellation applies to your microphone in calls, on this device only.">
+      <Section title="Microphone" description="How your microphone sounds in calls. Applies on this device only.">
         <ChoiceList value={voice.noiseMode} onChange={chooseNoise}>
           {MODES.map(([key, label, description, Glyph]) => <ChoiceCard key={key} value={key} icon={Glyph} label={label} description={key === 'neural' && blocked ? blocked : description} disabled={key === 'neural' && (Boolean(blocked) || busy)} trailing={key === 'neural' && busy ? <Spinner /> : undefined} />)}
         </ChoiceList>
-        <Hint>Neural uses noticeably more battery and CPU, and up to 40 ms more delay than standard. If the device gets busy mid-call, the model steps aside and comes back on its own; your choice here is never changed.</Hint>
+        <Hint>Neural uses more battery and CPU, and adds up to 40 ms of delay. If your device gets busy mid-call, the model steps aside and comes back on its own; your choice here is never changed.</Hint>
         {voice.noiseMode === 'neural' && voice.noiseState && voice.noiseState !== 'active' ? <Hint>{t(`voice.noise.${voice.noiseState}`)}</Hint> : null}
       </Section>
     </Section>
