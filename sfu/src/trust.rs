@@ -14,10 +14,37 @@ use crate::fetch::{self, AddressPolicy, MAX_DOCUMENT_BYTES};
 /// Ceiling on discovered origins: filled from unauthenticated bodies and re-fetched on a timer.
 const MAX_DISCOVERED_ORIGINS: usize = 512;
 
+/// Wait after an origin's first failed lookup, doubling with each further failure up to the ceiling.
 /// Per origin, so it does not cap how many distinct origins a stranger can make us look up; it only
-/// stops one origin being fetched on every request. Short, so one failed lookup (a dropped packet, a
-/// timeout) does not turn every join from that server into a refusal for minutes.
-const DISCOVERY_RETRY_AFTER: Duration = Duration::from_secs(60);
+/// stops one origin being fetched on every request. Short at first, so one failed lookup (a dropped
+/// packet, a timeout) costs a joiner seconds; a server that stays down is still asked rarely.
+const DISCOVERY_RETRY_FIRST: Duration = Duration::from_secs(10);
+const DISCOVERY_RETRY_CEILING: Duration = Duration::from_secs(300);
+
+#[derive(Clone)]
+struct Attempt {
+    /// When the last lookup was claimed, or when it failed once it finished.
+    at: Instant,
+    /// Lookups that have failed in a row.
+    failures: u32,
+    /// A lookup is running; nobody starts another until it finishes.
+    in_flight: bool,
+}
+
+impl Attempt {
+    fn retry_after(&self) -> Duration {
+        let doublings = self.failures.saturating_sub(1).min(16);
+        DISCOVERY_RETRY_FIRST.saturating_mul(1 << doublings).min(DISCOVERY_RETRY_CEILING)
+    }
+
+    fn may_retry(&self) -> bool {
+        // An abandoned in-flight claim (the request was dropped mid-lookup) expires at the ceiling.
+        if self.in_flight {
+            return self.at.elapsed() >= DISCOVERY_RETRY_CEILING;
+        }
+        self.at.elapsed() >= self.retry_after()
+    }
+}
 
 const MAX_ATTEMPT_LEDGER: usize = 4096;
 
@@ -27,7 +54,7 @@ pub struct TrustedKeys {
     discovery: bool,
     public: bool,
     discovered: HashMap<String, String>,
-    attempted: HashMap<String, Instant>,
+    attempted: HashMap<String, Attempt>,
     insecure_discovery: bool,
     /// This machine's own names, which may resolve to a local address without being refused.
     this_machine: Vec<String>,
@@ -79,21 +106,35 @@ impl TrustedKeys {
         if self.discovered.len() >= MAX_DISCOVERED_ORIGINS {
             return false;
         }
-        match self.attempted.get(origin) {
-            Some(at) => at.elapsed() >= DISCOVERY_RETRY_AFTER,
-            None => true,
-        }
+        self.attempted.get(origin).map(Attempt::may_retry).unwrap_or(true)
     }
 
     /// Claimed under the write lock before the network call so concurrent requests make one lookup.
     pub fn note_attempt(&mut self, origin: &str) {
-        if self.attempted.len() >= MAX_ATTEMPT_LEDGER {
-            self.attempted.retain(|_, at| at.elapsed() < DISCOVERY_RETRY_AFTER);
+        if !self.attempted.contains_key(origin) && self.attempted.len() >= MAX_ATTEMPT_LEDGER {
+            self.attempted.retain(|_, a| !a.may_retry());
             if self.attempted.len() >= MAX_ATTEMPT_LEDGER {
                 return;
             }
         }
-        self.attempted.insert(origin.to_string(), Instant::now());
+        let entry = self
+            .attempted
+            .entry(origin.to_string())
+            .or_insert(Attempt { at: Instant::now(), failures: 0, in_flight: false });
+        entry.at = Instant::now();
+        entry.in_flight = true;
+    }
+
+    /// A finished lookup: success forgets the origin's failures; a failure starts the next wait now,
+    /// not from when the lookup began, so a slow failure does not shorten it.
+    pub fn note_result(&mut self, origin: &str, ok: bool) {
+        if ok {
+            self.attempted.remove(origin);
+        } else if let Some(entry) = self.attempted.get_mut(origin) {
+            entry.at = Instant::now();
+            entry.failures = entry.failures.saturating_add(1);
+            entry.in_flight = false;
+        }
     }
 
     pub fn merge_keys(&mut self, origin: &str, discovered: Vec<(String, String)>, base: Option<String>) {
@@ -253,10 +294,12 @@ pub async fn maybe_discover(trust: &Arc<RwLock<TrustedKeys>>, value: &Value) {
         guard.note_attempt(&origin);
     }
 
-    let Some((base, keys)) = discover_keys(&origin, policy).await else {
-        return;
-    };
-    trust.write().await.merge_keys(&origin, keys, Some(base));
+    let found = discover_keys(&origin, policy).await;
+    let mut guard = trust.write().await;
+    guard.note_result(&origin, found.is_some());
+    if let Some((base, keys)) = found {
+        guard.merge_keys(&origin, keys, Some(base));
+    }
 }
 
 /// The machine's hostname (and /etc/hostname, which can differ until a reboot), when it is a real
@@ -441,6 +484,33 @@ mod tests {
         assert_eq!(t.discovery_policy("NotDiscord.fyi:8443"), AddressPolicy::ThisMachine);
         assert_eq!(t.discovery_policy("telium.chat"), AddressPolicy::Untrusted);
         assert_eq!(t.discovery_policy("sub.notdiscord.fyi"), AddressPolicy::Untrusted);
+    }
+
+    #[test]
+    fn a_failed_lookup_is_retried_after_ten_seconds_then_less_often() {
+        let mut a = Attempt { at: Instant::now(), failures: 1, in_flight: false };
+        assert_eq!(a.retry_after(), Duration::from_secs(10));
+        a.failures = 2;
+        assert_eq!(a.retry_after(), Duration::from_secs(20));
+        a.failures = 4;
+        assert_eq!(a.retry_after(), Duration::from_secs(80));
+        a.failures = 50;
+        assert_eq!(a.retry_after(), DISCOVERY_RETRY_CEILING);
+
+        let mut t = trust(true);
+        t.note_attempt("flaky.example");
+        assert!(!t.may_attempt("flaky.example"), "one lookup at a time");
+        t.note_result("flaky.example", false);
+        assert!(!t.may_attempt("flaky.example"), "waits after a failure");
+        t.attempted.get_mut("flaky.example").unwrap().at -= Duration::from_secs(11);
+        assert!(t.may_attempt("flaky.example"), "retried after ten seconds");
+        t.note_attempt("flaky.example");
+        t.note_result("flaky.example", false);
+        t.attempted.get_mut("flaky.example").unwrap().at -= Duration::from_secs(11);
+        assert!(!t.may_attempt("flaky.example"), "the second failure waits twenty");
+        t.note_attempt("flaky.example");
+        t.note_result("flaky.example", true);
+        assert!(!t.attempted.contains_key("flaky.example"), "success forgets the failures");
     }
 
     #[test]

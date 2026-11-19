@@ -298,11 +298,19 @@ export class SfuCall {
 
   async fetchSession() {
     const base = this.endpoint.replace(/\/$/, '');
-    const resp = await fetch(`${base}/session`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ token: this.joinToken }),
-    });
+    let resp;
+    try {
+      resp = await fetch(`${base}/session`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token: this.joinToken }),
+      });
+    } catch (e) {
+      // Marked here, at the one request that proves it, so a caller can try another relay
+      // without mistaking an unrelated TypeError for "this relay is unreachable".
+      e.relayUnreachable = true;
+      throw e;
+    }
     if (!resp.ok) {
       const failed = new Error(`SFU /session returned ${resp.status}`);
       // So a caller can tell an SFU that answered 'no' from one that is down.
