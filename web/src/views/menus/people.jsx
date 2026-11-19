@@ -470,9 +470,9 @@ export const account = (env) => {
         </MenuItem>
         <MenuItem
           icon={CopyIcon}
-          onAction={() => copyToClipboard(publicProfileLink(store.me?.user_id || ''), 'Profile URL')}
+          onAction={() => copyToClipboard(publicProfileLink(store.me?.user_id || ''), 'Profile link')}
         >
-          Copy profile URL
+          Copy profile link
         </MenuItem>
         <MenuItem icon={KeyIcon} onAction={() => settings('recovery')}>
           Manage encryption key

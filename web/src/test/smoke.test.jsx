@@ -698,7 +698,7 @@ describe('links and stickers', () => {
     expect(screen.getByTitle('Favorite GIF')).toBeTruthy();
   });
 
-  it('copies your username from the account menu, and your profile URL from Advanced', async () => {
+  it('copies your username from the account menu, and your profile link from Advanced', async () => {
     const { store, user } = await boot();
     const writeText = vi.fn(() => Promise.resolve());
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
@@ -709,7 +709,7 @@ describe('links and stickers', () => {
     expect(handle).toBe(displayId(store.me.user_id));
 
     await user.click(await screen.findByRole('menuitem', { name: 'Advanced' }));
-    const copyUrl = await screen.findByRole('menuitem', { name: 'Copy profile URL' });
+    const copyUrl = await screen.findByRole('menuitem', { name: 'Copy profile link' });
     fireEvent.click(copyUrl);
     expect(writeText.mock.calls.at(-1)[0]).toBe(publicProfileLink(store.me.user_id));
   });
