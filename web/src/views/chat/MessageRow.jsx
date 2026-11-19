@@ -25,7 +25,7 @@ import { useProfileCard } from '../../hooks/useProfileCard.js';
 import { EmojiPopover } from './EmojiPicker.jsx';
 import { useMenus } from '../menus.jsx';
 import { Attachments } from './Attachments.jsx';
-import { playableKind } from './PlayableAttachment.jsx';
+import { isPlayableLink, playableKind } from './PlayableAttachment.jsx';
 import { linksIn } from '../../lib/embeds.js';
 import { QuotePreview } from './QuotePreview.jsx';
 import { Embeds } from './Embeds.jsx';
@@ -33,18 +33,23 @@ import { GifEmbeds, isGifOnlyContent } from './GifEmbed.jsx';
 import { Sticker } from './Sticker.jsx';
 import { invitesIn, InviteCards } from './InviteCard.jsx';
 import { PlayableLinkEmbeds } from './PlayableLinkEmbeds.jsx';
-import { klipyConfig } from '../../lib/gifs.js';
+import { gifUrlsIn, klipyConfig } from '../../lib/gifs.js';
 import { AppMessage } from '../../components/message-ui/index.js';
 
 // Messages whose media the reader hid. Module-level so a row that scrolls out
 // and back in (or remounts) keeps its state; it lasts until the app reloads.
 const hiddenMedia = new Set();
 
-function carriesMedia(msg, encrypted) {
+/// Whatever the row would draw as media, so it can be hidden. GIFs and playable links are drawn in encrypted conversations too (only link previews are not), so they count there as well.
+export function carriesMedia(msg, encrypted, gifs) {
   if (msg.deleted) return false;
   if (msg.sticker) return true;
   if ((msg.attachments || []).some((a) => (a.mime || '').startsWith('image/') || playableKind(a))) return true;
-  return !encrypted && linksIn(msg.content || '').length > 0;
+  const content = msg.content || '';
+  const links = linksIn(content);
+  if (!links.length) return false;
+  if (!encrypted) return true;
+  return links.some(isPlayableLink) || gifUrlsIn(content, gifs).length > 0;
 }
 
 export const MessageRow = memo(function MessageRow({
@@ -74,7 +79,7 @@ export const MessageRow = memo(function MessageRow({
   const mayEdit = mine && surface.mayEdit(msg) && !msg.deleted && !msg.unreadable && !pending;
 
   const [mediaHidden, setMediaHidden] = useState(() => hiddenMedia.has(msg.id));
-  const hasMedia = carriesMedia(msg, surface.encrypted);
+  const hasMedia = carriesMedia(msg, surface.encrypted, klipyConfig(store));
   const toggleMedia = () => {
     if (hiddenMedia.has(msg.id)) hiddenMedia.delete(msg.id); else hiddenMedia.add(msg.id);
     setMediaHidden(hiddenMedia.has(msg.id));
