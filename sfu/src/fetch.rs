@@ -15,6 +15,11 @@ pub const MAX_DOCUMENT_BYTES: usize = 256 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddressPolicy {
     Untrusted,
+    /// A server named like this machine (its hostname). The machine's own name resolving to a local
+    /// address is the operator's configuration (Debian writes `127.0.1.1 <hostname>` into /etc/hosts),
+    /// not a stranger's DNS, and nobody outside can rename the machine. Still https only, with the
+    /// certificate checked, so it reaches nothing but this machine's own web server for that name.
+    ThisMachine,
     OperatorConfigured,
 }
 
@@ -24,7 +29,7 @@ impl AddressPolicy {
     }
 
     fn allows_private_addresses(self) -> bool {
-        matches!(self, Self::OperatorConfigured)
+        matches!(self, Self::OperatorConfigured | Self::ThisMachine)
     }
 }
 
@@ -302,6 +307,10 @@ mod tests {
         for url in ["https://localhost:9/x", "https://169.254.169.254/x", "https://[::1]:9/x"] {
             assert!(err(url, AddressPolicy::Untrusted).await.contains("non-public address"), "{url}");
         }
+        // This machine's own name may resolve locally, but stays https only.
+        assert!(err("http://localhost:9/x", AddressPolicy::ThisMachine).await.contains("over http"));
+        let e = err("https://localhost:9/x", AddressPolicy::ThisMachine).await;
+        assert!(!e.contains("non-public address"), "{e}");
         let e = err("http://127.0.0.1:9/x", AddressPolicy::OperatorConfigured).await;
         assert!(!e.contains("non-public address") && !e.contains("refusing to fetch"), "{e}");
     }

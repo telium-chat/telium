@@ -29,6 +29,8 @@ pub struct TrustedKeys {
     discovered: HashMap<String, String>,
     attempted: HashMap<String, Instant>,
     insecure_discovery: bool,
+    /// This machine's own names, which may resolve to a local address without being refused.
+    this_machine: Vec<String>,
 }
 
 impl TrustedKeys {
@@ -49,15 +51,20 @@ impl TrustedKeys {
             discovered: HashMap::new(),
             attempted: HashMap::new(),
             insecure_discovery: cfg.allow_insecure_discovery,
+            this_machine: this_machine_names(),
         }
     }
 
-    /// Untrusted unless the operator set `allow_insecure_discovery`; per deployment, never per request.
-    pub fn discovery_policy(&self) -> AddressPolicy {
+    /// Untrusted unless the operator set `allow_insecure_discovery`, or the origin is this machine's
+    /// own name (a homeserver installed beside the relay).
+    pub fn discovery_policy(&self, origin: &str) -> AddressPolicy {
         if self.insecure_discovery {
-            AddressPolicy::OperatorConfigured
-        } else {
-            AddressPolicy::Untrusted
+            return AddressPolicy::OperatorConfigured;
+        }
+        let host = fetch::parse_authority(origin).map(|(h, _)| h.to_ascii_lowercase());
+        match host {
+            Some(h) if self.this_machine.iter().any(|n| n == &h) => AddressPolicy::ThisMachine,
+            _ => AddressPolicy::Untrusted,
         }
     }
 
@@ -127,13 +134,13 @@ impl TrustedKeys {
         }
 
         // Stay untrusted: being fetched once does not promote a stranger's URL into configuration.
-        let policy = self.discovery_policy();
         let bases: Vec<(String, String)> = self
             .discovered
             .iter()
             .map(|(o, b)| (o.clone(), b.clone()))
             .collect();
         for (origin, base) in bases {
+            let policy = self.discovery_policy(&origin);
             let url = format!("{}/_telium/v1/keys", base.trim_end_matches('/'));
             if let Ok((name, discovered)) = fetch_keys(&url, policy).await {
                 if name == origin {
@@ -222,7 +229,7 @@ pub async fn maybe_discover(trust: &Arc<RwLock<TrustedKeys>>, value: &Value) {
         if !guard.may_attempt(&origin) {
             return;
         }
-        guard.discovery_policy()
+        guard.discovery_policy(&origin)
     };
     {
         // Re-check under the write lock and claim the attempt, so concurrent requests collapse into one lookup.
@@ -237,6 +244,37 @@ pub async fn maybe_discover(trust: &Arc<RwLock<TrustedKeys>>, value: &Value) {
         return;
     };
     trust.write().await.merge_keys(&origin, keys, Some(base));
+}
+
+/// The machine's hostname (and /etc/hostname, which can differ until a reboot), when it is a real
+/// domain. A dotless or `localhost`-style name is not a homeserver's name and is never relaxed.
+fn this_machine_names() -> Vec<String> {
+    let mut names = Vec::new();
+    for path in ["/proc/sys/kernel/hostname", "/etc/hostname"] {
+        if let Ok(raw) = std::fs::read_to_string(path) {
+            if let Some(name) = usable_machine_name(&raw) {
+                if !names.contains(&name) {
+                    names.push(name);
+                }
+            }
+        }
+    }
+    names
+}
+
+fn usable_machine_name(raw: &str) -> Option<String> {
+    let name = raw.trim().trim_end_matches('.').to_ascii_lowercase();
+    let (host, port) = fetch::parse_authority(&name)?;
+    if port.is_some() || host.starts_with('[') || !host.contains('.') {
+        return None;
+    }
+    if host == "localhost" || host.ends_with(".localhost") || host.ends_with(".localdomain") || host.ends_with(".local") {
+        return None;
+    }
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return None;
+    }
+    Some(host)
 }
 
 /// Text pointers may only select this account domain or its descendants.
@@ -273,7 +311,7 @@ async fn discover_base(origin: &str, policy: AddressPolicy) -> Result<String, St
     };
 
     let schemes: &[&str] = match policy {
-        AddressPolicy::Untrusted => &["https"],
+        AddressPolicy::Untrusted | AddressPolicy::ThisMachine => &["https"],
         AddressPolicy::OperatorConfigured => &["https", "http"],
     };
     let mut last = "no discovery document found".to_string();
@@ -375,6 +413,21 @@ mod tests {
             allow_insecure_discovery: false,
             origins: Vec::new(),
         })
+    }
+
+    #[test]
+    fn only_this_machines_own_domain_name_may_resolve_locally() {
+        assert_eq!(usable_machine_name("notdiscord.fyi\n"), Some("notdiscord.fyi".into()));
+        assert_eq!(usable_machine_name("Chat.Example.COM."), Some("chat.example.com".into()));
+        for bad in ["", "vps123", "localhost", "box.localdomain", "box.local", "a.localhost", "127.0.0.1", "x y.example"] {
+            assert_eq!(usable_machine_name(bad), None, "{bad:?}");
+        }
+        let mut t = trust(true);
+        t.this_machine = vec!["notdiscord.fyi".into()];
+        assert_eq!(t.discovery_policy("notdiscord.fyi"), AddressPolicy::ThisMachine);
+        assert_eq!(t.discovery_policy("NotDiscord.fyi:8443"), AddressPolicy::ThisMachine);
+        assert_eq!(t.discovery_policy("telium.chat"), AddressPolicy::Untrusted);
+        assert_eq!(t.discovery_policy("sub.notdiscord.fyi"), AddressPolicy::Untrusted);
     }
 
     #[test]
