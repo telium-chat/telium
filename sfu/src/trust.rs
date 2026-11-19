@@ -113,6 +113,20 @@ impl TrustedKeys {
         }
     }
 
+    /// Carry over what public mode discovered on its own, so editing the whitelist does not make
+    /// the relay forget every other server it has met (each would refuse joins until re-discovered).
+    /// Whitelisted origins keep the keys just loaded for them.
+    pub fn adopt_discovered(&mut self, previous: &TrustedKeys) {
+        for (origin, base) in &previous.discovered {
+            if self.knows(origin) {
+                continue;
+            }
+            if let Some(keys) = previous.keys.get(origin) {
+                self.merge_keys(origin, keys.clone(), Some(base.clone()));
+            }
+        }
+    }
+
     pub async fn refresh_discovery(&mut self, cfg: &TrustConfig) {
         if self.discovery {
             for o in &cfg.origins {
@@ -192,25 +206,24 @@ impl TrustedKeys {
 }
 
 async fn discover_keys(origin: &str, policy: AddressPolicy) -> Option<(String, Vec<(String, String)>)> {
-    let base = match discover_base(origin, policy).await {
-        Ok(b) => b,
+    match try_discover_keys(origin, policy).await {
+        Ok(found) => Some(found),
         Err(reason) => {
-            tracing::warn!(origin, %reason, "could not resolve origin via well-known discovery");
-            return None;
+            tracing::warn!(origin, %reason, "could not discover origin keys");
+            None
         }
-    };
+    }
+}
+
+/// The whole lookup, with the step that stopped it in `Err`. `telium-sfu discover` calls this directly.
+pub async fn try_discover_keys(origin: &str, policy: AddressPolicy) -> Result<(String, Vec<(String, String)>), String> {
+    let base = discover_base(origin, policy).await?;
     let url = format!("{}/_telium/v1/keys", base.trim_end_matches('/'));
     match fetch_keys(&url, policy).await {
         // The document must name the server we asked about, or we would file somebody else's keys under this origin.
-        Ok((name, keys)) if name == origin => Some((base, keys)),
-        Ok((name, _)) => {
-            tracing::warn!(origin, found = %name, "discovered server_name mismatch");
-            None
-        }
-        Err(e) => {
-            tracing::warn!(origin, error = %e, "origin key discovery failed");
-            None
-        }
+        Ok((name, keys)) if name == origin => Ok((base, keys)),
+        Ok((name, _)) => Err(format!("{url} names {name}, not {origin}")),
+        Err(e) => Err(format!("{url}: {e:#}")),
     }
 }
 
@@ -325,7 +338,7 @@ async fn discover_base(origin: &str, policy: AddressPolicy) -> Result<String, St
                 }
                 last = format!("{url} has no \"api\" field");
             }
-            Err(e) => last = format!("{url}: {e}"),
+            Err(e) => last = format!("{url}: {e:#}"),
         }
 
         // A static website may only contain /telium.txt; load live discovery
@@ -334,7 +347,7 @@ async fn discover_base(origin: &str, policy: AddressPolicy) -> Result<String, St
         let bytes = match fetch::get_bytes(&pointer_url, policy, 512, Duration::from_secs(8)).await {
             Ok(bytes) => bytes,
             Err(e) => {
-                last = format!("{pointer_url}: {e}");
+                last = format!("{pointer_url}: {e:#}");
                 continue;
             }
         };
@@ -358,7 +371,7 @@ async fn discover_base(origin: &str, policy: AddressPolicy) -> Result<String, St
                 return Ok(target);
             }
             Ok(_) => last = format!("{live} does not name {origin} with a matching api"),
-            Err(e) => last = format!("{live}: {e}"),
+            Err(e) => last = format!("{live}: {e:#}"),
         }
     }
     Err(last)
@@ -428,6 +441,16 @@ mod tests {
         assert_eq!(t.discovery_policy("NotDiscord.fyi:8443"), AddressPolicy::ThisMachine);
         assert_eq!(t.discovery_policy("telium.chat"), AddressPolicy::Untrusted);
         assert_eq!(t.discovery_policy("sub.notdiscord.fyi"), AddressPolicy::Untrusted);
+    }
+
+    #[test]
+    fn a_whitelist_edit_keeps_what_public_mode_discovered() {
+        let mut before = trust(true);
+        before.merge_keys("met.example", vec![("ed25519:a".into(), "pk".into())], Some("https://met.example".into()));
+        let mut after = trust(true);
+        after.adopt_discovered(&before);
+        assert!(after.knows("met.example"));
+        assert_eq!(after.discovered.get("met.example").map(String::as_str), Some("https://met.example"));
     }
 
     #[test]

@@ -732,7 +732,9 @@ async fn add_trust(
     }
     // Keep the verified key so a second network failure cannot lose a successful discovery.
     probe.refresh_discovery(&cfg.trust).await;
-    *state.trust.write().await = probe;
+    let mut live = state.trust.write().await;
+    probe.adopt_discovered(&live);
+    *live = probe;
 
     Redirect::to("/admin/trust").into_response()
 }
@@ -768,7 +770,9 @@ async fn remove_trust(
 async fn reload_runtime_trust(state: &AdminState, cfg: &SfuConfig) -> anyhow::Result<()> {
     let mut next = TrustedKeys::from_config(&cfg.trust);
     next.refresh_discovery(&cfg.trust).await;
-    *state.trust.write().await = next;
+    let mut live = state.trust.write().await;
+    next.adopt_discovered(&live);
+    *live = next;
     Ok(())
 }
 

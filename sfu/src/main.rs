@@ -77,6 +77,18 @@ enum Command {
     /// and the script remains the only thing on the box allowed to act on it.
     #[command(subcommand)]
     Updates(UpdatesCommand),
+    /// Look up a Telium server's keys the way this relay would for a join, and say what happened.
+    ///
+    /// Uses the same code and the same address policy as the running relay (from the config's
+    /// [trust] section), but touches nothing: no state is kept and the service is not contacted.
+    /// For an operator asking "why does this relay refuse joins from that server?".
+    Discover {
+        /// The server's name, as it appears in its join tokens (e.g. telium.chat).
+        origin: String,
+        /// Repeat the lookup, to catch a failure that only happens sometimes.
+        #[arg(long, default_value_t = 1)]
+        rounds: u32,
+    },
 }
 
 #[derive(Subcommand)]
@@ -147,6 +159,10 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!(path = %cli.config.display(), "no sfu.toml; using defaults");
         SfuConfig::default()
     };
+
+    if let Some(Command::Discover { origin, rounds }) = &cli.command {
+        return discover_command(&cfg, origin, *rounds).await;
+    }
 
     if let Some(Command::Updates(UpdatesCommand::Check { artifact, pin, manifest_url, trusted_native })) = &cli.command {
         return updates_check(&cfg.updates, artifact.clone(), pin.as_deref(), manifest_url.as_deref(), *trusted_native).await;
@@ -511,4 +527,33 @@ mod native_updater_trust_tests {
             "https://trusted.example/manifest"
         );
     }
+}
+
+async fn discover_command(cfg: &SfuConfig, origin: &str, rounds: u32) -> anyhow::Result<()> {
+    let trust = TrustedKeys::from_config(&cfg.trust);
+    let policy = trust.discovery_policy(origin);
+    println!("origin={origin} policy={policy:?} public={} whitelisted={}", cfg.trust.public, trust.knows(origin));
+    let mut failures = 0;
+    for round in 1..=rounds.max(1) {
+        let host = crate::fetch::parse_authority(origin).map(|(h, _)| h).unwrap_or_default();
+        match tokio::net::lookup_host((host.trim_matches(['[', ']']), 443)).await {
+            Ok(addrs) => {
+                let list: Vec<String> = addrs.map(|a| a.ip().to_string()).collect();
+                println!("round={round} resolved={}", list.join(","));
+            }
+            Err(e) => println!("round={round} resolve_error={e}"),
+        }
+        let started = std::time::Instant::now();
+        match crate::trust::try_discover_keys(origin, policy).await {
+            Ok((base, keys)) => println!("round={round} ok api={base} keys={} in={:?}", keys.len(), started.elapsed()),
+            Err(reason) => {
+                failures += 1;
+                println!("round={round} failed in={:?} reason={reason}", started.elapsed());
+            }
+        }
+    }
+    if failures > 0 {
+        anyhow::bail!("{failures} of {rounds} lookups failed");
+    }
+    Ok(())
 }
