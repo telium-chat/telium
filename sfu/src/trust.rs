@@ -14,7 +14,10 @@ use crate::fetch::{self, AddressPolicy, MAX_DOCUMENT_BYTES};
 /// Ceiling on discovered origins: filled from unauthenticated bodies and re-fetched on a timer.
 const MAX_DISCOVERED_ORIGINS: usize = 512;
 
-const DISCOVERY_RETRY_AFTER: Duration = Duration::from_secs(300);
+/// Per origin, so it does not cap how many distinct origins a stranger can make us look up; it only
+/// stops one origin being fetched on every request. Short, so one failed lookup (a dropped packet, a
+/// timeout) does not turn every join from that server into a refusal for minutes.
+const DISCOVERY_RETRY_AFTER: Duration = Duration::from_secs(60);
 
 const MAX_ATTEMPT_LEDGER: usize = 4096;
 
@@ -146,6 +149,22 @@ impl TrustedKeys {
         self.merge_keys(origin, keys, Some(base.clone()));
         tracing::info!(origin, "discovered origin keys via federation discovery");
         Some(base)
+    }
+
+    /// The refusal body for a value `verify_json` rejected. A signer whose keys we never obtained is
+    /// told apart from a signature that does not match, so a client can say "this relay could not
+    /// reach your server" instead of a permission error. The reason stays in our log, not the reply:
+    /// echoing fetch errors to an unauthenticated caller would make the relay a probe.
+    pub fn rejection(&self, value: &Value) -> Value {
+        let origin = value.get("origin").and_then(Value::as_str).unwrap_or("");
+        if !origin.is_empty() && !self.knows(origin) {
+            serde_json::json!({
+                "error": "could not verify the server that signed this request",
+                "code": "sfu_origin_unverified",
+            })
+        } else {
+            serde_json::json!({ "error": "bad signature", "code": "sfu_bad_signature" })
+        }
     }
 
     pub fn verify_json(&self, value: &Value) -> bool {
