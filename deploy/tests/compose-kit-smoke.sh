@@ -58,6 +58,10 @@ EOF
   docker build -q -t "$IMG" "$work/img" >/dev/null
   docker push -q "$IMG" >/dev/null
   docker image inspect --format '{{.Id}}' "$IMG"
+  # Drop the local tag, so the install and the updater have to pull the
+  # release from the registry like a real box would, rather than finding it
+  # already tagged on this daemon. (-f only untags an image a container uses.)
+  docker image rm -f "$IMG" >/dev/null
 }
 release_a="$(build a)"
 

@@ -28,7 +28,15 @@ and this directory (read-only, at `/project`) mounted. Every
    notice (SIGUSR1 to the server and the SFU) and waits it out, then
    `docker compose up -d --no-deps <what moved>`.
 
-It never recreates itself, so it never kills itself mid-update. A server
+It never recreates itself, so it never kills itself mid-update. The notice
+only covers the server and the SFU: a release of the bundled Caddy alone is
+applied straight away and drops open connections for a moment (clients
+reconnect on their own).
+
+The first start also writes `compose-suggestions` into the data volume: the
+storage and backup suggestions for every answer `.env` leaves empty. Later
+starts reuse them, so changing `TELIUM_REGISTRATION` from closed to open does
+not turn on attachment deletion for files that already exist. A server
 release from before the logic shipped in the image gets a minimal fallback
 (pull the server, recreate it if it moved) until a release that carries the
 logic arrives.

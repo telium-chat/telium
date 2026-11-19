@@ -80,7 +80,9 @@ services:
 
       # The server's configuration. Edit it here, then `docker compose up -d`:
       # a change to this block recreates the server with it. Any key from
-      # telium.example.toml can be added. The @WORDS@ are filled in by the
+      # telium.example.toml can be added. The server's own secret references
+      # need a doubled $ here, "$${env:NAME}" or "$${file:/path}", or Compose
+      # takes them for its own variables. The @WORDS@ are filled in by the
       # entrypoint from the answers above; replace one with a literal value if
       # you would rather decide it here.
       TELIUM_CONFIG: |
@@ -160,8 +162,8 @@ services:
       - |
         die() { echo "telium: $$*" >&2; exit 64; }
         case "$$TELIUM_REGISTRATION" in
-          open)   open=true;  days_default=30; media_default=no ;;
-          closed) open=false; days_default=0;  media_default=yes ;;
+          open)   open=true ;;
+          closed) open=false ;;
           *) die "TELIUM_REGISTRATION must be open or closed, not '$$TELIUM_REGISTRATION'" ;;
         esac
         case "$$TELIUM_REGISTRATION:$$TELIUM_RECOMMENDATIONS" in
@@ -169,17 +171,41 @@ services:
           *:yes|*:no) recommendations=false ;;
           *) die "TELIUM_RECOMMENDATIONS must be yes or no" ;;
         esac
-        # Size suggestions from the disks the volumes live on: three quarters
-        # of the media disk for all uploads, a tenth of each disk kept free.
-        # Measured from total size, not free space, so they do not shrink as
-        # the disk fills.
-        gib_of() { kb=$$(df -Pk "$$1" | tail -n 1 | tr -s ' ' | cut -d ' ' -f 2); echo $$((kb * $$2 / $$3 / 1048576)); }
-        at_least_1() { if [ "$$1" -lt 1 ]; then echo 1; else echo "$$1"; fi; }
-        media_total="$${TELIUM_MEDIA_TOTAL:-$$(at_least_1 "$$(gib_of /var/lib/telium 3 4)")GiB}"
-        media_free="$${TELIUM_MEDIA_FREE_RESERVE:-$$(at_least_1 "$$(gib_of /var/lib/telium 1 10)")GiB}"
-        backup_free="$${TELIUM_BACKUP_FREE_RESERVE:-$$(at_least_1 "$$(gib_of /var/backups/telium 1 10)")GiB}"
-        days="$${TELIUM_MEDIA_RETENTION_DAYS:-$$days_default}"
-        case "$${TELIUM_BACKUP_MEDIA:-$$media_default}" in
+        # Suggestions for every storage answer .env leaves empty, worked out
+        # on the first start and kept in the data volume after that, as the
+        # native installer decides them once. Switching registration from
+        # closed to open later then does not quietly start deleting old
+        # attachments, and the size limits do not move if the volume does.
+        # Answers set in .env always win.
+        #   retention, backup media: 30 days and no attachments in backups
+        #     for an open server; keep everything for a closed one
+        #   sizes: three quarters of the media disk for all uploads, a tenth
+        #     of each disk kept free (of its size, not of what is free now)
+        saved=/var/lib/telium/compose-suggestions
+        if [ ! -s "$$saved" ]; then
+          gib_of() { kb=$$(df -Pk "$$1" | tail -n 1 | tr -s ' ' | cut -d ' ' -f 2); g=$$((kb * $$2 / $$3 / 1048576)); [ "$$g" -ge 1 ] || g=1; echo "$${g}GiB"; }
+          if [ "$$open" = true ]; then s_days=30; s_media=no; else s_days=0; s_media=yes; fi
+          printf '%s\n' "# First-start storage suggestions, used for answers .env leaves empty." \
+            "s_days=$$s_days" "s_media=$$s_media" \
+            "s_total=$$(gib_of /var/lib/telium 3 4)" "s_free=$$(gib_of /var/lib/telium 1 10)" \
+            "s_backup_free=$$(gib_of /var/backups/telium 1 10)" > "$$saved.new"
+          mv -f "$$saved.new" "$$saved"
+        fi
+        s_days=; s_media=; s_total=; s_free=; s_backup_free=
+        while IFS='=' read -r key value; do
+          case "$$key" in
+            s_days) s_days="$$value" ;;
+            s_media) s_media="$$value" ;;
+            s_total) s_total="$$value" ;;
+            s_free) s_free="$$value" ;;
+            s_backup_free) s_backup_free="$$value" ;;
+          esac
+        done < "$$saved"
+        media_total="$${TELIUM_MEDIA_TOTAL:-$$s_total}"
+        media_free="$${TELIUM_MEDIA_FREE_RESERVE:-$$s_free}"
+        backup_free="$${TELIUM_BACKUP_FREE_RESERVE:-$$s_backup_free}"
+        days="$${TELIUM_MEDIA_RETENTION_DAYS:-$$s_days}"
+        case "$${TELIUM_BACKUP_MEDIA:-$$s_media}" in
           yes) backup_media=all ;;
           no)  backup_media=profile_assets ;;
           *) die "TELIUM_BACKUP_MEDIA must be yes or no" ;;
@@ -247,6 +273,11 @@ services:
       - server
     # It only talks to the Docker socket; pulls are made by the daemon.
     network_mode: none
+    # On SELinux hosts, a confined container may not read the socket or this
+    # directory. The socket already makes it root-equivalent, so the label
+    # protects nothing here.
+    security_opt:
+      - label=disable
     environment:
       TELIUM_UPDATES: ${TELIUM_UPDATES:-automatic}
       TELIUM_PIN: ${TELIUM_PIN:-}
