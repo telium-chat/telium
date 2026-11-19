@@ -1,19 +1,44 @@
 {
-  "generated_at": "2026-11-19T06:56:39.211Z",
+  "generated_at": "2026-11-19T07:02:32.454Z",
   "sfus": {
     "https://sfu.notdiscord.fyi": {
       "url": "https://sfu.notdiscord.fyi",
       "ok": false,
-      "checked_at": "2026-11-19T06:56:38.745Z",
+      "checked_at": "2026-11-19T07:02:32.289Z",
       "error": "Invalid IP address: undefined",
       "accepting": null,
       "rooms": null,
       "participants": null,
       "service": null,
-      "probe_ms": 466,
+      "probe_ms": 165,
+      "uptime_30d": null,
+      "samples": 2,
+      "first_probe_at": "2026-11-19T06:56:39.000Z",
+      "eligibility": {
+        "eligible": false,
+        "reasons": [
+          "listing_too_new",
+          "insufficient_observed_age",
+          "unreachable",
+          "insufficient_probe_history",
+          "uptime_below_minimum"
+        ],
+        "weight": 1
+      }
+    },
+    "https://sfu.yapper.cloud": {
+      "url": "https://sfu.yapper.cloud",
+      "ok": false,
+      "checked_at": "2026-11-19T07:02:32.293Z",
+      "error": "Invalid IP address: undefined",
+      "accepting": null,
+      "rooms": null,
+      "participants": null,
+      "service": null,
+      "probe_ms": 45,
       "uptime_30d": null,
       "samples": 1,
-      "first_probe_at": "2026-11-19T06:56:39.000Z",
+      "first_probe_at": "2026-11-19T07:02:32.000Z",
       "eligibility": {
         "eligible": false,
         "reasons": [
