@@ -78,11 +78,11 @@ test('the document matches the shape the Rust verifier reads', () => {
   assert.equal(document.serial, 7)
   // Integer epoch milliseconds: the Rust side parses i64, not ISO strings.
   assert.equal(document.issued_at, NOW)
-  assert.equal(document.expires_at, NOW + 120 * 60 * 1000)
+  assert.equal(document.expires_at, NOW + 7 * 24 * 60 * 60 * 1000)
   assert.deepEqual(document.criteria, {
     min_observed_age_days: 0,
     min_uptime_percent: 0,
-    max_probe_age_minutes: 180,
+    max_probe_age_minutes: 24 * 60,
   })
   assert.equal(document.sfus.length, 1)
   assert.equal(document.sfus[0].url, 'https://sfu.example')

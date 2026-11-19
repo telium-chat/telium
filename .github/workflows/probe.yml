@@ -7,9 +7,9 @@ on:
   #
   # The odd minute avoids the top-of-hour Actions queue spike.
   schedule:
-    - cron: '7 * * * *'
+    - cron: '7 */6 * * *'
   # A merged listing is probed right away, so a new entry does not sit at
-  # "Unreachable" until the next hourly run. The probe's own commit only touches
+  # "Unreachable" until the next scheduled run. The probe's own commit only touches
   # data/, so it does not re-trigger this.
   push:
     branches: [main]
