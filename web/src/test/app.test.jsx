@@ -342,6 +342,24 @@ describe('the client', () => {
     expect(await within(dialog).findByRole('button', { name: 'Open Carol’s profile' })).toBeTruthy();
     expect(within(dialog).queryByText('@carol:home.example')).toBeNull();
 
+    // A mutual friend opens as a full card, not the popover.
+    await user.click(within(dialog).getByRole('button', { name: 'Open Carol’s profile' }));
+    await waitFor(() => {
+      const open = screen.getAllByRole('dialog');
+      expect(open.some((d) => !d.closest('.popover') && /Carol/.test(d.textContent))).toBe(true);
+      expect(open.some((d) => d.closest('.popover'))).toBe(false);
+    });
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await user.click(within(members).getByText('Bob'));
+    await user.click(await within(await screen.findByRole('dialog')).findByRole('button', { name: 'Open full profile' }));
+    dialog = await waitFor(() => {
+      const full = screen.getAllByRole('dialog').find((d) => !d.closest('.popover'));
+      expect(full).toBeTruthy();
+      return full;
+    });
+    await user.click(within(dialog).getByRole('tab', { name: /mutual friends?$/i }));
+
     await user.click(within(dialog).getByRole('tab', { name: /mutual servers?$/i }));
     expect(await within(dialog).findByTitle(/\(guilds\.example\)$/)).toBeTruthy();
 

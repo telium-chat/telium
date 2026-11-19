@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { act, screen, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { DmSidePanel } from '../views/DmSidePanel.jsx';
 import { freshStore, HOME } from './fake-server.js';
 import { ME, mount } from './harness.jsx';
@@ -23,5 +24,21 @@ describe("a group conversation's member list", () => {
       store.emit('presence', mine);
     });
     expect(within(list).getByText('THE FINALS')).toBeTruthy();
+  });
+
+  it('closes a member\u2019s profile when their row is pressed again', async () => {
+    const store = freshStore();
+    store.me = { user_id: ME };
+    store.session = { home: { user_id: ME, device_id: 'd1', domain: HOME } };
+    const convo = { id: 'gc1', kind: 'gc', members: [{ user_id: ME }, { user_id: BOB }] };
+    mount(<DmSidePanel convo={convo} />, store);
+    const user = userEvent.setup();
+    const row = within(screen.getByRole('complementary', { name: 'Members' })).getByRole('button', { name: /bob/ });
+
+    await user.click(row);
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+
+    await user.click(row);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 });
