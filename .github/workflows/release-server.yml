@@ -540,9 +540,14 @@ jobs:
           cid="$(docker create "$IMAGE")"
           docker cp "$cid:/usr/share/telium/deploy/compose.yml" "$SMOKE/compose.yml"
           docker cp "$cid:/usr/share/telium/deploy/telium.example.toml" "$SMOKE/telium.example.toml"
+          docker cp "$cid:/usr/share/telium/deploy/compose/update.sh" "$SMOKE/compose-update.sh"
+          docker cp "$cid:/usr/share/telium/deploy/compose/compose.yml" "$SMOKE/compose-kit.yml"
           docker rm "$cid" > /dev/null
           cmp "$SMOKE/compose.yml" deploy/compose.yml
           cmp "$SMOKE/telium.example.toml" server/telium.example.toml
+          # The Compose kit's updater reads its logic out of this image.
+          cmp "$SMOKE/compose-update.sh" deploy/compose/update.sh
+          cmp "$SMOKE/compose-kit.yml" deploy/compose/compose.yml
           # `docker compose config` is what parses the file, and compose
           # refuses a declared env_file that is missing -- the cloudflared
           # service's tunnel.env lives on the box and is deliberately not in

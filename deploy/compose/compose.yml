@@ -1,0 +1,441 @@
+# Telium homeserver -- the whole deployment in one Compose file.
+#
+#   mkdir telium && cd telium
+#   curl -fsSLO https://raw.githubusercontent.com/telium-chat/telium/main/deploy/compose/compose.yml
+#   printf 'TELIUM_DOMAIN=chat.example.com\nTELIUM_REGISTRATION=open\n' > .env
+#   docker compose up -d
+#
+# That is a homeserver on 127.0.0.1:8448 that keeps itself up to date. Point
+# your reverse proxy at it (or add COMPOSE_PROFILES=proxy to .env and the
+# Caddy in this file does HTTPS for you). Full guide:
+# https://docs.telium.chat/self-hosting/install-docker/
+#
+# Settings go in .env beside this file, not in your shell. The updater
+# re-reads this file and .env from inside its own container when it recreates
+# a service; a value that exists only in your shell would quietly vanish the
+# first time it does.
+#
+# Services:
+#
+#   server    always on. Writes its telium.toml from TELIUM_CONFIG below on
+#             every start, then runs.
+#   updater   always on. Pulls new releases and restarts what moved. Turn it
+#             off with TELIUM_UPDATES=manual, not by removing it.
+#   sfu       COMPOSE_PROFILES=voice. The voice/video relay for group calls.
+#   caddy     COMPOSE_PROFILES=proxy. HTTPS with automatic certificates, for
+#             boxes with no reverse proxy of their own.
+#
+# Nothing here bind-mounts a file from this directory into the server: the
+# server's whole configuration is the TELIUM_CONFIG block below, so the file
+# you are reading is the deployment, and the updater (which sees this
+# directory at a different path inside its container) can recreate any
+# service without getting a path wrong.
+
+name: telium
+
+networks:
+  telium:
+    name: telium
+    ipam:
+      config:
+        # Pinned so that telium.toml can name the proxies it trusts by
+        # address: .1 is the gateway, which every connection from a reverse
+        # proxy on the host arrives from; .2 is the Caddy below.
+        - subnet: 172.31.241.0/28
+
+services:
+  server:
+    image: ${TELIUM_IMAGE:-ghcr.io/telium-chat/telium:server-latest}
+    restart: unless-stopped
+    # The server gives in-flight requests up to 15s on SIGTERM; this is the
+    # backstop above that, not a race against it.
+    stop_grace_period: 20s
+
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+
+    environment:
+      # Required. Compose stops with these messages if they are missing.
+      TELIUM_DOMAIN: ${TELIUM_DOMAIN:?set TELIUM_DOMAIN in .env to the hostname clients reach, e.g. chat.example.com}
+      TELIUM_REGISTRATION: ${TELIUM_REGISTRATION:?set TELIUM_REGISTRATION in .env to open or closed}
+      TELIUM_RECOMMENDATIONS: ${TELIUM_RECOMMENDATIONS:-no}
+      # Optional storage and backup answers -- the same names and formats the
+      # native installer asks about. Empty means "use the suggestion": see
+      # the entrypoint below for what each suggestion is.
+      TELIUM_MEDIA_POLICY: ${TELIUM_MEDIA_POLICY:-quota}
+      TELIUM_MEDIA_QUOTA: ${TELIUM_MEDIA_QUOTA:-1GiB}
+      TELIUM_MEDIA_FILE_MAX: ${TELIUM_MEDIA_FILE_MAX:-50MiB}
+      TELIUM_MEDIA_TOTAL: ${TELIUM_MEDIA_TOTAL:-}
+      TELIUM_MEDIA_FREE_RESERVE: ${TELIUM_MEDIA_FREE_RESERVE:-}
+      TELIUM_MEDIA_RETENTION_DAYS: ${TELIUM_MEDIA_RETENTION_DAYS:-}
+      TELIUM_BACKUP_MEDIA: ${TELIUM_BACKUP_MEDIA:-}
+      TELIUM_BACKUP_INTERVAL: ${TELIUM_BACKUP_INTERVAL:-6h}
+      TELIUM_BACKUP_KEEP: ${TELIUM_BACKUP_KEEP:-2}
+      TELIUM_BACKUP_FREE_RESERVE: ${TELIUM_BACKUP_FREE_RESERVE:-}
+
+      # The server's configuration. Edit it here, then `docker compose up -d`:
+      # a change to this block recreates the server with it. Any key from
+      # telium.example.toml can be added. The @WORDS@ are filled in by the
+      # entrypoint from the answers above; replace one with a literal value if
+      # you would rather decide it here.
+      TELIUM_CONFIG: |
+        # Identity: the part of a user id after the colon. Fixed once the
+        # first account exists. To have @you:example.com while the server
+        # lives at chat.example.com, set TELIUM_SERVER_NAME=example.com in
+        # .env before anyone registers.
+        server_name = "${TELIUM_SERVER_NAME:-${TELIUM_DOMAIN}}"
+        # Where clients actually reach the server, through your proxy.
+        public_base_url = "https://${TELIUM_DOMAIN}"
+        bind = "0.0.0.0:8448"
+        database_url = "sqlite:///var/lib/telium/telium.db?mode=rwc"
+        media_dir = "/var/lib/telium/media"
+
+        [registration]
+        # Nobody becomes a server administrator by signing up first. After you
+        # register, make your own account admin from this machine:
+        #   docker compose exec server telium-server admin recover NAME --reason "Initial server owner"
+        first_account_is_admin = false
+        open = @REGISTRATION_OPEN@
+        admins = []
+
+        [registration.recommendations]
+        # Referrals from telium.chat's public list (open servers only).
+        accepting = @RECOMMENDATIONS@
+
+        [media_policy]
+        default = "@MEDIA_POLICY@"
+        quota_bytes = "@MEDIA_QUOTA@"
+        max_file_bytes = "@MEDIA_FILE_MAX@"
+        max_total_bytes = "@MEDIA_TOTAL@"
+        min_free_bytes = "@MEDIA_FREE_RESERVE@"
+        default_expiry_secs = 0
+        max_expiry_secs = 0
+        attachment_max_age_days = @MEDIA_RETENTION_DAYS@
+
+        [rate_limit]
+        # Whose X-Forwarded-For to believe: a proxy on the host (it arrives
+        # from the network gateway) and the bundled Caddy. Nothing outside
+        # this machine can reach either address.
+        trusted_proxies = [${TELIUM_TRUSTED_PROXIES:-"172.31.241.1", "172.31.241.2"}]
+
+        [backup]
+        # Its own volume, so removing the data volume does not take the
+        # archives with it. Save backup.key off this machine.
+        dir = "/var/backups/telium/archives"
+        key_file = "/var/backups/telium/backup.key"
+        enabled = true
+        interval_secs = "@BACKUP_INTERVAL@"
+        keep = @BACKUP_KEEP@
+        media_mode = "@BACKUP_MEDIA@"
+        min_free_bytes = "@BACKUP_FREE_RESERVE@"
+
+        [archive]
+        dir = "/var/lib/telium/cold"
+
+        [mfa]
+        key_file = "/var/lib/telium/mfa.key"
+
+        # Voice: uncomment with COMPOSE_PROFILES=voice (and the SFU domains).
+        #[voice]
+        #enabled = true
+        #default_region = "local"
+        #
+        #[[voice.regions]]
+        #name = "local"
+        #sfu = "https://${TELIUM_SFU_DOMAIN:-sfu.example.com}"
+
+    # Fills in the @WORDS@, writes /var/lib/telium/telium.toml (the path the
+    # server's own CLI looks for by default, so `docker compose exec server
+    # telium-server backup list` needs no --config), and execs the server.
+    # The file is regenerated on every start; edit TELIUM_CONFIG, not it.
+    # ($$ is how Compose spells a literal $.)
+    entrypoint:
+      - /bin/sh
+      - -euc
+      - |
+        die() { echo "telium: $$*" >&2; exit 64; }
+        case "$$TELIUM_REGISTRATION" in
+          open)   open=true;  days_default=30; media_default=no ;;
+          closed) open=false; days_default=0;  media_default=yes ;;
+          *) die "TELIUM_REGISTRATION must be open or closed, not '$$TELIUM_REGISTRATION'" ;;
+        esac
+        case "$$TELIUM_REGISTRATION:$$TELIUM_RECOMMENDATIONS" in
+          open:yes) recommendations=true ;;
+          *:yes|*:no) recommendations=false ;;
+          *) die "TELIUM_RECOMMENDATIONS must be yes or no" ;;
+        esac
+        # Size suggestions from the disks the volumes live on: three quarters
+        # of the media disk for all uploads, a tenth of each disk kept free.
+        # Measured from total size, not free space, so they do not shrink as
+        # the disk fills.
+        gib_of() { kb=$$(df -Pk "$$1" | tail -n 1 | tr -s ' ' | cut -d ' ' -f 2); echo $$((kb * $$2 / $$3 / 1048576)); }
+        at_least_1() { if [ "$$1" -lt 1 ]; then echo 1; else echo "$$1"; fi; }
+        media_total="$${TELIUM_MEDIA_TOTAL:-$$(at_least_1 "$$(gib_of /var/lib/telium 3 4)")GiB}"
+        media_free="$${TELIUM_MEDIA_FREE_RESERVE:-$$(at_least_1 "$$(gib_of /var/lib/telium 1 10)")GiB}"
+        backup_free="$${TELIUM_BACKUP_FREE_RESERVE:-$$(at_least_1 "$$(gib_of /var/backups/telium 1 10)")GiB}"
+        days="$${TELIUM_MEDIA_RETENTION_DAYS:-$$days_default}"
+        case "$${TELIUM_BACKUP_MEDIA:-$$media_default}" in
+          yes) backup_media=all ;;
+          no)  backup_media=profile_assets ;;
+          *) die "TELIUM_BACKUP_MEDIA must be yes or no" ;;
+        esac
+        for v in "$$TELIUM_MEDIA_POLICY" "$$TELIUM_MEDIA_QUOTA" "$$TELIUM_MEDIA_FILE_MAX" "$$media_total" \
+                 "$$media_free" "$$days" "$$TELIUM_BACKUP_INTERVAL" "$$TELIUM_BACKUP_KEEP" "$$backup_free"; do
+          case "$$v" in *[!A-Za-z0-9.]*|'') die "'$$v' is not a valid storage or backup value" ;; esac
+        done
+        umask 077
+        printf '%s\n' "# GENERATED from TELIUM_CONFIG in compose.yml on every start. Edits here are lost." \
+          "$$TELIUM_CONFIG" | sed \
+          -e "s|@REGISTRATION_OPEN@|$$open|" \
+          -e "s|@RECOMMENDATIONS@|$$recommendations|" \
+          -e "s|@MEDIA_POLICY@|$$TELIUM_MEDIA_POLICY|" \
+          -e "s|@MEDIA_QUOTA@|$$TELIUM_MEDIA_QUOTA|" \
+          -e "s|@MEDIA_FILE_MAX@|$$TELIUM_MEDIA_FILE_MAX|" \
+          -e "s|@MEDIA_TOTAL@|$$media_total|" \
+          -e "s|@MEDIA_FREE_RESERVE@|$$media_free|" \
+          -e "s|@MEDIA_RETENTION_DAYS@|$$days|" \
+          -e "s|@BACKUP_INTERVAL@|$$TELIUM_BACKUP_INTERVAL|" \
+          -e "s|@BACKUP_KEEP@|$$TELIUM_BACKUP_KEEP|" \
+          -e "s|@BACKUP_MEDIA@|$$backup_media|" \
+          -e "s|@BACKUP_FREE_RESERVE@|$$backup_free|" \
+          > /var/lib/telium/telium.toml.new
+        mv -f /var/lib/telium/telium.toml.new /var/lib/telium/telium.toml
+        exec telium-server --config /var/lib/telium/telium.toml "$$@"
+      - telium-server
+    command: ["serve"]
+
+    volumes:
+      # The data: SQLite, uploads, caches, keys. This is what gets lost.
+      - telium-data:/var/lib/telium
+      # Backups, deliberately in a different volume. Still on this machine:
+      # see the Backups docs for copying archives off it.
+      - telium-backups:/var/backups/telium
+
+    # Loopback only. Your reverse proxy connects here; the internet does not.
+    ports:
+      - "127.0.0.1:${TELIUM_PORT:-8448}:8448"
+
+    networks:
+      telium:
+        ipv4_address: 172.31.241.3
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  updater:
+    # Every minute: pull the images this project runs, and if one moved,
+    # warn connected users, wait out the notice, and recreate what moved.
+    #
+    # The update logic itself ships inside the server image and is read from
+    # the server container on every run, so each release brings its own
+    # updater with it and this container never has to replace itself.
+    #
+    # It drives Docker through the socket, which is root-equivalent on this
+    # machine. That is the price of a container that restarts containers;
+    # TELIUM_UPDATES=manual keeps it running but changing nothing.
+    image: ${TELIUM_UPDATER_IMAGE:-docker:cli}
+    restart: unless-stopped
+    depends_on:
+      - server
+    # It only talks to the Docker socket; pulls are made by the daemon.
+    network_mode: none
+    environment:
+      TELIUM_UPDATES: ${TELIUM_UPDATES:-automatic}
+      TELIUM_PIN: ${TELIUM_PIN:-}
+      TELIUM_PIN_REASON: ${TELIUM_PIN_REASON:-}
+      # HH:MM-HH:MM in UTC (this container has no time zone database).
+      TELIUM_UPDATE_WINDOW: ${TELIUM_UPDATE_WINDOW:-}
+      TELIUM_RESTART_NOTICE_SECS: ${TELIUM_RESTART_NOTICE_SECS:-300}
+      TELIUM_UPDATE_INTERVAL_SECS: ${TELIUM_UPDATE_INTERVAL_SECS:-60}
+    volumes:
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+      # This directory, so the updater recreates services from the same
+      # compose.yml and .env you run. Read-only: it never edits them.
+      - .:/project:ro
+      # What it remembers between runs: a held release, the pin override.
+      - updater-state:/state
+    entrypoint:
+      - /bin/sh
+      - -uc
+      - |
+        logic=/usr/share/telium/deploy/compose/update.sh
+        while :; do
+          # The server container of this project, running or not.
+          project="$$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' "$$HOSTNAME")"
+          server="$$(docker ps -aq --filter "label=com.docker.compose.project=$$project" --filter label=com.docker.compose.service=server | head -n 1)"
+          if [ -n "$$server" ] && docker cp "$$server:$$logic" /usr/local/bin/telium-update.new >/dev/null 2>&1; then
+            mv -f /usr/local/bin/telium-update.new /usr/local/bin/telium-update
+            chmod 755 /usr/local/bin/telium-update
+            telium-update || echo "telium-update: run failed (exit $$?); trying again next interval" >&2
+          elif [ "$$TELIUM_UPDATES" = automatic ] && [ -z "$$TELIUM_PIN" ] && [ -n "$$server" ]; then
+            # A server release from before the updater shipped inside it:
+            # just follow the channel until one that carries it arrives.
+            image="$$(docker inspect --format '{{.Config.Image}}' "$$server")"
+            if docker pull -q "$$image" >/dev/null &&
+               [ "$$(docker image inspect --format '{{.Id}}' "$$image")" != "$$(docker inspect --format '{{.Image}}' "$$server")" ]; then
+              echo "new server image; recreating the server"
+              files="$$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$$HOSTNAME")"
+              dir="$$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "$$HOSTNAME")"
+              set --
+              for f in $$(echo "$$files" | tr ',' ' '); do set -- "$$@" -f "/project$${f#"$$dir"}"; done
+              docker compose -p "$$project" --project-directory /project "$$@" up -d --no-deps server
+            fi
+          fi
+          sleep "$$TELIUM_UPDATE_INTERVAL_SECS"
+        done
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  sfu:
+    # Group calls. telium-sfu and the LiveKit server it supervises, in one
+    # container. Media leaves straight from here; HTTP stays on loopback for
+    # your proxy (or the bundled Caddy) to front.
+    image: ${TELIUM_SFU_IMAGE:-ghcr.io/telium-chat/telium:sfu-latest}
+    restart: unless-stopped
+    profiles:
+      - voice
+    stop_grace_period: 30s
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    environment:
+      TELIUM_DOMAIN: ${TELIUM_DOMAIN:?set TELIUM_DOMAIN in .env}
+      TELIUM_SERVER_NAME: ${TELIUM_SERVER_NAME:-${TELIUM_DOMAIN}}
+      TELIUM_SFU_DOMAIN: ${TELIUM_SFU_DOMAIN:-}
+      TELIUM_LIVEKIT_DOMAIN: ${TELIUM_LIVEKIT_DOMAIN:-}
+      SFU_CONFIG: |
+        bind = "0.0.0.0:7890"
+
+        [livekit]
+        mode = "spawn"
+        url = "http://127.0.0.1:7880"
+        public_url = "https://@LIVEKIT_DOMAIN@"
+        binary = "livekit-server"
+        config_dir = "/var/lib/telium-sfu"
+
+        [livekit.rtc]
+        # Behind Docker's NAT: advertise the host's public address.
+        use_external_ip = true
+
+        [livekit.turn]
+        enabled = true
+        udp_port = 3478
+
+        [trust]
+        discovery = true
+        cache_ttl_secs = 86400
+        # Only your homeserver. See the SFU docs before making it public.
+        public = false
+
+        [[trust.origins]]
+        server_name = "@SERVER_NAME@"
+        discovery_url = "https://@DOMAIN@"
+
+        [admin]
+        enabled = true
+        bind = "0.0.0.0:7891"
+    entrypoint:
+      - /bin/sh
+      - -euc
+      - |
+        [ -n "$$TELIUM_SFU_DOMAIN" ] && [ -n "$$TELIUM_LIVEKIT_DOMAIN" ] ||
+          { echo "telium-sfu: set TELIUM_SFU_DOMAIN and TELIUM_LIVEKIT_DOMAIN in .env" >&2; exit 64; }
+        umask 077
+        printf '%s\n' "$$SFU_CONFIG" | sed \
+          -e "s|@LIVEKIT_DOMAIN@|$$TELIUM_LIVEKIT_DOMAIN|" \
+          -e "s|@SERVER_NAME@|$$TELIUM_SERVER_NAME|" \
+          -e "s|@DOMAIN@|$$TELIUM_DOMAIN|" > /var/lib/telium-sfu/sfu.toml.new
+        mv -f /var/lib/telium-sfu/sfu.toml.new /var/lib/telium-sfu/sfu.toml
+        exec telium-sfu serve --config /var/lib/telium-sfu/sfu.toml
+    volumes:
+      # The generated LiveKit keys; losing them strands every call token.
+      - sfu-state:/var/lib/telium-sfu
+    ports:
+      # API, dashboard, LiveKit signalling: loopback, for the proxy.
+      - "127.0.0.1:7890:7890"
+      - "127.0.0.1:7891:7891"
+      - "127.0.0.1:7880:7880"
+      # Media, straight to the internet. Open these in the firewall.
+      - "7881:7881"
+      - "3478:3478/udp"
+      - "50000-60000:50000-60000/udp"
+    networks:
+      telium:
+        ipv4_address: 172.31.241.4
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    # Optional HTTPS front for a box with no reverse proxy: publishes 80 and
+    # 443 and gets certificates by itself. Leave it off when you run your own
+    # proxy on the host; point that at 127.0.0.1:8448 instead.
+    image: caddy:2
+    restart: unless-stopped
+    profiles:
+      - proxy
+    depends_on:
+      - server
+    environment:
+      TELIUM_DOMAIN: ${TELIUM_DOMAIN:?set TELIUM_DOMAIN in .env}
+      TELIUM_SFU_DOMAIN: ${TELIUM_SFU_DOMAIN:-}
+      TELIUM_LIVEKIT_DOMAIN: ${TELIUM_LIVEKIT_DOMAIN:-}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    # The Caddyfile is written at start, with the SFU sites only when their
+    # domains are set.
+    entrypoint:
+      - /bin/sh
+      - -euc
+      - |
+        {
+          [ -z "$$ACME_EMAIL" ] || printf '{\n\temail %s\n}\n\n' "$$ACME_EMAIL"
+          printf '%s {\n' "$$TELIUM_DOMAIN"
+          printf '\trequest_body {\n\t\tmax_size 128MB\n\t}\n'
+          printf '\treverse_proxy server:8448 {\n\t\ttransport http {\n\t\t\tread_timeout 0\n\t\t\twrite_timeout 0\n\t\t}\n\t}\n'
+          printf '\tencode zstd gzip\n}\n'
+          if [ -n "$$TELIUM_SFU_DOMAIN" ] && [ -n "$$TELIUM_LIVEKIT_DOMAIN" ]; then
+            printf '%s {\n\thandle /admin* {\n\t\treverse_proxy sfu:7891\n\t}\n\thandle {\n\t\treverse_proxy sfu:7890\n\t}\n}\n' "$$TELIUM_SFU_DOMAIN"
+            printf '%s {\n\treverse_proxy sfu:7880\n}\n' "$$TELIUM_LIVEKIT_DOMAIN"
+          fi
+        } > /etc/caddy/Caddyfile
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      telium:
+        ipv4_address: 172.31.241.2
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  telium-data:
+  telium-backups:
+  sfu-state:
+  caddy-data:
+  caddy-config:
+  updater-state:
