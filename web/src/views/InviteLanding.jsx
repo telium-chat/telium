@@ -14,7 +14,7 @@ import {
   Avatar, Button, EmojiText, Hint, Notice, PasswordInput, TextInput,
 } from '../components/index.js';
 import { AccountHomePicker } from './AccountHomePicker.jsx';
-import { AccountAddress, HomeChip, useAlternativeHomesOffered } from './AccountHome.jsx';
+import { AccountAddress, HomeChip, UsernamePreview, useAlternativeHomesOffered } from './AccountHome.jsx';
 import { downloadRecoveryKey, recoveryKeyNote } from './user-settings/RecoveryParts.jsx';
 import { ScreeningDialog } from './dialogs/ScreeningDialog.jsx';
 import { Trans, useT } from '../lib/i18n/react.jsx';
@@ -105,6 +105,8 @@ export function InviteLanding({
   );
   const [customHome, setCustomHome] = useState(initialHome);
   const [changingHome, setChangingHome] = useState(false);
+  // The recommended home's account domain, which can differ from its API origin's host.
+  const [pickedHome, setPickedHome] = useState(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState(null);
   const fail = (text) => setNotice({ tone: 'danger', text });
@@ -556,13 +558,15 @@ export function InviteLanding({
               placeholder={mode === 'register'
                 ? t('onboarding.invite.usernamePlaceholder')
                 : t('onboarding.invite.accountIdPlaceholder')}
-              hint={mode === 'register' ? t('onboarding.invite.usernameHint') : null}
               onChange={(e) => {
                 setUsername(e.target.value);
                 setLegacyAuth(null);
                 setLegacyApproved(false);
               }}
             />
+            {mode === 'register' ? (
+              <UsernamePreview user={username} host={pickedHome?.domain || prettyHost(customHome)} />
+            ) : null}
 
             {askForCode ? (
               <TextInput
@@ -603,6 +607,7 @@ export function InviteLanding({
                 disabled={busy}
                 loadRecommendations={loadHomeRecommendations}
                 random={homeRandom}
+                onSelect={setPickedHome}
                 onChange={(value) => {
                   setCustomHome(value);
                   setLegacyAuth(null);

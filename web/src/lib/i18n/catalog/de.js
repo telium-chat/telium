@@ -5451,7 +5451,6 @@ export const messages = {
   'onboarding.invite.unopenableTitle': 'Diese Einladung ließ sich nicht öffnen',
   'onboarding.invite.unreachable': 'Der Server der Gilde war nicht erreichbar.',
   'onboarding.invite.useAnotherAccount': 'Ein anderes Konto verwenden',
-  'onboarding.invite.usernameHint': 'Das wird der erste Teil deiner Telium-Konto-ID.',
   'onboarding.invite.usernamePlaceholder': 'deinname',
   'onboarding.recoveryKey.body': 'Er kann dein Passwort zurücksetzen und dein verschlüsseltes Konto wiederherstellen.',
   'onboarding.recoveryKey.clipboardLabel': 'Wiederherstellungsschlüssel',

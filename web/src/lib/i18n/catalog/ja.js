@@ -5493,7 +5493,6 @@ export const messages = {
   'onboarding.invite.unopenableTitle': 'この招待を開けませんでした',
   'onboarding.invite.unreachable': 'ギルドのサーバーに接続できませんでした。',
   'onboarding.invite.useAnotherAccount': '別のアカウントを使う',
-  'onboarding.invite.usernameHint': 'これは Telium アカウント ID の最初の部分になります。',
   'onboarding.invite.usernamePlaceholder': 'yourname',
   'onboarding.recoveryKey.body': 'パスワードのリセットと、暗号化されたアカウントの復旧ができます。',
   'onboarding.recoveryKey.clipboardLabel': '復旧鍵',

@@ -278,4 +278,16 @@ describe('public invite onboarding', () => {
       meta.remove();
     }
   });
+  it('previews the full account address under the username, as regular sign-up does', async () => {
+    const server = createFakeServer({ suggestAlternatives: true });
+    server.install();
+    const store = freshStore();
+    const user = userEvent.setup();
+    renderInvite(store);
+
+    await screen.findByText('Community Home');
+    expect(screen.queryByText(/first part of your Telium account id/i)).toBeNull();
+    await user.type(screen.getByLabelText('Username'), 'New');
+    await waitFor(() => expect(screen.getByTestId('username-preview').textContent).toContain('new@home.example'));
+  });
 });

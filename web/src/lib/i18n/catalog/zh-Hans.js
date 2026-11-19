@@ -1400,7 +1400,6 @@ export const messages = {
   'onboarding.invite.unopenableTitle': '无法打开此邀请',
   'onboarding.invite.unreachable': '无法连接到服务器。',
   'onboarding.invite.useAnotherAccount': '使用其他账号',
-  'onboarding.invite.usernameHint': '它将作为你 Telium 账号 ID 的第一部分。',
   'onboarding.invite.usernamePlaceholder': '你的名字',
   'onboarding.recoveryKey.body': '它可以重置你的密码并恢复你加密的账号。',
   'onboarding.recoveryKey.clipboardLabel': '恢复密钥',
