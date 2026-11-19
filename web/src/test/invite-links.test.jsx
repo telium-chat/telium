@@ -70,6 +70,17 @@ describe('links and invites in messages', () => {
     expect(store.session.servers['guilds.example']).toBeTruthy();
   });
 
+  it('labels a call invite as a call, so it does not read as a guild invite', async () => {
+    const { server, store, user } = await bootDm();
+    server.state.invite.call = true;
+    await openDm(server, store, user, 'hop in https://guilds.example/invite/INVITE1');
+
+    const join = await screen.findByRole('button', { name: 'Join call' });
+    const card = join.closest('.invite-card');
+    expect(card.textContent).toContain('Voice call invite');
+    expect(card.textContent).toContain('Telium');
+  });
+
   it('renders a portal invite link as a card for the server the link names', async () => {
     const { server, store, user } = await bootDm();
     await openDm(server, store, user, 'come hang out https://telium.chat/invite/INVITE1@guilds.example');

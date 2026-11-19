@@ -1183,6 +1183,11 @@ async fn a_call_invite_is_one_link_that_ends_with_the_call() {
     assert_eq!(again["code"], code.as_str(), "asking twice returns the same link");
     assert_eq!(rows().await, 1, "never more than one row per call");
 
+    // The preview says it is a call's link, so a card can tell it from a standing guild invite.
+    let (status, preview) = s.get(&format!("/_telium/v1/invites/{code}"), None).await;
+    assert_eq!(status, 200, "{preview}");
+    assert_eq!(preview["call"], true, "{preview}");
+
     // Someone with no account in the guild can use it; it is a normal invite.
     let (status, joined) = s.post(&format!("/_telium/v1/invites/{code}/join"), Some(&carol.token), json!({})).await;
     assert_eq!(status, 200, "{joined}");
