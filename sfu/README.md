@@ -33,10 +33,10 @@ In the browser, choose **Full installation** or **Portable native installation**
 
 | Mode | Best for | System changes |
 | --- | --- | --- |
-| Full | A fresh Ubuntu/Debian VPS | Installs packages, nginx, Certbot, a service account, systemd units, and UFW rules where enabled. It retains the existing automated HTTPS setup. |
+| Full | An Ubuntu/Debian VPS | Detects Caddy or nginx and asks you to confirm which to use. Installs Caddy only if neither is present. Existing proxy configuration is never deleted or replaced: Telium adds its own file (`/etc/caddy/telium-sfu.caddy` or an nginx server file for its two hostnames). Adding one `import` line to an existing Caddyfile needs your explicit consent (backup + rollback). Also installs a service account, systemd units, and UFW rules where enabled. |
 | Portable | A shared bare-metal host using an existing reverse proxy | Downloads the release SFU + LiveKit under a selected `/opt/…` or `/srv/…` directory. Creates a dedicated service account and three systemd units, but doesn't install packages or touch nginx, certificates, or the firewall. |
 
-Full mode installs a privileged nginx/Certbot helper for the dashboard;
+Full mode installs a privileged proxy/certificate helper for the dashboard;
 portable mode **does not**. Both modes install an automatic native updater
 (checking every five minutes, draining calls and rolling back on a failed
 health check). Portable mode checks the downloaded release **before** installing
@@ -79,8 +79,8 @@ upgrades) to `http://127.0.0.1:7880`. Provide trusted HTTPS certificates
 for both names and permit the required WebRTC media ports in your own firewall.
 The browser-facing endpoints must be HTTPS/WSS for real voice calls.
 
-In full mode, the existing wizard also configures nginx and Let's Encrypt
-automatically. The full-mode dashboard lives at
+In full mode, the dashboard also configures HTTPS for the proxy you chose
+(Caddy certificates, or Let's Encrypt via Certbot for nginx) automatically. The full-mode dashboard lives at
 `https://<your-sfu-domain>/admin`; portable operators should normally
 keep the admin dashboard private to SSH rather than proxying it publicly.
 WebRTC media uses TCP 7881, UDP 3478 and UDP 50000-60000.
