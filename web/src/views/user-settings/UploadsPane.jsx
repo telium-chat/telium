@@ -134,6 +134,7 @@ export function UploadsPane({ onClose } = {}) {
           <ProgressBar
             value={Math.min(100, (summary.used / summary.quota) * 100)}
             label={tr('settings.uploads.usageLabel')}
+            className="h-2.5"
           />
           <Hint>{tr('settings.media.usage', {
             used: bytes(summary.used), quota: bytes(summary.quota), home,

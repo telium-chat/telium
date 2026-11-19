@@ -10,7 +10,10 @@ import { PING_WINDOW, useVoice } from '../hooks/useVoice.jsx';
 import { t } from '../lib/i18n/index.js';
 import { formatCallElapsed } from '../lib/call-elapsed.js';
 import { useT } from '../lib/i18n/react.jsx';
-import { Avatar, EmojiText, IconButton, SpinnerIcon } from '../components/index.js';
+import {
+  Avatar, ContextMenu, EmojiText, IconButton, MenuSeparator, MenuSlider, SpinnerIcon,
+} from '../components/index.js';
+import { useMenus } from './menus.jsx';
 import { Tooltip } from '../components/Tooltip.jsx';
 import { AudioQuickMenu } from '../components/AudioQuickMenu.jsx';
 import {
@@ -244,8 +247,9 @@ function AudioTool({ voice }) {
 
 const FACE_LIMIT = 7;
 
-function Roster({ participants, store, channel, speaking }) {
+function Roster({ participants, store, channel, speaking, voice }) {
   useT();
+  const menus = useMenus();
   if (!participants.length) return null;
   const live = speaking instanceof Set ? speaking : new Set();
   const shown = participants.slice(0, FACE_LIMIT);
@@ -264,18 +268,40 @@ function Roster({ participants, store, channel, speaking }) {
           guildId: channel?.guild_id, guildBase, guildDomain, state: v,
         });
         const label = face?.name || shortName(v.user_id);
+        const mine = v.user_id === store.me?.user_id;
+        // Right-click for the same menu as the channel list, with their volume on it.
+        const menu = () => (
+          <>
+            {menus.voice(v, channel?.guild_id)}
+            {mine ? null : (
+              <>
+                <MenuSeparator />
+                <MenuSlider
+                  label={t('voice.tile.volume')}
+                  value={voice.volumeFor?.(v.user_id) ?? 100}
+                  max={200}
+                  onChange={(value) => voice.setUserVolume?.(v.user_id, value)}
+                />
+              </>
+            )}
+          </>
+        );
         return (
-          <Tooltip key={v.user_id} label={label} side="top">
-            <Avatar
-              id={v.user_id}
-              name={face?.name}
-              size="sm"
-              mediaRef={face.mediaRef}
-              base={face.base}
-              mediaOrigin={face.mediaOrigin}
-              className={cn('voice-face', live.has(v.user_id) && 'is-talking')}
-            />
-          </Tooltip>
+          <ContextMenu key={v.user_id} content={menu}>
+            <span className="inline-flex">
+              <Tooltip label={label} side="top">
+                <Avatar
+                  id={v.user_id}
+                  name={face?.name}
+                  size="sm"
+                  mediaRef={face.mediaRef}
+                  base={face.base}
+                  mediaOrigin={face.mediaOrigin}
+                  className={cn('voice-face', live.has(v.user_id) && 'is-talking')}
+                />
+              </Tooltip>
+            </span>
+          </ContextMenu>
         );
       })}
       {rest > 0 ? (
@@ -423,6 +449,7 @@ export function VoiceBar() {
           store={store}
           channel={channel}
           speaking={voice.speaking}
+          voice={voice}
         />
         <div role="toolbar" aria-label={t('voice.bar.toolbar')} className="mt-2 grid grid-cols-5 gap-1.5">
           <Tool
