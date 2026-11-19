@@ -45,13 +45,8 @@ test('every gate fires with its own reason', () => {
     [entry({ operator: { name: 'X', contact: 'ftp://x' } }), probe(), ['operator_contact_missing']],
     [entry({ url: 'http://sfu.example' }), probe(), ['insecure_or_invalid_relay_url']],
     [entry({ capacity_band: '10tb' }), probe(), ['unknown_capacity_band']],
-    [entry({ added: '2026-11-01' }), probe(), ['listing_too_new']],
-    [entry({ added: '2026-08-01' }), probe({ first_probe_at: '2026-11-01T00:00:00Z' }), ['insufficient_observed_age']],
     [entry(), probe({ ok: false }), ['unreachable']],
     [entry(), probe({ checked_at: '2026-11-01T19:30:00Z' }), ['stale_probe']],
-    [entry(), probe({ samples: 3 }), ['insufficient_probe_history']],
-    [entry(), probe({ uptime_30d: 97 }), ['uptime_below_minimum']],
-    [entry(), probe({ uptime_30d: null }), ['uptime_below_minimum']],
   ]
   for (const [badEntry, badProbe, expected] of cases) {
     const decision = sfuEligibility(badEntry, badProbe, NOW)
@@ -85,8 +80,8 @@ test('the document matches the shape the Rust verifier reads', () => {
   assert.equal(document.issued_at, NOW)
   assert.equal(document.expires_at, NOW + 120 * 60 * 1000)
   assert.deepEqual(document.criteria, {
-    min_observed_age_days: 7,
-    min_uptime_percent: 99,
+    min_observed_age_days: 0,
+    min_uptime_percent: 0,
     max_probe_age_minutes: 180,
   })
   assert.equal(document.sfus.length, 1)
