@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-11-19T03:18:04.757Z",
+  "generated_at": "2026-11-19T06:56:38.695Z",
   "servers": {
     "notdiscord.fyi": {
       "domain": "notdiscord.fyi",
       "ok": true,
-      "checked_at": "2026-11-19T03:18:04.129Z",
+      "checked_at": "2026-11-19T06:56:38.272Z",
       "error": null,
       "server_name": "notdiscord.fyi",
       "api_origin": "https://notdiscord.fyi",
@@ -12,7 +12,7 @@
       "moved_to": null,
       "sunset": null,
       "registration_open": true,
-      "server_version": "0.5.0",
+      "server_version": "0.5.1",
       "roles": {
         "guild": true,
         "identity": true,
@@ -53,9 +53,9 @@
       },
       "recommendations_accepting": true,
       "recommendations_referral_weight": 1,
-      "probe_ms": 628,
+      "probe_ms": 304,
       "uptime_30d": null,
-      "samples": 17,
+      "samples": 18,
       "first_probe_at": "2026-11-14T19:44:19.000Z",
       "recommendation": {
         "eligible": true,
@@ -66,7 +66,7 @@
     "yapper.cloud": {
       "domain": "yapper.cloud",
       "ok": true,
-      "checked_at": "2026-11-19T03:18:04.133Z",
+      "checked_at": "2026-11-19T06:56:38.275Z",
       "error": null,
       "server_name": "yapper.cloud",
       "api_origin": "https://yapper.cloud",
@@ -74,7 +74,7 @@
       "moved_to": null,
       "sunset": null,
       "registration_open": true,
-      "server_version": "0.5.0",
+      "server_version": "0.5.1",
       "roles": {
         "guild": true,
         "identity": true,
@@ -115,9 +115,9 @@
       },
       "recommendations_accepting": true,
       "recommendations_referral_weight": 1,
-      "probe_ms": 541,
+      "probe_ms": 420,
       "uptime_30d": null,
-      "samples": 3,
+      "samples": 4,
       "first_probe_at": "2026-11-18T23:48:18.000Z",
       "recommendation": {
         "eligible": true,

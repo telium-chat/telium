@@ -1,4 +1,30 @@
 {
-  "generated_at": null,
-  "sfus": {}
+  "generated_at": "2026-11-19T06:56:39.211Z",
+  "sfus": {
+    "https://sfu.notdiscord.fyi": {
+      "url": "https://sfu.notdiscord.fyi",
+      "ok": false,
+      "checked_at": "2026-11-19T06:56:38.745Z",
+      "error": "Invalid IP address: undefined",
+      "accepting": null,
+      "rooms": null,
+      "participants": null,
+      "service": null,
+      "probe_ms": 466,
+      "uptime_30d": null,
+      "samples": 1,
+      "first_probe_at": "2026-11-19T06:56:39.000Z",
+      "eligibility": {
+        "eligible": false,
+        "reasons": [
+          "listing_too_new",
+          "insufficient_observed_age",
+          "unreachable",
+          "insufficient_probe_history",
+          "uptime_below_minimum"
+        ],
+        "weight": 1
+      }
+    }
+  }
 }
