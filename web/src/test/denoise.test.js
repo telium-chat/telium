@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  BENCHMARK_CEILING, DEEPFILTER_CEILING, DEEPFILTER_OVERLOAD, DEFAULT_NOISE_MODE, NOISE_MODES, OVERLOAD, benchmarkVerdict, micConstraints,
+  BENCHMARK_CEILING, DEEPFILTER_CEILING, DEFAULT_NOISE_MODE, NOISE_MODES, OVERLOAD, benchmarkVerdict, micConstraints,
   neuralCapability, normalizeNoiseMode, createGovernor, ENGINES, noiseChange, GOVERNOR, nextEngine, judgeSample, PERMANENT_REASONS, unavailableBecause,
 } from '../lib/denoise.js';
 
@@ -158,18 +158,16 @@ describe('standing aside mid-call', () => {
     expect(judgeSample({ load: 0.1, underrunRatio: 0.9 })).toBe(false);
   });
 
-  it('counts a DeepFilterNet3 window bad when one frame outran its quantum, whatever the average', () => {
-    const late = { load: 0.1, worstMs: 3, quantumMs: 128_000 / 48_000 };
-    const onTime = { load: 0.1, worstMs: 1, quantumMs: 128_000 / 48_000 };
-    expect(judgeSample(late, DEEPFILTER_OVERLOAD)).toBe(true);
-    expect(judgeSample(onTime, DEEPFILTER_OVERLOAD)).toBe(false);
-    // RNNoise's long quanta are the machine, not the model.
-    expect(judgeSample(late, OVERLOAD)).toBe(false);
+  it('does not count one long quantum against a model whose average is light', () => {
+    // A 4 ms quantum on a 3% load is the thread being paused, not the model being slow.
+    expect(judgeSample({ load: 0.03, worstMs: 4, quantumMs: 128_000 / 48_000 })).toBe(false);
   });
 
-  it('starts DeepFilterNet3 only where a frame fits well inside one render quantum', () => {
-    const quantumMs = 128_000 / 48_000;
-    expect(DEEPFILTER_CEILING * 10).toBeLessThan(quantumMs * 0.6);
+  it('keeps DeepFilterNet3 to machines with slack left for the rest of the call', () => {
+    expect(DEEPFILTER_CEILING).toBeLessThan(BENCHMARK_CEILING);
+    // A current desktop CPU measures about 0.03.
+    expect(benchmarkVerdict({ frames: 100, cpuMs: 31 }, DEEPFILTER_CEILING).ok).toBe(true);
+    expect(benchmarkVerdict({ frames: 100, cpuMs: 350 }, DEEPFILTER_CEILING).ok).toBe(false);
   });
 
   it('holds still when a browser reports neither', () => {

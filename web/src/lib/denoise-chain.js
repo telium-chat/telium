@@ -1,7 +1,7 @@
 // Main-thread half of neural noise cancellation; only reached via dynamic `import()`.
 
 import {
-  DEEPFILTER_CEILING, DEEPFILTER_OVERLOAD, FRAME_SAMPLES, OVERLOAD, benchmarkVerdict, createGovernor, nextEngine,
+  DEEPFILTER_CEILING, FRAME_SAMPLES, benchmarkVerdict, createGovernor, nextEngine,
 } from './denoise.js';
 
 // `?worker&url` (not `?url`) so Vite bundles the worklet's imports.
@@ -258,16 +258,15 @@ export class DenoiseChain {
     this.lastLoad = message.load;
     // The worklet has a clock, so it wins and the capacity events stand down.
     this.watching = 'worklet';
-    this.strike({ load: message.load, worstMs: message.worstMs, quantumMs: message.quantumMs });
+    this.strike({ load: message.load });
   }
 
   strike(sample) {
     if (this.paused || this.spent) return;
-    const heavy = this.engine === 'dfn3';
-    const verdict = this.governor.push(sample, heavy ? DEEPFILTER_OVERLOAD : OVERLOAD);
+    const verdict = this.governor.push(sample);
     if (!verdict) return;
-    // A model with a lighter one below it is swapped for that one, not paused: a pause only brings the same late frames back in 15 seconds.
-    if (verdict.giveUp || (heavy && nextEngine(this.engine))) { this.stepDown('too-slow'); return; }
+    // A model with a lighter one below it is swapped for that one, not paused: a pause only brings the same heavy model back in 15 seconds.
+    if (verdict.giveUp || nextEngine(this.engine)) { this.stepDown('too-slow'); return; }
     this.pause(verdict.pauseMs, sample);
   }
 

@@ -60,7 +60,7 @@ export const FRAME_MS = 10;
 /// Fraction of one core the model may take (laptop ~1.4%, mid phone ~10%).
 export const BENCHMARK_CEILING = 0.25;
 
-/// DeepFilterNet3 costs about eleven times what RNNoise does (about 9% of a core against under 1% on a laptop-class CPU). Its average is not the limit, though: the worklet runs a whole 10 ms frame inside one 2.67 ms render quantum, so a share of 0.35 (3.5 ms a frame) could never finish one in time, and the far end heard every late frame as a gap. 0.15 keeps a frame near half a quantum, with room for a busy machine; the governor still steps down mid-call if frames start running long.
+/// DeepFilterNet3 costs about eleven times what RNNoise does (about 3% of a core on a current desktop CPU, 0.3 ms a frame, against under 1% for RNNoise). A frame does not have to fit in the 2.67 ms render quantum it runs in: the device takes about 10 ms of audio per callback, so a slow frame borrows from the quanta around it. What breaks is a share that leaves no slack when the rest of the machine is busy too: measured in Chromium, frames at a third of a core played clean on an idle machine and dropped out hundreds of times in ten seconds with every core loaded. 0.15 keeps that slack.
 export const DEEPFILTER_CEILING = 0.15;
 
 /// The ladder: each engine yields to the next when a call cannot afford it, and the one after the last is the browser's own suppressor.
@@ -90,9 +90,6 @@ export function noiseChange(applied, wanted) {
 /// What a busy machine looks like. `load` is the model's own share of the audio thread (worklet clock); `underruns` is Chromium's whole-context underrun ratio, a hint that only counts when the worklet cannot report its own load, because it also rises when something else starves the audio thread, which dropping the model does not fix.
 export const OVERLOAD = { load: 0.6, underruns: 0.05 };
 
-/// DeepFilterNet3 is also judged on its slowest quantum: a frame that takes longer than the quantum it runs in is late however low the average is. RNNoise frames are a tenth of a millisecond, so a long one there is the machine pausing the thread, which dropping the model does not fix.
-export const DEEPFILTER_OVERLOAD = { ...OVERLOAD, frameBudget: true };
-
 /// Judged over a sliding window rather than in a row, and answered by pausing with a growing delay rather than by giving up: a game launching or a screen share starting is a bad half minute, not a verdict on the device.
 export const GOVERNOR = {
   /// Windows are about a second long.
@@ -105,15 +102,9 @@ export const GOVERNOR = {
   calm: 60,
 };
 
-/// `true` bad, `false` good, `null` not measured (the count must not move). `worstMs` against `quantumMs` counts only where `limits.frameBudget` asks for it. Where the worklet has only `Date.now()`, the worst reads in whole milliseconds and up to one high, so a 3 against a 2.67 ms quantum still means more than 2 ms was spent.
-export function judgeSample({
-  load = null, underrunRatio = null, worstMs = null, quantumMs = null,
-} = {}, limits = OVERLOAD) {
-  if (Number.isFinite(load)) {
-    const late = Boolean(limits.frameBudget) && Number.isFinite(worstMs) && Number.isFinite(quantumMs)
-      && worstMs > quantumMs;
-    return load > limits.load || late;
-  }
+/// `true` bad, `false` good, `null` not measured (the count must not move). The slowest single quantum is not judged: one long quantum is the machine pausing the audio thread, which a lighter model does not fix.
+export function judgeSample({ load = null, underrunRatio = null } = {}, limits = OVERLOAD) {
+  if (Number.isFinite(load)) return load > limits.load;
   if (Number.isFinite(underrunRatio)) return underrunRatio > limits.underruns;
   return null;
 }
