@@ -442,7 +442,7 @@ empty_timeout = 300
 max_participants = 0             # 0 = unlimited
 
 [limits]
-max_bitrate = 8000000            # per-participant publish ceiling (bps); join tokens are clamped to it
+max_bitrate = 10000000            # per-participant publish ceiling (bps); join tokens are clamped to it
 enforce = true                   # mute video tracks declared over the ceiling (see §15)
 poll_interval_secs = 15          # how often the sweep lists each active room
 

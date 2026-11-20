@@ -579,7 +579,7 @@ stun_servers = ["stun:stun.l.google.com:19302"]
 # How long a call-join token lives before the client quietly renews it.
 token_ttl_secs = "10m"
 # Bitrate ceiling handed to clients; the streamer spends the budget.
-max_bitrate = "2.5Mbps"
+max_bitrate = "10Mbps"
 # People who may screenshare in one channel at once.
 max_streamers_per_channel = 4
 # Peer-to-peer calls are used when no SFU is configured; more than this many
