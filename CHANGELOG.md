@@ -14,8 +14,8 @@ hands, not which PRs merged.
 
 ## 19 November 2026
 
-- Screen sharing is much smoother on SFU calls: the share is sent as one full-quality stream with a much bigger bitrate budget, and borrows your camera's share of it when your camera is off.
-- Servers and SFUs that haven't set their own voice bitrate limit now default to 10 Mbps per person.
+- Screen sharing is much smoother.
+- Servers and Relays that haven't set their own bitrate limit now default to 10 Mbps per person.
 
 ## 17 November 2026
 
