@@ -21,7 +21,14 @@ expect_ok "install a portable relay" --mode portable --dry-run
 expect_ok "install-portable.sh /srv/relay" --mode portable --dir /srv/relay --dry-run
 expect_ok "/opt/telium-sfu/bin/telium-sfu --config /opt/telium-sfu/config/sfu.toml configure --private --homeserver chat.example.com" \
   --mode portable --private --homeserver chat.example.com --dry-run
-expect_ok "install a full relay" --mode full --proxy caddy-new --dry-run
+# Which proxy choices exist depends on the machine (CI runners ship nginx), so
+# use one the detector actually offers; skip when none is.
+proxy="$(bash "$here/../install-full.sh" --detect-proxy 2>/dev/null | sed -n 's/^recommended=//p' | head -n1)"
+if [[ -n "$proxy" ]]; then
+  expect_ok "install a full relay" --mode full --proxy "$proxy" --dry-run
+else
+  echo "skipped full-mode plan check: no supported proxy detected"
+fi
 
 # Paths the privileged installer must never be pointed at.
 for bad in /etc/telium /opt /opt/../etc /opt/./x /opt//x /opt/x/.. relative/path "/opt/x y"; do
