@@ -1,6 +1,7 @@
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { isPortalHost } from './homeserver.js';
 import { unb64 } from './util.js';
+import { teliumFetch } from './net/transport.js';
 
 export const RECOMMENDATION_KIND = 'telium.account_home_recommendations';
 export const RECOMMENDATION_VERSION = 1;
@@ -220,7 +221,7 @@ export const loadAccountHomeRecommendations = async ({
   url = recommendationUrl(),
   // Read at call time, like `hasPinnedRecommendationKey`.
   publicKey = pinnedRecommendationKey(),
-  fetchImpl = fetch,
+  fetchImpl = (target, init) => teliumFetch(target, init, { purpose: 'Server recommendations', native: true }),
   storageImpl = typeof localStorage !== 'undefined' ? localStorage : null,
   nowMs = Date.now(),
 } = {}) => {

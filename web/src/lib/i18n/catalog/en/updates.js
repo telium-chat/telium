@@ -90,6 +90,7 @@ export const updates = {
   // said only "Install" and then vanished the window would be a button people
   // learn not to press.
   'updates.action.install': 'Install and restart',
+  'updates.action.installAndroid': 'Update',
   'updates.action.reload': 'Reload',
   'updates.action.store': 'Open the store',
   // For the runtimes that cannot install anything. Not a call to action --
@@ -127,6 +128,8 @@ export const updates = {
   'updates.state.ready': 'Telium {version} is ready. Restart to use it.',
   'updates.action.restart': 'Restart',
   'updates.action.retry': 'Retry update',
+  'updates.state.permission': 'Android needs your permission first: allow Telium to install apps in the settings that just opened, come back, and tap Update again.',
+  'updates.state.handoff': 'Confirm the update in Android\'s installer. Telium restarts when it finishes.',
   // The failure sentence does not say why, and that is deliberate. The reasons
   // -- a truncated download, a signature that did not verify, a read-only
   // install directory -- are all things the reader cannot act on differently,

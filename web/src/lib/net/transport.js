@@ -1,6 +1,7 @@
 // Single outbound chokepoint.
 
 import { isNativeShellRuntime } from '../platform.js';
+import { androidFetch, androidFetchAvailable } from '../android-native.js';
 import { decide, REFUSAL } from './policy.js';
 import {
   openTunnelFetch, openTunnelSocket, relayCapability, relayUnderstood, tunnelSupported,
@@ -142,7 +143,8 @@ function refuse(domain, decision) {
   throw error;
 }
 
-export async function teliumFetch(url, init = {}, { purpose = 'request' } = {}) {
+/// `native` is for a public, unauthenticated read of another site's document (discovery, the signed feeds): on Android the WebView's CORS rules would refuse it, so the native side reads it. Never for anything that carries credentials.
+export async function teliumFetch(url, init = {}, { purpose = 'request', native = false } = {}) {
   const { domain, decision } = route(url, purpose);
   if (decision.route === 'refuse') refuse(domain, decision);
   if (decision.route === 'protected') {
@@ -150,13 +152,17 @@ export async function teliumFetch(url, init = {}, { purpose = 'request' } = {}) 
       return await openTunnelFetch(domain, url, init);
     } catch (err) {
       const retry = effectiveMode(domain);
-      if (retry.route === 'direct') return viaChokepoint(() => fetch(url, init));
+      if (retry.route === 'direct') return viaChokepoint(() => rawFetch(url, init, native));
       const failure = { ...retry, refusal: REFUSAL.failed, route: 'refuse' };
       err.protection = true;
       refuse(domain, failure);
     }
   }
-  return viaChokepoint(() => fetch(url, init));
+  return viaChokepoint(() => rawFetch(url, init, native));
+}
+
+function rawFetch(url, init, native) {
+  return native && androidFetchAvailable() ? androidFetch(url, init) : fetch(url, init);
 }
 
 export function teliumSocket(url, protocols, { purpose = 'gateway' } = {}) {

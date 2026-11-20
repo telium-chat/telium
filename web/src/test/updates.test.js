@@ -212,11 +212,11 @@ describe('what a build can do about being behind', () => {
 
   it('offers an install only on the runtime that owns its own executable', () => {
     expect(deliveryFor('desktop')).toBe(Delivery.Install);
-    expect(deliveryFor('android')).toBe(Delivery.Store);
+    expect(deliveryFor('android')).toBe(Delivery.Sideload);
     expect(deliveryFor('desktop-tauri')).toBe(Delivery.Package);
     expect(deliveryFor('web')).toBe(Delivery.Reload);
     expect(configured({ manifest: two }).canInstall).toBe(true);
-    for (const runtime of ['android', 'desktop-tauri', 'web']) {
+    for (const runtime of ['desktop-tauri', 'web']) {
       const state = configured({ manifest: two, runtime });
       expect(state.behind, runtime).toBe(true);
       expect(state.canInstall, runtime).toBe(false);
@@ -287,3 +287,26 @@ describe('the notice and how long it stays dismissed', () => {
   });
 });
 
+
+describe('android self-update policy', () => {
+  const androidManifest = (versions, key = 'android-apk') => parseManifest(manifestBytes({
+    kind: 'telium.client_releases',
+    version: 1,
+    releases: versions.map((version) => ({
+      version,
+      artifacts: { [key]: { url: `https://example.org/${version}.apk`, sha256: 'a'.repeat(64), size: 10 } },
+    })),
+  }));
+
+  it('installs in place on a sideloaded build', () => {
+    const state = configured({ manifest: androidManifest(['0.3.0', '0.2.0']), runtime: 'android', current: '0.2.0' });
+    expect(state.delivery).toBe(Delivery.Sideload);
+    expect(state.canInstall).toBe(true);
+    expect(state.latest.version).toBe('0.3.0');
+  });
+
+  it('ignores a release that has no Android artifact, so a desktop manifest announces nothing', () => {
+    const state = configured({ manifest: androidManifest(['9.0.0'], 'desktop-windows-x86_64'), runtime: 'android', current: '0.2.0' });
+    expect(state.behind).toBe(false);
+  });
+});

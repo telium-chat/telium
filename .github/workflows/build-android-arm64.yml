@@ -46,26 +46,19 @@ env:
   VITE_TELIUM_RECOMMENDATION_PUBLIC_KEY: ${{ vars.TELIUM_RECOMMENDATION_PUBLIC_KEY }}
   VITE_TELIUM_RECOMMENDATION_URL: ${{ vars.TELIUM_RECOMMENDATION_URL }}
 
-  # Deliberately no `VITE_TELIUM_UPDATE_URL` or `VITE_TELIUM_UPDATE_PUBLIC_KEY`
-  # here, unlike the desktop workflows.
+  # Android reads its own signed manifest, never the desktop one.
   #
-  # The published client manifest describes desktop artifacts. It has no
-  # `android-apk` entry, and `assess()` picks the newest release newer than the
-  # running version before looking for that entry -- so an Android build given
-  # the desktop publisher would, on the first desktop release ahead of it,
-  # announce a new version and then say there is nothing for this machine.
-  # Every Android install would show a notice that is wrong, every time the
-  # desktop app shipped.
-  #
-  # Empty is a named state rather than a broken one: `publisherState()` returns
-  # `unconfigured`, no request is made, and no notice appears. Protocol
-  # incompatibility (gateway close 4015) is a fact about the socket and still
-  # reaches the reader without a publisher. Android has no automatic update
-  # path yet -- the download page always links to the newest preview -- and
-  # when it gets one, the manifest has to learn that a version belongs to a
-  # platform before this build may read it.
-  VITE_TELIUM_UPDATE_PUBLIC_KEY: ''
-  VITE_TELIUM_UPDATE_URL: ''
+  # The desktop manifest orders desktop versions (0.4.x) and Android has its own
+  # train (0.2.x), so one shared list would compare unrelated numbers. The
+  # publish job below writes `android-releases.json` (+ `.sig`, same
+  # format and same release key, see `scripts/sign-client-manifest.mjs`) onto
+  # the rolling `android-latest` release, and the client additionally ignores
+  # any release that lacks an `android-apk` artifact (`assess()` in
+  # `web/src/lib/updates.js`), so a desktop manifest replayed at this URL
+  # announces nothing. The URL and key are compiled in, as on desktop; with no
+  # `TELIUM_RELEASE_PUBLIC_KEY` the client makes no request at all.
+  VITE_TELIUM_UPDATE_PUBLIC_KEY: ${{ vars.TELIUM_RELEASE_PUBLIC_KEY }}
+  VITE_TELIUM_UPDATE_URL: https://github.com/${{ github.repository }}/releases/download/android-latest/android-releases.json
 
 jobs:
   build:
@@ -406,6 +399,47 @@ jobs:
           sha256sum Telium_arm64.apk > SHA256SUMS-android-arm64
           cat SHA256SUMS-android-arm64 >> "$GITHUB_STEP_SUMMARY"
 
+      # The Android half of the signed client manifest: what lets an installed
+      # copy find, verify and install the next one (`AndroidSelfUpdate.kt`).
+      # The artifact URL is the immutable versioned tag, not `android-latest`,
+      # so the digest signed here always matches the bytes served. Gated like
+      # the desktop halves: without the signing key there is no manifest and
+      # installed copies simply report that they cannot check.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        if: vars.RELEASE_SIGNING_ENABLED == 'true'
+        with:
+          # Into its own directory: checkout cleans its target, and the signed APK in `out/` must survive it.
+          path: tools
+          sparse-checkout: scripts
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: vars.RELEASE_SIGNING_ENABLED == 'true'
+        with:
+          node-version: 22
+
+      - name: Build and sign the Android release manifest
+        if: vars.RELEASE_SIGNING_ENABLED == 'true'
+        env:
+          TELIUM_RELEASE_SIGNING_KEY: ${{ secrets.TELIUM_RELEASE_SIGNING_KEY }}
+          TELIUM_RELEASE_PUBLIC_KEY: ${{ vars.TELIUM_RELEASE_PUBLIC_KEY }}
+          TELIUM_RELEASE_KEY_ID: ${{ vars.TELIUM_RELEASE_KEY_ID }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#android-v}"
+          rm -rf /tmp/android-previous && mkdir -p /tmp/android-previous
+          gh release download android-latest --repo "$GITHUB_REPOSITORY" \
+            --pattern android-releases.json --dir /tmp/android-previous --clobber || true
+          PREVIOUS=/tmp/android-previous/android-releases.json
+          [ -s "$PREVIOUS" ] || echo '{}' > "$PREVIOUS"
+          node tools/scripts/sign-client-manifest.mjs build \
+            --out out/android-releases.json \
+            --version "$VERSION" \
+            --previous "$PREVIOUS" \
+            --page "https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME" \
+            --artifact "android-apk=out/Telium_arm64.apk=https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/Telium_arm64.apk"
+          node tools/scripts/sign-client-manifest.mjs sign out/android-releases.json
+
       # The notes are written here rather than generated from commit titles,
       # because what a person needs before installing this is not a list of
       # commits: it is how to install it, and what this build is not.
@@ -427,9 +461,10 @@ jobs:
             in \`SHA256SUMS-android-arm64\`.
           - Built from \`${GITHUB_SHA}\`.
 
-          There is no automatic update yet. The download page always links to
-          the newest preview, and installing a newer one over an older one
-          works without uninstalling.
+          Installed copies check for updates themselves (a signed manifest,
+          verified before anything is downloaded) and hand the new APK to
+          Android's installer, which asks you to confirm. Installing a newer
+          one over an older one works without uninstalling.
           EOF
 
       - name: Publish the APK
@@ -439,6 +474,7 @@ jobs:
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#android-v}"
           ASSETS="out/Telium_arm64.apk out/SHA256SUMS-android-arm64"
+          for extra in out/android-releases.json out/android-releases.json.sig; do [ -f "$extra" ] && ASSETS="$ASSETS $extra"; done
 
           # The versioned release is the record of this tag, and its asset URL
           # is immutable because the tag is. A re-run against an existing tag
@@ -477,6 +513,7 @@ jobs:
         run: |
           set -euo pipefail
           ASSETS="out/Telium_arm64.apk out/SHA256SUMS-android-arm64"
+          for extra in out/android-releases.json out/android-releases.json.sig; do [ -f "$extra" ] && ASSETS="$ASSETS $extra"; done
           TITLE="Telium for Android — latest preview"
 
           if gh release view android-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then

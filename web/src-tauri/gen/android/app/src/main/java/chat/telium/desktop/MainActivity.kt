@@ -28,6 +28,7 @@ import org.json.JSONObject
 import java.io.OutputStream
 import java.util.Locale
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : TauriActivity() {
   private data class PendingSave(
@@ -53,6 +54,9 @@ class MainActivity : TauriActivity() {
   private lateinit var telecomCallManager: AndroidTelecomCallManager
   private var callActionReceiverRegistered = false
   private val saveExecutor = Executors.newSingleThreadExecutor()
+  /// Network reads and the update download, off the main thread. Two threads so a long APK download never blocks a discovery lookup.
+  private val netExecutor = Executors.newFixedThreadPool(2)
+  private val updateRunning = AtomicBoolean(false)
   private val callActionReceiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
       when (intent?.action) {
@@ -148,6 +152,8 @@ class MainActivity : TauriActivity() {
     installCallBridge(webView)
     installShareBridge(webView)
     installGofileBridge(webView)
+    installFetchBridge(webView)
+    installUpdateBridge(webView)
     AndroidNotificationBridge.install(this, webView)
   }
 
@@ -190,6 +196,7 @@ class MainActivity : TauriActivity() {
     }
     pendingSave = null
     saveExecutor.shutdownNow()
+    netExecutor.shutdownNow()
     teliumWebView = null
     super.onDestroy()
   }
@@ -262,6 +269,113 @@ class MainActivity : TauriActivity() {
   /// viewer-only disposable guest token obtained through Telium's authenticated
   /// control plane; it is never the uploader's token. Once installed, Chromium's own media
   /// stack requests the original Gofile URL directly, including byte ranges.
+  /// Public documents from other origins (see `AndroidNativeFetch`): the
+  /// WebView's CORS rules refuse them. Read-only, HTTPS-only and size-capped.
+  private fun installFetchBridge(webView: WebView) {
+    if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return
+    WebViewCompat.addWebMessageListener(
+      webView,
+      "teliumAndroidFetchBridge",
+      setOf("http://tauri.localhost", "https://tauri.localhost"),
+      WebViewCompat.WebMessageListener { _, message, _, isMainFrame, replyProxy ->
+        if (!isMainFrame || message.type != WebMessageCompat.TYPE_STRING) return@WebMessageListener
+        val payload = try { JSONObject(message.data ?: "") } catch (_: Exception) { return@WebMessageListener }
+        val requestId = payload.optString("request_id").takeIf { it.isNotBlank() }
+        if (payload.optString("op") != "get") {
+          reply(replyProxy, "get", ok = false, message = "Unknown network operation.", extra = responseExtra(requestId))
+          return@WebMessageListener
+        }
+        netExecutor.execute {
+          try {
+            val result = AndroidNativeFetch.get(
+              payload.optString("url"),
+              payload.optString("accept"),
+              payload.optString("redirect") == "follow",
+              payload.optInt("max_bytes", AndroidNativeFetch.MAX_BYTES_CEILING),
+            )
+            val extra = mutableMapOf<String, Any>(
+              "status" to result.status,
+              "url" to result.url,
+              "body_b64" to Base64.encodeToString(result.body, Base64.NO_WRAP),
+            )
+            result.contentType?.let { extra["content_type"] = it }
+            reply(replyProxy, "get", ok = true, extra = responseExtra(requestId, extra))
+          } catch (error: Exception) {
+            reply(
+              replyProxy, "get", ok = false,
+              message = if (error is AndroidNativeFetch.Refused) error.message else "Could not reach that address.",
+              extra = responseExtra(requestId),
+            )
+          }
+        }
+      },
+    )
+  }
+
+  /// Self-update (see `AndroidSelfUpdate`). JavaScript verified the signed
+  /// manifest; this side re-checks size, SHA-256 and signing certificate, then
+  /// hands the APK to Android's installer, which asks the reader to confirm.
+  private fun installUpdateBridge(webView: WebView) {
+    if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return
+    val updater = AndroidSelfUpdate(this)
+    WebViewCompat.addWebMessageListener(
+      webView,
+      "teliumAndroidUpdateBridge",
+      setOf("http://tauri.localhost", "https://tauri.localhost"),
+      WebViewCompat.WebMessageListener { _, message, _, isMainFrame, replyProxy ->
+        if (!isMainFrame || message.type != WebMessageCompat.TYPE_STRING) return@WebMessageListener
+        val payload = try { JSONObject(message.data ?: "") } catch (_: Exception) { return@WebMessageListener }
+        val requestId = payload.optString("request_id").takeIf { it.isNotBlank() }
+        when (payload.optString("op")) {
+          "status" -> reply(
+            replyProxy, "status", ok = true,
+            extra = responseExtra(requestId, mapOf("can_install" to updater.canInstall())),
+          )
+          "install" -> {
+            if (!updateRunning.compareAndSet(false, true)) {
+              reply(replyProxy, "install", ok = false, message = "An update is already in progress.", extra = responseExtra(requestId))
+              return@WebMessageListener
+            }
+            netExecutor.execute {
+              try {
+                var last = 0L
+                val result = updater.install(
+                  payload.optString("url"),
+                  payload.optString("sha256"),
+                  payload.optLong("size", -1),
+                  progress = { received, total ->
+                    val now = System.currentTimeMillis()
+                    if (now - last >= 250) {
+                      last = now
+                      reply(
+                        replyProxy, "install", ok = true,
+                        extra = responseExtra(requestId, mapOf("stage" to "progress", "received" to received, "total" to total)),
+                      )
+                    }
+                  },
+                  verifying = {
+                    reply(replyProxy, "install", ok = true, extra = responseExtra(requestId, mapOf("stage" to "verifying")))
+                  },
+                )
+                reply(replyProxy, "install", ok = true, extra = responseExtra(requestId, mapOf("stage" to "done", "result" to result)))
+              } catch (error: Exception) {
+                reply(
+                  replyProxy, "install", ok = false,
+                  message = if (error is AndroidSelfUpdate.Failed || error is AndroidNativeFetch.Refused) error.message
+                  else "The update could not be installed.",
+                  extra = responseExtra(requestId),
+                )
+              } finally {
+                updateRunning.set(false)
+              }
+            }
+          }
+          else -> reply(replyProxy, "update", ok = false, message = "Unknown update operation.", extra = responseExtra(requestId))
+        }
+      },
+    )
+  }
+
   private fun installGofileBridge(webView: WebView) {
     if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return
 
