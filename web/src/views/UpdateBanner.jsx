@@ -3,6 +3,7 @@ import { useStore, useStoreEvent } from '../hooks/useStore.jsx';
 import { Banner, Button, ProgressBar } from '../components/index.js';
 import { Kind } from '../lib/failure.js';
 import { openExternal } from '../lib/platform.js';
+import { androidUpdater } from '../lib/android-native.js';
 import { t } from '../lib/i18n/index.js';
 import { useT } from '../lib/i18n/react.jsx';
 import { bytes } from '../lib/util.js';
@@ -26,6 +27,8 @@ export function UpdateBanner() {
   const [now, setNow] = useState(() => Date.now());
   const [desktop, setDesktop] = useState(null);
   const [restarting, setRestarting] = useState(false);
+  // Android installs through its own bridge; the phases are the desktop's, so the rest of the banner reads either.
+  const [android, setAndroid] = useState(null);
 
   useEffect(() => {
     let live = true;
@@ -53,6 +56,23 @@ export function UpdateBanner() {
     bridge.state().then((state) => { if (live) setDesktop(state); }).catch(() => {});
     const off = bridge.onChanged((state) => { if (live) setDesktop(state); });
     return () => { live = false; off(); };
+  }, []);
+
+  const installAndroid = useCallback((notice) => {
+    const updater = androidUpdater();
+    if (!updater || !notice?.artifact) return;
+    const version = notice.version;
+    setAndroid({ phase: 'downloading', version, received: 0, total: notice.artifact.size });
+    updater.install(notice.artifact, (m) => {
+      setAndroid({
+        phase: m.stage === 'verifying' ? 'verifying' : 'downloading',
+        version,
+        received: m.received || 0,
+        total: m.total || notice.artifact.size,
+      });
+    }).then((m) => {
+      setAndroid({ phase: m.result === 'needs-permission' ? 'permission' : 'handoff', version });
+    }).catch(() => setAndroid({ phase: 'failed', version }));
   }, []);
 
   const incompatible = (store.gw?.failures?.() || []).some(
@@ -110,13 +130,15 @@ export function UpdateBanner() {
   }
   if (!notice) return null;
 
-  const busy = desktop?.phase === 'downloading' || desktop?.phase === 'verifying';
-  const failed = desktop?.phase === 'failed';
+  const progress = desktop || android;
+  const busy = progress?.phase === 'downloading' || progress?.phase === 'verifying';
+  const failed = progress?.phase === 'failed';
   // `assess` knows the manifest; only the desktop process knows whether this
   // install can actually be swapped (`electron/updater.cjs`). Overruling it
   // here is what keeps the button from promising an install the click cannot
   // keep -- which used to surface, after the fact, as the failure sentence.
-  const installable = notice.canInstall && desktop?.canInstall !== false;
+  const installable = notice.canInstall && desktop?.canInstall !== false
+    && (notice.delivery !== Delivery.Sideload || Boolean(androidUpdater()));
 
   return (
     <Banner
@@ -136,22 +158,34 @@ export function UpdateBanner() {
       {desktop && notice.canInstall && !installable
         ? <span>{t('updates.blocked.package')}</span>
         : null}
-      {busy ? <span>{t(`updates.state.${desktop.phase}`, { version: desktop.version })}</span> : null}
-      {desktop?.phase === 'downloading' && desktop.total > 0 ? (
+      {busy ? <span>{t(`updates.state.${progress.phase}`, { version: progress.version })}</span> : null}
+      {android?.phase === 'permission' ? <span>{t('updates.state.permission')}</span> : null}
+      {android?.phase === 'handoff' ? <span>{t('updates.state.handoff')}</span> : null}
+      {progress?.phase === 'downloading' && progress.total > 0 ? (
         <span className="flex items-center gap-2 whitespace-nowrap text-xs tabular-nums">
           <ProgressBar
-            value={Math.min(100, Math.round((desktop.received / desktop.total) * 100))}
-            label={t('updates.state.downloading', { version: desktop.version })}
+            value={Math.min(100, Math.round((progress.received / progress.total) * 100))}
+            label={t('updates.state.downloading', { version: progress.version })}
             className="w-36"
           />
           <span>
-            {t('updates.state.progress', { received: bytes(desktop.received), total: bytes(desktop.total) })}
+            {t('updates.state.progress', { received: bytes(progress.received), total: bytes(progress.total) })}
           </span>
         </span>
       ) : null}
-      {failed ? <span>{desktop.fault === 'not-launched' ? t('updates.state.restartFailed') : t('updates.state.failed')}</span> : null}
+      {failed ? <span>{desktop?.fault === 'not-launched' ? t('updates.state.restartFailed') : t('updates.state.failed')}</span> : null}
 
-      <UpdateAction notice={notice} busy={busy} installable={installable} desktop={desktop} store={store} />
+      <UpdateAction
+        notice={notice}
+        busy={busy}
+        installable={installable}
+        desktop={desktop}
+        failed={failed}
+        onInstall={() => (notice.delivery === Delivery.Sideload
+          ? installAndroid(notice)
+          : desktopUpdates()?.install()?.catch(() => {}))}
+        store={store}
+      />
 
       <Button
         size="sm"
@@ -165,7 +199,7 @@ export function UpdateBanner() {
   );
 }
 
-function UpdateAction({ notice, busy, installable, desktop, store }) {
+function UpdateAction({ notice, busy, installable, desktop, failed, onInstall, store }) {
   if (busy) return null;
 
   if (notice.delivery === Delivery.Reload) {
@@ -190,16 +224,16 @@ function UpdateAction({ notice, busy, installable, desktop, store }) {
       size="sm"
       variant="flat"
       className="ms-1 min-h-9 shrink-0 rounded-lg"
-      onClick={() => { desktopUpdates()?.install()?.catch(() => {}); }}
+      onClick={onInstall}
     >
-      {t('updates.action.install')}
+      {notice.delivery === Delivery.Sideload ? t('updates.action.installAndroid') : t('updates.action.install')}
     </Button>
   ) : null;
   // The release page travels with a failure -- the failure sentence says to
   // download it yourself, which without this link is advice going nowhere --
   // and with any state where this client cannot install. Otherwise it stays
   // out of the way of the button that works.
-  const page = notice.page && (desktop?.phase === 'failed' || !installable) ? (
+  const page = notice.page && (desktop?.phase === 'failed' || failed || !installable) ? (
     <Button
       key="page"
       size="sm"

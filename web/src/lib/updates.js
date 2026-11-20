@@ -4,6 +4,7 @@ import { ed25519 } from '@noble/curves/ed25519.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { runtime as buildRuntime, version as buildVersion } from './build.js';
 import { unb64 } from './util.js';
+import { teliumFetch } from './net/transport.js';
 
 /// Neither has a default: a compiled-in key would be the pin an attacker would choose.
 export const PUBLISHER_URL = import.meta.env?.VITE_TELIUM_UPDATE_URL || '';
@@ -206,8 +207,10 @@ export const Delivery = {
   /// Packaged Electron on Linux only: the one runtime that owns its executable.
   Install: 'install',
   Reload: 'reload',
-  /// A store (Play, F-Droid, sideload) owns the install; link to where.
+  /// A store (Play, F-Droid) owns the install; link to where.
   Store: 'store',
+  /// Android outside a store: Telium downloads and verifies the APK itself and hands it to Android's installer, which still asks the reader to confirm.
+  Sideload: 'sideload',
   /// A package manager or self-built binary; overwriting a distro package would corrupt its database.
   Package: 'package',
 };
@@ -224,7 +227,7 @@ export const Blocked = {
 
 export function deliveryFor(runtime = buildRuntime) {
   if (runtime === 'desktop') return Delivery.Install;
-  if (runtime === 'android') return Delivery.Store;
+  if (runtime === 'android') return Delivery.Sideload;
   if (runtime === 'desktop-tauri') return Delivery.Package;
   return Delivery.Reload;
 }
@@ -264,18 +267,22 @@ export function assess({
     };
   }
 
-  const releases = manifest?.releases ?? [];
+  const key = artifactKey(runtime, platform);
+  // Android's versions are their own train, so a release is only a candidate when it carries this runtime's artifact: a desktop manifest replayed at the Android URL must not announce a version that is a different program's.
+  const releases = (manifest?.releases ?? [])
+    .filter((release) => runtime !== 'android' || release.artifacts?.has(key));
   const latest = releases.find((release) => isNewer(release.version, current)) || null;
-  const artifact = latest?.artifacts?.get(artifactKey(runtime, platform)) || null;
+  const artifact = latest?.artifacts?.get(key) || null;
 
   // Asked of every missed release: a fix in the second of four must still surface.
   const security = releases.some(
     (release) => release.security && isNewer(release.version, current),
   );
 
-  const canInstall = Boolean(latest && artifact) && delivery === Delivery.Install;
+  const installs = delivery === Delivery.Install || delivery === Delivery.Sideload;
+  const canInstall = Boolean(latest && artifact) && installs;
   const blocked = !latest ? Blocked.None
-    : delivery !== Delivery.Install ? Blocked.Runtime
+    : !installs ? Blocked.Runtime
       : !artifact ? Blocked.NoArtifact
         : Blocked.None;
 
@@ -318,7 +325,7 @@ const FETCH_TIMEOUT_MS = 15_000;
 export async function fetchManifest({
   url = PUBLISHER_URL,
   key = PUBLISHER_KEY,
-  fetchImpl = globalThis.fetch,
+  fetchImpl = (target, init) => teliumFetch(target, init, { purpose: 'Update check', native: true }),
   timeoutMs = FETCH_TIMEOUT_MS,
 } = {}) {
   if (!url || !key) return { manifest: null, error: Unchecked.NoKey };
@@ -427,6 +434,7 @@ export function updateNotice(state, { now = Date.now(), dismissal = null } = {})
     version: state.latest?.version || '',
     page: state.latest?.page || '',
     canInstall: Boolean(state.canInstall),
+    artifact: state.artifact ? { url: state.artifact.url, sha256: state.artifact.sha256, size: state.artifact.size } : null,
     delivery: state.delivery,
     blocked: state.blocked,
   };

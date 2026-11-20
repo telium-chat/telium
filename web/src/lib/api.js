@@ -101,7 +101,7 @@ async function discoveryGet(url, limit, accept, { followRedirects = false } = {}
       redirect: followRedirects ? 'follow' : 'error',
       signal: controller.signal,
       headers: { Accept: accept },
-    }, { purpose: 'Account discovery' });
+    }, { purpose: 'Account discovery', native: true });
     // Following an HTTPS website redirect must never make an HTTP discovery
     // document authoritative. In production Fetch responses expose the final URL.
     if (followRedirects && new URL(url).protocol === 'https:' && response.url
