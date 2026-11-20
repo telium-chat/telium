@@ -4,13 +4,13 @@ import {
 } from '../views/user-settings/GifFavoritesPane.jsx';
 
 describe('Discord GIF favorites import', () => {
-  it('reads the exported URL map and preserves its order', () => {
+  it('reads the exported URL map newest first, since a larger order is newer', () => {
     expect(discordGifFavoriteUrls({
       'https://tenor.com/view/second-gif-2': { order: 20, src: 'https://media.tenor.com/second.mp4' },
       'https://cdn.example/first.gif': { order: 10 },
     })).toEqual([
-      'https://cdn.example/first.gif',
       'https://tenor.com/view/second-gif-2',
+      'https://cdn.example/first.gif',
     ]);
   });
 

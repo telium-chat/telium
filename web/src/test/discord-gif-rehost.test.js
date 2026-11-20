@@ -102,6 +102,8 @@ describe('Discord GIF Re-hosting & Import Helpers', () => {
           onProgress: (p) => progressUpdates.push(p),
         });
 
+        // Discord's order grows with the add date, so the newest (order 3) leads.
+        expect(result.urls[0]).toBe('https://giphy.com/gifs/third-gif');
         expect(result.externalCount).toBe(2);
         expect(result.rehostedCount).toBe(1);
         expect(result.failedCount).toBe(0);
