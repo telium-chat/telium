@@ -12,6 +12,18 @@ import { DISCORD_GIF_EXPORT_SCRIPT } from '../../lib/discordGifExport.js';
 import { copyToClipboard } from '../../lib/clipboard.js';
 import { downloadText } from './RecoveryParts.jsx';
 
+/// Discord numbers favorites upward as they are added, so a bigger `order` is newer; Telium lists newest first, as a
+/// new favorite is put at the front. An entry with no `order` keeps its place in the file, after the ones that have one.
+function newestFirst(am, ai, bm, bi) {
+  const ao = Number(am?.order);
+  const bo = Number(bm?.order);
+  const a = Number.isFinite(ao);
+  const b = Number.isFinite(bo);
+  if (a && b) return bo - ao || ai - bi;
+  if (a !== b) return a ? -1 : 1;
+  return ai - bi;
+}
+
 export function discordGifFavoriteUrls(document) {
   const entries = Array.isArray(document)
     ? document.map((url, index) => [url, null, index])
@@ -25,11 +37,7 @@ export function discordGifFavoriteUrls(document) {
       index,
     }))
     .filter((entry) => entry.url)
-    .sort((a, b) => {
-      const ao = Number(a.metadata.order);
-      const bo = Number(b.metadata.order);
-      return (Number.isFinite(ao) ? ao : a.index) - (Number.isFinite(bo) ? bo : b.index);
-    })
+    .sort((a, b) => newestFirst(a.metadata, a.index, b.metadata, b.index))
     .map(({ url }) => url);
 }
 
@@ -107,11 +115,7 @@ export async function processAndRehostFavorites({ document, home, onProgress }) 
         }))
       : [];
 
-  entries.sort((a, b) => {
-    const ao = Number(a.metadata?.order);
-    const bo = Number(b.metadata?.order);
-    return (Number.isFinite(ao) ? ao : a.index) - (Number.isFinite(bo) ? bo : b.index);
-  });
+  entries.sort((a, b) => newestFirst(a.metadata, a.index, b.metadata, b.index));
 
   const finalUrls = [];
   let rehostedCount = 0;
@@ -276,6 +280,9 @@ export function GifFavoritesPane() {
             <li>Copy the script below, paste it into the console, and press Enter. If it asks, type "allow pasting" first.</li>
             <li>It saves discord-favorite-gifs-fresh.json. Choose that file here.</li>
           </ol>
+          <Hint>
+            The script uses your Discord session to ask Discord for fresh links to your attachments. It only talks to Discord, and nothing is sent to Telium until you choose the file.
+          </Hint>
           <div className="flex flex-wrap items-center gap-3">
             <Button variant="secondary" onClick={copyScript}>Copy export script</Button>
             <Button disabled={busy} onClick={() => jsonInput.current?.click()}>
