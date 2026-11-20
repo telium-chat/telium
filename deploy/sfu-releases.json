@@ -1,7 +1,29 @@
 {
   "channel": "releases",
-  "generated_at": 1795122971987,
+  "generated_at": 1795139745129,
   "releases": [
+    {
+      "version": "0.2.5",
+      "commit": "9c70714ffcf7a8923d28e2dc126f51010e158079",
+      "released_at": 1795139170000,
+      "security": false,
+      "summary": "SFU: replace the web installer and dashboard with an interactive CLI (#118)",
+      "image": "sha256:381069d212c34699ad15fd5b365e3ef571fe94fbfccd41f23f96c1cd47b553cc",
+      "protocol": 1,
+      "min_protocol": 1,
+      "artifacts": {
+        "sfu-linux-x86_64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/sfu-v0.2.5/telium-sfu-linux-x86_64.tar.gz",
+          "sha256": "22d3265cefb291b6e19dd6bfff76a34b312917b1ff0d35c4737191cb9bb6354e",
+          "size": 3986180
+        },
+        "sfu-linux-aarch64": {
+          "url": "https://github.com/telium-chat/telium/releases/download/sfu-v0.2.5/telium-sfu-linux-aarch64.tar.gz",
+          "sha256": "bc734ab4110d1f03d691cc9e9c39c0a2d3514fc6aa147706d1919146109a7859",
+          "size": 3933980
+        }
+      }
+    },
     {
       "version": "0.2.4",
       "commit": "c374044c6f707d9e2758c7d7fe6365b69eb71209",
