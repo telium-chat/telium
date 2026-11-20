@@ -172,10 +172,10 @@ describe('the content presets', () => {
     }
   });
 
-  it('defaults to detail, and treats anything it does not know as that', () => {
-    expect(DEFAULT_SCREEN_SHARE_CONTENT).toBe('detail');
-    expect(contentPreset('nonsense').value).toBe('detail');
-    expect(contentPreset(undefined).value).toBe('detail');
+  it('defaults to motion, and treats anything it does not know as that', () => {
+    expect(DEFAULT_SCREEN_SHARE_CONTENT).toBe('motion');
+    expect(contentPreset('nonsense').value).toBe('motion');
+    expect(contentPreset(undefined).value).toBe('motion');
   });
 
   it('pairs each preset with the degradation preference that matches its promise', () => {
@@ -749,5 +749,28 @@ describe('the degradation preference on a live sender', () => {
     expect(await applyDegradationPreference(sender, 'maintain-resolution')).toBe(false);
     expect(await applyDegradationPreference(null, 'maintain-resolution')).toBe(false);
     expect(await applyDegradationPreference({ getParameters: () => ({}) }, null)).toBe(false);
+  });
+});
+
+describe('share stats', () => {
+  it('parses the announced preset', async () => {
+    const { parseSharePreset } = await import('../lib/screenShare.js');
+    expect(parseSharePreset('motion 1080p@60')).toMatchObject({ content: 'motion', width: 1920, height: 1080, fps: 60 });
+    expect(parseSharePreset('garbage')).toBeNull();
+    expect(parseSharePreset(null)).toBeNull();
+  });
+
+  it('turns byte counters into a bitrate and sorts layers high first', async () => {
+    const { summarizeVideoStats } = await import('../lib/screenShare.js');
+    const mk = (bytes, at) => new Map([
+      ['a', { id: 'a', type: 'outbound-rtp', kind: 'video', rid: 'q', frameWidth: 480, frameHeight: 270, framesPerSecond: 30, bytesSent: bytes, timestamp: at }],
+      ['b', { id: 'b', type: 'outbound-rtp', kind: 'video', rid: 'f', frameWidth: 1920, frameHeight: 1080, framesPerSecond: 58, bytesSent: bytes * 10, timestamp: at, qualityLimitationReason: 'bandwidth' }],
+    ]);
+    const first = summarizeVideoStats(mk(1000, 0));
+    expect(first.rows[0].width).toBe(1920);
+    expect(first.rows[0].bitrate).toBeNull();
+    const next = summarizeVideoStats(mk(2000, 1000), first.raw);
+    expect(next.rows[0].bitrate).toBe(80000);
+    expect(next.rows[0].limit).toBe('bandwidth');
   });
 });

@@ -211,10 +211,21 @@ export const MessageRow = memo(function MessageRow({
     />
   ) : null;
 
+  // Desktop shortcut: double-click your own message to edit it, someone else's to reply.
+  const onDoubleClick = (e) => {
+    if (mobile || editing || pending || e.button !== 0) return;
+    if (e.target.closest?.('a, button, input, textarea, select, img, video, audio, [role="button"], [contenteditable="true"]')) return;
+    const act = mine ? (mayEdit && (() => onEdit?.(msg.id))) : (mayReply && (() => onReply?.(msg)));
+    if (!act) return;
+    window.getSelection?.()?.removeAllRanges();
+    act();
+  };
+
   const rowContent = (
     <div
       ref={rowRef}
       data-id={msg.id}
+      onDoubleClick={onDoubleClick}
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
