@@ -280,6 +280,9 @@ export function GifFavoritesPane() {
             <li>Copy the script below, paste it into the console, and press Enter. If it asks, type "allow pasting" first.</li>
             <li>It saves discord-favorite-gifs-fresh.json. Choose that file here.</li>
           </ol>
+          <Hint>
+            The script uses your Discord session to ask Discord for fresh links to your attachments. It only talks to Discord, and nothing is sent to Telium until you choose the file.
+          </Hint>
           <div className="flex flex-wrap items-center gap-3">
             <Button variant="secondary" onClick={copyScript}>Copy export script</Button>
             <Button disabled={busy} onClick={() => jsonInput.current?.click()}>
