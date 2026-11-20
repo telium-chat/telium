@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-11-20T15:19:42.785Z",
+  "generated_at": "2026-11-20T23:56:57.835Z",
   "servers": {
     "notdiscord.fyi": {
       "domain": "notdiscord.fyi",
       "ok": true,
-      "checked_at": "2026-11-20T15:19:42.344Z",
+      "checked_at": "2026-11-20T23:56:57.083Z",
       "error": null,
       "server_name": "notdiscord.fyi",
       "api_origin": "https://notdiscord.fyi",
@@ -53,9 +53,9 @@
       },
       "recommendations_accepting": true,
       "recommendations_referral_weight": 1,
-      "probe_ms": 441,
-      "uptime_30d": null,
-      "samples": 23,
+      "probe_ms": 186,
+      "uptime_30d": 100,
+      "samples": 24,
       "first_probe_at": "2026-11-14T19:44:19.000Z",
       "recommendation": {
         "eligible": true,
@@ -66,7 +66,7 @@
     "yapper.cloud": {
       "domain": "yapper.cloud",
       "ok": true,
-      "checked_at": "2026-11-20T15:19:42.348Z",
+      "checked_at": "2026-11-20T23:56:57.086Z",
       "error": null,
       "server_name": "yapper.cloud",
       "api_origin": "https://yapper.cloud",
@@ -115,9 +115,9 @@
       },
       "recommendations_accepting": true,
       "recommendations_referral_weight": 1,
-      "probe_ms": 402,
+      "probe_ms": 749,
       "uptime_30d": null,
-      "samples": 9,
+      "samples": 10,
       "first_probe_at": "2026-11-18T23:48:18.000Z",
       "recommendation": {
         "eligible": true,
