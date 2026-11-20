@@ -113,7 +113,7 @@ origins = []
 # New rooms stop at 80% by default; existing calls finish naturally.
 # This is an estimate, not your provider's actual traffic meter.
 [limits]
-max_bitrate = 8000000
+max_bitrate = 10000000
 enforce = true
 poll_interval_secs = 15
 max_rooms = 0

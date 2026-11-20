@@ -1854,7 +1854,7 @@ impl Default for Voice {
             turn_secret: None,
             turn_ttl_secs: 3600,
             turn: None,
-            max_bitrate: 2_500_000,
+            max_bitrate: 10_000_000,
             max_streamers_per_channel: 4,
             mesh_max_participants: 4,
             reconnect_grace_secs: 15,

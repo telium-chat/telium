@@ -12,6 +12,11 @@ Write for the people using the app, not the repo: what changed in their
 hands, not which PRs merged.
 -->
 
+## 19 November 2026
+
+- Screen sharing is much smoother.
+- Servers and Relays that haven't set their own bitrate limit now default to 10 Mbps per person.
+
 ## 17 November 2026
 
 - Both the desktop app and server must be updated to the newest version.

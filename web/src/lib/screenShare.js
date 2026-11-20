@@ -119,14 +119,14 @@ export function applyContentHint(track, content) {
   return null;
 }
 
-/// Mirrors livekit-client's presets (three layers from 960px, two from 480px); layers under `LAYER_FLOOR` are dropped; `layers` excludes the top.
-export function simulcastLadder({ width, height, fps = 30 }, budget, content = null) {
+/// Mirrors livekit-client's presets (three layers from 960px, two from 480px); layers under `LAYER_FLOOR` are dropped; `layers` excludes the top. `single` publishes one layer at the full size.
+export function simulcastLadder({ width, height, fps = 30 }, budget, content = null, { single = false } = {}) {
   const w = Math.max(1, Math.floor(Number(width) || 0));
   const h = Math.max(1, Math.floor(Number(height) || 0));
   const maxFramerate = Math.max(1, Math.floor(Number(fps) || 30));
   const total = Math.max(1, Math.floor(Number(budget) || 0));
   const size = Math.max(w, h);
-  let count = size >= 960 ? 3 : size >= 480 ? 2 : 1;
+  let count = single ? 1 : size >= 960 ? 3 : size >= 480 ? 2 : 1;
 
   const preset = content ? contentPreset(content) : null;
   const shares = preset?.shares || { 3: [1 / 16, 1 / 4, 1], 2: [1 / 4, 1], 1: [1] };

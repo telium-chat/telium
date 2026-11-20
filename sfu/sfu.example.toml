@@ -98,7 +98,7 @@ discovery_url = "https://your.server.name"  # SFU GETs {discovery_url}/_telium/v
 # for more than it is willing to carry. The clamped figure is handed to the
 # client (as the /session `max_bitrate` and the participant attribute
 # `telium.max_bitrate`), which sizes its encoders and simulcast ladder to fit.
-max_bitrate = 8000000
+max_bitrate = 10000000
 
 # Admission ceilings. When either is hit, the relay refuses NEW joins with a
 # clear "relay is full" answer and guild servers route newcomers elsewhere;

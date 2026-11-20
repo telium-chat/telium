@@ -466,7 +466,7 @@ describe('SfuCall publish ceiling', () => {
     expect(call.settleBudget({})).toBeNull();
   });
 
-  it('publishes a screen share as a simulcast ladder that fits under the ceiling', async () => {
+  it('publishes a screen share as one stream at its full size, under the ceiling', async () => {
     stubCall();
     const { call } = watchedRoom();
     call.maxBitrate = 2_500_000;
@@ -478,14 +478,30 @@ describe('SfuCall publish ceiling', () => {
     const [on, capture, opts] = setScreenShareEnabled.mock.calls[0];
     expect(on).toBe(true);
     expect(capture).toEqual({ audio: true });
-    expect(opts.simulcast).toBe(true);
-    expect(opts.screenShareSimulcastLayers).toHaveLength(2);
-    expect(opts.screenShareSimulcastLayers[0]).toBeInstanceOf(VideoPreset);
-    expect(opts.screenShareSimulcastLayers.map((p) => [p.width, p.height]))
-      .toEqual([[480, 270], [960, 540]]);
+    expect(opts.simulcast).toBe(false);
+    expect(opts.screenShareSimulcastLayers).toBeUndefined();
     expect(opts.screenShareEncoding.maxFramerate).toBe(30);
-    expect(ladderSum(opts)).toBeLessThanOrEqual(call.budget.screen);
+    // No camera is publishing, so the share spends the camera's slice too: all of it on the one stream.
+    expect(opts.screenShareEncoding.maxBitrate).toBe(call.budget.screen + call.budget.camera);
     expect(opts.audioPreset).toEqual({ maxBitrate: 48_000 });
+  });
+
+  it('lends an idle camera slice to the share, and the camera takes it back', async () => {
+    stubCall();
+    const { call } = watchedRoom();
+    call.maxBitrate = 2_500_000;
+    call.settleBudget({ max_bitrate: 2_500_000 });
+    const setScreenShareEnabled = vi.fn(async () => ({}));
+    call.room.localParticipant.setScreenShareEnabled = setScreenShareEnabled;
+
+    await call.setScreenShareEnabled(true, { width: 1920, height: 1080, fps: 30 });
+    const opts = setScreenShareEnabled.mock.calls[0][2];
+    expect(call.screenReclaimed).toBe(true);
+    expect(ladderSum(opts)).toBeGreaterThan(call.budget.screen);
+    expect(ladderSum(opts)).toBeLessThanOrEqual(call.budget.screen + call.budget.camera);
+
+    const plain = call.videoPublishOptions('screen', { width: 1920, height: 1080, fps: 30 }, 'motion');
+    expect(ladderSum(plain)).toBeLessThanOrEqual(call.budget.screen);
   });
 
   it('publishes a single capped layer when the ceiling has no room for a ladder', async () => {
@@ -500,7 +516,7 @@ describe('SfuCall publish ceiling', () => {
     const opts = setScreenShareEnabled.mock.calls[0][2];
     expect(opts.simulcast).toBe(false);
     expect(opts.screenShareSimulcastLayers).toBeUndefined();
-    expect(opts.screenShareEncoding.maxBitrate).toBe(call.budget.screen);
+    expect(opts.screenShareEncoding.maxBitrate).toBe(call.budget.screen + call.budget.camera);
   });
 
   it('leaves the encoder to its defaults when no ceiling was ever stated', async () => {
@@ -510,7 +526,7 @@ describe('SfuCall publish ceiling', () => {
     call.room.localParticipant.setScreenShareEnabled = setScreenShareEnabled;
 
     await call.setScreenShareEnabled(true);
-    expect(setScreenShareEnabled.mock.calls[0][2]).toEqual({ simulcast: true });
+    expect(setScreenShareEnabled.mock.calls[0][2]).toEqual({ simulcast: false });
   });
 
   it('caps the camera the same way', async () => {
@@ -743,7 +759,7 @@ describe('a share and the person sharing it are two sounds', () => {
 });
 
 describe('what a screenshare is of, on the wire', () => {
-  it('publishes a game with the ladder and the preference that suit one', async () => {
+  it('publishes a game with the frame rate and the preference that suit one', async () => {
     stubCall();
     const { call } = watchedRoom();
     call.maxBitrate = 2_500_000;
@@ -757,9 +773,7 @@ describe('what a screenshare is of, on the wire', () => {
     const opts = setScreenShareEnabled.mock.calls[0][2];
     expect(opts.degradationPreference).toBe('maintain-framerate');
     expect(opts.screenShareEncoding.maxFramerate).toBe(60);
-    for (const layer of opts.screenShareSimulcastLayers) {
-      expect(layer.encoding.maxFramerate).toBe(30);
-    }
+    expect(opts.simulcast).toBe(false);
   });
 
   it('publishes a document the other way round out of the same budget', async () => {
@@ -786,7 +800,7 @@ describe('what a screenshare is of, on the wire', () => {
 
     await call.setScreenShareEnabled(true, { content: 'motion' });
     expect(setScreenShareEnabled.mock.calls[0][2]).toEqual({
-      simulcast: true, degradationPreference: 'maintain-framerate',
+      simulcast: false, degradationPreference: 'maintain-framerate',
     });
   });
 

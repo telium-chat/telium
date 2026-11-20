@@ -298,7 +298,7 @@ impl Default for SfuConfig {
 impl Default for LimitsConfig {
     fn default() -> Self {
         Self {
-            max_bitrate: 8_000_000,
+            max_bitrate: 10_000_000,
             enforce: true,
             poll_interval_secs: 15,
             max_rooms: 0,

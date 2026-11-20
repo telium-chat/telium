@@ -55,6 +55,8 @@ export class SfuCall {
     this.repairingTracks = new Set();
     this.mediaRepairs = new Map();
     this.screenSettings = { width: 1920, height: 1080, fps: 30 };
+    // True while the share is publishing with the camera's slice added to its own.
+    this.screenReclaimed = false;
     this.onMediaLimit = onMediaLimit || (() => {});
     this.onSpeaking = onSpeaking || (() => {});
     this.onPeers = onPeers || (() => {});
@@ -121,19 +123,22 @@ export class SfuCall {
   }
 
   /// `content` is the screenshare preset ('detail'/'motion'); a camera has none.
-  videoPublishOptions(kind, capture, content = null) {
-    const slice = this.budget?.[kind];
+  /// `reclaim` lends a screen share the camera's slice while no camera is publishing; the camera takes it back before it starts.
+  videoPublishOptions(kind, capture, content = null, { reclaim = false } = {}) {
+    const base = this.budget?.[kind];
+    const slice = base && kind === 'screen' && reclaim ? base + (this.budget.camera || 0) : base;
     // No ceiling: LiveKit's ladder, but content still steers the encoder.
     if (!slice) {
       const fallback = content ? contentPreset(content).degradation : null;
       const codec = kind === 'screen' ? preferredScreenCodec() : null;
       return {
-        simulcast: true,
+        simulcast: kind !== 'screen',
         ...(codec ? { videoCodec: codec } : {}),
         ...(fallback ? { degradationPreference: fallback } : {}),
       };
     }
-    const ladder = simulcastLadder(capture, slice, content);
+    // A share is one stream at its target size: LiveKit's dynacast keeps every layer at or below the best one any viewer asks for, so extra layers would be sent anyway while taking budget from the top.
+    const ladder = simulcastLadder(capture, slice, content, { single: kind === 'screen' });
     const layers = ladder.layers.map((l) => new VideoPreset(
       l.width, l.height, l.encoding.maxBitrate, l.encoding.maxFramerate,
     ));
@@ -570,6 +575,7 @@ export class SfuCall {
       const cap = Math.floor(Number(message.max_bitrate) * (attempts === 0 ? 0.65 : 0.35));
       this.mediaLimitCap = Math.max(1, Math.min(this.mediaLimitCap ?? Infinity, cap));
       this.settleBudget({ max_bitrate: Number(message.max_bitrate) });
+      if (source === Track.Source.ScreenShare) this.screenReclaimed = false;
       const options = source === Track.Source.ScreenShare
         ? this.videoPublishOptions('screen', this.screenSettings, this.screenSettings?.content)
         : this.videoPublishOptions('camera', CAMERA_CAPTURE);
@@ -837,6 +843,8 @@ export class SfuCall {
   async setVideoEnabled(on, { facingMode = this.cameraFacing } = {}) {
     if (!this.room) return false;
     if (on) userMedia();
+    // The camera is about to declare its slice, so the share gives its loan back first.
+    if (on) await this.returnCameraSlice();
     const publication = await this.room.localParticipant.setCameraEnabled(
       on,
       on ? {
@@ -855,6 +863,34 @@ export class SfuCall {
       if (publication.track) this.show(this.me, publication.track, Track.Source.Camera);
     } else this.detach(this.me, Track.Source.Camera);
     return on;
+  }
+
+  cameraPublishing() {
+    const pubs = this.room?.localParticipant?.videoTrackPublications?.values() || [];
+    return [...pubs].some((p) => p.source === Track.Source.Camera && p.track && !p.isMuted);
+  }
+
+  /// Republishes the live share (same capture, so no new picker) at its own slice only; called before the camera starts.
+  async returnCameraSlice() {
+    if (!this.screenReclaimed || !this.room) return;
+    this.screenReclaimed = false;
+    const local = this.room.localParticipant;
+    const publication = [...(local.videoTrackPublications?.values() || [])]
+      .find((p) => p.source === Track.Source.ScreenShare);
+    const track = publication?.track;
+    if (!track || this.repairingTracks.has(Track.Source.ScreenShare)) return;
+    this.repairingTracks.add(Track.Source.ScreenShare);
+    try {
+      const options = this.videoPublishOptions('screen', this.screenSettings, this.screenSettings?.content);
+      await local.unpublishTrack(track, false);
+      if (!this.live || !this.room) return;
+      await local.publishTrack(track, { ...options, source: Track.Source.ScreenShare });
+      this.show(this.me, track, Track.Source.ScreenShare);
+    } catch (error) {
+      console.warn('Could not shrink the share for the camera:', error);
+    } finally {
+      this.repairingTracks.delete(Track.Source.ScreenShare);
+    }
   }
 
   async switchCamera(facingMode = 'environment') {
@@ -876,17 +912,19 @@ export class SfuCall {
     if (on) displayMedia();
     // A request only; callers check `screenShareHasAudio`.
     const wantsAudio = settings?.audio !== false;
+    const reclaim = on && !this.cameraPublishing();
     const publication = await this.room.localParticipant.setScreenShareEnabled(
       on,
       on ? { audio: wantsAudio } : undefined,
       on
         ? {
-          ...this.videoPublishOptions('screen', settings, settings?.content),
+          ...this.videoPublishOptions('screen', settings, settings?.content, { reclaim }),
           ...this.audioPublishOptions(),
         }
         : undefined,
     );
     if (on && !publication) return false;
+    this.screenReclaimed = Boolean(on && reclaim && this.budget?.camera);
     if (on) {
       this.screenSettings = { ...settings };
       this.mediaRepairs.delete(Track.Source.ScreenShare); // a deliberate fresh attempt
