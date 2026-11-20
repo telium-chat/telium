@@ -69,7 +69,7 @@ public = false
 # /session or /control body, and it is dialled before any signature is checked
 # — the lookup is how the SFU gets the key to check with. Discovery is therefore
 # HTTPS-only to public addresses: a stranger must not be able to make the SFU
-# connect to 127.0.0.1, to the LiveKit API, to this dashboard, to the operator's
+# connect to 127.0.0.1, to the LiveKit API, to the operator's
 # LAN, or to cloud instance metadata on 169.254.169.254. Turning this on removes
 # all of that. It exists for development and closed-LAN test rigs where every
 # homeserver is plaintext on loopback. Configured [[trust.origins]] below are
@@ -119,7 +119,7 @@ max_participants = 0
 # A metered VPS should also monitor provider-reported traffic.
 # Set stop_percent below 100 to leave room for existing calls to finish.
 # New rooms stop at that percentage; established rooms and reconnects continue.
-# /health and the dashboard show usage, the threshold, and whether accepting.
+# /health and `telium-sfu status` show usage, the threshold, and whether accepting.
 # Example: 1 TB (decimal) per 30 days; stop admitting new calls at 800 GB:
 # transfer_budget_bytes = 1000000000000
 # transfer_stop_percent = 80
@@ -128,8 +128,8 @@ transfer_period_days = 30
 transfer_stop_percent = 80
 
 # Guild servers this relay refuses, by server_name. Blocked at admission;
-# rooms already in progress finish naturally. Editable here or from the
-# dashboard's status page (takes effect after a restart).
+# rooms already in progress finish naturally. Edit here or run
+# `telium-sfu block add <server>`; a running relay follows the file, no restart.
 blocked_origins = []
 # Media-plane backstop. LiveKit has no per-participant bitrate cap of its own,
 # so every `poll_interval_secs` the SFU lists each active room and mutes, at
@@ -140,19 +140,20 @@ blocked_origins = []
 enforce = true
 poll_interval_secs = 15
 
-[admin]
-# The one-command installer enables this automatically. Keep it on localhost
-# once nginx is configured; nginx exposes it at https://<sfu-domain>/admin.
-enabled = false
-bind = "127.0.0.1:7891"
-state_dir = "./state"
-helper_path = "/usr/local/libexec/telium-sfu-admin-helper"
+[install]
+# How `telium-sfu` manages this machine; the installers write both keys and
+# `telium-sfu configure` keeps sfu_domain current. mode is "full" (Telium
+# manages Caddy/nginx and HTTPS), "portable" (your own proxy) or "compose"
+# (a container: config is read-only, the host restarts it). Leave it empty on
+# a hand-built relay and `telium-sfu` will only manage this file.
+mode = ""
+sfu_domain = ""
 
 [updates]
 # Self-update CHECK. This only watches and nags: the relay fetches one signed
 # release manifest (`deploy/sfu-releases.json` in the project repo), compares it
-# against the commit it was built from, and reports in the logs and the
-# dashboard. The actual apply is deploy/update-sfu-native.sh (native installs)
+# against the commit it was built from, and reports in the logs and in
+# `telium-sfu status`. The actual apply is deploy/update-sfu-native.sh (native installs)
 # or deploy/update-sfu.sh (compose installs) on their systemd timers -- those
 # scripts ask this binary what to do via `telium-sfu updates check`, drain live
 # calls, swap the binary and restart. `check = false` fetches nothing and the
@@ -168,7 +169,7 @@ check_interval_secs = 21600   # 6 h
 retry_secs = 1800             # 30 min
 timeout_secs = 10
 
-# How many days behind before the dashboard says WARN, then URGENT. A missed
+# How many days behind before `telium-sfu status` says WARN, then URGENT. A missed
 # release flagged security-relevant is URGENT immediately, as is a release that
 # raised the protocol floor past what this build speaks.
 stale_after_days = 14

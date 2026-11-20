@@ -114,8 +114,8 @@ your own relay's origin; you cannot volunteer somebody else's bandwidth.
 **Public mode.** For a relay to be useful to guilds at all it must accept guilds it has
 never met: set `[trust] public = true` in its `sfu.toml`. It verifies every guild server
 by fetching that server's own published keys, so a public relay needs no per-guild
-configuration — but it is carrying strangers' traffic, and the dashboard's per-guild
-usage view and block list are how you keep that sane. A relay on a metered connection
+configuration — but it is carrying strangers' traffic, and `telium-sfu status`'s per-guild
+usage view and `telium-sfu block` are how you keep that sane. A relay on a metered connection
 should also set a transfer budget there.
 
 **Automatic use is opt-in, twice.** Being listed does not volunteer your relay to carry

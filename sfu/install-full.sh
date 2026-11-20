@@ -51,10 +51,9 @@ CADDYFILE=/etc/caddy/Caddyfile
 CADDY_SNIPPET=/etc/caddy/telium-sfu.caddy
 die() { echo "error: $*" >&2; exit 1; }
 
-# The browser installer asks the operator and passes the answer in
-# TELIUM_SFU_PROXY (and TELIUM_SFU_CADDYFILE_EDIT=yes if they agreed to the
-# one line added to their Caddyfile). Run directly, ask here; with no way to
-# ask, stop rather than guess.
+# install.sh asks the operator and passes the answer in TELIUM_SFU_PROXY (and
+# TELIUM_SFU_CADDYFILE_EDIT=yes if they agreed to the one line added to their
+# Caddyfile). Run directly, ask here; with no way to ask, stop rather than guess.
 PROXY="${TELIUM_SFU_PROXY:-}"
 if [[ -z "$PROXY" && -f /etc/telium/sfu-proxy ]]; then
   # A rerun on a host that is already set up keeps its existing front end.
@@ -112,6 +111,10 @@ curl -fsSL --retry 3 --max-time 900 "$sfu_base/$sfu_asset" -o "$sfu_tmp/$sfu_ass
 curl -fsSL --retry 3 --max-time 60 "$sfu_base/$sfu_asset.sha256" -o "$sfu_tmp/$sfu_asset.sha256"
 ( cd "$sfu_tmp" && sha256sum -c "$sfu_asset.sha256" )
 tar -xzf "$sfu_tmp/$sfu_asset" -C "$sfu_tmp" telium-sfu
+# This installer hands the operator over to `telium-sfu configure`; refuse a
+# release that predates it rather than finish and leave them nothing to run.
+"$sfu_tmp/telium-sfu" version 2>/dev/null | grep -Fxq 'management_cli=1' ||
+  die "the latest published SFU release predates the command-line manager (telium-sfu status/trust/configure). Publish a new SFU release containing it, then rerun. Nothing was changed except installed packages"
 install -m 0755 "$sfu_tmp/telium-sfu" /usr/local/bin/telium-sfu
 rm -rf "$sfu_tmp"; trap - EXIT
 
@@ -132,14 +135,13 @@ if ! command -v livekit-server >/dev/null 2>&1; then
   rm -rf "$tmp"
 fi
 
-echo "[5/7] Installing dashboard helper and service..."
+echo "[5/7] Installing the proxy helper and service..."
+# Root-only: `telium-sfu configure` calls it (through sudo) to write the Caddy or
+# nginx site and get certificates. The service account no longer needs, or
+# gets, any way to run it: earlier versions let the web dashboard do that.
 install -d -m 0755 /usr/local/libexec
 install -m 0755 "$SCRIPT_DIR/scripts/admin-helper.sh" /usr/local/libexec/telium-sfu-admin-helper
-cat > /etc/sudoers.d/telium-sfu <<'EOF'
-telium-sfu ALL=(root) NOPASSWD: /usr/local/libexec/telium-sfu-admin-helper
-EOF
-chmod 0440 /etc/sudoers.d/telium-sfu
-visudo -cf /etc/sudoers.d/telium-sfu >/dev/null
+rm -f /etc/sudoers.d/telium-sfu
 
 install -d -o telium-sfu -g telium-sfu -m 0750 /var/lib/telium-sfu
 install -d -o telium-sfu -g telium-sfu -m 0750 /var/lib/telium-sfu/state
@@ -193,11 +195,9 @@ transfer_budget_bytes = 0
 transfer_period_days = 30
 transfer_stop_percent = 80
 
-[admin]
-enabled = true
-bind = "127.0.0.1:7891"
-state_dir = "/var/lib/telium-sfu/state"
-helper_path = "/usr/local/libexec/telium-sfu-admin-helper"
+[install]
+mode = "full"
+sfu_domain = ""
 EOF
   chown telium-sfu:telium-sfu "$CONFIG"
   chmod 0640 "$CONFIG"
@@ -238,8 +238,8 @@ WantedBy=multi-user.target
 EOF
 
 # --- HTTPS front end -------------------------------------------------------
-# Nothing here removes or replaces an existing proxy's configuration. The
-# dashboard adds the real domains later (sfu/scripts/admin-helper.sh).
+# Nothing here removes or replaces an existing proxy's configuration.
+# `telium-sfu configure` adds the real domains later (sfu/scripts/admin-helper.sh).
 install -d -m 0755 /etc/telium
 case "$PROXY" in
   caddy-new|caddy-existing)
@@ -250,24 +250,8 @@ case "$PROXY" in
     systemctl cat caddy.service >/dev/null 2>&1 ||
       die "Caddy is installed but has no caddy.service. Add 'import $CADDY_SNIPPET' to your Caddyfile yourself, then rerun"
     install -d -m 0755 /etc/caddy
-    [[ -e "$CADDY_SNIPPET" ]] || {
-      if [[ "$PROXY" == caddy-new ]]; then
-        # Setup page on this machine's address until the domains are entered.
-        cat > "$CADDY_SNIPPET" <<'SNIP'
-# Written by Telium SFU setup. Replaced by the dashboard once you enter domains.
-:80 {
-	handle /admin* {
-		reverse_proxy 127.0.0.1:7891
-	}
-	handle {
-		respond "Telium SFU setup is available at /admin" 200
-	}
-}
-SNIP
-      else
-        printf '# Written by Telium SFU setup. The dashboard adds your SFU and LiveKit sites here.\n' > "$CADDY_SNIPPET"
-      fi
-    }
+    [[ -e "$CADDY_SNIPPET" ]] ||
+      printf '# Written by Telium SFU setup. `telium-sfu configure` adds your SFU and LiveKit sites here.\n' > "$CADDY_SNIPPET"
     import_line="import $CADDY_SNIPPET"
     if ! grep -qxF "$import_line" "$CADDYFILE" 2>/dev/null; then
       if [[ ! -s "$CADDYFILE" ]] || grep -q 'The Caddyfile is an easy way to configure your Caddy web server' "$CADDYFILE"; then
@@ -328,44 +312,15 @@ fi
 
 echo "[7/7] Finishing..."
 sleep 2
-if [[ -f /var/lib/telium-sfu/state/admin-password ]]; then
+if [[ "${TELIUM_SFU_FROM_INSTALLER:-}" != 1 ]]; then
   echo
   echo "=============================================================="
-  echo "Telium SFU was updated successfully."
-  echo "Your existing HTTPS configuration and admin dashboard were kept."
+  echo "Telium SFU is installed."
+  echo
+  echo "Next, set its domains and who may use it (this also sets up HTTPS"
+  echo "through $PROXY):"
+  echo "  sudo telium-sfu configure"
+  echo
+  echo "Afterwards:  telium-sfu status | telium-sfu trust add <server> | telium-sfu manage"
   echo "=============================================================="
-else
-  public_ip="$(curl -4fsS --max-time 3 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
-  line="$(journalctl -u telium-sfu -n 100 --no-pager 2>/dev/null | grep 'FIRST-RUN SETUP:' | tail -1 || true)"
-  if [[ -n "$line" ]]; then
-    url="$(printf '%s\n' "$line" | sed -n 's/.*open \(http[^ ]*\).*/\1/p')"
-    if [[ "$PROXY" == caddy-new ]]; then
-      url="${url/http:\/\/SERVER_IP:7891/http:\/\/$public_ip}"
-    else
-      # Your existing proxy is not touched before you enter domains, so the
-      # setup page is reached over an SSH tunnel to the dashboard's local port.
-      url="${url/http:\/\/SERVER_IP:7891/http:\/\/localhost:7891}"
-      tunnel_hint="  From your own computer first run: ssh -N -L 7891:127.0.0.1:7891 USER@$public_ip"
-    fi
-    if [[ "${TELIUM_SFU_FROM_WIZARD:-}" == 1 ]]; then
-      # The web installer turns this URL into a localhost link that goes
-      # through the SSH tunnel the operator already has open.
-      url="${url/http:\/\/$public_ip/http:\/\/localhost:7891}"
-      tunnel_hint="  (The installer page shows a Continue button for this; no new tunnel is needed.)"
-    fi
-    echo
-    echo "=============================================================="
-    echo "Telium SFU is installed."
-    echo
-    echo "Open this one-time setup URL:"
-    echo "  $url"
-    [[ -z "${tunnel_hint:-}" ]] || echo "$tunnel_hint"
-    echo
-    echo "The wizard will create your admin password, configure the SFU,"
-    echo "set up HTTPS through $PROXY, and leave you with a dashboard."
-    echo "=============================================================="
-  else
-    echo "Telium SFU started, but the setup URL was not found in the journal yet."
-    echo "Run: journalctl -u telium-sfu -n 100 --no-pager"
-  fi
 fi

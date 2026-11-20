@@ -11,7 +11,7 @@
 //! It deliberately over-estimates (idle senders still declare layers) — the
 //! right failure mode for protecting an operator on a hard traffic cap — and
 //! it is labelled an estimate everywhere it is shown. It is also per-origin:
-//! the dashboard's per-guild usage and a per-origin block list both read it.
+//! `telium-sfu status`'s per-guild usage and a per-origin block list both read it.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -116,7 +116,7 @@ impl Usage {
         sum_window(&ledger, Some(origin), now_ms, days)
     }
 
-    /// The dashboard's view: per-origin trailing-window estimates, heaviest first.
+    /// The status view: per-origin trailing-window estimates, heaviest first.
     pub fn snapshot(&self, now_ms: i64, days: u32) -> Vec<(String, i64)> {
         let ledger = self.lock();
         let mut rows: Vec<(String, i64)> = ledger

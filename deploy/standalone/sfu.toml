@@ -49,8 +49,7 @@ public = false
 server_name = "chat.example.com"
 discovery_url = "https://chat.example.com"
 
-[admin]
-# The dashboard, at https://<TELIUM_SFU_DOMAIN>/admin through the front. The
-# first-run setup URL is in the container's logs on first start.
-enabled = true
-bind = "0.0.0.0:7891"
+[install]
+# Manage the relay with `docker compose exec sfu telium-sfu status`. This file
+# is mounted read-only: edit it on the host, then restart the sfu service.
+mode = "compose"

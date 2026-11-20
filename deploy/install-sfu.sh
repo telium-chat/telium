@@ -69,15 +69,14 @@ for f in compose.yml sfu.toml update-sfu.conf; do
       install -o "$RUN_AS" -g "$RUN_GROUP" -m 644 "$src" "$PREFIX/$f"
     else
       # The seeded relay config: the same shape the native installer writes,
-      # bound to the container's interfaces. public_url and the embedded
-      # TURN/RTC settings are the dashboard setup wizard's job -- the admin
-      # bootstrap URL is in the journal on first boot.
+      # bound to the container's interfaces. public_url is yours to set: see
+      # "Compose SFU setup" in deploy/README.md.
       tmp="$(mktemp)"
       cat > "$tmp" <<'EOF'
 # The relay's config. This file is yours; the updater never writes it and no
-# release needs it to change (every key has a default in the binary). The
-# dashboard at http://127.0.0.1:7891 (published on loopback by compose.yml)
-# walks through public_url, TURN and HTTPS setup.
+# release needs it to change (every key has a default in the binary). Set
+# livekit.public_url to your LiveKit domain; see "Compose SFU setup" in
+# deploy/README.md for the proxy and HTTPS side.
 bind = "0.0.0.0:7890"
 
 [livekit]
@@ -123,11 +122,8 @@ transfer_budget_bytes = 0
 transfer_period_days = 30
 transfer_stop_percent = 80
 
-[admin]
-enabled = true
-bind = "0.0.0.0:7891"
-state_dir = "/var/lib/telium-sfu/state"
-helper_path = "/usr/local/libexec/telium-sfu-admin-helper"
+[install]
+mode = "compose"
 
 EOF
       install -o "$RUN_AS" -g "$RUN_GROUP" -m 644 "$tmp" "$PREFIX/$f"
@@ -172,14 +168,14 @@ if [ ! -s /root/.docker/config.json ]; then
   say "    <your password manager> | sudo docker login ghcr.io -u <user> --password-stdin"
 fi
 
-say "the compose stack has not been started yet. The native dashboard wizard"
-say "cannot configure host nginx/Certbot from inside a container."
+say "the compose stack has not been started yet. The container cannot"
+say "configure host nginx/Certbot, so that part is by hand."
 say "Set livekit.public_url in $PREFIX/sfu.toml, configure host nginx + HTTPS"
 say "for the SFU and LiveKit domains, then start the stack:"
 say "    cd $PREFIX && docker compose up -d"
 say "Full instructions: https://github.com/telium-chat/telium/blob/main/deploy/README.md#compose-sfu-setup"
-say "The dashboard is available over an SSH tunnel to localhost:7891 for"
-say "administration and first-run password setup; do not expose it publicly."
+say "Once it is running, check on it with:"
+say "    cd $PREFIX && docker compose exec sfu telium-sfu status"
 say ""
 say "updates are ON. $PREFIX/update-sfu.conf says so in a field with a name;"
 say "'$PREFIX/update-sfu.sh --status' will tell you what this box currently thinks."

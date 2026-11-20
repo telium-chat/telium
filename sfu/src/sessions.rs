@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 #[derive(Debug, Clone)]
 pub struct JoinRecord {
     /// The guild server this join's token was signed by; the usage ledger and
-    /// the dashboard's per-guild view roll up by it.
+    /// the per-guild usage view roll up by it.
     pub origin: String,
     pub max_bitrate: i64,
     pub minted_at: Instant,

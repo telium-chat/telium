@@ -42,12 +42,7 @@
 
 # --- SFU: uncomment when the voice profile is on (the installer does this) ---
 #{$TELIUM_SFU_DOMAIN} {
-#	handle /admin* {
-#		reverse_proxy sfu:7891
-#	}
-#	handle {
-#		reverse_proxy sfu:7890
-#	}
+#	reverse_proxy sfu:7890
 #}
 #
 ## Browser-facing call signalling. A long-lived WebSocket; Caddy's defaults

@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Root-only proxy helper, installed by install-full.sh and run by
+# `telium-sfu configure` (as root, directly or through sudo). It writes the
+# SFU's and LiveKit's sites into the host's Caddy or nginx and gets
+# certificates. Nothing else is allowed to call it: the sudoers entry that once
+# let the service account do so is removed on install.
 set -euo pipefail
 
 fail() { echo "telium-sfu helper: $*" >&2; exit 1; }
@@ -12,9 +17,6 @@ valid_domain() {
 
 cmd="${1:-}"
 case "$cmd" in
-  restart)
-    systemctl restart --no-block telium-sfu.service
-    ;;
   proxy)
     sfu_domain="${2:-}"
     livekit_domain="${3:-}"
@@ -32,12 +34,7 @@ case "$cmd" in
       cat > "$snippet" <<CADDY
 # Written by Telium SFU setup. Caddy gets and renews the certificates itself.
 $sfu_domain {
-	handle /admin* {
-		reverse_proxy 127.0.0.1:7891
-	}
-	handle {
-		reverse_proxy 127.0.0.1:7890
-	}
+	reverse_proxy 127.0.0.1:7890
 }
 
 $livekit_domain {
@@ -62,15 +59,6 @@ server {
     listen 80;
     listen [::]:80;
     server_name $sfu_domain;
-
-    location /admin {
-        proxy_pass http://127.0.0.1:7891;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
 
     location / {
         proxy_pass http://127.0.0.1:7890;
@@ -127,6 +115,6 @@ EOF
     echo "proxy and certificates configured"
     ;;
   *)
-    fail "usage: $0 {restart|proxy <sfu-domain> <livekit-domain> <email>}"
+    fail "usage: $0 proxy <sfu-domain> <livekit-domain> <email>"
     ;;
 esac

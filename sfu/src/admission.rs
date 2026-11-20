@@ -66,7 +66,7 @@ pub fn status(state: &AppState) -> Status {
 /// "full" and get 503 so callers route around without treating it as an error
 /// of their own.
 pub fn refuse(state: &AppState, origin: &str, room: &str, identity: &str) -> Option<(axum::http::StatusCode, Value)> {
-    if state.cfg.limits.blocked_origins.iter().any(|o| o == origin) {
+    if state.is_blocked(origin) {
         return Some((
             axum::http::StatusCode::FORBIDDEN,
             json!({ "error": format!("this relay does not serve {origin}"), "code": "origin_blocked" }),

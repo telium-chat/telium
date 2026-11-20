@@ -1,6 +1,6 @@
 
 mod admission;
-mod admin;
+mod cli;
 mod config;
 mod control;
 mod enforce;
@@ -26,7 +26,6 @@ use tokio::sync::watch;
 use tokio::sync::RwLock;
 use tracing_subscriber::EnvFilter;
 
-use crate::admin::AdminState;
 use crate::config::SfuConfig;
 use crate::livekit::LivekitManager;
 use crate::server::{router, AppState};
@@ -37,9 +36,10 @@ use crate::usage::Usage;
 #[derive(Parser)]
 #[command(name = "telium-sfu", version, about = "Telium SFU front (LiveKit-backed media plane)")]
 struct Cli {
-    /// Path to the TOML config. Defaults are usable without one.
-    #[arg(short, long, default_value = "sfu.toml", global = true)]
-    config: PathBuf,
+    /// Path to the TOML config. `serve` works without one (defaults); the
+    /// management commands look for an installed relay's config on their own.
+    #[arg(short, long, global = true)]
+    config: Option<PathBuf>,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -89,6 +89,79 @@ enum Command {
         #[arg(long, default_value_t = 1)]
         rounds: u32,
     },
+    /// Show what the relay is doing: health, load, access, transfer, updates.
+    Status {
+        /// Machine-readable output.
+        #[arg(long)]
+        json: bool,
+        /// Skip the release-manifest check (no outbound request).
+        #[arg(long)]
+        offline: bool,
+    },
+    /// Which Telium servers may use this relay (the whitelist of a private relay).
+    Trust {
+        #[command(subcommand)]
+        command: Option<TrustCommand>,
+    },
+    /// Guild servers this relay refuses, whatever the trust mode.
+    Block {
+        #[command(subcommand)]
+        command: Option<BlockCommand>,
+    },
+    /// Set the relay's domains and who may use it; configures HTTPS on a full install.
+    Configure {
+        /// Public hostname of the SFU API (e.g. sfu.example.com).
+        #[arg(long)]
+        sfu_domain: Option<String>,
+        /// Public hostname for LiveKit signalling (e.g. livekit.example.com).
+        #[arg(long)]
+        livekit_domain: Option<String>,
+        /// Let's Encrypt contact email (full installs only).
+        #[arg(long)]
+        email: Option<String>,
+        /// Any federated Telium server may use this relay.
+        #[arg(long, conflicts_with = "private")]
+        public: bool,
+        /// Only trusted Telium servers may use this relay.
+        #[arg(long)]
+        private: bool,
+        /// Your homeserver's name; trusted automatically.
+        #[arg(long)]
+        homeserver: Option<String>,
+        /// Where to find the homeserver's keys, when not discoverable from its name.
+        #[arg(long)]
+        discovery_url: Option<String>,
+        /// Do not ask for confirmation.
+        #[arg(long, short = 'y')]
+        yes: bool,
+        /// Save the config but leave the relay running as it is.
+        #[arg(long)]
+        no_restart: bool,
+    },
+    /// Restart the relay's service.
+    Restart,
+    /// Interactive menu over all of the above.
+    Manage,
+}
+
+#[derive(Subcommand)]
+enum TrustCommand {
+    /// List whitelisted servers (the default).
+    List,
+    /// Look a server up, verify its keys, and whitelist it. Live; no restart.
+    Add { server: String },
+    /// Remove a server from the whitelist. Live; no restart.
+    Remove { server: String },
+}
+
+#[derive(Subcommand)]
+enum BlockCommand {
+    /// List blocked guild servers (the default).
+    List,
+    /// Refuse new calls from a guild server. Live; no restart.
+    Add { server: String },
+    /// Stop refusing a guild server. Live; no restart.
+    Remove { server: String },
 }
 
 #[derive(Subcommand)]
@@ -129,12 +202,36 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
 
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+    let explicit_config = cli.config.take();
+
+    if let Some(command) = &cli.command {
+        if is_management(command) {
+            let path = cli::resolve_config_path(explicit_config.as_deref());
+            cli::reexec_as_root_if_unreadable(&path);
+            // Operator-facing: a message, not anyhow's `Error:` debug dump.
+            if let Err(e) = manage_command(command, &path).await {
+                eprintln!("error: {e:#}");
+                std::process::exit(1);
+            }
+            return Ok(());
+        }
+    }
+    let config_path = if matches!(cli.command, Some(Command::Discover { .. })) {
+        // An operator's diagnostic, run against the installed relay's own
+        // [trust] section, so find that config like the management commands do.
+        let path = cli::resolve_config_path(explicit_config.as_deref());
+        cli::reexec_as_root_if_unreadable(&path);
+        path
+    } else {
+        explicit_config.unwrap_or_else(|| PathBuf::from("sfu.toml"))
+    };
+    cli.config = Some(config_path.clone());
 
     if matches!(cli.command, Some(Command::Init)) {
         let cfg = SfuConfig::default();
-        std::fs::write(&cli.config, toml::to_string_pretty(&cfg)?)?;
-        println!("wrote {}", cli.config.display());
+        std::fs::write(&config_path, toml::to_string_pretty(&cfg)?)?;
+        println!("wrote {}", config_path.display());
         return Ok(());
     }
 
@@ -146,17 +243,17 @@ async fn main() -> anyhow::Result<()> {
     // auditing a config that was never installed should fail loudly, not
     // approve defaults the running relay may not be using.
     if matches!(cli.command, Some(Command::Check)) {
-        let cfg = SfuConfig::load(&cli.config)?;
+        let cfg = SfuConfig::load(&config_path)?;
         cfg.updates.validate()?;
         cfg.limits.validate()?;
         println!("ok");
         return Ok(());
     }
 
-    let cfg = if cli.config.exists() {
-        SfuConfig::load(&cli.config)?
+    let cfg = if config_path.exists() {
+        SfuConfig::load(&config_path)?
     } else {
-        tracing::warn!(path = %cli.config.display(), "no sfu.toml; using defaults");
+        tracing::warn!(path = %config_path.display(), "no sfu.toml; using defaults");
         SfuConfig::default()
     };
 
@@ -194,6 +291,7 @@ async fn main() -> anyhow::Result<()> {
         usage.verify_metered_storage()?;
     }
     let state = Arc::new(AppState {
+        blocked: Arc::new(std::sync::RwLock::new(cfg.limits.blocked_origins.clone())),
         cfg: cfg.clone(),
         trust: trust.clone(),
         livekit: livekit.clone(),
@@ -250,50 +348,46 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    if cfg.admin.enabled {
-        let admin_state = Arc::new(AdminState::new(
-            cfg.clone(),
-            cli.config.clone(),
-            livekit.clone(),
-            trust.clone(),
-            state.usage.clone(),
-            state.sessions.clone(),
-            state.updates.clone(),
-            state.drain_until_ms.clone(),
-        )?);
-        let admin_bind = cfg.admin.bind.clone();
-        if admin_state.needs_bootstrap() {
-            tracing::warn!(
-                "FIRST-RUN SETUP: open {} and replace SERVER_IP with this machine's IP",
-                admin_state.bootstrap_url()
-            );
-        } else {
-            tracing::info!(bind = %admin_bind, "SFU admin dashboard enabled at /admin");
-        }
-        tokio::spawn(async move {
-            match tokio::net::TcpListener::bind(&admin_bind).await {
-                Ok(listener) => {
-                    if let Err(e) = axum::serve(listener, crate::admin::router(admin_state)).await {
-                        tracing::error!(error = %e, "admin dashboard stopped");
-                    }
-                }
-                Err(e) => tracing::error!(bind = %admin_bind, error = %e, "could not bind admin dashboard"),
-            }
-        });
-    }
-
+    // Follow the config file. The operator's `telium-sfu trust` / `block`
+    // commands edit it from another process, and a change to either list is
+    // live within a couple of seconds: no restart, no dropped calls. Other
+    // settings still need a restart (they are read once, at startup). Without
+    // a change, keys are re-discovered every `cache_ttl_secs` as before.
     {
         let trust = trust.clone();
-        let config_path = cli.config.clone();
-        let secs = (cfg.trust.cache_ttl_secs.clamp(60, 300)) as u64;
+        let blocked = state.blocked.clone();
+        let config_path = config_path.clone();
+        let refresh_every = Duration::from_secs((cfg.trust.cache_ttl_secs.clamp(60, 300)) as u64);
         tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(Duration::from_secs(secs));
+            let modified = |p: &PathBuf| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+            let mut seen = modified(&config_path);
+            let mut last_refresh = std::time::Instant::now();
+            let mut ticker = tokio::time::interval(Duration::from_secs(2));
             loop {
                 ticker.tick().await;
-                match SfuConfig::load(&config_path) {
-                    Ok(latest) => trust.write().await.refresh_discovery(&latest.trust).await,
-                    Err(e) => tracing::warn!(error = %e, "could not reload trust config for key refresh"),
+                let now = modified(&config_path);
+                let changed = now != seen;
+                if !changed && last_refresh.elapsed() < refresh_every {
+                    continue;
                 }
+                match SfuConfig::load(&config_path) {
+                    Ok(latest) if changed => {
+                        *blocked.write().unwrap_or_else(|e| e.into_inner()) = latest.limits.blocked_origins.clone();
+                        // Fetch keys before taking the lock: verification keeps
+                        // working while a slow homeserver answers.
+                        let mut next = TrustedKeys::from_config(&latest.trust);
+                        next.refresh_discovery(&latest.trust).await;
+                        let mut live = trust.write().await;
+                        next.adopt_discovered(&live);
+                        *live = next;
+                        tracing::info!("sfu.toml changed; trusted and blocked servers reloaded");
+                    }
+                    Ok(latest) => trust.write().await.refresh_discovery(&latest.trust).await,
+                    Err(e) => tracing::warn!(error = %e, "could not reload sfu.toml"),
+                }
+                // Even a failed load is "seen": one warning per edit, not one per tick.
+                seen = now;
+                last_refresh = std::time::Instant::now();
             }
         });
     }
@@ -305,6 +399,49 @@ async fn main() -> anyhow::Result<()> {
         .with_graceful_shutdown(shutdown_signal(shutdown_tx, state))
         .await?;
     Ok(())
+}
+
+fn is_management(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::Status { .. }
+            | Command::Trust { .. }
+            | Command::Block { .. }
+            | Command::Configure { .. }
+            | Command::Restart
+            | Command::Manage
+    )
+}
+
+async fn manage_command(command: &Command, path: &std::path::Path) -> anyhow::Result<()> {
+    match command {
+        Command::Status { json, offline } => cli::status(path, *json, *offline).await,
+        Command::Trust { command: None | Some(TrustCommand::List) } => cli::trust_list(path),
+        Command::Trust { command: Some(TrustCommand::Add { server }) } => cli::trust_add(path, server).await,
+        Command::Trust { command: Some(TrustCommand::Remove { server }) } => cli::trust_remove(path, server),
+        Command::Block { command: None | Some(BlockCommand::List) } => cli::block_list(path),
+        Command::Block { command: Some(BlockCommand::Add { server }) } => cli::block_add(path, server),
+        Command::Block { command: Some(BlockCommand::Remove { server }) } => cli::block_remove(path, server),
+        Command::Configure { sfu_domain, livekit_domain, email, public, private, homeserver, discovery_url, yes, no_restart } => {
+            cli::configure(
+                path,
+                cli::ConfigureArgs {
+                    sfu_domain: sfu_domain.clone(),
+                    livekit_domain: livekit_domain.clone(),
+                    email: email.clone(),
+                    public: if *public { Some(true) } else if *private { Some(false) } else { None },
+                    homeserver: homeserver.clone(),
+                    discovery_url: discovery_url.clone(),
+                    yes: *yes,
+                    restart: if *no_restart { Some(false) } else { None },
+                },
+            )
+            .await
+        }
+        Command::Restart => cli::restart(path),
+        Command::Manage => cli::manage(path).await,
+        _ => unreachable!("not a management command"),
+    }
 }
 
 /// One `telium.drain` message to every occupied room, phrased `draining` (an
@@ -393,8 +530,11 @@ fn print_version() -> anyhow::Result<()> {
         "built_at={}",
         if b.built_at_ms == 0 { String::new() } else { b.built_at_ms.to_string() }
     );
-    // The installer checks both markers before changing the system.
+    // The installers check these markers before changing the system: this
+    // release has the `status`/`trust`/`block`/`configure` commands they hand
+    // the operator over to, and (portable) a pinned update-signing key.
     println!("portable_native_installer=1");
+    println!("management_cli=1");
     println!(
         "publisher_key_embedded={}",
         !option_env!("TELIUM_RELEASE_PUBLIC_KEY").unwrap_or("").is_empty()

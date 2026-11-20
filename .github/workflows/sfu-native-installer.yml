@@ -1,12 +1,11 @@
-name: SFU native web installer
+name: SFU native installer
 
 on:
   pull_request:
     paths:
       - 'sfu/install*.sh'
-      - 'sfu/scripts/install-wizard.py'
-      - 'sfu/scripts/test_install_wizard.py'
-      - 'sfu/src/admin.rs'
+      - 'sfu/scripts/**'
+      - 'sfu/src/cli.rs'
       - 'sfu/src/config.rs'
       - 'deploy/update-sfu-native.sh'
       - 'sfu/README.md'
@@ -15,9 +14,8 @@ on:
     branches: [main]
     paths:
       - 'sfu/install*.sh'
-      - 'sfu/scripts/install-wizard.py'
-      - 'sfu/scripts/test_install_wizard.py'
-      - 'sfu/src/admin.rs'
+      - 'sfu/scripts/**'
+      - 'sfu/src/cli.rs'
       - 'sfu/src/config.rs'
       - 'deploy/update-sfu-native.sh'
       - '.github/workflows/sfu-native-installer.yml'
@@ -38,10 +36,10 @@ jobs:
           bash -n sfu/install-full.sh
           bash -n sfu/install-portable.sh
           bash -n deploy/update-sfu-native.sh
-      - name: Validate web installer and path guards
+      - name: Validate the interactive installer and its path guards
         run: |
-          python3 -m py_compile sfu/scripts/install-wizard.py
-          python3 -m unittest discover -s sfu/scripts -p 'test_install_wizard.py' -v
+          bash -n sfu/scripts/admin-helper.sh
+          bash sfu/scripts/test-install.sh
       - name: Verify portable installer does not invoke system package or proxy managers
         run: |
           if grep -En '^\s*(apt(-get)?|dnf|yum|ufw|certbot|nginx)\b' sfu/install-portable.sh; then

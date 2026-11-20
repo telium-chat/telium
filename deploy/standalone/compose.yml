@@ -147,11 +147,10 @@ services:
       - sfu-state:/var/lib/telium-sfu
 
     ports:
-      # The HTTP surface: API, dashboard, LiveKit signalling. Loopback only --
+      # The HTTP surface: API and LiveKit signalling. Loopback only --
       # the front reaches them from here, the internet does not reach them at
       # all except through the front.
       - "127.0.0.1:7890:7890"
-      - "127.0.0.1:7891:7891"
       - "127.0.0.1:7880:7880"
       # Media, published straight onto the host. These are the ports a firewall
       # must open for calls to carry audio.

@@ -666,7 +666,7 @@ pub fn describe(status: &Status, now: i64) -> Option<String> {
                 let breaking = notes.iter().filter(|n| n.breaking).count();
                 line.push_str(&format!(
                     " -- {} of the missed releases carry upgrade notes{}; read them before \
-                     updating (GET /admin/version)",
+                     updating (`telium-sfu status --json` lists them)",
                     notes.len(),
                     if breaking > 0 { format!(", {breaking} flagged as needing a config change") } else { String::new() }
                 ));
@@ -811,7 +811,7 @@ pub fn log_build() {
     tracing::info!(version = b.version, commit = %commit, "telium-sfu build");
 }
 
-/// The JSON behind `GET /admin/version` — pure so it is testable without HTTP.
+/// The JSON behind `telium-sfu status --json` — pure so it is testable without a relay.
 pub fn version_document(status: &Status, cfg: &Updates, now: i64) -> Value {
     let b = build();
 

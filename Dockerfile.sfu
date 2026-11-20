@@ -70,7 +70,7 @@ RUN install -d -o telium -g telium /var/lib/telium-sfu
 USER telium
 WORKDIR /var/lib/telium-sfu
 
-EXPOSE 7880 7881 7890 7891 3478/udp 50000-60000/udp
+EXPOSE 7880 7881 7890 3478/udp 50000-60000/udp
 
 # A real probe of the control API, which probes LiveKit in turn (see the /health
 # row in the SFU docs) -- so a wedged engine fails the container, not just the

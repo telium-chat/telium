@@ -6,9 +6,8 @@
 #
 # One service. Unlike the server stack there is no tunnel and no second
 # container: the image already carries the livekit-server the SFU spawns and
-# supervises, and everything public goes through the host's nginx, which
-# install-sfu.sh (or the dashboard's setup wizard on a native install)
-# configures for TLS.
+# supervises, and everything public goes through the host's nginx, which you
+# configure for TLS (deploy/README.md, "Compose SFU setup").
 
 name: telium-sfu
 
@@ -32,10 +31,6 @@ services:
       # The SFU control API is HTTP, so only nginx on the host should reach
       # it. Do not expose this port directly to the public internet.
       - "127.0.0.1:7890:7890"
-      # The admin dashboard. Keep this off the public internet: publish it
-      # only on loopback, or drop this line and reach it over an SSH tunnel.
-      # install-sfu.sh binds it to 127.0.0.1 for that reason.
-      - "127.0.0.1:7891:7891"
       # LiveKit signaling is plain WebSocket inside the container. nginx on
       # the host terminates TLS (wss://<livekit-domain>/) and proxies here.
       - "127.0.0.1:7880:7880"

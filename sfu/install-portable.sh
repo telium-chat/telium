@@ -69,13 +69,15 @@ for target in "$PREFIX/bin/telium-sfu" "$PREFIX/bin/livekit-server" "$PREFIX/bin
 done
 
 # Fail before creating users, directories or units if sfu-latest is too old.
-# Both the portable dashboard and the hardened native updater are required.
+# The command-line manager (what the operator is handed over to) and the
+# hardened native updater are both required.
 require_compatible_sfu() {
   local version_output
   version_output="$("$1" version)" || { echo "Unable to inspect SFU release: $1" >&2; return 1; }
   if ! grep -Fxq 'portable_native_installer=1' <<< "$version_output" \
+      || ! grep -Fxq 'management_cli=1' <<< "$version_output" \
       || ! grep -Fxq 'publisher_key_embedded=true' <<< "$version_output"; then
-    echo "This SFU release lacks portable installer support or its pinned signing key." >&2
+    echo "This SFU release lacks portable installer support, the command-line manager or its pinned signing key." >&2
     echo "Publish a new signed SFU release containing this PR before installing portable mode." >&2
     return 1
   fi
@@ -220,12 +222,9 @@ transfer_budget_bytes = 0
 transfer_period_days = 30
 transfer_stop_percent = 80
 
-[admin]
-enabled = true
-bind = "127.0.0.1:7891"
-state_dir = "__PREFIX__/data/state"
-helper_path = ""
-install_mode = "portable"
+[install]
+mode = "portable"
+sfu_domain = ""
 SFU_CONFIG
   sed -i "s|__PREFIX__|$PREFIX|g" "$CONFIG"
   lk_key="telium$(openssl rand -hex 8)"
@@ -302,15 +301,9 @@ systemctl enable --now telium-sfu-update-native.timer
 
 echo "[portable] Installed under $PREFIX. No nginx, Certbot, firewall or packages touched."
 echo "[portable] Only a service account and three systemd units live outside $PREFIX."
-if [[ "${TELIUM_SFU_FROM_WIZARD:-}" == 1 ]]; then
-  echo "[portable] The installer page shows a Continue button; the SSH tunnel you opened for it already reaches the dashboard."
-else
-  echo "[portable] To open the private dashboard from your computer:"
-  echo "  ssh -N -L 7891:127.0.0.1:7891 USER@YOUR_SERVER"
-fi
-if [[ ! -f "$PREFIX/data/state/admin-password" ]]; then
-  sleep 2
-  line="$(journalctl -u telium-sfu -n 100 --no-pager 2>/dev/null | grep 'FIRST-RUN SETUP:' | tail -1 || true)"
-  url="$(printf '%s\n' "$line" | sed -n 's/.*open \(http[^ ]*\).*/\1/p')"
-  echo "Then open: $(printf '%s' "$url" | sed 's/SERVER_IP/localhost/')"
+if [[ "${TELIUM_SFU_FROM_INSTALLER:-}" != 1 ]]; then
+  echo
+  echo "Next, set the relay's domains and who may use it:"
+  echo "  sudo $PREFIX/bin/telium-sfu configure"
+  echo "Afterwards:  $PREFIX/bin/telium-sfu status | trust add <server> | manage"
 fi

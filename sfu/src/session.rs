@@ -204,6 +204,7 @@ mod tests {
         let livekit = LivekitManager::start(&cfg, rx).await.unwrap();
 
         Arc::new(AppState {
+            blocked: Arc::new(std::sync::RwLock::new(cfg.limits.blocked_origins.clone())),
             cfg,
             trust: Arc::new(RwLock::new(trust)),
             livekit,
