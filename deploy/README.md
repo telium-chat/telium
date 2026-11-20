@@ -115,8 +115,8 @@ place an SFU update is allowed what a server update is not.
 ### Compose SFU setup
 
 The Compose SFU runs as an unprivileged container; **it cannot operate host nginx
-or Certbot**. Unlike the native installer, its dashboard does not provide a
-host setup wizard. Configure the proxy on the host before making a relay public:
+or Certbot**. Unlike the native installer, `telium-sfu configure` cannot set
+up the host for it. Configure the proxy on the host before making a relay public:
 
 1. Create DNS records pointing `sfu.example.com` and
    `livekit.example.com` to the relay host. Leave them **DNS-only** if using
@@ -125,9 +125,8 @@ host setup wizard. Configure the proxy on the host before making a relay public:
    `/opt/telium-sfu/sfu.toml` on the host. Set
    `livekit.public_url = "https://livekit.example.com"`, and choose
    `trust.public = true` only if the relay should accept any valid Telium
-   server. Keep `bind = "0.0.0.0:7890"` and
-   `admin.bind = "0.0.0.0:7891"` **inside** the container; Compose
-   publishes those ports on host loopback only.
+   server. Keep `bind = "0.0.0.0:7890"` **inside** the container; Compose
+   publishes that port on host loopback only.
 3. Configure host nginx to proxy `sfu.example.com` to
    `http://127.0.0.1:7890`, and `livekit.example.com` to
    `http://127.0.0.1:7880` with WebSocket `Upgrade` and
@@ -158,11 +157,11 @@ host setup wizard. Configure the proxy on the host before making a relay public:
    ```
 
    Validate with `sudo nginx -t`, then use Certbot's nginx plugin to issue
-   HTTPS certificates for both names. Do not publish HTTP ports 7890, 7880,
-   or the admin port 7891 beyond host loopback.
+   HTTPS certificates for both names. Do not publish HTTP ports 7890 or 7880
+   beyond host loopback.
 4. From `/opt/telium-sfu`, run `docker compose up -d`, then
-   `docker compose logs sfu` to inspect startup. Open the admin bootstrap
-   URL through an SSH tunnel to `127.0.0.1:7891`.
+   `docker compose logs sfu` to inspect startup, and
+   `docker compose exec sfu telium-sfu status` for the relay's state.
    Firewall rules must permit public HTTPS, LiveKit TCP fallback (7881),
    TURN UDP (3478), and the configured RTC UDP range (50000–60000).
 5. Confirm `https://sfu.example.com/health` returns
@@ -171,6 +170,14 @@ host setup wizard. Configure the proxy on the host before making a relay public:
 
 The Compose updater deliberately never rewrites `sfu.toml`; after making
 operator configuration changes, use `docker compose up -d` to apply them.
+
+The `telium-sfu` command works in the container for everything that only
+reads: `docker compose exec sfu telium-sfu status` and `… trust list`. Its
+config lives on the host, so `trust add`, `block add` and `configure` refuse
+there rather than save a change that would be lost: edit `sfu.toml` on the host (a `[[trust.origins]]` entry per
+server, `blocked_origins` under `[limits]`; see `sfu/sfu.example.toml`), then
+`docker compose restart sfu`. (A single-file bind mount does not reliably show
+the container a replaced file, so a restart is the dependable way.)
 
 ## Files
 

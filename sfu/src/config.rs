@@ -8,7 +8,11 @@ pub struct SfuConfig {
     pub bind: String,
     pub livekit: LivekitConfig,
     pub trust: TrustConfig,
-    pub admin: AdminConfig,
+    /// How this relay was installed. Read from `[admin]` too: older installs
+    /// wrote it there, back when the same section also configured a web
+    /// dashboard that no longer exists (its other keys are ignored).
+    #[serde(alias = "admin")]
+    pub install: InstallConfig,
     pub limits: LimitsConfig,
     pub updates: Updates,
 }
@@ -134,15 +138,44 @@ pub struct TrustedOrigin {
     pub discovery_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+/// What the `telium-sfu` command needs to know about the machine it manages.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
-pub struct AdminConfig {
-    pub enabled: bool,
-    pub bind: String,
-    pub state_dir: String,
-    pub helper_path: String,
-    /// How installation integrates with this host: empty/full for legacy installs.
-    pub install_mode: String,
+pub struct InstallConfig {
+    /// `full`, `portable` or `compose`. Empty on installs that predate this
+    /// key; see [`InstallConfig::kind`].
+    #[serde(alias = "install_mode")]
+    pub mode: String,
+    /// The public hostname of the SFU API, recorded by `telium-sfu configure`
+    /// so `status` can show it and a rerun can offer it as the default.
+    pub sfu_domain: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallKind {
+    /// Native install that manages the HTTPS front end (Caddy or nginx).
+    Full,
+    /// Native install under one directory; the operator's own proxy.
+    Portable,
+    /// Container deployment: config is mounted read-only, the host restarts it.
+    Compose,
+    /// Hand-built or unrecognised: manage config and nothing else.
+    Manual,
+}
+
+impl InstallConfig {
+    /// `helper_present` is whether the root-owned proxy helper exists on this
+    /// machine, which is how installs from before `mode` was recorded tell a
+    /// full install from a hand-built one.
+    pub fn kind(&self, helper_present: bool) -> InstallKind {
+        match self.mode.as_str() {
+            "full" => InstallKind::Full,
+            "portable" => InstallKind::Portable,
+            "compose" => InstallKind::Compose,
+            _ if helper_present => InstallKind::Full,
+            _ => InstallKind::Manual,
+        }
+    }
 }
 
 /// Self-update check: GET one public manifest (and its detached signature)
@@ -255,7 +288,7 @@ impl Default for SfuConfig {
             bind: "127.0.0.1:7890".into(),
             livekit: LivekitConfig::default(),
             trust: TrustConfig::default(),
-            admin: AdminConfig::default(),
+            install: InstallConfig::default(),
             limits: LimitsConfig::default(),
             updates: Updates::default(),
         }
@@ -362,18 +395,6 @@ impl Default for TrustConfig {
             public: false,
             allow_insecure_discovery: false,
             origins: Vec::new(),
-        }
-    }
-}
-
-impl Default for AdminConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            bind: "127.0.0.1:7891".into(),
-            state_dir: "./state".into(),
-            helper_path: "/usr/local/libexec/telium-sfu-admin-helper".into(),
-            install_mode: String::new(),
         }
     }
 }

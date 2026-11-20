@@ -381,9 +381,8 @@ services:
         server_name = "@SERVER_NAME@"
         discovery_url = "https://@DOMAIN@"
 
-        [admin]
-        enabled = true
-        bind = "0.0.0.0:7891"
+        [install]
+        mode = "compose"
     entrypoint:
       - /bin/sh
       - -euc
@@ -401,9 +400,8 @@ services:
       # The generated LiveKit keys; losing them strands every call token.
       - sfu-state:/var/lib/telium-sfu
     ports:
-      # API, dashboard, LiveKit signalling: loopback, for the proxy.
+      # API and LiveKit signalling: loopback, for the proxy.
       - "127.0.0.1:7890:7890"
-      - "127.0.0.1:7891:7891"
       - "127.0.0.1:7880:7880"
       # Media, straight to the internet. Open these in the firewall.
       - "7881:7881"
@@ -446,7 +444,7 @@ services:
           printf '\treverse_proxy server:8448 {\n\t\ttransport http {\n\t\t\tread_timeout 0\n\t\t\twrite_timeout 0\n\t\t}\n\t}\n'
           printf '\tencode zstd gzip\n}\n'
           if [ -n "$$TELIUM_SFU_DOMAIN" ] && [ -n "$$TELIUM_LIVEKIT_DOMAIN" ]; then
-            printf '%s {\n\thandle /admin* {\n\t\treverse_proxy sfu:7891\n\t}\n\thandle {\n\t\treverse_proxy sfu:7890\n\t}\n}\n' "$$TELIUM_SFU_DOMAIN"
+            printf '%s {\n\treverse_proxy sfu:7890\n}\n' "$$TELIUM_SFU_DOMAIN"
             printf '%s {\n\treverse_proxy sfu:7880\n}\n' "$$TELIUM_LIVEKIT_DOMAIN"
           fi
         } > /etc/caddy/Caddyfile

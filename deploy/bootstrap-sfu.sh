@@ -46,10 +46,10 @@ trap 'rm -rf -- "$tmp"' EXIT
 base="https://raw.githubusercontent.com/$REPO/$REF"
 mkdir -p "$tmp/sfu/scripts" "$tmp/deploy"
 files=(
+  sfu/install.sh
   sfu/install-full.sh
   sfu/install-portable.sh
   sfu/sfu.example.toml
-  sfu/scripts/install-wizard.py
   sfu/scripts/admin-helper.sh
   deploy/update-sfu-native.sh
   deploy/update-sfu.conf
@@ -62,4 +62,4 @@ for file in "${files[@]}"; do
 done
 
 printf '\n== Starting the Telium SFU installer\n'
-python3 "$tmp/sfu/scripts/install-wizard.py" --source-root "$tmp"
+bash "$tmp/sfu/install.sh" --source-root "$tmp" "$@"

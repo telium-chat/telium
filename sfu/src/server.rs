@@ -22,17 +22,27 @@ use crate::usage::Usage;
 #[allow(dead_code)]
 pub struct AppState {
     pub cfg: SfuConfig,
+    /// Guild servers this relay refuses. Starts as `[limits].blocked_origins`
+    /// and follows the config file while the relay runs, so `telium-sfu block`
+    /// takes effect without a restart. A std lock: held for one list scan.
+    pub blocked: Arc<std::sync::RwLock<Vec<String>>>,
     pub trust: Arc<RwLock<TrustedKeys>>,
     pub livekit: Arc<LivekitManager>,
     pub sessions: Arc<SessionRegistry>,
-    /// The estimated-transfer ledger, shared with admission and the dashboard.
+    /// The estimated-transfer ledger, shared with admission.
     pub usage: Arc<Usage>,
-    /// Result of the latest release-manifest check, shared with the dashboard.
+    /// Result of the latest release-manifest check.
     pub updates: Arc<RwLock<updates::Status>>,
     /// Epoch-ms deadline while draining for an update (refuse new joins, let
     /// calls finish); 0 = not draining. An Atomic so the admission hot path
     /// never awaits.
     pub drain_until_ms: Arc<AtomicI64>,
+}
+
+impl AppState {
+    pub fn is_blocked(&self, origin: &str) -> bool {
+        self.blocked.read().unwrap_or_else(|e| e.into_inner()).iter().any(|o| o == origin)
+    }
 }
 
 async fn root(State(_state): State<Arc<AppState>>) -> Json<Value> {

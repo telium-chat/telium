@@ -128,6 +128,7 @@ fn unique_usage_dir() -> std::path::PathBuf {
         let (tx, rx) = watch::channel(false);
         let livekit = LivekitManager::start(&cfg, rx).await.unwrap();
         let state = Arc::new(AppState {
+            blocked: Arc::new(std::sync::RwLock::new(cfg.limits.blocked_origins.clone())),
             cfg,
             trust: Arc::new(RwLock::new(trust)),
             livekit,
@@ -474,6 +475,7 @@ fn unique_usage_dir() -> std::path::PathBuf {
         let (_tx, rx) = watch::channel(false);
         let livekit = LivekitManager::start(&cfg, rx).await.unwrap();
         let state = Arc::new(AppState {
+            blocked: Arc::new(std::sync::RwLock::new(cfg.limits.blocked_origins.clone())),
             cfg,
             trust: Arc::new(RwLock::new(trust)),
             livekit,
@@ -732,7 +734,7 @@ fn unique_usage_dir() -> std::path::PathBuf {
             other => panic!("expected behind, got {other:?}"),
         }
 
-        // The loop's refresh lands the assessment in shared state for the dashboard.
+        // The loop's refresh lands the assessment in shared state for `status`.
         crate::updates::refresh(&h.state).await;
         let status = h.state.updates.read().await.clone();
         assert!(status.last_checked_ms.is_some());

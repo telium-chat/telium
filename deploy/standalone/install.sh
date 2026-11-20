@@ -78,7 +78,7 @@ if [ "$VOICE" = "y" ]; then
   echo
   say "Voice needs two extra DNS records on this box's address: media is UDP"
   say "and cannot ride the chat domain's front."
-  ask SFU_DOMAIN "SFU domain (API + dashboard)" "sfu.${DOMAIN}"
+  ask SFU_DOMAIN "SFU domain (API)" "sfu.${DOMAIN}"
   ask LIVEKIT_DOMAIN "LiveKit signalling domain" "livekit.${DOMAIN}"
 fi
 
@@ -175,11 +175,11 @@ if [ "$VOICE" = "y" ]; then
   say "  $SFU_DOMAIN and $LIVEKIT_DOMAIN"
   say "    need DNS -> this box; media ports open: 7881/tcp 3478/udp 50000-60000/udp"
   if [ "$FRONT" = "1" ]; then
-    say "    fronted by the kit's Caddy; dashboard at https://$SFU_DOMAIN/admin"
+    say "    fronted by the kit's Caddy"
   else
-    say "    front them yourself: 7890 (API) and 7891 (/admin) and 7880 (signalling) on loopback"
+    say "    front them yourself: 7890 (API) and 7880 (signalling) on loopback"
   fi
-  say "    SFU first-run setup URL: cd /opt/telium && docker compose logs sfu | grep FIRST-RUN"
+  say "    SFU status: cd /opt/telium && docker compose exec sfu telium-sfu status"
 fi
 say
 say "Next:"

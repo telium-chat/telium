@@ -11,7 +11,7 @@ name = "telium-sfu"
 path = "src/main.rs"
 
 [dependencies]
-axum = { version = "0.8", features = ["ws", "macros", "form"] }
+axum = { version = "0.8", features = ["ws", "macros"] }
 tower-http = { version = "0.6", features = ["cors"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "sync", "fs", "net", "process"] }
 serde = { version = "1", features = ["derive"] }
@@ -20,6 +20,7 @@ serde_yaml = "0.9"
 toml = "0.8"
 url = "2"
 clap = { version = "4", features = ["derive"] }
+libc = "0.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ed25519-dalek = { version = "2", features = ["pkcs8"] }
@@ -29,7 +30,6 @@ anyhow = "1"
 thiserror = "2"
 jsonwebtoken = "9"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-argon2 = "0.5"
 # The release-manifest statement is "prefix sha256=<hex>"; ed25519 signs the statement text.
 sha2 = "0.10"
 telium-protocol = { path = "../telium-protocol" }
