@@ -302,8 +302,12 @@ systemctl enable --now telium-sfu-update-native.timer
 
 echo "[portable] Installed under $PREFIX. No nginx, Certbot, firewall or packages touched."
 echo "[portable] Only a service account and three systemd units live outside $PREFIX."
-echo "[portable] To open the private dashboard from your computer:"
-echo "  ssh -L 7891:127.0.0.1:7891 USER@YOUR_SERVER"
+if [[ "${TELIUM_SFU_FROM_WIZARD:-}" == 1 ]]; then
+  echo "[portable] The installer page shows a Continue button; the SSH tunnel you opened for it already reaches the dashboard."
+else
+  echo "[portable] To open the private dashboard from your computer:"
+  echo "  ssh -N -L 7891:127.0.0.1:7891 USER@YOUR_SERVER"
+fi
 if [[ ! -f "$PREFIX/data/state/admin-password" ]]; then
   sleep 2
   line="$(journalctl -u telium-sfu -n 100 --no-pager 2>/dev/null | grep 'FIRST-RUN SETUP:' | tail -1 || true)"

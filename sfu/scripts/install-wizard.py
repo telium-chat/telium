@@ -4,6 +4,10 @@
 Runs as root because the selected installation backend must install services.
 Never bind this privileged server to a non-loopback address. The bearer token
 is printed on the server console; a remote operator uses SSH port forwarding.
+
+The wizard listens on a fixed port next to the dashboard's (7892 and 7891), so
+one SSH command forwarding both covers installation *and* the dashboard after
+it: the operator never has to open a second tunnel.
 """
 import argparse
 import html
@@ -14,8 +18,14 @@ import secrets
 import subprocess
 import tempfile
 import threading
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
+
+# The dashboard's loopback port (admin.bind in sfu.toml, set by both install
+# scripts) and the wizard's own, fixed so the tunnel can be opened up front.
+DASHBOARD_PORT = 7891
+WIZARD_PORT = 7892
 
 
 def validate_directory(value):
@@ -94,8 +104,8 @@ def _read(path):
         return ""
 
 
-def page(body):
-    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+def page(body, head=""):
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">{head}
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Telium SFU setup</title>
 <style>
@@ -105,7 +115,7 @@ section{{border:1px solid #35353e;border-radius:14px;padding:20px;margin:18px 0;
 label{{display:block;margin:12px 0}}input[type=text]{{display:block;width:100%;max-width:550px;
 padding:11px;margin-top:6px;background:#22222a;color:#fff;border:1px solid #555;border-radius:8px}}
 button{{background:#7c3aed;color:#fff;padding:12px 22px;border:0;border-radius:9px;font-weight:bold;cursor:pointer}}
-small{{color:#aaa;display:block}}pre{{white-space:pre-wrap;word-break:break-word;max-height:480px;overflow:auto;
+small{{color:#aaa;display:block}}a.button{{display:inline-block;background:#7c3aed;color:#fff;padding:12px 22px;border-radius:9px;font-weight:bold;text-decoration:none}}pre{{white-space:pre-wrap;word-break:break-word;max-height:480px;overflow:auto;
 border-radius:10px;padding:16px;background:#191920}}a{{color:#c4b5fd}}
 </style></head><body><h1>Install Telium SFU</h1>{body}</body></html>"""
 
@@ -118,6 +128,106 @@ def tail(path, lines=70):
         return ""
 
 
+_IPV4 = re.compile(r"(?:\d{1,3}\.){3}\d{1,3}")
+
+
+def ssh_target(environ=os.environ, lookup=None):
+    """Best guess at `user@host` for the operator's ssh command.
+
+    The user is whoever ran sudo; the host is the address their current SSH
+    session reached (SSH_CONNECTION, if sudo kept it), else this machine's
+    public IPv4. Placeholders stand in for anything unknown.
+    """
+    user = environ.get("SUDO_USER") or "USER"
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", user):
+        user = "USER"
+    host = ""
+    connection = environ.get("SSH_CONNECTION", "").split()
+    if len(connection) == 4:
+        host = connection[2]
+    if not host and lookup is not None:
+        host = lookup()
+    if not re.fullmatch(r"[0-9A-Fa-f:.]+", host or ""):
+        host = "YOUR_SERVER"
+    if ":" in host:
+        host = f"[{host}]" if not host.startswith("[") else host
+    return f"{user}@{host}"
+
+
+def public_ipv4():
+    try:
+        with urllib.request.urlopen("https://api.ipify.org", timeout=3) as response:
+            value = response.read(64).decode("ascii", "replace").strip()
+    except (OSError, ValueError):
+        return ""
+    return value if _IPV4.fullmatch(value) else ""
+
+
+def tunnel_command(wizard_port, target):
+    """One ssh command that forwards both the wizard and the dashboard."""
+    forwards = [f"-L {DASHBOARD_PORT}:127.0.0.1:{DASHBOARD_PORT}"]
+    if wizard_port != DASHBOARD_PORT:
+        forwards.insert(0, f"-L {wizard_port}:127.0.0.1:{wizard_port}")
+    return f"ssh -N {' '.join(forwards)} {target}"
+
+
+_SETUP_TOKEN = re.compile(r"/admin\?token=([A-Za-z0-9_-]{16,})")
+
+
+def setup_link(log_text):
+    """The dashboard's one-time setup link, rewritten for the SSH tunnel.
+
+    Both install scripts print the dashboard's bootstrap URL in some form
+    (SERVER_IP:7891, the public IP behind a fresh Caddy, or localhost). The
+    token is the only part that matters: the tunnel the operator already has
+    open reaches the dashboard on localhost, which also keeps the token off
+    plain HTTP to the public address.
+    """
+    matches = _SETUP_TOKEN.findall(log_text)
+    if not matches:
+        return None
+    return f"http://localhost:{DASHBOARD_PORT}/admin?token={matches[-1]}"
+
+
+def journal_text():
+    try:
+        return subprocess.run(
+            ["journalctl", "-u", "telium-sfu", "-n", "200", "--no-pager", "-o", "cat"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def admin_password_path(mode, directory):
+    if mode == "portable" and directory:
+        return Path(directory) / "data" / "state" / "admin-password"
+    return Path("/var/lib/telium-sfu/state/admin-password")
+
+
+def finished_state(log_text, mode, directory, journal=journal_text):
+    """After a successful run: ("setup", link), ("kept", None) or ("starting", None).
+
+    The scripts read the setup link from the journal two seconds after
+    starting the service, which can be too early. Look again ourselves, and
+    only call the install an update when the admin password really exists.
+    """
+    link = setup_link(log_text) or setup_link(journal())
+    if link:
+        return "setup", link
+    if admin_password_path(mode, directory).exists():
+        return "kept", None
+    return "starting", None
+
+
+def bind_wizard(handler):
+    """Bind the fixed wizard port on loopback, or any free one if it is taken."""
+    try:
+        return ThreadingHTTPServer(("127.0.0.1", WIZARD_PORT), handler)
+    except OSError:
+        return ThreadingHTTPServer(("127.0.0.1", 0), handler)
+
+
 def serve(source):
     token = secrets.token_urlsafe(32)
     state = {"mode": None, "directory": None, "returncode": None}
@@ -126,8 +236,8 @@ def serve(source):
     os.close(fd)
 
     class Handler(BaseHTTPRequestHandler):
-        def send_html(self, body, code=200):
-            data = page(body).encode()
+        def send_html(self, body, code=200, head=""):
+            data = page(body, head).encode()
             self.send_response(code)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
@@ -164,16 +274,34 @@ account and three small systemd units are installed outside the folder.</small>
 I understand the selected installation will make the system changes described above.</label>
 <button type="submit">Install selected mode</button></form>""")
                 return
-            log = html.escape(tail(logfile))
+            log_text = tail(logfile)
+            log = html.escape(log_text)
+            refresh = ""
             if rc is None:
-                status = "<h2>Installing…</h2><p>Refresh this page to check progress.</p>"
+                refresh = '<meta http-equiv="refresh" content="3">'
+                status = "<h2>Installing…</h2><p>This page refreshes itself every few seconds.</p>"
             elif rc == 0:
-                status = "<h2>Installation complete</h2><p>Follow the one-time SFU dashboard URL in the log below to set your admin password and finish configuration.</p>"
-                if mode == "portable":
-                    status += "<p>For remote access to the portable dashboard, use <code>ssh -L 7891:127.0.0.1:7891 user@server</code> and replace SERVER_IP in the printed URL with localhost.</p>"
+                outcome, link = finished_state(_read(logfile), mode, directory)
+                if outcome == "starting":
+                    refresh = '<meta http-equiv="refresh" content="3">'
+                    status = """<h2>Installation complete — the dashboard is starting…</h2>
+<p>Its one-time setup link appears here as soon as the SFU has written it. This page refreshes itself.</p>"""
+                elif outcome == "setup":
+                    status = f"""<h2>Installation complete</h2>
+<p>Next, set your admin password and enter your domains in the SFU dashboard. The SSH
+tunnel you opened for this installer already reaches it.</p>
+<p><a class="button" href="{html.escape(link)}">Continue to dashboard setup</a></p>
+<small>This link works once. Later, open <code>http://localhost:{DASHBOARD_PORT}/admin</code> through the same
+tunnel{" or <code>https://YOUR-SFU-DOMAIN/admin</code> once HTTPS is set up" if mode == "full" else ""}.</small>"""
+                else:
+                    status = f"""<h2>Installation complete</h2>
+<p>Your existing dashboard and settings were kept. Open
+<a href="http://localhost:{DASHBOARD_PORT}/admin">http://localhost:{DASHBOARD_PORT}/admin</a> through the same SSH tunnel.</p>"""
+                if outcome != "starting":
+                    status += "<p>You can close the installer with Ctrl+C in its terminal.</p>"
             else:
                 status = f"<h2>Installation failed (exit {rc})</h2><p>Review the output below; you can safely rerun the installer after fixing prerequisites.</p>"
-            self.send_html(f"{status}<p>Mode: <strong>{html.escape(mode)}</strong> {html.escape(directory or '')}</p><pre>{log}</pre><p><a href='/?token={token}'>Refresh status</a></p>")
+            self.send_html(f"{status}<p>Mode: <strong>{html.escape(mode)}</strong> {html.escape(directory or '')}</p><details{' open' if rc != 0 else ''}><summary>Installer output</summary><pre>{log}</pre></details>", head=refresh)
 
         def do_POST(self):
             if not self.allowed() or urlsplit(self.path).path != "/choose":
@@ -208,6 +336,9 @@ I understand the selected installation will make the system changes described ab
                     try:
                         with open(logfile, "a", encoding="utf-8") as output:
                             env = dict(os.environ)
+                            # The scripts then point at this page's Continue
+                            # button instead of asking for a second tunnel.
+                            env["TELIUM_SFU_FROM_WIZARD"] = "1"
                             if proxy:
                                 env["TELIUM_SFU_PROXY"] = proxy
                                 if params.get("caddyfile_edit") == ["yes"]:
@@ -230,15 +361,18 @@ I understand the selected installation will make the system changes described ab
         def log_message(self, format, *args):
             pass  # Do not log bearer tokens to the console/journal.
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = bind_wizard(Handler)
     port = server.server_port
-    print("\nTelium SFU local web installer")
-    print("No packages, services, nginx sites or firewall rules have been changed.")
-    print(f"Open on this machine: http://127.0.0.1:{port}/?token={token}")
-    print("For SSH access from your own computer, open another terminal and run:")
-    print(f"  ssh -L {port}:127.0.0.1:{port} USER@YOUR_SERVER")
-    print("Then open the localhost URL above in your browser.")
-    print("Keep this terminal running until installation finishes. Ctrl+C closes the wizard.\n", flush=True)
+    target = ssh_target(lookup=public_ipv4)
+    url = f"http://localhost:{port}/?token={token}"
+    print("\nTelium SFU installer is ready. Nothing on this machine has been changed yet.\n")
+    print("1. On your own computer, open a terminal and run this one SSH tunnel.")
+    print("   Keep it open: it serves this installer now and the SFU dashboard afterwards.")
+    print(f"     {tunnel_command(port, target)}")
+    print("   (Already connected with these -L options? Skip this step.)")
+    print("2. Open this URL in your browser:")
+    print(f"     {url}")
+    print("\nKeep this terminal running until installation finishes. Ctrl+C closes the installer.\n", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

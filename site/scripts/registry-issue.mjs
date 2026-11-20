@@ -11,10 +11,12 @@
  * The issue body is untrusted input, so nothing in it is carried through
  * as-is: the entry is rebuilt from an allowlist of schema fields, the `added`
  * date is stamped here rather than trusted from the submitter. A homeserver's
- * `recommendations.opt_in` is carried over from the JSON only when it is
- * exactly `true` (the wizard asks once, on the website, and writes it there);
- * a relay's `feed` consent is still read only from the issue's own checkbox.
- * Nothing else the submitter could not set can be smuggled through. The existing validators stay the gate — the rules
+ * `recommendations.opt_in` and a relay's `feed.opt_in` are carried over from
+ * the JSON only when they are exactly `true`: the wizard asks once, on the
+ * website, and writes the answer there, so the issue form does not ask again.
+ * (A relay issue filed from the old form, which still had an "Automatic call
+ * routing" checkbox, counts that tick too.) Nothing else the submitter could
+ * not set can be smuggled through. The existing validators stay the gate — the rules
  * live in one place.
  *
  * Exit codes: 0 ok · 2 no entry or unparseable · 3 duplicate · 4 ownership not
@@ -144,10 +146,10 @@ export const rebuildEntry = (kind, raw, { added, consent }) => {
     pickStrings(raw, ['name', 'description', 'capacity_band'], entry)
     pickObject(raw, 'region', ['label', 'code'], entry)
     pickObject(raw, 'operator', ['name', 'contact'], entry)
-    if (consent) entry.feed = { opt_in: true }
+    // The wizard already asked; only a literal boolean true counts.
+    if (raw.feed?.opt_in === true || consent) entry.feed = { opt_in: true }
   }
-  // The relay consent switch exists only as the issue's checkbox, and the date
-  // is stamped by the machine that merges: neither arrives through the JSON.
+  // The date is stamped by the machine that merges, never taken from the JSON.
   entry.added = added
   return entry
 }
@@ -250,7 +252,8 @@ const main = async () => {
     process.exit(2)
   }
 
-  // Only relays still use an issue checkbox; homeserver consent is in the JSON.
+  // Consent lives in the JSON. Relay issues opened from the old form carried a
+  // separate checkbox instead; honour a tick there so those still go through.
   const consent = kind === 'sfu'
     && checkboxChecked(sectionFor(body, 'Automatic call routing'), 'Also let guilds in automatic mode route calls')
 

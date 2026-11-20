@@ -91,7 +91,7 @@ jobs:
           cat > pr-body.md <<'EOF'
           From listing issue #ISSUE_NUMBER (Closes #ISSUE_NUMBER).
 
-          The entry was built by `site/scripts/registry-issue.mjs` from the issue's fields: the JSON is allowlist-rebuilt, the `added` date is stamped from the issue, and a homeserver's recommendation opt-in comes from the wizard's JSON (only a literal `true` counts) and a relay's feed consent from its checkbox. The validator ran on it already and will run again here, alongside the advisory live probe.
+          The entry was built by `site/scripts/registry-issue.mjs` from the issue's fields: the JSON is allowlist-rebuilt, the `added` date is stamped from the issue, and a homeserver's recommendation opt-in and a relay's automatic-routing opt-in both come from the wizard's JSON (only a literal `true` counts). The validator ran on it already and will run again here, alongside the advisory live probe.
 
           Nothing here is urgent. When it merges, the probe workflow runs immediately (it also runs hourly), so the listing shows real status instead of "Unreachable" until the next scheduled run.
           EOF

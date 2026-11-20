@@ -24,10 +24,20 @@ sudo bash sfu/install.sh
 ```
 
 This starts a **local-only browser installer** before making any system-wide
-changes. Python 3 is required for this first step. The console prints a
-one-time URL with a random token; if using SSH, forward the printed port to
-your machine with `ssh -L PORT:127.0.0.1:PORT user@server`, then open the
-URL on localhost. **Do not expose this privileged installer to the internet.**
+changes. Python 3 is required for this first step. The installer listens on
+`127.0.0.1:7892` and the dashboard it installs on `127.0.0.1:7891`, so **one**
+SSH tunnel covers both. The simplest way is to log in with it:
+
+```sh
+ssh -L 7892:127.0.0.1:7892 -L 7891:127.0.0.1:7891 user@server
+sudo bash sfu/install.sh
+```
+
+(Or run the `ssh -N …` command the installer prints in a second terminal.)
+Open the one-time `http://localhost:7892/?token=…` URL it prints. When the
+installation finishes, the page shows a **Continue to dashboard setup** button
+that goes through the same tunnel. **Do not expose this privileged installer
+to the internet.**
 
 In the browser, choose **Full installation** or **Portable native installation**:
 
@@ -63,15 +73,13 @@ lives in root-owned `updates/`, not in the service-writable config directory.
 The service account can edit `config/sfu.toml` and its own data. Reruns will
 reject symlinks or writable ancestors in the installation path rather than
 following them with root privileges. The portable
-setup dashboard binds to `127.0.0.1:7891`; connect with:
+setup dashboard binds to `127.0.0.1:7891`, which the installer's tunnel
+already forwards; later, reach it the same way at `http://localhost:7891/admin`.
 
-```sh
-ssh -L 7891:127.0.0.1:7891 user@server
-```
-
-Open the one-time URL from the installer output, replacing `SERVER_IP` with
-`localhost`. After setting the admin password, the web wizard asks for the
-SFU hostname, LiveKit hostname, public/private mode and optional origin. It
+After setting the admin password, the web wizard asks for the SFU hostname,
+LiveKit hostname, and whether the relay is **public** (any homeserver's guilds;
+required for a relay listed at telium.chat/list) or **private** (only the
+homeservers you name, starting with yours). It
 saves the configuration and restarts the service **without touching host
 HTTPS configuration**. Configure your existing reverse proxy to send the SFU
 hostname to `http://127.0.0.1:7890` and the LiveKit hostname (with WebSocket
