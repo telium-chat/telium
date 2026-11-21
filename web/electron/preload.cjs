@@ -89,7 +89,6 @@ const bridge = Object.freeze({
   mprisStatus: () => ipcRenderer.invoke('telium:mpris-status'),
   windowsMediaStatus: () => ipcRenderer.invoke('telium:windows-media-status'),
   rpcStatus: () => ipcRenderer.invoke('telium:rpc-status'),
-  gpuStatus: () => ipcRenderer.invoke('telium:gpu-status'),
   onRichPresenceChanged(callback) {
     if (typeof callback !== 'function') return () => {};
     const listener = (_event, activity) => callback(activity || null);

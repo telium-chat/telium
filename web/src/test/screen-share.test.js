@@ -773,18 +773,4 @@ describe('share stats', () => {
     expect(next.rows[0].bitrate).toBe(80000);
     expect(next.rows[0].limit).toBe('bandwidth');
   });
-
-  it('reports the encoder implementation when Chromium exposes it, null when it does not', async () => {
-    const { summarizeVideoStats } = await import('../lib/screenShare.js');
-    const known = summarizeVideoStats(new Map([
-      ['a', { id: 'a', type: 'outbound-rtp', kind: 'video', frameWidth: 1920, frameHeight: 1080, bytesSent: 1, timestamp: 0, encoderImplementation: 'VaapiVideoEncodeAccelerator', powerEfficientEncoder: true }],
-    ]));
-    expect(known.rows[0].encoder).toBe('VaapiVideoEncodeAccelerator');
-    expect(known.rows[0].powerEfficient).toBe(true);
-    const hidden = summarizeVideoStats(new Map([
-      ['a', { id: 'a', type: 'outbound-rtp', kind: 'video', frameWidth: 1920, frameHeight: 1080, bytesSent: 1, timestamp: 0 }],
-    ]));
-    expect(hidden.rows[0].encoder).toBeNull();
-    expect(hidden.rows[0].powerEfficient).toBeNull();
-  });
 });

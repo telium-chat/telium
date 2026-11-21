@@ -100,9 +100,6 @@ export function summarizeVideoStats(report, prev = null) {
       limit: stat.qualityLimitationReason && stat.qualityLimitationReason !== 'none'
         ? stat.qualityLimitationReason : null,
       codec: codecs.get(stat.codecId)?.replace('video/', '') ?? null,
-      // Chromium withholds these from pages it doesn't consider capture-capable, so null means unknown rather than software.
-      encoder: out ? stat.encoderImplementation ?? null : null,
-      powerEfficient: out ? stat.powerEfficientEncoder ?? null : null,
       dropped: stat.framesDropped ?? null,
       active: out ? stat.active !== false && (stat.framesPerSecond ?? 1) > 0 : true,
     });

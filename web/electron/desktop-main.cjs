@@ -75,12 +75,6 @@ ipcMain.handle('telium:windows-media-status', (event) => {
   return richPresence?.windowsMediaStatus() || null;
 });
 
-ipcMain.handle('telium:gpu-status', (event) => {
-  assertTeliumWindow(event);
-  // 'enabled' means Chromium may hardware-encode; 'disabled_software' means it won't.
-  return { videoEncode: app.getGPUFeatureStatus().video_encode || null };
-});
-
 ipcMain.handle('telium:rpc-status', (event) => {
   assertTeliumWindow(event);
   return richPresence?.rpcStatus() || null;
