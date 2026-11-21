@@ -10,7 +10,7 @@ import { cn } from '../lib/cn.js';
 import { CallStage, ChatToggle, DockButton } from './CallStage.jsx';
 import { Tooltip } from '../components/Tooltip.jsx';
 import {
-  Avatar, ChoiceCard, ChoiceList, EmojiText, EmptyState, GlobeIcon, HashIcon, Hint, Loading,
+  Avatar, ChoiceCard, ChoiceList, CloseIcon, EmojiText, EmptyState, GlobeIcon, HashIcon, Hint, IconButton, Loading,
   ModalShell, ServerIcon, VoiceIcon, WarnIcon,
 } from '../components/index.js';
 import { ChatView } from './ChatView.jsx';
@@ -302,6 +302,9 @@ export function VoiceView({
             <span className="min-w-0 flex-1 truncate text-lg font-semibold tracking-tight">
               <EmojiText>{channel.name}</EmojiText>
             </span>
+            <IconButton title={t('voice.room.hideChat')} onClick={() => setChatOpen(false)}>
+              <CloseIcon />
+            </IconButton>
           </div>
           <ChatView key={channelId} channelId={channelId} />
         </div>

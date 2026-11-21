@@ -59,6 +59,9 @@ function userIdentityPayload(signer, subject, immutableId, identityKey) {
   );
 }
 
+/// Least time between re-reads of this account's own device list.
+const OWN_RELOAD_GAP_MS = 5_000;
+
 export class Trust {
   constructor(home, { userId, deviceId, recovery = null }) {
     this.home = home;
@@ -635,6 +638,10 @@ export class Trust {
 
   /// null only for a legacy account with no root; otherwise a hard boolean so a server can't smuggle in an unsigned leaf.
   async verifyClaimedPackage(userId, deviceId, signatureKey) {
+    // Our own device list is read once at start; a device of ours signed in since (a phone joining the call) is news.
+    if (userId === this.userId && this.own.get(deviceId)?.mls_key !== signatureKey) {
+      await this.reloadOwnDevices();
+    }
     const peer = await this.refresh(userId);
     if (peer?.continuityRejected) return false;
     if (peer?.continuityUnknown) {
@@ -653,6 +660,25 @@ export class Trust {
       && device.mls_key === signatureKey
       && device.active !== false
     );
+  }
+
+  /// Re-reads this account's devices from home, adding or updating what it lists. Deduplicated, and spaced by waiting
+  /// out the gap rather than skipping it: a skipped read would answer a just-signed sibling with a hard no. A failed
+  /// read leaves the list as it was, the answer this gave before it ever re-read.
+  async reloadOwnDevices() {
+    if (this.ownReload) return this.ownReload;
+    this.ownReload = (async () => {
+      const wait = OWN_RELOAD_GAP_MS - (Date.now() - (this.ownReloadedAt || 0));
+      if (wait > 0) await new Promise((resolve) => { setTimeout(resolve, wait); });
+      let doc;
+      try { doc = await this.home.crossSigning(); } catch { return; }
+      this.ownReloadedAt = Date.now();
+      for (const d of doc?.devices || []) {
+        if (d?.device_id) this.own.set(d.device_id, d);
+      }
+    })();
+    try { await this.ownReload; } finally { this.ownReload = null; }
+    return undefined;
   }
 
   /// So a missing identity key is a change, not legacy.

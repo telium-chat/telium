@@ -4,6 +4,7 @@ import { EmojiText, Twemoji } from '../../components/Twemoji.jsx';
 import { loadEmoji, searchEmoji } from '../../lib/emoji.js';
 import { displayNameOf, displayText, mentionToken } from '../../lib/mentions.js';
 import { remoteMediaOrigin } from '../../lib/media.js';
+import { faceOf } from '../../lib/faces.js';
 import { colourOf, shortName } from '../../lib/util.js';
 import { channelGlyph, isLinkable } from '../../lib/channels.js';
 import { has } from '../../lib/perms.js';
@@ -49,6 +50,9 @@ function person(store, guildId, member) {
   const id = member.user_id;
   const mine = id === store?.me?.user_id;
   const guild = guildId ? store?.guilds?.get?.(guildId) : null;
+  // DM rows carry only a user id, so the face comes from what the store already knows (friends, peer profiles, identities).
+  const face = !guildId && !mine ? faceOf(store, id) : null;
+  if (face && !face.avatarRef) store?.ensureProfile?.(id);
   return {
     key: id,
     insert: mentionToken('user', id),
@@ -57,10 +61,13 @@ function person(store, guildId, member) {
     colour: guildId ? store.colourFor(guildId, id) : null,
     avatar: {
       id,
-      name: member.display_name || member.nickname || null,
-      mediaRef: (mine ? store?.me?.profile?.avatar_ref : null) || member.avatar_ref || null,
-      base: (mine || !guild ? store?.home?.base : store?.apiForGuild?.(guildId)?.base) || null,
-      mediaOrigin: mine ? undefined : remoteMediaOrigin(id, guild?.domain || store?.home?.domain),
+      name: member.display_name || member.nickname || face?.name || null,
+      mediaRef: (mine ? store?.me?.profile?.avatar_ref : null) || member.avatar_ref || face?.avatarRef || null,
+      base: (face?.avatarRef ? face.base : null)
+        || (mine || !guild ? store?.home?.base : store?.apiForGuild?.(guildId)?.base) || null,
+      mediaOrigin: mine
+        ? undefined
+        : (face?.avatarRef ? face.mediaOrigin : remoteMediaOrigin(id, guild?.domain || store?.home?.domain)),
       presence: store?.statusOf?.(id) || null,
     },
   };

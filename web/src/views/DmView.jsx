@@ -82,7 +82,7 @@ export function DmView({ conversationId, mobile = false, onBack, onMore, onOpenN
 
   const surface = useDmSurface(convo);
   const frames = store.dmFrames.get(conversationId) || [];
-  const callLogs = store.callLogs.get(conversationId) || [];
+  const callLogs = store.callLogFor(conversationId);
 
   // Sends the wire refused, held for idempotent retry. The row hands off from the composer's
   // optimistic one by nonce; a failed entry offers a fresh resend instead.

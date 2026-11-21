@@ -606,6 +606,7 @@ export const sessionMethods = {
     this.fallbackTimer = null;
     this.probeTimer = null;
     this.fallback = null;
+    this.forgetAllRefusals?.();
     this.gw.closeAll();
     const outgoing = this.session?.home?.user_id || null;
     const remaining = listAccounts().some((a) => a.user_id !== outgoing);
