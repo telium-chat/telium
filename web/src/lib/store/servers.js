@@ -4,7 +4,9 @@ import {
 } from '../failover.js';
 import { Status } from '../gateway.js';
 import { activeSunset } from '../sunset.js';
-import { DEFAULT_INTENTS, RENEW_BEFORE_MS } from './shared.js';
+import {
+  DEFAULT_INTENTS, REFUSED_RETRY_MS, RENEW_BEFORE_MS, RENEW_MIN_GAP_MS,
+} from './shared.js';
 import { BIO_MAX_FALLBACK } from '../bio.js';
 import { registerOrigin, teliumFetch } from '../net/transport.js';
 
@@ -249,6 +251,7 @@ export const serverMethods = {
   },
 
   removeServer(domain) {
+    this.forgetRefusal(domain);
     this.gw.remove(domain);
     this.apis.delete(domain);
     delete this.session.servers[domain];
@@ -286,6 +289,42 @@ export const serverMethods = {
     this.renewedAt.set(domain, Date.now());
     this.save();
     this.connectServer(domain, entry);
+  },
+
+  /// A refused socket stays down (`wanted` is false), and nothing else asks again: a renewal that failed (home not yet
+  /// reachable after a wake) or that fell inside `RENEW_MIN_GAP_MS` left the banner up until a manual reconnect.
+  /// Counted per server and reset by READY, so a server refusing every fresh session settles on the banner.
+  recoverRefused(domain) {
+    if (!this.refusals) this.refusals = new Map();
+    const held = this.refusals.get(domain) || { tries: 0, timer: null };
+    if (held.timer) return;
+    if (held.tries >= REFUSED_RETRY_MS.length) return;
+    const since = Date.now() - (this.renewedAt.get(domain) || 0);
+    const wait = Math.max(
+      held.tries === 0 ? 0 : REFUSED_RETRY_MS[held.tries - 1],
+      RENEW_MIN_GAP_MS - since,
+    );
+    held.tries += 1;
+    held.timer = setTimeout(() => {
+      held.timer = null;
+      if (this.disposed || !this.session?.servers?.[domain]) return;
+      if (this.gw.statusOf(domain) !== Status.Rejected) return;
+      this.renewServer(domain).catch(() => {
+        if (this.gw.statusOf(domain) === Status.Rejected) this.recoverRefused(domain);
+      });
+    }, Math.max(0, wait));
+    this.refusals.set(domain, held);
+  },
+
+  forgetRefusal(domain) {
+    const held = this.refusals?.get(domain);
+    if (!held) return;
+    clearTimeout(held.timer);
+    this.refusals.delete(domain);
+  },
+
+  forgetAllRefusals() {
+    for (const domain of [...(this.refusals?.keys() || [])]) this.forgetRefusal(domain);
   },
 
   /// Assertions live minutes and sessions an hour; renew quietly. Home is not here: its token is the login.

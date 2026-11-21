@@ -338,7 +338,6 @@ export function useDmItems(frames, convo, mls, me, callLogs = []) {
     }));
   }
 
-  for (const key of cache.current.keys()) if (!seen.has(key)) cache.current.delete(key);
   for (const entry of callLogs || []) {
     if (!entry || entry.conversationId !== conversationId) continue;
     items.push(hold(cache.current, seen, {
@@ -363,6 +362,7 @@ export function useDmItems(frames, convo, mls, me, callLogs = []) {
       name: r.name,
     }));
   }
+  for (const key of cache.current.keys()) if (!seen.has(key)) cache.current.delete(key);
   items.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
   return items;
 }

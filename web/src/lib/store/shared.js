@@ -17,3 +17,6 @@ export const RENEW_BEFORE_MS = 5 * 60_000;
 export const RENEW_EVERY_MS = 60_000;
 /// A server refusing a token it just minted is refusing for another reason.
 export const RENEW_MIN_GAP_MS = 30_000;
+/// Waits between renewals of a refused server session. Past the last one the banner stays for a manual reconnect:
+/// a server that keeps refusing fresh sessions (a revoked account) must not be asked forever.
+export const REFUSED_RETRY_MS = [5_000, 30_000, 60_000, 120_000, 300_000];

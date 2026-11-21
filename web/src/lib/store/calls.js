@@ -120,8 +120,29 @@ export const callMethods = {
     list.push(entry);
     while (list.length > CALL_LOG_MAX) list.shift();
     this.callLogs.set(conversationId, list);
+    this.keepCallLog(conversationId, [entry]);
     this.emit('call-log', conversationId);
     return entry;
+  },
+
+  /// Saved with the conversation's encrypted state; without it a reload dropped every call line.
+  keepCallLog(conversationId, entries) {
+    const engine = this.mls;
+    if (!engine?.rememberCalls) return;
+    engine.rememberCalls(conversationId, entries)
+      .then(() => this.emit('call-log', conversationId))
+      .catch(() => {});
+  },
+
+  /// What this session logged, over what earlier sessions saved; this session's copy of a line wins.
+  callLogFor(conversationId) {
+    const live = this.callLogs.get(conversationId) || [];
+    const saved = this.mls?.callsIn?.(conversationId) || [];
+    if (!saved.length) return live;
+    if (!live.length) return saved;
+    const byId = new Map(saved.map((row) => [row.id, row]));
+    for (const row of live) byId.set(row.id, row);
+    return [...byId.values()].sort((a, b) => a.at - b.at).slice(-CALL_LOG_MAX);
   },
 
   markUnanswered(conversationId) {
@@ -130,6 +151,7 @@ export const callMethods = {
     const last = list[list.length - 1];
     if (last.kind === 'incoming' || last.kind === 'outgoing') {
       last.kind = 'missed';
+      this.keepCallLog(conversationId, [last]);
       this.emit('call-log', conversationId);
     }
   },

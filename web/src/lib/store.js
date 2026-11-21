@@ -9,7 +9,7 @@ import { debounce, Emitter, storage } from './util.js';
 import { readStored } from './local-state.js';
 import {
   OPAQUE_PIN_PREFIX, PENDING_RECOVERY_KEY,
-  RENEW_EVERY_MS, RENEW_MIN_GAP_MS, SESSION_KEY,
+  RENEW_EVERY_MS, SESSION_KEY,
 } from './store/shared.js';
 import { callMethods } from './store/calls.js';
 import { dispatchMethods } from './store/dispatch.js';
@@ -206,10 +206,10 @@ export class Store extends Emitter {
     this.gw.on('status', (e) => {
       this.emit('status', e);
       this.watchHome(e);
+      if (e.status === Status.Ready) { this.forgetRefusal(e.domain); return; }
       // A rejected token needs a new one; waiting won't help.
       if (e.status !== Status.Rejected) return;
-      if (Date.now() - (this.renewedAt.get(e.domain) || 0) < RENEW_MIN_GAP_MS) return;
-      this.renewServer(e.domain).catch(() => {});
+      this.recoverRefused(e.domain);
     });
     this.gw.on('dispatch', (e) => this.onDispatch(e));
 
@@ -241,6 +241,7 @@ export class Store extends Emitter {
     this.sync.retire();
     for (const off of this.unlisten.splice(0)) off();
     clearInterval(this.renewTimer);
+    this.forgetAllRefusals();
     clearTimeout(this.fallbackTimer);
     clearTimeout(this.startupTimer);
     clearInterval(this.probeTimer);

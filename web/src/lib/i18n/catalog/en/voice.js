@@ -640,6 +640,7 @@ export const voice = {
   'voice.room.watching': '{count, plural, one {# person watching} other {# people watching}}',
 
   'voice.room.chatTitle': 'Channel chat',
+  'voice.room.hideChat': 'Hide chat',
   'voice.room.minimize': 'Minimize',
 
   // What the voice room is doing right now, as opposed to its topic's standing
