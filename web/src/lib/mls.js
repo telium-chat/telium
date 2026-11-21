@@ -114,7 +114,7 @@ const SNIPPET_MAX = 200;
 
 const GROUP_NAME_MAX = 100;
 const RENAME_LOG_MAX = 50;
-// Call lines are this device's own record (who rang, how long it ran); kept with the conversation's state so a reload keeps them.
+// Call lines are this device's own record (who rang, how long it ran), kept locally so a reload keeps them.
 const CALL_LOG_MAX = 50;
 const CALL_LOG_KINDS = new Set(['incoming', 'outgoing', 'missed', 'ended']);
 
@@ -700,7 +700,7 @@ export class Mls {
     // Reload now: until then `joined` says no and the store would mistake the new group for none.
     await this.loadGroup(conversationId).catch(() => null);
     if (this.stateRead.has(conversationId)) {
-      for (const folds of [this.reactions, this.edits, this.tombstones, this.pins, this.callSfus, this.names, this.renames, this.calls]) {
+      for (const folds of [this.reactions, this.edits, this.tombstones, this.pins, this.callSfus, this.names, this.renames]) {
         folds.delete(conversationId);
       }
       await this.readFolds(conversationId);
@@ -1635,24 +1635,46 @@ export class Mls {
 
   /// Once per conversation per session, before the sync walk. Rows not understood are skipped.
   async loadConversationState(conversationId) {
-    if (this.stateRead.has(conversationId)) return this.stateReading?.get(conversationId);
+    if (this.stateRead.has(conversationId)) return;
     this.stateRead.add(conversationId);
-    if (!this.stateReading) this.stateReading = new Map();
-    const reading = (async () => {
-      // Mirror first so everything after reads one store.
-      await this.pullMirror(conversationId).catch(() => {});
-      await this.readFolds(conversationId);
-    })();
-    this.stateReading.set(conversationId, reading);
-    try { await reading; } finally { this.stateReading.delete(conversationId); }
-    return undefined;
+    // Mirror first so everything after reads one store.
+    await this.pullMirror(conversationId).catch(() => {});
+    await this.readFolds(conversationId);
   }
 
-  /// Folds in this device's call lines for a conversation; a line already held is replaced (a ring that became missed).
-  /// Waits for the saved state first: writing before it is read would overwrite the conversation's edits, pins and names.
+  /// This device's call lines, on a record of their own: not the conversation's `cx` state and not the backup, so a
+  /// ring arriving before that state was read can never overwrite its edits, pins or names. Read once, by id.
+  loadCalls(conversationId) {
+    if (!this.callsRead) this.callsRead = new Map();
+    if (!this.callsRead.has(conversationId)) {
+      this.callsRead.set(conversationId, (async () => {
+        const rows = await get(OPENED, `${this.scope}:cl:${conversationId}`).catch(() => null);
+        const held = new Map((this.calls.get(conversationId) || []).map((row) => [row.id, row]));
+        for (const row of Array.isArray(rows) ? rows : []) {
+          if (typeof row?.id !== 'string' || held.has(row.id) || !CALL_LOG_KINDS.has(row.kind)) continue;
+          const at = Number(row.at);
+          if (!Number.isFinite(at) || at <= 0) continue;
+          const duration = Number(row.durationMs);
+          held.set(row.id, {
+            id: row.id,
+            conversationId,
+            kind: row.kind,
+            from: typeof row.from === 'string' ? row.from : null,
+            at,
+            endedAt: row.kind === 'ended' ? at : null,
+            durationMs: row.kind === 'ended' && Number.isFinite(duration) && duration >= 0 ? duration : null,
+          });
+        }
+        this.calls.set(conversationId, [...held.values()].sort((a, b) => a.at - b.at).slice(-CALL_LOG_MAX));
+      })());
+    }
+    return this.callsRead.get(conversationId);
+  }
+
+  /// A line already held is replaced (a ring that became missed).
   async rememberCalls(conversationId, entries) {
     if (!conversationId || !Array.isArray(entries) || !entries.length) return;
-    await this.loadConversationState(conversationId).catch(() => {});
+    await this.loadCalls(conversationId);
     const held = new Map((this.calls.get(conversationId) || []).map((row) => [row.id, row]));
     for (const row of entries) {
       if (typeof row?.id !== 'string' || !CALL_LOG_KINDS.has(row.kind)) continue;
@@ -1668,7 +1690,9 @@ export class Mls {
     }
     const list = [...held.values()].sort((a, b) => a.at - b.at).slice(-CALL_LOG_MAX);
     this.calls.set(conversationId, list);
-    this.saveMessageState(conversationId);
+    this.track(put(OPENED, `${this.scope}:cl:${conversationId}`, list.map((c) => ({
+      id: c.id, kind: c.kind, from: c.from, at: c.at, durationMs: c.durationMs,
+    }))));
   }
 
   callsIn(conversationId) {
@@ -1724,22 +1748,6 @@ export class Mls {
       if (row.name !== null && !validGroupName(row.name)) continue;
       if (!this.renames.has(conversationId)) this.renames.set(conversationId, []);
       this.renames.get(conversationId).push({ id: row.id, by: row.by, name: row.name, at: Number(row.at) || 0 });
-    }
-    for (const row of cx.calls || []) {
-      if (typeof row?.id !== 'string' || !CALL_LOG_KINDS.has(row.kind)) continue;
-      const at = Number(row.at);
-      if (!Number.isFinite(at) || at <= 0) continue;
-      if (!this.calls.has(conversationId)) this.calls.set(conversationId, []);
-      const duration = Number(row.durationMs);
-      this.calls.get(conversationId).push({
-        id: row.id,
-        conversationId,
-        kind: row.kind,
-        from: typeof row.from === 'string' ? row.from : null,
-        at,
-        endedAt: row.kind === 'ended' ? at : null,
-        durationMs: row.kind === 'ended' && Number.isFinite(duration) && duration >= 0 ? duration : null,
-      });
     }
   }
 
@@ -1958,9 +1966,6 @@ export class Mls {
       sfu: this.callSfus.get(conversationId) || null,
       name: this.names.get(conversationId) || null,
       renames: this.renames.get(conversationId) || [],
-      calls: (this.calls.get(conversationId) || []).map((c) => ({
-        id: c.id, kind: c.kind, from: c.from, at: c.at, durationMs: c.durationMs,
-      })),
     };
     this.track(put(OPENED, `${this.scope}:cx:${conversationId}`, state));
     this.backup?.queue(conversationId, CX, state);

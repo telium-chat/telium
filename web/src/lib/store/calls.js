@@ -137,7 +137,15 @@ export const callMethods = {
   /// What this session logged, over what earlier sessions saved; this session's copy of a line wins.
   callLogFor(conversationId) {
     const live = this.callLogs.get(conversationId) || [];
-    const saved = this.mls?.callsIn?.(conversationId) || [];
+    const engine = this.mls;
+    // First look this session: read what earlier sessions saved, then draw again. Once per conversation, or every
+    // render would schedule another redraw.
+    if (conversationId && engine?.loadCalls && !engine.callsRead?.has(conversationId)) {
+      engine.loadCalls(conversationId)
+        .then(() => this.emit('call-log', conversationId))
+        .catch(() => {});
+    }
+    const saved = engine?.callsIn?.(conversationId) || [];
     if (!saved.length) return live;
     if (!live.length) return saved;
     const byId = new Map(saved.map((row) => [row.id, row]));

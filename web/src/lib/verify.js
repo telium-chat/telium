@@ -662,18 +662,16 @@ export class Trust {
     );
   }
 
-  /// Re-reads this account's devices from home, adding or updating what it lists. Deduplicated and spaced, since
-  /// every leaf of a call can ask at once. An unreachable home is "unknown", never a quiet no.
+  /// Re-reads this account's devices from home, adding or updating what it lists. Deduplicated, and spaced by waiting
+  /// out the gap rather than skipping it: a skipped read would answer a just-signed sibling with a hard no. A failed
+  /// read leaves the list as it was, the answer this gave before it ever re-read.
   async reloadOwnDevices() {
     if (this.ownReload) return this.ownReload;
-    if (Date.now() - (this.ownReloadedAt || 0) < OWN_RELOAD_GAP_MS) return undefined;
     this.ownReload = (async () => {
+      const wait = OWN_RELOAD_GAP_MS - (Date.now() - (this.ownReloadedAt || 0));
+      if (wait > 0) await new Promise((resolve) => { setTimeout(resolve, wait); });
       let doc;
-      try {
-        doc = await this.home.crossSigning();
-      } catch (e) {
-        throw unanswered(e) ? Object.assign(e ?? new Error('no answer'), { unknown: true }) : e;
-      }
+      try { doc = await this.home.crossSigning(); } catch { return; }
       this.ownReloadedAt = Date.now();
       for (const d of doc?.devices || []) {
         if (d?.device_id) this.own.set(d.device_id, d);
