@@ -644,7 +644,7 @@ export class MeshCall {
       throw new Error('Peer offer did not contain all four expected media sections');
     }
     [peer.transceiver, peer.camera, peer.screen, peer.screenAudio] = transceivers;
-    preferScreenCodec(peer.screen);
+    preferScreenCodec(peer.screen, globalThis, this.screenSettings?.content);
     this.transmit(peer);
     this.face(peer);
     this.project(peer);
@@ -728,7 +728,7 @@ export class MeshCall {
       peer.screen = display
         ? pc.addTransceiver(display, { direction: 'sendrecv', streams: [this.screen] })
         : pc.addTransceiver('video', { direction: 'recvonly' });
-      preferScreenCodec(peer.screen);
+      preferScreenCodec(peer.screen, globalThis, this.screenSettings?.content);
 
       const [screenAudio] = this.screen?.getAudioTracks() || [];
       peer.screenAudio = screenAudio

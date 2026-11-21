@@ -229,8 +229,26 @@ function useShareStats(on, statsReport, id) {
   return stats;
 }
 
+function useGpuEncodeStatus(on) {
+  const [status, setStatus] = useState(null);
+  useEffect(() => {
+    if (!on || typeof window.teliumDesktop?.gpuStatus !== 'function') return;
+    window.teliumDesktop.gpuStatus().then((s) => setStatus(s?.videoEncode ?? null)).catch(() => {});
+  }, [on]);
+  return status;
+}
+
+function encoderLabel(t, top, gpuVideoEncode) {
+  if (!top || top.direction !== 'out') return null;
+  if (top.encoder) return top.powerEfficient ? `${top.encoder} · ${t('voice.stats.encoderGpu')}` : top.encoder;
+  if (gpuVideoEncode === 'enabled') return t('voice.stats.encoderGpuAllowed');
+  if (gpuVideoEncode) return t('voice.stats.encoderSoftware');
+  return null;
+}
+
 function StatsPanel({ rows, preset }) {
   const t = useT();
+  const gpuVideoEncode = useGpuEncodeStatus(true);
   const asked = parseSharePreset(preset);
   const mode = asked ? contentPreset(asked.content) : null;
   // Our own sender lists every simulcast layer; the top live one is what viewers get at best.
@@ -260,6 +278,7 @@ function StatsPanel({ rows, preset }) {
           {line(t('voice.stats.fps'), asked ? `${asked.fps}` : null, top.fps != null ? `${Math.round(top.fps)}` : null)}
           {line(t('voice.stats.bitrate'), top.targetBitrate ? fmtRate(top.targetBitrate) : null, fmtRate(top.bitrate))}
           {line(t('voice.stats.codec'), null, top.codec)}
+          {encoderLabel(t, top, gpuVideoEncode) ? line(t('voice.stats.encoder'), null, encoderLabel(t, top, gpuVideoEncode)) : null}
           {top.limit ? line(t('voice.stats.limit'), null, top.limit) : null}
           {top.dropped != null ? line(t('voice.stats.dropped'), null, `${top.dropped}`) : null}
         </div>

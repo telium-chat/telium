@@ -12,6 +12,10 @@ Write for the people using the app, not the repo: what changed in their
 hands, not which PRs merged.
 -->
 
+## 20 November 2026
+
+- Screen sharing on Linux uses far less CPU in game and video mode.
+
 ## 19 November 2026
 
 - Screen sharing is much smoother.

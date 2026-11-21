@@ -130,7 +130,7 @@ export class SfuCall {
     // No ceiling: LiveKit's ladder, but content still steers the encoder.
     if (!slice) {
       const fallback = content ? contentPreset(content).degradation : null;
-      const codec = kind === 'screen' ? preferredScreenCodec() : null;
+      const codec = kind === 'screen' ? preferredScreenCodec(globalThis, content) : null;
       return {
         simulcast: kind !== 'screen',
         ...(codec ? { videoCodec: codec } : {}),
@@ -145,7 +145,7 @@ export class SfuCall {
     const encodingKey = kind === 'screen' ? 'screenShareEncoding' : 'videoEncoding';
     const layersKey = kind === 'screen' ? 'screenShareSimulcastLayers' : 'videoSimulcastLayers';
     // With simulcast on and no layers named, LiveKit would add presets exceeding the ceiling.
-    const codec = kind === 'screen' ? preferredScreenCodec() : null;
+    const codec = kind === 'screen' ? preferredScreenCodec(globalThis, content) : null;
     return {
       simulcast: layers.length > 0,
       ...(codec ? { videoCodec: codec } : {}),

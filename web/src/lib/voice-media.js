@@ -126,12 +126,16 @@ export function cameraVideoConstraints(facingMode = 'user') {
   };
 }
 
-export function preferredScreenCodec(scope = globalThis) {
-  return scope?.teliumDesktop?.platform === 'win32' ? 'h264' : null;
+/// Windows always shares H.264 (Media Foundation). On Linux desktop the share mode picks: 'detail' (text, 15 fps) stays on VP8, anything else (motion, 60 fps) uses H.264, which measured at under half VP8's CPU there. Browsers and macOS keep the default.
+export function preferredScreenCodec(scope = globalThis, content = null) {
+  const platform = scope?.teliumDesktop?.platform;
+  if (platform === 'win32') return 'h264';
+  if (platform === 'linux') return content === 'detail' ? 'vp8' : 'h264';
+  return null;
 }
 
-export function preferScreenCodec(transceiver, scope = globalThis) {
-  const codec = preferredScreenCodec(scope);
+export function preferScreenCodec(transceiver, scope = globalThis, content = null) {
+  const codec = preferredScreenCodec(scope, content);
   if (!codec || typeof transceiver?.setCodecPreferences !== 'function') return false;
   const capabilities = scope?.RTCRtpSender?.getCapabilities?.('video');
   const codecs = Array.isArray(capabilities?.codecs) ? capabilities.codecs : [];
