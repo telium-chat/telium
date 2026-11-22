@@ -295,6 +295,24 @@ describe('downloadTheme', () => {
     expect(installedThemeIds(storageImpl)).toEqual([]);
   });
 
+  it('a stream that stalls mid-body times out instead of hanging forever', async () => {
+    const storageImpl = store();
+    const neverDone = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('/** * @name S * @author a * @description d */'));
+        // Never closes — the stall the bar used to freeze on.
+      },
+    });
+    const outcome = await downloadTheme({
+      id: 'stall',
+      cssUrl: 'https://x/x.css',
+      timeoutMs: 80,
+      fetchImpl: async () => ({ ok: true, headers: { get: () => null }, body: neverDone }),
+    }, storageImpl);
+    expect(outcome.error).toBe('unreachable');
+    expect(installedThemeIds(storageImpl)).toEqual([]);
+  });
+
   it('still installs through a fake without a streamable body', async () => {
     const storageImpl = store();
     const outcome = await downloadTheme({

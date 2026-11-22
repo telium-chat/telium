@@ -287,6 +287,12 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
     const track = ({ received, total }) => {
       if (mounted.current && installingId.current === theme.id) setProgress({ id: theme.id, received, total });
     };
+    // Belt for the suspenders in themes.js: even if something below never
+    // resolves, the bar dies at the deadline instead of hanging forever.
+    const deadline = setTimeout(() => {
+      installingId.current = null;
+      if (mounted.current) setProgress(null);
+    }, 20_000);
     try {
       let outcome = await downloadTheme({ id: theme.id, cssUrl: theme.cssUrl, onProgress: track });
       if (outcome.error === THEME_ERRORS.unreachable) {
@@ -312,6 +318,7 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
       noteLocalInstall(theme.id);
       apply(theme.id);
     } finally {
+      clearTimeout(deadline);
       installingId.current = null;
       // Cleared no matter how the install exits — the bar must never outlive
       // its download, even through an unexpected throw.

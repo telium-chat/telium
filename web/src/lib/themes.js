@@ -438,7 +438,10 @@ export const THEME_ERRORS = {
 /// Downloads a theme's CSS and stores it device-local. Never throws.
 /// `onProgress` receives `{ received, total }` as the body streams in —
 /// `total` is null when the server sent no Content-Length, and the cap is
-/// enforced mid-stream, not just after.
+/// enforced mid-stream, not just after. The deadline covers the WHOLE
+/// download, stream included: a server that stalls mid-body aborts the
+/// controller and the caller sees `unreachable` within `timeoutMs`, never a
+/// bar frozen at its last percentage.
 export async function downloadTheme({
   id,
   cssUrl,
@@ -448,12 +451,14 @@ export async function downloadTheme({
   maxBytes = MAX_THEME_BYTES,
 } = {}, storageImpl = storage) {
   const controller = new AbortController();
-  let timeoutId;
-  const timeout = new Promise((resolve) => {
-    timeoutId = setTimeout(() => resolve(null), timeoutMs);
-  });
+  // One deadline for everything — connect, headers, and every stream chunk.
+  // Enforced two ways: the abort signal for fetches that honor it, and a
+  // wall-clock check per chunk for fakes/servers that ignore it. Either path
+  // lands in `unreachable` within `timeoutMs`; neither leaves a bar frozen.
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const deadline = Date.now() + timeoutMs;
   try {
-    const attempt = Promise.resolve()
+    const response = await Promise.resolve()
       .then(() => fetchImpl(cssUrl, {
         signal: controller.signal,
         cache: 'no-store',
@@ -461,7 +466,6 @@ export async function downloadTheme({
         referrerPolicy: 'no-referrer',
       }))
       .catch(() => null);
-    const response = await Promise.race([attempt, timeout]);
     if (!response || !response.ok) return { error: THEME_ERRORS.unreachable };
 
     let css;
@@ -477,7 +481,16 @@ export async function downloadTheme({
       let received = 0;
       const chunks = [];
       for (;;) {
-        const { done, value } = await reader.read();
+        // A stalled `read()` rejects with the abort; one that never resolves
+        // at all is raced off the same deadline, so no chunk wait can outlive
+        // the download's budget.
+        const over = new Promise((resolve) => setTimeout(() => resolve('over'), Math.max(1, deadline - Date.now())));
+        const raced = await Promise.race([reader.read(), over]);
+        if (raced === 'over' || Date.now() > deadline) {
+          controller.abort();
+          return { error: THEME_ERRORS.unreachable };
+        }
+        const { done, value } = raced;
         if (done) break;
         received += value.byteLength;
         if (received > maxBytes) {
@@ -504,9 +517,10 @@ export async function downloadTheme({
     if (!installed) return { error: THEME_ERRORS.noMeta };
     return { theme: installed };
   } catch {
+    // An aborted signal lands here — reported like any other unreachable.
     return { error: THEME_ERRORS.unreachable };
   } finally {
-    clearTimeout(timeoutId);
+    clearTimeout(timer);
   }
 }
 
