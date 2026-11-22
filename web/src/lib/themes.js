@@ -284,6 +284,23 @@ export function removeTheme(id, storageImpl = storage) {
 
 /// One reusable style element, replaced rather than appended: a previous
 /// theme's rules must never outlive its uninstall.
+///
+/// The injected CSS is specificity-boosted first. Telium's own palette rules
+/// are written on `[data-theme="dark"]` / `[data-theme="light"]`
+/// (specificity 0,2,0) while BetterDiscord-style themes declare their tokens
+/// on plain `:root` (0,1,0) — unmodified, the app's palette would legally
+/// out-rank every community theme and the theme would apply to nothing.
+/// `:root` doubles to `:root:root` and bare `[data-theme=…]` gains a `:root`
+/// prefix, so theme rules tie the app's and win by cascade order (the style
+/// element sits last in `<head>`). A theme that names its mode in the header
+/// also moves `data-theme`, so light themes bring light component styling
+/// with them.
+export function boostThemeCss(css) {
+  return css
+    .replace(/:root(?![\w-])/g, ':root:root')
+    .replace(/\[data-theme=(["'])(light|dark)\1\]/g, ':root[data-theme=$2]');
+}
+
 export function applyMarketTheme(css) {
   if (typeof document === 'undefined') return;
   let el = document.getElementById(STYLE_ID);
@@ -296,7 +313,9 @@ export function applyMarketTheme(css) {
     el.id = STYLE_ID;
     document.head.append(el);
   }
-  el.textContent = css;
+  el.textContent = boostThemeCss(css);
+  const mode = parseThemeMeta(css)?.mode;
+  if (mode === 'light' || mode === 'dark') document.documentElement.dataset.theme = mode;
 }
 
 /// Reads the synced choice and applies whatever is on this device for it.

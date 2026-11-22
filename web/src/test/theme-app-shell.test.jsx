@@ -42,7 +42,7 @@ describe('market theme applied through the real app shell', () => {
     await waitFor(() => {
       const tag = document.getElementById('telium-market-theme');
       expect(tag).toBeTruthy();
-      expect(tag.textContent).toBe(THEME_CSS);
+      expect(tag.textContent).toContain(":root:root");
     });
 
     // The point of the feature: the theme's values actually render. Inline

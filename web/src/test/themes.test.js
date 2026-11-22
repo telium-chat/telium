@@ -191,6 +191,23 @@ describe('searchThemes', () => {
   });
 });
 
+describe('boostThemeCss', () => {
+  it('lifts :root and bare data-theme selectors above the app palette', async () => {
+    const { boostThemeCss } = await import('../lib/themes.js');
+    const boosted = boostThemeCss(`:root { --background: red; }
+[data-theme="dark"] & { x } [data-theme='light'] { --accent: blue; }`);
+    expect(boosted).toContain(':root:root { --background: red; }');
+    expect(boosted).toContain(":root[data-theme=dark]");
+    expect(boosted).toContain(":root[data-theme=light]");
+  });
+
+  it('already-prefixed selectors keep working and gain the boost too', async () => {
+    const { boostThemeCss } = await import('../lib/themes.js');
+    // Quoting is normalized away — unquoted attribute values are valid CSS.
+    expect(boostThemeCss(':root[data-theme="dark"] { a }')).toContain(':root:root:root[data-theme=dark]');
+  });
+});
+
 describe('install, apply and remove', () => {
   it('installTheme requires a parseable meta header', () => {
     const storageImpl = store();
@@ -204,7 +221,7 @@ describe('install, apply and remove', () => {
     applyMarketTheme(META_CSS);
     const el = document.getElementById('telium-market-theme');
     expect(el).toBeTruthy();
-    expect(el.textContent).toBe(META_CSS);
+    expect(el.textContent).toContain(":root:root");
     applyMarketTheme('/* replaced */');
     expect(document.getElementById('telium-market-theme')).toBe(el);
     expect(el.textContent).toBe('/* replaced */');

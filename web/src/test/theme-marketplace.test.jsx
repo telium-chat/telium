@@ -107,7 +107,7 @@ describe('the theme workshop', () => {
     const { user, store } = await boot();
     await user.click(screen.getAllByRole('button', { name: 'Install' })[0]);
     await waitFor(() => expect(store.prefs.marketTheme).toBe('midnight-glass'));
-    expect(styleTag()?.textContent).toBe(THEME_CSS);
+    expect(styleTag()?.textContent).toContain(":root:root");
     expect(screen.getAllByRole('button', { name: 'Active' }).length).toBeGreaterThan(0);
     const installed = JSON.parse(localStorage.getItem('telium.themes.v1'));
     expect(installed.installed['midnight-glass'].meta.name).toBe('Midnight Glass');
@@ -142,7 +142,7 @@ describe('the theme workshop', () => {
     const { user, store } = await boot();
     await user.click(screen.getAllByRole('button', { name: 'Install' })[0]);
     await waitFor(() => expect(store.prefs.marketTheme).toBe('midnight-glass'));
-    expect(styleTag()?.textContent).toBe(THEME_CSS);
+    expect(styleTag()?.textContent).toContain(":root:root");
     expect(catalogFetches).toBe(2);
   });
 
@@ -156,7 +156,7 @@ describe('the theme workshop', () => {
     const { user, store } = await boot();
     store.prefs.marketTheme = 'midnight-glass';
     store.savePrefs();
-    expect(styleTag()?.textContent).toBe(THEME_CSS);
+    expect(styleTag()?.textContent).toContain(":root:root");
     await user.click(screen.getAllByRole('button', { name: 'Active' })[0]);
     await waitFor(() => expect(store.prefs.marketTheme).toBeNull());
     expect(styleTag()).toBeNull();
@@ -228,7 +228,7 @@ describe('the theme workshop', () => {
     // The ghost card offers Install, not Active, and installing revives it.
     await user.click(screen.getAllByRole('button', { name: 'Install' })[0]);
     await waitFor(() => expect(store.prefs.marketTheme).toBe('midnight-glass'));
-    expect(styleTag()?.textContent).toBe(THEME_CSS);
+    expect(styleTag()?.textContent).toContain(":root:root");
     await screen.findByText(/You are using Midnight Glass/);
   });
 
