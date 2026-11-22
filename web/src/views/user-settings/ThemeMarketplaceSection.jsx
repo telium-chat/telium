@@ -287,12 +287,15 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
     const track = ({ received, total }) => {
       if (mounted.current && installingId.current === theme.id) setProgress({ id: theme.id, received, total });
     };
-    // Belt for the suspenders in themes.js: even if something below never
-    // resolves, the bar dies at the deadline instead of hanging forever.
+    // Backstop only: if something below somehow never resolves, the bar dies
+    // rather than hanging. It deliberately does NOT clear installingId — the
+    // download may still be in flight, and unlocking early would let a second
+    // click fork a zombie download beside the retry. The lock is released
+    // exclusively in the finally, which always runs because downloadTheme
+    // now resolves within its own per-attempt budget.
     const deadline = setTimeout(() => {
-      installingId.current = null;
       if (mounted.current) setProgress(null);
-    }, 20_000);
+    }, 50_000);
     try {
       let outcome = await downloadTheme({ id: theme.id, cssUrl: theme.cssUrl, onProgress: track });
       if (outcome.error === THEME_ERRORS.unreachable) {
