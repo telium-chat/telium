@@ -8,6 +8,7 @@ import { dateOrder, setLocale, translationStatus } from '../../lib/i18n/index.js
 import { loadCatalog } from '../../lib/i18n/catalog/index.js';
 import { LOCALES, localeOptions, listLanguages } from '../../lib/i18n/locale.js';
 import { PRESETS } from '../../lib/scheme.js';
+import { installedTheme } from '../../lib/themes.js';
 import { ThemeMarketplaceSection } from './ThemeMarketplaceSection.jsx';
 
 function LanguageSection() {
@@ -64,18 +65,24 @@ export function AppearancePane() {
   const [, bump] = useState(0);
   const set = (fn) => { fn(); store.savePrefs(); bump((n) => n + 1); };
 
-  // A marketplace theme owns the palette while it is on: the included themes
-  // are display-only until it is deactivated.
-  const marketThemeOn = Boolean(prefs.marketTheme);
+  // A marketplace theme owns the palette while it is on — "on" meaning its
+  // CSS is actually on this device. A synced id whose CSS went missing (a
+  // fresh install, a wiped browser) must not lock the included themes: the
+  // honest state is "nothing applied", so they stay clickable.
+  const marketThemeUsable = Boolean(prefs.marketTheme) && Boolean(installedTheme(prefs.marketTheme));
+  const marketThemeOn = Boolean(prefs.marketTheme) && marketThemeUsable;
   const activeId = PRESETS.some((preset) => preset.id === prefs.scheme) ? prefs.scheme : PRESETS[0].id;
 
   const choose = (id) => {
     if (marketThemeOn) return;
     set(() => {
+      // Picking an included theme also clears a stale synced theme id, so a
+      // missing-CSS ghost can never linger and lock anything again.
       const preset = PRESETS.find((entry) => entry.id === id);
       if (preset) {
         prefs.scheme = preset.id;
         prefs.theme = preset.mode;
+        prefs.marketTheme = null;
       }
     });
   };

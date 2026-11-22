@@ -108,6 +108,11 @@ export const settings = {
   'settings.market.apply': 'Apply',
   'settings.market.active': 'Active',
   'settings.market.activeHint': 'Tap to turn this theme off',
+  // The banner at the top of the grid answers "which theme am I using" in one
+  // line, and its twin handles the ghost case: a synced theme id whose CSS
+  // file is not on this device, so nothing is actually applied.
+  'settings.market.activeBanner': 'You are using {name}. Tap Active on its card to turn it off.',
+  'settings.market.missingBanner': 'Your synced theme ({name}) is not on this device — install it again below, or pick an included theme.',
   'settings.market.remove': 'Remove theme',
   'settings.market.community': 'From the community',
   'settings.market.included': 'Included with Telium',

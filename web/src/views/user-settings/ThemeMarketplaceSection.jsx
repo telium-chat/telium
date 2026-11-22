@@ -60,7 +60,12 @@ function ThemeCard({
 }) {
   const installed = state !== 'none';
   return (
-    <div className="relative flex flex-col gap-2 rounded-xl border border-border bg-surface p-3">
+    <div
+      className={cn(
+        'relative flex flex-col gap-2 rounded-xl border border-border bg-surface p-3',
+        state === 'active' && 'border-accent/60 ring-1 ring-accent',
+      )}
+    >
       <FavoriteButton
         favorited={favorited}
         label={t(favorited ? 'settings.market.unfavorite' : 'settings.market.favorite', { name: theme.name })}
@@ -119,7 +124,10 @@ function BaseCard({ preset, active, locked, t, onChoose }) {
       disabled={locked}
       aria-pressed={active}
       title={t(`settings.theme.preset.${preset.id}.description`)}
-      className="relative flex flex-col gap-2 rounded-xl border border-border bg-surface p-3 text-start transition-opacity hover:border-accent/50 disabled:pointer-events-none disabled:opacity-60"
+      className={cn(
+        'relative flex flex-col gap-2 rounded-xl border border-border bg-surface p-3 text-start transition-opacity hover:border-accent/50 disabled:pointer-events-none disabled:opacity-60',
+        active && 'border-accent/60 ring-1 ring-accent',
+      )}
     >
       <span
         aria-hidden
@@ -181,6 +189,13 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
 
   const favorites = favoriteIds(store.prefs);
   const activeId = store.prefs.marketTheme || null;
+  // "On" means the CSS is on this device. A synced id without its file is a
+  // ghost: nothing is applied, the included themes stay usable, and the card
+  // shows Install so the file can come back.
+  const marketUsable = activeId ? installedTheme(activeId) : null;
+  const marketName = marketUsable?.meta?.name
+    || catalog?.themes?.find((entry) => entry.id === activeId)?.name
+    || activeId;
   // A catalog smaller than one page is all "top" — trending means nothing
   // until there are more themes than a week can show, so it stays hidden.
   const showTrending = (catalog?.themes?.length || 0) > TRENDING.page;
@@ -296,6 +311,13 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
         </a>
       )}
     >
+      {marketUsable ? (
+        <Notice tone="accent">{t('settings.market.activeBanner', { name: marketName })}</Notice>
+      ) : null}
+      {activeId && !marketUsable ? (
+        <Notice tone="warn">{t('settings.market.missingBanner', { name: marketName })}</Notice>
+      ) : null}
+
       <SearchField
         label={t('settings.market.search')}
         placeholder={t('settings.market.search')}
@@ -334,7 +356,7 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
           <span className="text-sm font-medium">{t('settings.market.community')}</span>
           <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
             {community.week.map((theme) => (
-              <ThemeCard key={theme.id} state={activeId === theme.id ? 'active' : installedTheme(theme.id) ? 'installed' : 'none'} {...cardProps(theme)} />
+              <ThemeCard key={theme.id} state={activeId && marketUsable && activeId === theme.id ? 'active' : installedTheme(theme.id) ? 'installed' : 'none'} {...cardProps(theme)} />
             ))}
           </div>
         </>
@@ -347,7 +369,7 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
           )}
           <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
             {community.rest.map((theme) => (
-              <ThemeCard key={theme.id} state={activeId === theme.id ? 'active' : installedTheme(theme.id) ? 'installed' : 'none'} {...cardProps(theme)} />
+              <ThemeCard key={theme.id} state={activeId && marketUsable && activeId === theme.id ? 'active' : installedTheme(theme.id) ? 'installed' : 'none'} {...cardProps(theme)} />
             ))}
           </div>
         </div>

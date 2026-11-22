@@ -187,6 +187,51 @@ describe('the theme workshop', () => {
     expect(store.prefs.scheme).toBe('graphite');
   });
 
+  it('says which theme is on, in a banner, with the active card ringed', async () => {
+    seeded(CATALOG);
+    localStorage.setItem('telium.themes.v1', JSON.stringify({
+      installed: { 'midnight-glass': { meta: { name: 'Midnight Glass', author: 'nova', description: 'd' }, css: THEME_CSS, installedAt: Date.now() } },
+      active: null,
+    }));
+    vi.stubGlobal('fetch', json(CATALOG));
+    const { user, store } = await boot({ base: PRESETS, baseActiveId: 'graphite' });
+    store.prefs.marketTheme = 'midnight-glass';
+    store.savePrefs();
+    await screen.findByText(/You are using Midnight Glass/);
+    // The active card is the one wearing the ring.
+    const activeCard = screen.getAllByRole('button', { name: 'Active' })[0]
+      .closest('div[class*="ring"]');
+    expect(activeCard).toBeTruthy();
+    // Turning it off clears the banner.
+    await user.click(screen.getAllByRole('button', { name: 'Active' })[0]);
+    await waitFor(() => expect(store.prefs.marketTheme).toBeNull());
+    await waitFor(() => expect(screen.queryByText(/You are using Midnight Glass/)).toBeNull());
+  });
+
+  it('a synced theme id whose css is missing on this device is a ghost: nothing locks, install still works', async () => {
+    seeded(CATALOG);
+    vi.stubGlobal('fetch', async (url) => {
+      if (String(url).endsWith('.css')) {
+        return { ok: true, arrayBuffer: async () => new TextEncoder().encode(THEME_CSS).buffer };
+      }
+      return { ok: false };
+    });
+    // prefs claim the theme is on, but no css exists device-local: the exact
+    // state that used to lock the whole pane forever.
+    const { user, store } = mount(
+      <PaneWithPrefsBridge base={PRESETS} baseActiveId="graphite" />,
+      signedInStore({ prefs: { marketTheme: 'midnight-glass', scheme: 'graphite', theme: 'dark' } }),
+    );
+    await screen.findByText(/is not on this device/);
+    // The included themes stay clickable.
+    expect(screen.getByRole('button', { name: /Evergreen/ }).disabled).toBe(false);
+    // The ghost card offers Install, not Active, and installing revives it.
+    await user.click(screen.getAllByRole('button', { name: 'Install' })[0]);
+    await waitFor(() => expect(store.prefs.marketTheme).toBe('midnight-glass'));
+    expect(styleTag()?.textContent).toBe(THEME_CSS);
+    await screen.findByText(/You are using Midnight Glass/);
+  });
+
   it('filters: Favorites narrows to starred', async () => {
     seeded(CATALOG);
     vi.stubGlobal('fetch', json(CATALOG));
