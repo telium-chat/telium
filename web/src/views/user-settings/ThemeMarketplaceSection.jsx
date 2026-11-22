@@ -121,7 +121,9 @@ function ThemeCard({
         {theme.version ? ` · v${theme.version}` : ''}
       </div>
       <p className="line-clamp-2 text-xs leading-[1.5] text-muted">{theme.description}</p>
-      {progress ? <DownloadBar progress={progress} t={t} /> : null}
+      {/* The bar belongs to a download in flight only: an installed or active
+          card must never wear one, whatever raced above it. */}
+      {progress && state === 'none' ? <DownloadBar progress={progress} t={t} /> : null}
       <div className="mt-auto flex items-center gap-1.5">
         {state === 'active' ? (
           <Button variant="primary" size="sm" className="grow" title={t('settings.market.activeHint')} onClick={onDeactivate}>
@@ -273,35 +275,48 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
     store.savePrefs();
   };
 
+  // One install per theme at a time: a second click on the same card must
+  // never fork a parallel download (that is how a finished install could end
+  // up wearing a stale bar).
+  const installingId = useRef(null);
+
   const install = async (theme) => {
+    if (installingId.current) return;
+    installingId.current = theme.id;
     setProgress({ id: theme.id, received: 0, total: null });
     const track = ({ received, total }) => {
-      if (mounted.current) setProgress({ id: theme.id, received, total });
+      if (mounted.current && installingId.current === theme.id) setProgress({ id: theme.id, received, total });
     };
-    let outcome = await downloadTheme({ id: theme.id, cssUrl: theme.cssUrl, onProgress: track });
-    if (outcome.error === THEME_ERRORS.unreachable) {
-      // A stale cached catalog can carry URLs from a previous host (the CDN
-      // before the local rebuild, an old repo name); force one refresh and
-      // retry through the fresh URL before reporting failure.
-      const fresh = await refreshThemes();
-      const updated = fresh?.themes?.find((entry) => entry.id === theme.id);
-      if (updated && updated.cssUrl !== theme.cssUrl) {
-        setCatalog(fresh);
-        outcome = await downloadTheme({ id: theme.id, cssUrl: updated.cssUrl, onProgress: track });
+    try {
+      let outcome = await downloadTheme({ id: theme.id, cssUrl: theme.cssUrl, onProgress: track });
+      if (outcome.error === THEME_ERRORS.unreachable) {
+        // A stale cached catalog can carry URLs from a previous host (the CDN
+        // before the local rebuild, an old repo name); force one refresh and
+        // retry through the fresh URL before reporting failure.
+        const fresh = await refreshThemes();
+        const updated = fresh?.themes?.find((entry) => entry.id === theme.id);
+        if (updated && updated.cssUrl !== theme.cssUrl) {
+          setCatalog(fresh);
+          outcome = await downloadTheme({ id: theme.id, cssUrl: updated.cssUrl, onProgress: track });
+        }
       }
+      if (!mounted.current) return;
+      if (outcome.error === THEME_ERRORS.noMeta) {
+        setError('noMeta');
+        return;
+      }
+      if (outcome.error) {
+        setError(true);
+        return;
+      }
+      noteLocalInstall(theme.id);
+      apply(theme.id);
+    } finally {
+      installingId.current = null;
+      // Cleared no matter how the install exits — the bar must never outlive
+      // its download, even through an unexpected throw.
+      if (mounted.current) setProgress(null);
     }
-    if (!mounted.current) return;
-    setProgress(null);
-    if (outcome.error === THEME_ERRORS.noMeta) {
-      setError('noMeta');
-      return;
-    }
-    if (outcome.error) {
-      setError(true);
-      return;
-    }
-    noteLocalInstall(theme.id);
-    apply(theme.id);
   };
 
   const uninstall = (id) => {
