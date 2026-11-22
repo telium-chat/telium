@@ -19,7 +19,7 @@ const CATALOG_KEY = 'telium.themes.catalog.v1';
 const INSTALLED_KEY = 'telium.themes.v1';
 const STYLE_ID = 'telium-market-theme';
 
-const REFRESH_TTL_MS = 6 * 60 * 60 * 1000;
+const REFRESH_TTL_MS = 5 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 15_000;
 const MAX_CATALOG_BYTES = 256 * 1024;
 const MAX_THEME_BYTES = 512 * 1024;
@@ -436,9 +436,13 @@ export const THEME_ERRORS = {
 };
 
 /// Downloads a theme's CSS and stores it device-local. Never throws.
+/// `onProgress` receives `{ received, total }` as the body streams in —
+/// `total` is null when the server sent no Content-Length, and the cap is
+/// enforced mid-stream, not just after.
 export async function downloadTheme({
   id,
   cssUrl,
+  onProgress = null,
   fetchImpl = globalThis.fetch,
   timeoutMs = FETCH_TIMEOUT_MS,
   maxBytes = MAX_THEME_BYTES,
@@ -459,9 +463,43 @@ export async function downloadTheme({
       .catch(() => null);
     const response = await Promise.race([attempt, timeout]);
     if (!response || !response.ok) return { error: THEME_ERRORS.unreachable };
-    const bytes = await response.arrayBuffer();
-    if (bytes.byteLength > maxBytes) return { error: THEME_ERRORS.tooLarge };
-    const css = new TextDecoder().decode(bytes);
+
+    let css;
+    const reader = response.body && typeof response.body.getReader === 'function'
+      ? response.body.getReader()
+      : null;
+    if (reader) {
+      let total = null;
+      try {
+        const declared = Number(response.headers?.get?.('content-length'));
+        if (Number.isFinite(declared) && declared > 0) total = declared;
+      } catch { /* fakes without headers still stream fine */ }
+      let received = 0;
+      const chunks = [];
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        received += value.byteLength;
+        if (received > maxBytes) {
+          controller.abort();
+          return { error: THEME_ERRORS.tooLarge };
+        }
+        chunks.push(value);
+        onProgress?.({ received, total });
+      }
+      const bytes = new Uint8Array(received);
+      let at = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, at);
+        at += chunk.byteLength;
+      }
+      css = new TextDecoder().decode(bytes);
+    } else {
+      const bytes = await response.arrayBuffer();
+      if (bytes.byteLength > maxBytes) return { error: THEME_ERRORS.tooLarge };
+      css = new TextDecoder().decode(bytes);
+    }
+
     const installed = installTheme(id, css, storageImpl);
     if (!installed) return { error: THEME_ERRORS.noMeta };
     return { theme: installed };

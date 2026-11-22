@@ -252,16 +252,57 @@ describe('install, apply and remove', () => {
 });
 
 describe('downloadTheme', () => {
-  it('installs a fetched theme and reports it', async () => {
+  const streamBody = (chunks) => new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+      controller.close();
+    },
+  });
+
+  it('reports byte progress while the body streams', async () => {
     const storageImpl = store();
+    const seen = [];
     const outcome = await downloadTheme({
       id: 'midnight-glass',
-      cssUrl: 'https://cdn.jsdelivr.net/gh/telium-chat/themes@main/themes/midnight-glass/midnight-glass.theme.css',
-      fetchImpl: fetchReturning(META_CSS),
+      cssUrl: 'https://cdn.example/x.css',
+      onProgress: ({ received, total }) => seen.push({ received, total }),
+      fetchImpl: async () => ({
+        ok: true,
+        headers: { get: (name) => (name === 'content-length' ? String(META_CSS.length + 20) : null) },
+        body: streamBody([META_CSS.slice(0, 20), META_CSS.slice(20)]),
+      }),
     }, storageImpl);
     expect(outcome.error).toBeUndefined();
     expect(outcome.theme.meta.name).toBe('Midnight Glass');
-    expect(installedTheme('midnight-glass', storageImpl)).toBeTruthy();
+    expect(seen.length).toBe(2);
+    expect(seen.at(-1).received).toBe(META_CSS.length);
+    expect(seen.at(-1).total).toBe(META_CSS.length + 20);
+  });
+
+  it('enforces the byte cap mid-stream', async () => {
+    const storageImpl = store();
+    const big = 'x'.repeat(600 * 1024);
+    const outcome = await downloadTheme({
+      id: 'big',
+      cssUrl: 'https://x/x.css',
+      fetchImpl: async () => ({
+        ok: true,
+        headers: { get: () => null },
+        body: streamBody([big.slice(0, 400 * 1024), big.slice(400 * 1024)]),
+      }),
+    }, storageImpl);
+    expect(outcome.error).toBe('too_large');
+    expect(installedThemeIds(storageImpl)).toEqual([]);
+  });
+
+  it('still installs through a fake without a streamable body', async () => {
+    const storageImpl = store();
+    const outcome = await downloadTheme({
+      id: 'midnight-glass',
+      cssUrl: 'https://x/x.css',
+      fetchImpl: fetchReturning(META_CSS),
+    }, storageImpl);
+    expect(outcome.theme.meta.name).toBe('Midnight Glass');
   });
 
   it('refuses a file without a meta header and never stores it', async () => {

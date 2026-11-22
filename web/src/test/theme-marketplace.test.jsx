@@ -270,6 +270,24 @@ describe('the theme workshop', () => {
     void store;
   });
 
+  it('shows a download bar while the css streams instead of freezing', async () => {
+    seeded(CATALOG);
+    vi.stubGlobal('fetch', async (url) => {
+      if (String(url).endsWith('.css')) {
+        // Hold the download open long enough to observe the bar.
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return { ok: true, arrayBuffer: async () => new TextEncoder().encode(THEME_CSS).buffer };
+      }
+      return { ok: false };
+    });
+    const { user, store } = await boot();
+    await user.click(screen.getAllByRole('button', { name: 'Install' })[0]);
+    expect(await screen.findByText('Downloading…')).toBeTruthy();
+    await waitFor(() => expect(store.prefs.marketTheme).toBe('midnight-glass'));
+    await waitFor(() => expect(screen.queryByText('Downloading…')).toBeNull());
+    expect(styleTag()?.textContent).toContain(':root:root');
+  });
+
   it('a theme file without its meta header is refused with an explanation', async () => {
     seeded(CATALOG);
     vi.stubGlobal('fetch', async (url) => {

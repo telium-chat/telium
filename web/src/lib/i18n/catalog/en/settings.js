@@ -105,6 +105,9 @@ export const settings = {
   // One button per card: install applies in the same tap, and tapping the
   // active theme turns it off. The hint on the active button says so.
   'settings.market.install': 'Install',
+  // Shown under the bar while a theme's CSS streams in; `Active` arrives the
+  // moment the bytes land, so install is never a silent freeze.
+  'settings.market.downloading': 'Downloading…',
   'settings.market.apply': 'Apply',
   'settings.market.active': 'Active',
   'settings.market.activeHint': 'Tap to turn this theme off',

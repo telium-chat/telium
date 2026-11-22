@@ -54,8 +54,39 @@ function FavoriteButton({ favorited, label, onClick }) {
   );
 }
 
+/// Determinate when the server sent Content-Length, a gentle pulse while the
+/// length is unknown — either way, visible: a silent Install button reads as
+/// a frozen pane.
+function DownloadBar({ progress, t }) {
+  const pct = progress.total
+    ? Math.min(100, Math.round((progress.received / progress.total) * 100))
+    : null;
+  return (
+    <div
+      className="flex flex-col gap-1"
+      role="progressbar"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={pct ?? undefined}
+      aria-label={t('settings.market.downloading')}
+    >
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-rail">
+        {pct != null ? (
+          <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${pct}%` }} />
+        ) : (
+          <div className="h-full w-1/3 rounded-full bg-accent animate-pulse" />
+        )}
+      </div>
+      <span className="text-xs text-muted">
+        {t('settings.market.downloading')}
+        {pct != null ? ` ${pct}%` : ''}
+      </span>
+    </div>
+  );
+}
+
 function ThemeCard({
-  theme, state, trending, favorited, locked, t,
+  theme, state, trending, favorited, locked, progress, t,
   onApply, onDeactivate, onInstall, onRemove, onToggleFavorite,
 }) {
   const installed = state !== 'none';
@@ -90,6 +121,7 @@ function ThemeCard({
         {theme.version ? ` · v${theme.version}` : ''}
       </div>
       <p className="line-clamp-2 text-xs leading-[1.5] text-muted">{theme.description}</p>
+      {progress ? <DownloadBar progress={progress} t={t} /> : null}
       <div className="mt-auto flex items-center gap-1.5">
         {state === 'active' ? (
           <Button variant="primary" size="sm" className="grow" title={t('settings.market.activeHint')} onClick={onDeactivate}>
@@ -168,6 +200,7 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
   const [filter, setFilter] = useState('all');
   const [catalog, setCatalog] = useState(() => cachedCatalog());
   const [error, setError] = useState(null);
+  const [progress, setProgress] = useState(null);
   const mounted = useRef(true);
   useEffect(() => () => { mounted.current = false; }, []);
 
@@ -241,7 +274,11 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
   };
 
   const install = async (theme) => {
-    let outcome = await downloadTheme({ id: theme.id, cssUrl: theme.cssUrl });
+    setProgress({ id: theme.id, received: 0, total: null });
+    const track = ({ received, total }) => {
+      if (mounted.current) setProgress({ id: theme.id, received, total });
+    };
+    let outcome = await downloadTheme({ id: theme.id, cssUrl: theme.cssUrl, onProgress: track });
     if (outcome.error === THEME_ERRORS.unreachable) {
       // A stale cached catalog can carry URLs from a previous host (the CDN
       // before the local rebuild, an old repo name); force one refresh and
@@ -250,10 +287,11 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
       const updated = fresh?.themes?.find((entry) => entry.id === theme.id);
       if (updated && updated.cssUrl !== theme.cssUrl) {
         setCatalog(fresh);
-        outcome = await downloadTheme({ id: theme.id, cssUrl: updated.cssUrl });
+        outcome = await downloadTheme({ id: theme.id, cssUrl: updated.cssUrl, onProgress: track });
       }
     }
     if (!mounted.current) return;
+    setProgress(null);
     if (outcome.error === THEME_ERRORS.noMeta) {
       setError('noMeta');
       return;
@@ -356,7 +394,7 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
           <span className="text-sm font-medium">{t('settings.market.community')}</span>
           <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
             {community.week.map((theme) => (
-              <ThemeCard key={theme.id} state={activeId && marketUsable && activeId === theme.id ? 'active' : installedTheme(theme.id) ? 'installed' : 'none'} {...cardProps(theme)} />
+              <ThemeCard key={theme.id} state={activeId && marketUsable && activeId === theme.id ? 'active' : installedTheme(theme.id) ? 'installed' : 'none'} {...cardProps(theme)} progress={progress?.id === theme.id ? progress : null} />
             ))}
           </div>
         </>
@@ -369,7 +407,7 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
           )}
           <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
             {community.rest.map((theme) => (
-              <ThemeCard key={theme.id} state={activeId && marketUsable && activeId === theme.id ? 'active' : installedTheme(theme.id) ? 'installed' : 'none'} {...cardProps(theme)} />
+              <ThemeCard key={theme.id} state={activeId && marketUsable && activeId === theme.id ? 'active' : installedTheme(theme.id) ? 'installed' : 'none'} {...cardProps(theme)} progress={progress?.id === theme.id ? progress : null} />
             ))}
           </div>
         </div>
