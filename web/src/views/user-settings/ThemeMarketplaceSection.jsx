@@ -320,11 +320,16 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
   };
 
   const uninstall = (id) => {
+    const wasActive = activeId === id;
     removeTheme(id);
-    if (activeId === id) {
+    if (wasActive) {
+      // The CSS is gone, so the palette must fall back to the base theme now.
       store.prefs.marketTheme = null;
-      store.savePrefs();
     }
+    // Saved unconditionally: the cards read device-local storage at render
+    // time, and without a prefs event a removed-but-not-active theme would
+    // keep showing Apply and its trash as though nothing happened.
+    store.savePrefs();
   };
 
   const installedList = installedThemeIds()

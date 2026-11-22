@@ -288,6 +288,24 @@ describe('the theme workshop', () => {
     expect(styleTag()?.textContent).toContain(':root:root');
   });
 
+  it('the trash deletes the theme for real: the card flips to Install at once', async () => {
+    seeded(CATALOG);
+    localStorage.setItem('telium.themes.v1', JSON.stringify({
+      installed: { 'midnight-glass': { meta: { name: 'Midnight Glass', author: 'nova', description: 'd' }, css: THEME_CSS, installedAt: Date.now() } },
+      active: null,
+    }));
+    vi.stubGlobal('fetch', json(CATALOG));
+    const { user, store } = await boot();
+    // Installed but not active: Apply and trash on the card.
+    expect(screen.getAllByRole('button', { name: 'Apply' }).length).toBeGreaterThan(0);
+    await user.click(screen.getAllByRole('button', { name: 'Remove theme' })[0]);
+    // Without the prefs event this used to keep showing Apply — deleted on
+    // disk, stale on screen.
+    expect((await screen.findAllByRole('button', { name: 'Install' })).length).toBe(2);
+    expect(JSON.parse(localStorage.getItem('telium.themes.v1')).installed).toEqual({});
+    expect(store.prefs.marketTheme).toBeUndefined();
+  });
+
   it('a theme file without its meta header is refused with an explanation', async () => {
     seeded(CATALOG);
     vi.stubGlobal('fetch', async (url) => {
