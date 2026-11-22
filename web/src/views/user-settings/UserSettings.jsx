@@ -63,12 +63,12 @@ const BASE_PANES = {
     icon: AdvancedIcon,
     keywords: ['bots', 'applications', 'developer', 'token', 'api'],
   },
-  appearance: {
-    label: 'Appearance',
+  themes: {
+    label: 'Themes',
     component: AppearancePane,
     group: 'App',
     icon: SunIcon,
-    keywords: ['theme', 'dark', 'light', 'language', 'locale'],
+    keywords: ['theme', 'themes', 'dark', 'light', 'marketplace', 'market', 'community', 'download', 'favorite', 'favorites', 'starred', 'language', 'locale'],
   },
   notifications: {
     label: 'Notifications',

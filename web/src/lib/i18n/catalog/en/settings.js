@@ -80,12 +80,54 @@ export const settings = {
 
   // ------------------------------------------------------------------- theme
 
-  'settings.theme.title': 'Theme',
-  // "Follows you" = syncs with the account rather than staying on this device.
-  // Worth saying because the alternative is genuinely what people expect from
-  // a display setting, and somebody who does not want their work laptop's
-  // theme on their phone deserves to find that out here and not later.
-  'settings.theme.description': 'Follows you to your other devices.',
+  // One grid, one action per theme: tap to apply, tap the active one to turn
+  // it off. Community themes come from a GitHub repository, are checked by a
+  // bot and a human before they appear here. The six included palettes wear
+  // the same card shape and live in the same grid.
+  'settings.market.title': 'Themes',
+  'settings.market.description': 'Tap a theme to apply it. Community themes come straight from GitHub.',
+  'settings.market.submit': 'Submit a theme',
+  'settings.market.search': 'Search themes',
+  'settings.market.filters': 'Filter themes',
+  'settings.market.all': 'All',
+  // The week's picks, derived on the device from download counts and the ISO
+  // week number: no key, no server, and everyone sees the same set until the
+  // week turns over. As a filter chip it shows just those themes.
+  'settings.market.trending': 'Trending',
+  // Favorites are a synced bookmark list, not an install. The star's label
+  // names the theme so a screen reader announces what is being kept.
+  'settings.market.favorites': 'Favorites',
+  'settings.market.favorite': 'Keep {name} in your favorites',
+  'settings.market.unfavorite': 'Take {name} out of your favorites',
+  'settings.market.favoritesEmpty': 'No favorites yet — tap the star on a theme to keep it here.',
+  // `count` arrives already rounded ("12.4k"); a translator only moves the word.
+  'settings.market.downloads': '{count} downloads',
+  // One button per card: install applies in the same tap, and tapping the
+  // active theme turns it off. The hint on the active button says so.
+  'settings.market.install': 'Install',
+  'settings.market.apply': 'Apply',
+  'settings.market.active': 'Active',
+  'settings.market.activeHint': 'Tap to turn this theme off',
+  'settings.market.remove': 'Remove theme',
+  'settings.market.community': 'From the community',
+  'settings.market.included': 'Included with Telium',
+  'settings.market.retry': 'Retry',
+  'settings.market.error': 'The theme list could not be reached. You can retry, and themes you already installed keep working offline.',
+  // A theme whose file carries no BetterDiscord-style header: the marketplace
+  // cannot show who made it or what it is called, so it refuses the file.
+  'settings.market.noMeta': 'That theme file is missing its name, author, or description header, so it was not installed.',
+  'settings.market.empty': 'No themes match.',
+  // A theme was installed before but the catalog is unreachable: its card is
+  // gone from the grid, though the theme itself keeps working.
+  'settings.market.offlineNote': 'The community list is offline; installed themes still apply.',
+
+  // The badge on whichever included theme is currently the under-layer for a
+  // marketplace theme (or the whole look, when no marketplace theme is on).
+  'settings.theme.baseActive': 'In use',
+  // A marketplace theme owns the palette while it is on, so the included
+  // themes are display-only until it is deactivated. The copy names the door
+  // back: the grid right above.
+  'settings.theme.locked': 'A marketplace theme is on, so the included themes are paused. Turn it off above to pick one of these again.',
 
   'settings.theme.preset.graphite.name': 'Graphite',
   'settings.theme.preset.graphite.description': 'Deep neutral grey. The default.',
