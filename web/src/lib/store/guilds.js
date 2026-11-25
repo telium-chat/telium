@@ -37,6 +37,7 @@ export const guildMethods = {
     if (this.home && domain !== this.home.domain) {
       this.home.reportMemberships(domain, [...listed]).catch(() => {});
     }
+    if (this.home && domain !== this.home.domain) this.settleAdoptedServer?.(domain, listed.size);
     for (const guildId of [...this.memberWindows.keys()]) {
       const held = this.guilds.get(guildId);
       if (!held || held.domain === domain) this.memberWindows.delete(guildId);

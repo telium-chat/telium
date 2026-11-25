@@ -22,6 +22,11 @@ function parseGuildAddress(raw) {
   return { address: `#${local}:${host}`, host };
 }
 
+/// Which guilds the registry lists on a server, order-free: a change means try it again.
+function registrySignature(ids) {
+  return [...new Set(ids)].sort().join(',') || '-';
+}
+
 export const serverMethods = {
   isReadOnly() {
     return Boolean(this.fallback) && this.fallback.status?.read_only !== false;
@@ -229,6 +234,10 @@ export const serverMethods = {
     if (this.session.dismissedServers?.includes(name)) {
       this.session.dismissedServers = this.session.dismissedServers.filter((d) => d !== name);
     }
+    if (this.session.emptyServers?.[name]) {
+      const { [name]: _gone, ...rest } = this.session.emptyServers;
+      this.session.emptyServers = rest;
+    }
     this.save();
     this.connectServer(name, entry);
     this.loadCapabilities(name).catch(() => {});
@@ -256,22 +265,31 @@ export const serverMethods = {
   /// A device only knew the servers it joined guilds on itself, so a guild joined on the
   /// PC never appeared on the phone. The home keeps a registry of every membership;
   /// sign in to any server in it this device has not met yet. A server removed by hand
-  /// here stays removed.
+  /// here stays removed. One that turns out to hold none of the account's guilds (a
+  /// stale registry entry) is let go after READY and not tried again until the
+  /// registry says something different about it.
   async adoptRemoteServers() {
     const home = this.home;
     if (!home?.memberships) return [];
     const payload = await home.memberships();
     const dismissed = new Set(this.session?.dismissedServers || []);
-    const wanted = new Set();
+    const listed = new Map();
     for (const m of payload?.memberships || []) {
       const server = typeof m?.guild_server === 'string' ? m.guild_server.trim() : '';
-      if (server) wanted.add(server);
+      if (!server) continue;
+      if (!listed.has(server)) listed.set(server, []);
+      if (typeof m.guild_id === 'string') listed.get(server).push(m.guild_id);
     }
     const added = [];
-    for (const server of wanted) {
+    for (const [server, ids] of listed) {
       if (!this.session?.home || this.session.servers?.[server] || dismissed.has(server)) continue;
+      const signature = registrySignature(ids);
+      if (this.session.emptyServers?.[server] === signature) continue;
       try {
-        added.push(await this.addServer(server, { silent: true }));
+        const name = await this.addServer(server, { silent: true });
+        const entry = this.session.servers?.[name];
+        if (entry) { entry.adopted = signature; this.save(); }
+        added.push(name);
       } catch (e) {
         console.warn(`could not reach ${server}`, e);
       }
@@ -280,8 +298,25 @@ export const serverMethods = {
     return added;
   },
 
-  removeServer(domain) {
-    if (this.session) {
+  /// After READY from a server this device signed in to only because of the registry.
+  settleAdoptedServer(domain, guildCount) {
+    const entry = this.session?.servers?.[domain];
+    if (!entry?.adopted) return;
+    if (guildCount > 0) {
+      delete entry.adopted;
+      this.save();
+      return;
+    }
+    this.session.emptyServers = { ...(this.session.emptyServers || {}), [domain]: entry.adopted };
+    // Not from inside this socket's own READY dispatch.
+    setTimeout(() => {
+      if (this.session?.servers?.[domain]?.adopted) this.removeServer(domain, { dismiss: false });
+    }, 0);
+  },
+
+  /// `dismiss: false` lets go without remembering it as removed by hand.
+  removeServer(domain, { dismiss = true } = {}) {
+    if (this.session && dismiss) {
       const dismissed = new Set(this.session.dismissedServers || []);
       dismissed.add(domain);
       this.session.dismissedServers = [...dismissed];
