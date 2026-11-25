@@ -30,44 +30,43 @@ describe('useMobileViewport', () => {
       writable: true,
       value: 800,
     });
-    document.documentElement.style.removeProperty('--android-ime-bottom');
+    delete document.documentElement.dataset.androidKeyboard;
   });
 
   afterEach(() => {
-    document.documentElement.style.removeProperty('--android-ime-bottom');
+    delete document.documentElement.dataset.androidKeyboard;
   });
 
-  it('uses the native Android IME inset when visualViewport does not resize', () => {
-    installVisualViewport({ height: 800 });
+  it('follows a keyboard that overlays the page through visualViewport', () => {
+    const viewport = installVisualViewport({ height: 500 });
     renderHook(() => useMobileViewport());
-
-    expect(document.documentElement.style.getPropertyValue('--mobile-viewport-height')).toBe('800px');
-
-    act(() => {
-      document.documentElement.style.setProperty('--android-ime-bottom', '300px');
-      window.dispatchEvent(new CustomEvent('telium:android-insets'));
-    });
 
     expect(document.documentElement.style.getPropertyValue('--mobile-viewport-height')).toBe('500px');
     expect(document.documentElement.style.getPropertyValue('--mobile-keyboard-height')).toBe('300px');
     expect(document.documentElement.dataset.mobileKeyboard).toBe('open');
-  });
-
-  it('does not double-count the keyboard when visualViewport already reports it', () => {
-    const viewport = installVisualViewport({ height: 500 });
-    document.documentElement.style.setProperty('--android-ime-bottom', '300px');
-    renderHook(() => useMobileViewport());
-
-    expect(document.documentElement.style.getPropertyValue('--mobile-viewport-height')).toBe('500px');
-    expect(document.documentElement.style.getPropertyValue('--mobile-keyboard-height')).toBe('300px');
 
     act(() => {
       viewport.set({ height: 800 });
-      document.documentElement.style.setProperty('--android-ime-bottom', '0px');
-      window.dispatchEvent(new CustomEvent('telium:android-insets'));
+      viewport.dispatchEvent(new Event('resize'));
     });
 
     expect(document.documentElement.style.getPropertyValue('--mobile-viewport-height')).toBe('800px');
     expect(document.documentElement.dataset.mobileKeyboard).toBe('closed');
+  });
+
+  it('takes the open state from Android when the native shell has already shrunk the page', () => {
+    installVisualViewport({ height: 500 });
+    window.innerHeight = 500;
+    renderHook(() => useMobileViewport());
+    expect(document.documentElement.dataset.mobileKeyboard).toBe('closed');
+
+    act(() => {
+      document.documentElement.dataset.androidKeyboard = 'open';
+      window.dispatchEvent(new CustomEvent('telium:android-insets'));
+    });
+
+    expect(document.documentElement.style.getPropertyValue('--mobile-viewport-height')).toBe('500px');
+    expect(document.documentElement.style.getPropertyValue('--mobile-keyboard-height')).toBe('0px');
+    expect(document.documentElement.dataset.mobileKeyboard).toBe('open');
   });
 });

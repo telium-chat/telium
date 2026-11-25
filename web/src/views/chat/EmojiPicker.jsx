@@ -29,7 +29,7 @@ const SECTION_HEAD = 23;
 const tagOf = (sticker) => `${sticker?.origin || ''}\n${sticker?.id || ''}`;
 
 export function EmojiPickerPanel({
-  guildId, onPick, onPickSticker, onClose, className = 'emoji-panel',
+  guildId, onPick, onPickSticker, onClose, className = 'emoji-panel', autoFocusSearch = true,
 }) {
   const t = useT();
   const store = useStore();
@@ -52,7 +52,8 @@ export function EmojiPickerPanel({
   const flatRef = useRef([]);
 
   useEffect(() => { loadEmoji().then(setAll); }, []);
-  useEffect(() => { search.current?.focus(); }, []);
+  // Not in the docked phone panel: focusing the search would raise the keyboard over it.
+  useEffect(() => { if (autoFocusSearch) search.current?.focus(); }, []);
 
   const [customRevision, setCustomRevision] = useState(0);
   useEffect(() => {

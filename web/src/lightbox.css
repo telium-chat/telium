@@ -145,3 +145,11 @@
   background: var(--lightbox-chrome-hover);
   color: var(--lightbox-ink);
 }
+
+/* Pinch-zoom layer (usePinchZoom). Covers the viewer so the fixed-position image
+   keeps its coordinates; the gestures are ours, not the page's. */
+.lightbox__zoom {
+  position: fixed;
+  inset: 0;
+  touch-action: none;
+}

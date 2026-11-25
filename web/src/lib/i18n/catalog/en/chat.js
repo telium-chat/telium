@@ -684,6 +684,9 @@ export const chat = {
   // which is a separate decision a translator should not have to guess at.
   'chat.composer.gif': 'GIF',
   'chat.composer.emoji': 'Emoji',
+  'chat.composer.keyboard': 'Keyboard',
+  'chat.composer.expressions': 'Emoji and GIFs',
+  'chat.composer.gifs': 'GIFs',
   'chat.composer.send': 'Send',
   'chat.composer.cancelReply': 'Cancel reply',
 

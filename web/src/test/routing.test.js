@@ -114,4 +114,14 @@ describe('history binding', () => {
     expect(store.route).toMatchObject({ view: 'dms', conversationId: 'V3' });
     expect(window.location.pathname).toBe('/channels/@me/V3');
   });
+
+  it('rewrites history in place when pushing is off, so Android Back leaves the app', () => {
+    window.history.replaceState(null, '', '/');
+    const before = window.history.length;
+    stop = bindRouting(store, window, { push: false });
+    store.navigate({ view: 'chat', guildId: 'G4', channelId: 'C4' });
+    store.navigate({ view: 'chat', guildId: 'G4', channelId: 'C5' });
+    expect(window.location.pathname).toBe('/channels/G4/C5');
+    expect(window.history.length).toBe(before);
+  });
 });

@@ -522,3 +522,74 @@
   margin-inline: 3px;
   background: var(--separator);
 }
+
+/* Phone expression panel (MobileExpressionPanel): docked where the keyboard goes,
+   at the keyboard's last height so swapping between them doesn't move the composer. */
+.mobile-expressions {
+  display: flex;
+  flex-direction: column;
+  height: clamp(240px, var(--mobile-keyboard-last, 300px), 60dvh);
+  transition: height 280ms cubic-bezier(0.2, 0, 0, 1);
+  margin-inline: -1rem;
+  padding-bottom: var(--safe-area-bottom);
+  border-top: 1px solid var(--border);
+  background-color: var(--surface);
+}
+
+.mobile-expressions__tabs {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  padding: 6px 8px 0;
+}
+
+.mobile-expressions__tab {
+  flex: 1 1 0;
+  min-height: 40px;
+  border-radius: 999px;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.mobile-expressions__tab[aria-selected="true"] {
+  background-color: var(--surface-secondary);
+  color: var(--foreground);
+}
+
+.mobile-expressions__body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.mobile-expressions__panel {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+/* Scrolled into: most of the screen, leaving the composer and a strip of chat. */
+.mobile-expressions[data-expanded] {
+  height: min(80dvh, calc(var(--mobile-viewport-height, 100dvh) - 10rem));
+}
+
+.mobile-expressions__grip {
+  display: flex;
+  flex: none;
+  justify-content: center;
+  padding: 6px 0 2px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-expressions__grip > span {
+  width: 2.25rem;
+  height: 0.25rem;
+  border-radius: 999px;
+  background-color: var(--border);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-expressions { transition: none; }
+}

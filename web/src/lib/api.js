@@ -776,6 +776,8 @@ export class Api {
   reportMemberships(guildServer, guildIds) {
     return this.post('/_telium/v1/memberships', { guild_server: guildServer, guild_ids: guildIds });
   }
+  /// Every guild the account belongs to, on any server, as the home last heard.
+  memberships() { return this.get('/_telium/v1/memberships'); }
   membershipMoves() { return this.get('/_telium/v1/migrate/memberships'); }
   retryMembershipMoves() { return this.post('/_telium/v1/migrate/memberships/retry', {}); }
   sunset() { return this.get('/_telium/v1/sunset'); }

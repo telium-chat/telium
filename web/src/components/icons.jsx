@@ -10,7 +10,7 @@ import {
   TriangleAlert, UserMinus, UserPlus, UserRound, Users, Video, VideoOff, SwitchCamera,
   Maximize2, Minimize2, Pause, Play, Volume2, VolumeX, X, Forward,
   Gamepad2, Music, Radio, Trophy, Tv,
-  Sparkles,
+  Sparkles, Keyboard,
 } from 'lucide-react';
 
 const icon = (Glyph) => {
@@ -63,6 +63,7 @@ export const SearchIcon = icon(Search);
 export const LinkIcon = icon(Link2);
 export const AttachIcon = icon(Paperclip);
 export const EmojiIcon = icon(Smile);
+export const KeyboardIcon = icon(Keyboard);
 export const ImageIcon = icon(Image);
 export const StarIcon = icon(Star);
 export const AddChannelIcon = icon(SquarePlus);

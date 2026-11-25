@@ -1263,3 +1263,177 @@ button.pc__row:focus-visible {
     transition: none;
   }
 }
+
+/* Full profile on a phone: one scrolling page. Sections keep their natural height
+   (a shrinking flex column squeezed them instead of scrolling), the banner reaches
+   under the status bar with the close button clear of it, and the tabs stick to
+   the top while their panel scrolls. */
+.mobile-fullscreen-dialog .pc[data-full="true"] {
+  --pc-pad: 16px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  padding-bottom: var(--safe-area-bottom);
+}
+
+.mobile-fullscreen-dialog .pc[data-full="true"]::-webkit-scrollbar {
+  display: none;
+}
+
+.mobile-fullscreen-dialog .pc[data-full="true"] > *,
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__left > *,
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__right > * {
+  flex-shrink: 0;
+  min-height: auto;
+}
+
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__left,
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__right {
+  flex: none;
+  overflow: visible;
+}
+
+/* Fills what is left below short content, without adding scroll of its own. */
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__right {
+  flex: 1 0 auto;
+}
+
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__banner {
+  height: calc(140px + max(var(--safe-area-top), 32px));
+}
+
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__close {
+  position: fixed;
+  /* Clear of the status bar icons even where the WebView under-reports the inset. */
+  top: calc(max(var(--safe-area-top), 32px) + 12px);
+  inset-inline-end: calc(var(--safe-area-end) + 12px);
+  z-index: 3;
+  width: 40px;
+  height: 40px;
+}
+
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__top-actions {
+  top: calc(max(var(--safe-area-top), 32px) + 12px);
+  inset-inline-end: 60px;
+}
+
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__face {
+  margin-top: -52px;
+}
+
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__cut .avatar,
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__cut .presence {
+  --presence-avatar: 92px !important;
+}
+
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__cut .avatar {
+  width: 92px;
+  height: 92px;
+}
+
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__name {
+  font-size: 1.5rem;
+  overflow-wrap: anywhere;
+}
+
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__actions {
+  flex-wrap: wrap;
+}
+
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__actions .pc__message,
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__actions .pc__actions-primary {
+  height: 44px;
+}
+
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__body,
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__panel,
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__panel-empty {
+  flex: none;
+  overflow: visible;
+}
+
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__tabs {
+  position: sticky;
+  top: var(--safe-area-top);
+  z-index: 2;
+  gap: 4px;
+  padding: 4px 8px 0;
+  background-color: color-mix(in oklab, var(--pc-fill) 88%, transparent);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  /* Fills the status-bar strip above the stuck tabs without taking layout space. */
+  box-shadow: 0 calc(-1 * var(--safe-area-top)) 0 0 var(--pc-fill);
+}
+
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__tab {
+  flex: 1 0 auto;
+  min-height: 44px;
+  padding-inline: 12px;
+  text-align: center;
+}
+
+/* One surface on a phone: the profile's colour (and theme gradient) runs the whole
+   page, behind the tabs as well, instead of stopping where the top section ends.
+   `local` makes the gradient span and scroll with the full content. */
+.mobile-fullscreen-dialog .pc[data-full="true"] {
+  --pc-ground-l: 97.6%;
+  --pc-ground-c: 0.016;
+  --pc-raise-l: 94.4%;
+  --pc-raise-c: 0.02;
+  --pc-raise-hover-l: 91.2%;
+  --pc-raise-hover-c: 0.024;
+  --pc-ink-l: 24%;
+  --pc-ink-c: 0.035;
+  --pc-ink-muted-l: 49%;
+  --pc-ink-muted-c: 0.022;
+  background-color: var(--pc-fill);
+  background-attachment: local;
+}
+
+:root.dark .mobile-fullscreen-dialog .pc[data-full="true"],
+:root[data-theme="dark"] .mobile-fullscreen-dialog .pc[data-full="true"] {
+  --pc-ground-l: 26.6%;
+  --pc-ground-c: 0.032;
+  --pc-raise-l: 30.6%;
+  --pc-raise-c: 0.036;
+  --pc-raise-hover-l: 34.6%;
+  --pc-raise-hover-c: 0.04;
+  --pc-ink-l: 94.5%;
+  --pc-ink-c: 0.012;
+  --pc-ink-muted-l: 73%;
+  --pc-ink-muted-c: 0.022;
+}
+
+@supports (color: oklch(from red l c h)) {
+  .mobile-fullscreen-dialog .pc[data-full="true"] {
+    --pc-fill: oklch(
+      from var(--pc-tint)
+      var(--pc-ground-l) min(c, calc(var(--pc-ground-c) * var(--pc-vivid, 1))) h
+    );
+    --pc-raise: oklch(from var(--pc-tint) var(--pc-raise-l) min(c, var(--pc-raise-c)) h);
+    --pc-raise-hover: oklch(from var(--pc-tint) var(--pc-raise-hover-l) min(c, var(--pc-raise-hover-c)) h);
+    --surface-secondary: var(--pc-raise);
+    --surface-tertiary: var(--pc-raise-hover);
+    --foreground: oklch(from var(--pc-tint) var(--pc-ink-l) min(c, var(--pc-ink-c)) h);
+    --muted: oklch(from var(--pc-tint) var(--pc-ink-muted-l) min(c, var(--pc-ink-muted-c)) h);
+    color: var(--foreground);
+  }
+
+  .mobile-fullscreen-dialog .pc[data-full="true"][data-themed="true"] {
+    background-image: linear-gradient(
+      180deg,
+      var(--pc-fill) 20%,
+      oklch(from var(--pc-theme-bottom) var(--pc-ground-l) min(c, calc(var(--pc-ground-c) * 3)) h)
+    );
+  }
+}
+
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__left,
+.mobile-fullscreen-dialog .pc[data-full="true"] .pc__right {
+  background: none;
+}

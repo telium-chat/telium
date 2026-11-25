@@ -226,6 +226,9 @@ export const serverMethods = {
       sunset: doc.sunset || null,
     };
     this.session.servers[name] = entry;
+    if (this.session.dismissedServers?.includes(name)) {
+      this.session.dismissedServers = this.session.dismissedServers.filter((d) => d !== name);
+    }
     this.save();
     this.connectServer(name, entry);
     this.loadCapabilities(name).catch(() => {});
@@ -250,7 +253,39 @@ export const serverMethods = {
     });
   },
 
+  /// A device only knew the servers it joined guilds on itself, so a guild joined on the
+  /// PC never appeared on the phone. The home keeps a registry of every membership;
+  /// sign in to any server in it this device has not met yet. A server removed by hand
+  /// here stays removed.
+  async adoptRemoteServers() {
+    const home = this.home;
+    if (!home?.memberships) return [];
+    const payload = await home.memberships();
+    const dismissed = new Set(this.session?.dismissedServers || []);
+    const wanted = new Set();
+    for (const m of payload?.memberships || []) {
+      const server = typeof m?.guild_server === 'string' ? m.guild_server.trim() : '';
+      if (server) wanted.add(server);
+    }
+    const added = [];
+    for (const server of wanted) {
+      if (!this.session?.home || this.session.servers?.[server] || dismissed.has(server)) continue;
+      try {
+        added.push(await this.addServer(server, { silent: true }));
+      } catch (e) {
+        console.warn(`could not reach ${server}`, e);
+      }
+    }
+    if (added.length) this.emit('servers');
+    return added;
+  },
+
   removeServer(domain) {
+    if (this.session) {
+      const dismissed = new Set(this.session.dismissedServers || []);
+      dismissed.add(domain);
+      this.session.dismissedServers = [...dismissed];
+    }
     this.forgetRefusal(domain);
     this.gw.remove(domain);
     this.apis.delete(domain);

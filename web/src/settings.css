@@ -456,3 +456,125 @@
   color: var(--color-foreground);
 }
 
+
+/* Phones: Android-style settings. A top bar with Back and the page name, the list
+   rows in full colour with room to tap, and the list and page sliding past each other. */
+@media (max-width: 639.98px) {
+  .settings__controls {
+    justify-content: flex-start;
+    gap: 0.25rem;
+    min-height: calc(3.5rem + var(--safe-area-top));
+    padding-inline: 0.25rem 0.5rem;
+  }
+
+  .settings__controls > button {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .settings__bar-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--color-foreground);
+  }
+
+  /* The page name is in the bar; leave the heading for screen readers. */
+  .settings__title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    margin: 0;
+  }
+
+  /* Back is how you leave a page; the bar's X would duplicate it. */
+  .settings[data-view="pane"] .settings__close { display: none; }
+
+  .settings__body { padding-inline: 1rem; }
+
+  .settings-item {
+    min-height: 3.25rem;
+    gap: 0.875rem;
+    padding-inline: 0.75rem;
+    font-size: 1rem;
+    color: var(--color-foreground);
+  }
+
+  .settings-item__icon { opacity: 0.7; }
+
+  .settings-item::after {
+    content: "";
+    flex: none;
+    width: 0.5rem;
+    height: 0.5rem;
+    margin-inline-start: auto;
+    border-top: 1.5px solid var(--color-muted);
+    border-inline-end: 1.5px solid var(--color-muted);
+    transform: rotate(45deg);
+    opacity: 0.6;
+  }
+
+  :root[dir="rtl"] .settings-item::after { transform: rotate(-45deg); }
+
+  /* No "current page" highlight in a list you just came back to. */
+  .settings-item[aria-current="page"] {
+    background: transparent;
+    font-weight: 400;
+  }
+
+  .settings[data-view="pane"] .settings__pane {
+    animation: settings-push 260ms cubic-bezier(0.2, 0, 0, 1) both;
+  }
+
+  .settings[data-view="nav"] .settings__nav {
+    animation: settings-pop 260ms cubic-bezier(0.2, 0, 0, 1) both;
+  }
+}
+
+@keyframes settings-push {
+  from { transform: translateX(calc(24% * var(--settings-dir, 1))); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes settings-pop {
+  from { transform: translateX(calc(-12% * var(--settings-dir, 1))); opacity: 0.4; }
+  to { transform: none; opacity: 1; }
+}
+
+:root[dir="rtl"] .settings { --settings-dir: -1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .settings__pane,
+  .settings__nav { animation: none !important; }
+}
+
+/* Swiping back from a page (useSwipeBack): the list sits under the page and comes
+   forward as the page slides away. */
+@media (max-width: 639.98px) {
+  .settings { position: relative; }
+
+  .settings[data-swiping] .settings__nav {
+    display: flex;
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    animation: none;
+    transform: translateX(calc(-20% * (1 - var(--swipe-progress, 0)) * var(--settings-dir, 1)));
+    opacity: calc(0.5 + 0.5 * var(--swipe-progress, 0));
+  }
+
+  .settings[data-swiping] .settings__pane {
+    z-index: 1;
+    background: var(--color-background);
+    box-shadow: 0 0 24px rgb(0 0 0 / 0.3);
+  }
+
+  .settings[data-swiped] .settings__nav { animation: none; }
+}
