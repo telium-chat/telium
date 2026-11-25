@@ -9,9 +9,15 @@ import {
 } from '../lib/voice.js';
 import { FakePC, fakeTrack, stubCall, settle } from './fake-webrtc.js';
 
-describe('Windows screen codec', () => {
-  it('leaves Linux and browser codec order alone', () => {
-    expect(preferredScreenCodec({ teliumDesktop: { platform: 'linux' } })).toBeNull();
+describe('Desktop screen codec', () => {
+  it('uses H264 on Windows, VP8 for text and H264 for motion on Linux, and leaves browsers and macOS alone', () => {
+    expect(preferredScreenCodec({ teliumDesktop: { platform: 'win32' } })).toBe('h264');
+    expect(preferredScreenCodec({ teliumDesktop: { platform: 'win32' } }, 'detail')).toBe('h264');
+    const linux = { teliumDesktop: { platform: 'linux' } };
+    expect(preferredScreenCodec(linux, 'detail')).toBe('vp8');
+    expect(preferredScreenCodec(linux, 'motion')).toBe('h264');
+    expect(preferredScreenCodec(linux)).toBe('h264');
+    expect(preferredScreenCodec({ teliumDesktop: { platform: 'darwin' } })).toBeNull();
     expect(preferredScreenCodec({})).toBeNull();
   });
 
