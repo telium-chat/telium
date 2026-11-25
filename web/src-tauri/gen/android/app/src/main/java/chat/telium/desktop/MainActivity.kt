@@ -5,9 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
-import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
@@ -51,9 +49,10 @@ class MainActivity : TauriActivity() {
   private var callMuted = false
   private var callDeafened = false
   private var savedAudioMode: Int? = null
-  private var requestedCommunicationDeviceId: Int? = null
-  private var audioFocusRequest: AudioFocusRequest? = null
-  private var legacyAudioFocusHeld = false
+  private var callVideo = false
+  private var callCamera = false
+  private var callStartedAt = 0L
+  private val callAudio by lazy { AndroidCallAudio(this) { action -> publishAndroidCallControl(action) } }
   private lateinit var telecomCallManager: AndroidTelecomCallManager
   private var callActionReceiverRegistered = false
   private val saveExecutor = Executors.newSingleThreadExecutor()
@@ -499,6 +498,8 @@ class MainActivity : TauriActivity() {
           "state" -> {
             callMuted = payload.optBoolean("muted", callMuted)
             callDeafened = payload.optBoolean("deafened", callDeafened)
+            callVideo = payload.optBoolean("video", callVideo)
+            callCamera = payload.optBoolean("camera", callCamera)
             applyCallMode(payload.optBoolean("active"), view)
             reply(
               replyProxy,
@@ -531,22 +532,23 @@ class MainActivity : TauriActivity() {
       if (!callActive) {
         savedAudioMode = audio.mode
         callActive = true
+        callStartedAt = System.currentTimeMillis()
         telecomCallManager.startCall()
       }
-      AndroidCallForegroundService.start(this, callMuted, callDeafened)
+      AndroidCallForegroundService.start(this, callMuted, callDeafened, callCamera, callStartedAt)
       if (audio.mode != AudioManager.MODE_IN_COMMUNICATION) {
         audio.mode = AudioManager.MODE_IN_COMMUNICATION
       }
-      requestCallAudioFocus(audio)
-      webView.keepScreenOn = true
+      callAudio.start(callVideo)
+      // Video wants a lit screen; a voice call lets it sleep (or the proximity sensor blank it).
+      webView.keepScreenOn = callVideo
       return
     }
 
     webView.keepScreenOn = false
-    abandonCallAudioFocus(audio)
+    callAudio.stop()
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       audio.clearCommunicationDevice()
-      requestedCommunicationDeviceId = null
     }
     if (!callActive) return
 
@@ -560,6 +562,9 @@ class MainActivity : TauriActivity() {
     callActive = false
     callMuted = false
     callDeafened = false
+    callVideo = false
+    callCamera = false
+    callStartedAt = 0L
     telecomCallManager.endCall()
     AndroidCallForegroundService.stop(this)
   }
@@ -570,46 +575,6 @@ class MainActivity : TauriActivity() {
     val script =
       "window.dispatchEvent(new CustomEvent('telium:android-call-control',{detail:$detail}));"
     webView.post { webView.evaluateJavascript(script, null) }
-  }
-
-  private fun requestCallAudioFocus(audio: AudioManager) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      if (audioFocusRequest != null) return
-      val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
-        .setAudioAttributes(
-          AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-            .build()
-        )
-        .build()
-      if (audio.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-        audioFocusRequest = request
-      }
-      return
-    }
-
-    if (legacyAudioFocusHeld) return
-    @Suppress("DEPRECATION")
-    val granted = audio.requestAudioFocus(
-      null,
-      AudioManager.STREAM_VOICE_CALL,
-      AudioManager.AUDIOFOCUS_GAIN_TRANSIENT,
-    )
-    legacyAudioFocusHeld = granted == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-  }
-
-  private fun abandonCallAudioFocus(audio: AudioManager) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      audioFocusRequest?.let { audio.abandonAudioFocusRequest(it) }
-      audioFocusRequest = null
-      return
-    }
-
-    if (!legacyAudioFocusHeld) return
-    @Suppress("DEPRECATION")
-    audio.abandonAudioFocus(null)
-    legacyAudioFocusHeld = false
   }
 
   private fun responseExtra(
@@ -642,8 +607,8 @@ class MainActivity : TauriActivity() {
     val audio = getSystemService(AudioManager::class.java)
     val available = audio.availableCommunicationDevices
     val ids = available.map { it.id }.toSet()
-    requestedCommunicationDeviceId?.let { requested ->
-      if (requested !in ids) requestedCommunicationDeviceId = null
+    callAudio.requestedDeviceId?.let { requested ->
+      if (requested !in ids) callAudio.requestedDeviceId = null
     }
 
     val current = audio.communicationDevice
@@ -672,7 +637,7 @@ class MainActivity : TauriActivity() {
         requestId,
         mapOf(
           "supported" to true,
-          "selected" to (requestedCommunicationDeviceId?.toString() ?: "auto"),
+          "selected" to (callAudio.requestedDeviceId?.toString() ?: "auto"),
           "automatic_label" to if (currentLabel == null) "Automatic" else "Automatic · $currentLabel",
           "routes" to routes,
         ),
@@ -699,7 +664,8 @@ class MainActivity : TauriActivity() {
     val audio = getSystemService(AudioManager::class.java)
     if (routeId == "auto") {
       audio.clearCommunicationDevice()
-      requestedCommunicationDeviceId = null
+      callAudio.requestedDeviceId = null
+      callAudio.routeChanged()
       reply(
         replyProxy,
         "route",
@@ -712,7 +678,7 @@ class MainActivity : TauriActivity() {
     val wanted = routeId.toIntOrNull()
     val device = audio.availableCommunicationDevices.firstOrNull { it.id == wanted }
     if (device == null) {
-      requestedCommunicationDeviceId = null
+      callAudio.requestedDeviceId = null
       reply(
         replyProxy,
         "route",
@@ -734,7 +700,8 @@ class MainActivity : TauriActivity() {
         )
         return
       }
-      requestedCommunicationDeviceId = device.id
+      callAudio.requestedDeviceId = device.id
+      callAudio.routeChanged()
       reply(
         replyProxy,
         "route",

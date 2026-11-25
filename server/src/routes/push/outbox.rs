@@ -139,6 +139,11 @@ async fn expand_broadcast_notification(
         }
         ready.push((user_id, destination));
     }
+    // Remembered per recipient, as for a direct mention, so reading the channel takes it down.
+    let scope = format!("channel:{}", job.source.channel_id);
+    for (user_id, _) in &ready {
+        notifications::note_notified(state, user_id, &scope).await;
+    }
 
     let mut tx = state.pool.begin().await?;
     for (user_id, destination) in ready {
@@ -660,7 +665,7 @@ pub async fn flush_notification_outbox(state: &AppState) -> ApiResult<u64> {
             }
         };
         let expected_home = crate::federation::domain_of(&recipient_id);
-        if !matches!(kind.as_str(), "mention" | "reply")
+        if !matches!(kind.as_str(), "mention" | "reply" | notifications::DISMISS_KIND)
             || source.id != source_id
             || source.guild_id != guild_id
             || expected_home != Some(destination.as_str())

@@ -399,6 +399,49 @@ pub async fn enqueue_federated(
     enqueue(state, origin, user_id, Some(guild_id), source_id, kind, Some(&bucket), envelopes).await
 }
 
+/// The kind of the content-free row that takes a shown notification off a device once the user has
+/// read that channel or conversation somewhere. Devices never display it.
+pub const DISMISS_KIND: &str = "dismiss";
+
+/// Records that `user_id` was just sent a background notification for `scope` (`channel:<id>` or
+/// `conversation:<id>`), so reading it can later dismiss it on the user's other devices.
+pub async fn note_notified(state: &AppState, user_id: &str, scope: &str) {
+    let result = sqlx::query(
+        "INSERT INTO notified_scopes (user_id, scope, notified_at) VALUES (?, ?, ?) \
+         ON CONFLICT(user_id, scope) DO UPDATE SET notified_at = excluded.notified_at",
+    )
+    .bind(user_id)
+    .bind(scope)
+    .bind(now_ms())
+    .execute(&state.pool)
+    .await;
+    if let Err(error) = result {
+        tracing::debug!(target: crate::logcat::PUSH, %error, "could not record a notified scope");
+    }
+}
+
+/// Clears the record for `scope`; true when there was one, i.e. a notification may still be showing
+/// and is worth a dismissal. Reading with nothing outstanding stays free.
+pub async fn take_notified(state: &AppState, user_id: &str, scope: &str) -> bool {
+    sqlx::query("DELETE FROM notified_scopes WHERE user_id = ? AND scope = ?")
+        .bind(user_id)
+        .bind(scope)
+        .execute(&state.pool)
+        .await
+        .map(|done| done.rows_affected() > 0)
+        .unwrap_or(false)
+}
+
+/// The descriptor a dismissal carries: where, never what.
+pub fn dismiss_descriptor(destination: Value) -> Value {
+    json!({
+        "v": 1,
+        "kind": DISMISS_KIND,
+        "destination": destination,
+        "created_at": now_ms(),
+    })
+}
+
 pub async fn enqueue_local_conversation(
     state: &AppState,
     user_id: &str,
@@ -551,6 +594,20 @@ pub async fn pull(
     after: Option<&str>,
     limit: i64,
 ) -> ApiResult<Value> {
+    pull_accepting(state, auth, after, limit, false).await
+}
+
+/// `accept_dismiss`: the device understands `dismiss` rows. One that does not (an older app or
+/// service worker) would stall on or display a kind it has never seen, so it is simply not shown
+/// them; the alert a dismissal superseded stays hidden from it either way, which is right, since
+/// it was read.
+pub async fn pull_accepting(
+    state: &AppState,
+    auth: &BackgroundAuth,
+    after: Option<&str>,
+    limit: i64,
+    accept_dismiss: bool,
+) -> ApiResult<Value> {
     let _ = sqlx::query("DELETE FROM notification_inbox WHERE expires_at <= ?")
         .bind(now_ms())
         .execute(&state.pool)
@@ -562,12 +619,13 @@ pub async fn pull(
         sqlx::query_as(
             "SELECT id, origin, source_id, kind, guild_id, ciphertext, coalesce_key, coalesced, created_at \
              FROM notification_inbox WHERE user_id = ? AND device_id = ? AND id > ? \
-               AND superseded_at IS NULL \
+               AND superseded_at IS NULL AND (? OR kind <> 'dismiss') \
              ORDER BY id ASC LIMIT ?",
         )
         .bind(&auth.user_id)
         .bind(&auth.device_id)
         .bind(after)
+        .bind(accept_dismiss)
         .bind(limit)
         .fetch_all(&state.pool)
         .await?
@@ -575,11 +633,12 @@ pub async fn pull(
         sqlx::query_as(
             "SELECT id, origin, source_id, kind, guild_id, ciphertext, coalesce_key, coalesced, created_at \
              FROM notification_inbox WHERE user_id = ? AND device_id = ? \
-               AND superseded_at IS NULL \
+               AND superseded_at IS NULL AND (? OR kind <> 'dismiss') \
              ORDER BY id ASC LIMIT ?",
         )
         .bind(&auth.user_id)
         .bind(&auth.device_id)
+        .bind(accept_dismiss)
         .bind(limit)
         .fetch_all(&state.pool)
         .await?

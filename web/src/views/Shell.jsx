@@ -41,6 +41,7 @@ import { useMobileBackDismiss } from '../hooks/useMobileBackDismiss.js';
 import { useMobileViewport } from '../hooks/useMobileViewport.js';
 import { MobileDrawer } from './mobile/MobileDrawer.jsx';
 import { useDrawerGestures } from './mobile/drawer-gesture.js';
+import { useSheetDrag } from '../hooks/useSheetDrag.js';
 import { UserSettings } from './settings.jsx';
 
 export function Shell() {
@@ -322,7 +323,7 @@ function MobileShell() {
         />
 
         {voiceStageOpen && (
-          <div className="fixed inset-0 z-50 flex min-h-0 flex-col bg-background animate-sheet-in">
+          <VoiceStageSheet onMinimize={() => setVoiceStageOpen(false)}>
             <VoiceView
               channelId={voice.channelId}
               mobile
@@ -332,9 +333,20 @@ function MobileShell() {
                 openDrawer();
               }}
             />
-          </div>
+          </VoiceStageSheet>
         )}
       </div>
+    </div>
+  );
+}
+
+/// The full-screen call: a downward drag (from anywhere not scrolled) shrinks it back to the
+/// call pill, the way phone call screens minimise.
+function VoiceStageSheet({ onMinimize, children }) {
+  const { sheetRef } = useSheetDrag(onMinimize);
+  return (
+    <div ref={sheetRef} className="fixed inset-0 z-50 flex min-h-0 flex-col bg-background animate-sheet-in">
+      {children}
     </div>
   );
 }

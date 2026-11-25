@@ -40,6 +40,8 @@ class AndroidCallForegroundService : Service() {
 
     val muted = intent?.getBooleanExtra(EXTRA_MUTED, false) ?: false
     val deafened = intent?.getBooleanExtra(EXTRA_DEAFENED, false) ?: false
+    val camera = intent?.getBooleanExtra(EXTRA_CAMERA, false) ?: false
+    val startedAt = intent?.getLongExtra(EXTRA_STARTED_AT, 0L)?.takeIf { it > 0L }
     val returnIntent = Intent(this, MainActivity::class.java).apply {
       this.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
     }
@@ -74,7 +76,11 @@ class AndroidCallForegroundService : Service() {
     val notification = NotificationCompat.Builder(this, CHANNEL_ID)
       .setSmallIcon(R.drawable.ic_launcher_monochrome)
       .setContentTitle("Telium call")
-      .setContentText("Call in progress")
+      .setContentText(if (muted) "Call in progress · muted" else "Call in progress")
+      .apply {
+        // A running timer, like the system dialer's, from when the call began.
+        if (startedAt != null) setWhen(startedAt).setShowWhen(true).setUsesChronometer(true)
+      }
       .setContentIntent(returnPending)
       .setCategory(NotificationCompat.CATEGORY_CALL)
       .setStyle(NotificationCompat.CallStyle.forOngoingCall(caller, hangUpPending))
@@ -98,17 +104,36 @@ class AndroidCallForegroundService : Service() {
       }
       .build()
 
+    // With the camera on, the service also claims the camera type: from Android 14 a camera in
+    // use by an app that leaves the foreground is cut off unless a foreground service holds it.
+    // Claimed only while the permission is granted, or startForeground throws.
+    val cameraAllowed = camera && ContextCompat.checkSelfPermission(
+      this,
+      android.Manifest.permission.CAMERA,
+    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
     val foregroundType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-      ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+      ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+        (if (cameraAllowed) ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA else 0)
     } else {
       0
     }
-    ServiceCompat.startForeground(
-      this,
-      NOTIFICATION_ID,
-      notification,
-      foregroundType,
-    )
+    try {
+      ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, foregroundType)
+    } catch (_: Exception) {
+      // Android 14 refuses a camera (or even microphone) type started from the background, e.g.
+      // a Mute tap on this notification with the app away. Fall back to the microphone type, and
+      // if even that is refused, stop quietly rather than crash the call's process.
+      try {
+        val micOnly = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+          ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        } else {
+          0
+        }
+        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, micOnly)
+      } catch (_: Exception) {
+        stopSelf()
+      }
+    }
     return START_NOT_STICKY
   }
 
@@ -141,6 +166,8 @@ class AndroidCallForegroundService : Service() {
     const val ACTION_TOGGLE_DEAFEN = "chat.telium.desktop.action.TOGGLE_DEAFEN_CALL"
     private const val EXTRA_MUTED = "muted"
     private const val EXTRA_DEAFENED = "deafened"
+    private const val EXTRA_CAMERA = "camera"
+    private const val EXTRA_STARTED_AT = "started_at"
     private const val CHANNEL_ID = "telium_active_call"
     private const val NOTIFICATION_ID = 0x54434c
     private const val REQUEST_RETURN = 0x54434d
@@ -148,13 +175,21 @@ class AndroidCallForegroundService : Service() {
     private const val REQUEST_MUTE = 0x54434f
     private const val REQUEST_DEAFEN = 0x544350
 
-    fun start(context: Context, muted: Boolean = false, deafened: Boolean = false) {
+    fun start(
+      context: Context,
+      muted: Boolean = false,
+      deafened: Boolean = false,
+      camera: Boolean = false,
+      startedAt: Long = 0L,
+    ) {
       try {
         ContextCompat.startForegroundService(
           context,
           Intent(context, AndroidCallForegroundService::class.java)
             .putExtra(EXTRA_MUTED, muted)
-            .putExtra(EXTRA_DEAFENED, deafened),
+            .putExtra(EXTRA_DEAFENED, deafened)
+            .putExtra(EXTRA_CAMERA, camera)
+            .putExtra(EXTRA_STARTED_AT, startedAt),
         )
       } catch (_: Exception) {
         // The WebRTC call remains usable in the foreground if Android rejects

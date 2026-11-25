@@ -138,6 +138,10 @@ self.addEventListener('push', (event) => {
                 data: { destination: notification.destination },
               });
             },
+            onDismiss: async (tag) => {
+              const shown = await self.registration.getNotifications({ tag });
+              for (const n of shown) n.close();
+            },
           });
           return;
         } catch {

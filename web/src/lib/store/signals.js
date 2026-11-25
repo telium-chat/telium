@@ -1,4 +1,5 @@
 import { debounce } from '../util.js';
+import { personLooking } from './timeline.js';
 
 const SIGNAL_IDLE = 4000;
 
@@ -96,6 +97,24 @@ export const signalMethods = {
     this.scheduleSignals(conversationId);
     // The read cursor the server keeps: every other device's badge follows.
     this.reportDmDelivered(conversationId, this.mls.seqOf?.get(last) || 0);
+    this.reportDmSeen(conversationId, last);
+  },
+
+  /// Tells the account home this device read the conversation, once per newly read frame and at
+  /// most every couple of seconds, so a notification still showing on a phone comes off it.
+  /// Independent of read receipts: it reaches only the home, never the other members.
+  reportDmSeen(conversationId, frameId) {
+    if (!this.home?.conversationSeen || !personLooking()) return;
+    if (!this.dmSeen) this.dmSeen = new Map();
+    const held = this.dmSeen.get(conversationId) || {};
+    if (held.frame === frameId) return;
+    held.frame = frameId;
+    this.dmSeen.set(conversationId, held);
+    if (held.timer) return;
+    held.timer = setTimeout(() => {
+      held.timer = null;
+      this.home?.conversationSeen?.(conversationId)?.catch?.(() => {});
+    }, 1_500);
   },
 
   scheduleSignals(conversationId) {

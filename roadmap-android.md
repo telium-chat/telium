@@ -43,13 +43,13 @@ The native Android notification pipeline is implemented. Remaining work here is 
 The current native audio routing work is a strong base, but Android should understand that Telium is actually in a call.
 
 - [ ] Integrate Android Core-Telecom / Telecom APIs for VoIP lifecycle where practical. Authenticated active calls now register with stable AndroidX Core-Telecom, report active/disconnect lifecycle, and use a CallStyle foreground notification; keep this open until a real device verifies Telecom behavior while backgrounded and locked.
-- [ ] Add an ongoing call foreground service with the correct microphone/camera service types and permissions. Audio calls now start a native microphone foreground service with a credential-free ongoing Return-to-call notification; camera/video service-type handling and real-device lifecycle verification remain.
+- [ ] Add an ongoing call foreground service with the correct microphone/camera service types and permissions. The credential-free foreground service now claims the camera type too while the camera is on (Android 14 otherwise cuts it off in the background) and shows a running call timer; real-device lifecycle verification remains.
 - [ ] Keep voice alive with the screen locked and while another app is foregrounded.
 - [x] Add native incoming-call notifications with Answer / Decline. Answer opens the authenticated conversation, rechecks that the call is still live, then joins through the normal voice client; Decline dismisses only this device's native alert.
 - [x] Add native ongoing-call notifications with Return / Mute / Deafen / Hang Up as appropriate. The foreground CallStyle notification mirrors the authenticated client's mute/deafen state and sends credential-free control events back through the existing call bridge.
 - [ ] Preserve the current speaker, earpiece, wired, USB, Bluetooth, BLE, and hearing-aid routing behavior.
-- [ ] React correctly when a Bluetooth or wired device connects/disconnects mid-call.
-- [ ] Handle audio-focus loss from phone calls, alarms, navigation, and other media apps without leaving Telium in a broken audio mode.
+- [ ] React correctly when a Bluetooth or wired device connects/disconnects mid-call. `AndroidCallAudio` now switches to a headset that connects mid-call (unless the user picked an output), falls back to automatic when the picked one disappears, and refreshes an open output picker; keep open until verified on devices.
+- [ ] Handle audio-focus loss from phone calls, alarms, navigation, and other media apps without leaving Telium in a broken audio mode. Focus is now held with a listener: losing it holds the microphone and tells the user, regaining it re-asserts communication mode and restores the user's mute state; keep open until verified against a real incoming phone call.
 - [ ] Restore Android audio state reliably after every exit path, including crashes/reconnects where possible.
 
 ## Resume, reconnect, and network transitions
@@ -134,7 +134,7 @@ The current mobile-specific drawers, sheets, long-press actions, and shared Back
 - [ ] Add camera front/back switching.
 - [ ] Handle orientation changes during calls without dropping media.
 - [ ] Add picture-in-picture for active video/screenshare if it proves reliable and useful.
-- [ ] Consider proximity-sensor behavior when using the earpiece.
+- [x] Consider proximity-sensor behavior when using the earpiece. On the earpiece with no video the proximity wake lock blanks the screen against the ear (Android 12+), and voice-only calls no longer hold the screen on.
 - [ ] Make screen-share viewing usable on small displays with zoom/orientation controls.
 
 ---

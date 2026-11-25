@@ -873,6 +873,7 @@ export const voice = {
   'voice.error.listDevices': 'Could not list the audio devices',
   'voice.error.switchMic': 'Could not switch the microphone',
   'voice.error.switchOutput': 'Could not switch the output',
+  'voice.android.onHold': 'Another app is using the audio. Your mic is muted until it finishes.',
   'voice.error.readRoutes': 'Could not read the audio outputs',
   // "Noise suppression" is the feature and "the neural model" is the thing
   // that may not load; see `voice.noise.reason.load-failed`. These two sit

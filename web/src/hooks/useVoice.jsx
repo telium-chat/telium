@@ -150,12 +150,15 @@ export function VoiceProvider({ children }) {
   };
   const conversationCall = (id) => Boolean(id) && !store.channels.get(id);
 
+  const hasVideo = Boolean(local.self_video || local.streaming || cameras.size || screens.size);
   useEffect(() => {
     setAndroidCallActive(Boolean(channelId), {
       muted: local.self_mute,
       deafened: local.self_deaf,
+      video: hasVideo,
+      camera: Boolean(local.self_video),
     });
-  }, [channelId, local.self_mute, local.self_deaf]);
+  }, [channelId, local.self_mute, local.self_deaf, hasVideo, local.self_video]);
 
   useEffect(() => () => setAndroidCallActive(false), []);
 
@@ -999,11 +1002,29 @@ export function VoiceProvider({ children }) {
     return undefined;
   }, [store, toggleCamera]);
 
+  // Another app (a phone call, an alarm) took the audio: hold the microphone until it hands it
+  // back, then restore exactly what the user had. A mute the user chose stays theirs.
+  const heldForFocusRef = useRef(false);
   useEffect(() => subscribeAndroidCallControls((action) => {
     if (action === 'disconnect') coreLeave();
     if (action === 'toggle_mute') toggle('self_mute');
     if (action === 'toggle_deafen') toggle('self_deaf');
+    if (action === 'focus_lost' && channelRef.current) {
+      if (!localRef.current.self_mute && !localRef.current.self_deaf) {
+        heldForFocusRef.current = true;
+        toggle('self_mute');
+      }
+      toast(t('voice.android.onHold'));
+    }
+    if (action === 'focus_gained' && heldForFocusRef.current) {
+      heldForFocusRef.current = false;
+      if (localRef.current.self_mute) toggle('self_mute');
+    }
+    if (action === 'routes_changed' && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('telium:android-routes-changed'));
+    }
   }), [coreLeave, toggle]);
+  useEffect(() => { if (!channelId) heldForFocusRef.current = false; }, [channelId]);
 
   const setStream = useCallback(async (next, settings = null) => {
     const currentChannelId = channelRef.current;

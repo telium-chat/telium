@@ -984,3 +984,54 @@ async fn guild_mentions_group_by_their_blinded_channel_hint() {
     assert!(enqueue("hostile", Some("../../etc/passwd")).await.is_err(), "a hint outside the token alphabet");
     enqueue("blank-hint", Some("   ")).await.unwrap();
 }
+
+#[tokio::test]
+async fn reading_a_conversation_dismisses_its_alert_once_and_only_after_one() {
+    let t = state().await;
+    let (alice, bob) = ("@alice:bob.example", "@bob:bob.example");
+    seed_device(&t.state, alice, "alice", "alice-phone").await;
+    seed_device(&t.state, bob, "bob", "bob-phone").await;
+    seed_conversation(&t.state, "01JCONVERSATION", &[alice, bob]).await;
+    let (_, auth) = background_auth(&t.state, bob, "bob-phone").await;
+    let count = |sql: &'static str| {
+        let pool = t.state.pool.clone();
+        async move { sqlx::query_scalar::<_, i64>(sql).fetch_one(&pool).await.unwrap() }
+    };
+
+    // Nothing was shown, so reading sends nothing.
+    telium_server::routes::push::dismiss_conversation_notifications(&t.state, bob, "01JCONVERSATION").await;
+    assert_eq!(count("SELECT COUNT(*) FROM notification_inbox").await, 0);
+
+    let frame = conversation_frame(alice, "01JFRAME", true);
+    let locals = vec![alice.to_string(), bob.to_string()];
+    telium_server::routes::push::wake_conversation(&t.state, "01JCONVERSATION", &frame, &locals).await;
+    assert_eq!(count("SELECT COUNT(*) FROM notified_scopes WHERE scope = 'conversation:01JCONVERSATION'").await, 1);
+
+    telium_server::routes::push::dismiss_conversation_notifications(&t.state, bob, "01JCONVERSATION").await;
+    let old_client = notifications::pull(&t.state, &auth, None, 50).await.unwrap();
+    assert_eq!(old_client["notifications"].as_array().unwrap().len(), 0,
+        "a device that never asked for dismissals sees neither it nor the alert it superseded");
+    let page = notifications::pull_accepting(&t.state, &auth, None, 50, true).await.unwrap();
+    let rows = page["notifications"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "the dismissal supersedes the alert it clears: {rows:?}");
+    assert_eq!(rows[0]["kind"], json!("dismiss"));
+    assert!(rows[0]["source_id"].as_str().unwrap().starts_with("dismiss-"));
+    assert_eq!(count("SELECT COUNT(*) FROM notified_scopes").await, 0);
+
+    // A second read with nothing new outstanding wakes no one.
+    telium_server::routes::push::dismiss_conversation_notifications(&t.state, bob, "01JCONVERSATION").await;
+    assert_eq!(count("SELECT COUNT(*) FROM notification_inbox WHERE kind = 'dismiss'").await, 1);
+}
+
+#[tokio::test]
+async fn reading_a_channel_with_no_outstanding_alert_sends_nothing() {
+    let t = state().await;
+    let user = "@bob:bob.example";
+    seed_account(&t.state, user, "phone-1").await;
+    telium_server::routes::push::dismiss_channel_notifications(&t.state, user, "channel-1").await;
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM notification_inbox").fetch_one(&t.state.pool).await.unwrap();
+    assert_eq!(rows, 0);
+    notifications::note_notified(&t.state, user, "channel:channel-1").await;
+    assert!(notifications::take_notified(&t.state, user, "channel:channel-1").await);
+    assert!(!notifications::take_notified(&t.state, user, "channel:channel-1").await, "taken once");
+}

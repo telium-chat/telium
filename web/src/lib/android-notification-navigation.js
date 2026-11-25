@@ -1,4 +1,5 @@
 import { isMobileTauri } from './platform.js';
+import { dismissAndroidNotificationsFor } from './android-notifications.js';
 
 let requestSerial = 0;
 
@@ -107,8 +108,24 @@ export function installAndroidNotificationNavigation(store) {
     }
   };
 
+  // What is on screen is read: its alerts come off the shade straight away.
+  let lastPlace = '';
+  const clearOnScreen = () => {
+    if (disposed || !store?.signedIn) return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    const destination = onScreenDestination(store);
+    const place = destination ? JSON.stringify(destination) : '';
+    if (!destination) { lastPlace = ''; return; }
+    lastPlace = place;
+    dismissAndroidNotificationsFor(store.session?.home, destination).catch(() => {});
+  };
+  const offRoute = store.on('route', () => {
+    const destination = onScreenDestination(store);
+    if ((destination ? JSON.stringify(destination) : '') !== lastPlace) clearOnScreen();
+  });
+
   const offReady = store.on('ready', take);
-  const onResume = () => { take(); };
+  const onResume = () => { take(); clearOnScreen(); };
   window.addEventListener('telium:resume', onResume);
 
   // Hot install/reload can happen after READY already fired.
@@ -117,6 +134,22 @@ export function installAndroidNotificationNavigation(store) {
   return () => {
     disposed = true;
     if (typeof offReady === 'function') offReady();
+    if (typeof offRoute === 'function') offRoute();
     window.removeEventListener('telium:resume', onResume);
   };
+}
+
+/// The conversation or channel the route has open, in the shape Android indexes alerts by.
+export function onScreenDestination(store) {
+  const route = store?.route;
+  if (!route) return null;
+  if (route.view === 'dms' && route.conversationId) {
+    return { type: 'conversation', conversation_id: route.conversationId };
+  }
+  if (route.guildId && route.channelId) {
+    const origin = store.guilds?.get?.(route.guildId)?.domain;
+    if (!origin) return null;
+    return { type: 'guild_channel', guild_origin: origin, guild_id: route.guildId, channel_id: route.channelId };
+  }
+  return null;
 }

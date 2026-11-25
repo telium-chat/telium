@@ -220,6 +220,15 @@ export async function setAndroidDmNotifications(sessionHome, enabled) {
   return result.dm_notifications !== false;
 }
 
+/// Takes down the alerts shown for a conversation or channel the user has just opened here.
+/// `destination` is `{ type: 'conversation', conversation_id }` or
+/// `{ type: 'guild_channel', guild_origin, guild_id, channel_id }`.
+export async function dismissAndroidNotificationsFor(sessionHome, destination) {
+  if (!androidNotificationBridgeAvailable() || !sessionHome || !destination) return 0;
+  const result = await nativeRequest({ op: 'dismiss_place', ...scope(sessionHome), destination });
+  return Number(result.cancelled) || 0;
+}
+
 export async function clearAndroidNotificationSecrets(sessionHome) {
   if (!androidNotificationBridgeAvailable() || !sessionHome) return false;
   await nativeRequest({ op: 'clear', ...scope(sessionHome) });

@@ -41,6 +41,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 internal object AndroidNotificationInbox {
   private const val TAG = "TeliumNotificationInbox"
+  private const val DISMISS_KIND = "dismiss"
   private const val PAGE_SIZE = 25
   private const val CONNECT_TIMEOUT_MS = 10_000
   private const val READ_TIMEOUT_MS = 10_000
@@ -134,19 +135,22 @@ internal object AndroidNotificationInbox {
       val page = request(
         registration,
         "GET",
-        "/_telium/v1/notifications?limit=$PAGE_SIZE",
+        // `accept=dismiss`: this build takes "read elsewhere" rows down instead of showing them.
+        "/_telium/v1/notifications?limit=$PAGE_SIZE&accept=dismiss",
       )
       val notifications = page.optJSONArray("notifications") ?: JSONArray()
       if (notifications.length() == 0) return
 
-      var acknowledgedThrough: String? = null
+      // Decrypt the page first, so an alert that a later row in this same page already
+      // dismissed (read elsewhere while this phone was offline) is never posted -- no buzz for
+      // something the user has seen. Decryption still stops at the first failure.
+      val decrypted = mutableListOf<Pair<JSONObject, JSONObject>>()
+      var failedAt: Int? = null
       for (index in 0 until notifications.length()) {
         // A non-object row is malformed server data. Stop rather than looping
         // back to the same page forever or acknowledging past it.
-        val item = notifications.optJSONObject(index) ?: return
-        val id = item.optString("id")
-        if (id.isBlank()) return
-
+        val item = notifications.optJSONObject(index)
+        if (item == null || item.optString("id").isBlank()) { failedAt = index; break }
         val descriptor = try {
           decrypt(privateKey, registration, item)
         } catch (error: Exception) {
@@ -154,8 +158,37 @@ internal object AndroidNotificationInbox {
           Log.w(TAG, "Inbox decryption failed; later rows remain pending (${error.javaClass.simpleName})")
           // Leave this and every later row in the inbox. A key mismatch or
           // tampered envelope must never be converted into a misleading alert.
-          if (acknowledgedThrough != null) ack(registration, acknowledgedThrough)
-          return
+          failedAt = index
+          break
+        }
+        decrypted.add(item to descriptor)
+      }
+      val lastDismissal = mutableMapOf<String, Int>()
+      decrypted.forEachIndexed { index, (item, descriptor) ->
+        if (isDismissal(item, descriptor)) {
+          AndroidNotificationIndex.placeOf(descriptor.optJSONObject("destination"))
+            ?.let { lastDismissal[it] = index }
+        }
+      }
+
+      var acknowledgedThrough: String? = null
+      for ((index, pair) in decrypted.withIndex()) {
+        val (item, descriptor) = pair
+        val id = item.optString("id")
+        if (isDismissal(item, descriptor)) {
+          // Read on another device: take this place's alerts down and show nothing. The row
+          // is consumed either way; a place with nothing showing is simply a no-op.
+          AndroidNotificationIndex.placeOf(descriptor.optJSONObject("destination"))?.let { place ->
+            AndroidNotificationIndex.dismiss(context, registration.scope.id, place)
+          }
+          acknowledgedThrough = id
+          continue
+        }
+        val place = AndroidNotificationIndex.placeOf(descriptor.optJSONObject("destination"))
+        if (place != null && (lastDismissal[place] ?: -1) > index) {
+          // Already read elsewhere: consume without ever showing it.
+          acknowledgedThrough = id
+          continue
         }
         val dmHint = descriptor.optString("kind") == "dm_hint"
         val quietDmHint = dmHint && descriptor.optInt("notify", 0) != 1
@@ -180,12 +213,19 @@ internal object AndroidNotificationInbox {
         }
         acknowledgedThrough = id
       }
+      if (failedAt != null) {
+        if (acknowledgedThrough != null) ack(registration, acknowledgedThrough)
+        return
+      }
 
       if (acknowledgedThrough == null) return
       ack(registration, acknowledgedThrough)
       if (notifications.length() < PAGE_SIZE) return
     }
   }
+
+  private fun isDismissal(item: JSONObject, descriptor: JSONObject): Boolean =
+    item.optString("kind") == DISMISS_KIND && descriptor.optString("kind") == DISMISS_KIND
 
   private fun decrypt(
     privateKey: PrivateKey,
@@ -446,6 +486,9 @@ internal object AndroidNotificationInbox {
       // network failure updates the existing OS notification rather than
       // duplicating it, because the replayed row lands on the same tag.
       NotificationManagerCompat.from(context).notify(tag, 0, builder.build())
+      AndroidNotificationIndex.placeOf(destination)?.let { place ->
+        AndroidNotificationIndex.remember(context, scope.id, place, tag)
+      }
       true
     } catch (_: SecurityException) {
       Log.w(TAG, "Android rejected notification display; row remains pending")

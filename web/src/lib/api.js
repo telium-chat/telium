@@ -467,7 +467,7 @@ export class Api {
   deleteThread(id) { return this.del(`/_telium/v1/threads/${id}`); }
   follow(channelId, targetId) { return this.post(`/_telium/v1/channels/${channelId}/follow`, { target_id: targetId }); }
   unfollow(channelId, targetId) { return this.del(`/_telium/v1/channels/${channelId}/follow/${targetId}`); }
-  ack(channelId, messageId) { return this.post(`/_telium/v1/channels/${channelId}/ack`, { message_id: messageId }); }
+  ack(channelId, messageId, { seen = false } = {}) { return this.post(`/_telium/v1/channels/${channelId}/ack`, { message_id: messageId, seen }); }
   readState(guildId) { return this.get(`/_telium/v1/guilds/${guildId}/read-state`); }
   search(guildId, query) { return this.get(`/_telium/v1/guilds/${guildId}/search`, query); }
   segments(channelId) { return this.get(`/_telium/v1/channels/${channelId}/segments`); }
@@ -510,6 +510,8 @@ export class Api {
   sendFrame(id, body) { return this.post(`/_telium/v1/conversations/${id}/messages`, withFrameId(body)); }
   // The member's delivery cursor: a MAX upsert, so a repeat can only hold still.
   sendDmDelivered(id, seq) { return this.post(`/_telium/v1/conversations/${id}/delivered`, { seq }); }
+  /// Read on this device: lets the account home take this conversation's alert off the account's other devices.
+  conversationSeen(id) { return this.post(`/_telium/v1/conversations/${id}/seen`, {}); }
   dmNotificationKeys(id) {
     return this.get(`/_telium/v1/conversations/${id}/notification-keys`);
   }
