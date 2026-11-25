@@ -478,6 +478,10 @@ fn federation_routes() -> Router<AppState> {
             "/_telium/v1/conversations/{id}/notification-hints",
             post(dm::conversation_notification_hints),
         )
+        .route(
+            "/_telium/v1/conversations/{id}/seen",
+            post(dm::conversation_seen),
+        )
         .route("/_telium/v1/conversations/{id}/members", post(dm::add_member).delete(dm::remove_member))
         .route("/_telium/v1/conversations/{id}/policy", delete(dm::withdraw_policy))
         .route(

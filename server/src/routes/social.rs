@@ -838,6 +838,10 @@ pub struct Ack {
     pub message_id: String,
     #[serde(default)]
     pub muted: Option<bool>,
+    /// A person was looking (the window visible and focused), not just a timeline catching up in a
+    /// background window. Only such a read takes the alert off the user's other devices.
+    #[serde(default)]
+    pub seen: bool,
 }
 
 pub async fn ack(
@@ -862,6 +866,15 @@ pub async fn ack(
     .bind(req.muted.map(|m| m as i64))
     .execute(&state.pool)
     .await?;
+    // Read here by a person: take any mention alert for this channel off the user's other devices.
+    if req.seen {
+        let state = state.clone();
+        let user_id = auth.user_id.clone();
+        let channel_id = channel_id.clone();
+        tokio::spawn(async move {
+            crate::routes::push::dismiss_channel_notifications(&state, &user_id, &channel_id).await;
+        });
+    }
     Ok(Json(json!({ "ok": true })))
 }
 

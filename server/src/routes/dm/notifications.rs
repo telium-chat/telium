@@ -181,7 +181,7 @@ pub(super) async fn consume_dm_notification_hints(
     sender: &str,
 ) -> ApiResult<u64> {
     let matched: Option<i64> = sqlx::query_scalar(
-        "SELECT 1 FROM dm_messages \
+        "SELECT notify FROM dm_messages \
          WHERE conversation_id = ? AND notification_id = ? AND sender = ? AND kind = 'application' \
          LIMIT 1",
     )
@@ -255,6 +255,18 @@ pub(super) async fn consume_dm_notification_hints(
             .await?;
     }
     tx.commit().await?;
+
+    // A frame its sender marked worth a notification left an alert on these users' devices;
+    // remembered so reading the conversation elsewhere can take it off again.
+    if matched == Some(1) {
+        let scope = crate::routes::push::conversation_scope(conversation_id);
+        let mut noted = std::collections::HashSet::new();
+        for (user_id, _) in &wake {
+            if noted.insert(user_id.clone()) {
+                crate::notifications::note_notified(state, user_id, &scope).await;
+            }
+        }
+    }
 
     for (user_id, device_id) in &wake {
         if !state.hub.device_live(user_id, device_id).await {
@@ -448,4 +460,21 @@ pub async fn inbound_dm_notification_hints(
     )
     .await?;
     Ok(Json(json!({ "ok": true, "consumed": consumed })))
+}
+
+/// The account read this conversation on the calling device. Reaches only the account home, never
+/// the other members, and does not depend on read receipts: if the account's devices were woken for
+/// the conversation since, each gets a content-free dismissal so the alert comes off them.
+pub async fn conversation_seen(
+    State(state): State<AppState>,
+    auth: HomeAuth,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    require_member(&state, &id, &auth.user_id).await?;
+    let state = state.clone();
+    let user_id = auth.user_id.clone();
+    tokio::spawn(async move {
+        crate::routes::push::dismiss_conversation_notifications(&state, &user_id, &id).await;
+    });
+    Ok(Json(json!({ "ok": true })))
 }

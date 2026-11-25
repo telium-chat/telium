@@ -624,6 +624,9 @@ pub struct InboxQuery {
     pub after: Option<String>,
     #[serde(default = "default_inbox_limit")]
     pub limit: i64,
+    /// Comma-separated extra row kinds the device understands (today only `dismiss`).
+    #[serde(default)]
+    pub accept: Option<String>,
 }
 
 fn default_inbox_limit() -> i64 { 50 }
@@ -635,7 +638,14 @@ pub async fn notification_inbox(
 ) -> ApiResult<Json<Value>> {
     let token = notification_bearer(&headers)?;
     let auth = notifications::authenticate_background(&state, &token).await?;
-    Ok(Json(notifications::pull(&state, &auth, query.after.as_deref(), query.limit).await?))
+    let accept_dismiss = query
+        .accept
+        .as_deref()
+        .is_some_and(|kinds| kinds.split(',').any(|k| k.trim() == notifications::DISMISS_KIND));
+    Ok(Json(
+        notifications::pull_accepting(&state, &auth, query.after.as_deref(), query.limit, accept_dismiss)
+            .await?,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -927,6 +937,16 @@ async fn notification_descriptor(
     source: &NotificationSource,
     kind: &str,
 ) -> ApiResult<Vec<u8>> {
+    if kind == notifications::DISMISS_KIND {
+        let descriptor = notifications::dismiss_descriptor(json!({
+            "type": "guild_channel",
+            "guild_origin": state.cfg.server_name,
+            "guild_id": source.guild_id,
+            "channel_id": source.channel_id,
+        }));
+        return serde_json::to_vec(&descriptor)
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("notification descriptor: {e}")));
+    }
     if !matches!(kind, "mention" | "reply") {
         return Err(ApiError::BadRequest("unsupported guild notification kind".into()));
     }
@@ -1183,6 +1203,7 @@ pub async fn wake_mentioned(
         if !recipient_allows_background_notification(state, &source, &user_id).await {
             continue;
         }
+        notifications::note_notified(state, &user_id, &channel_scope(&source.channel_id)).await;
 
         let local = crate::federation::is_local(state, &user_id);
         if local {
@@ -1222,6 +1243,51 @@ pub async fn wake_mentioned(
                 "could not queue private guild notification"
             );
         }
+    }
+}
+
+fn channel_scope(channel_id: &str) -> String {
+    format!("channel:{channel_id}")
+}
+
+/// The user read `channel_id` (on any device). If this server sent them a background notification
+/// there since they last read it, send each of their notification devices a content-free `dismiss`
+/// in the same bucket, so the alert comes off phones that are still showing it.
+pub async fn dismiss_channel_notifications(state: &AppState, user_id: &str, channel_id: &str) {
+    if !notifications::take_notified(state, user_id, &channel_scope(channel_id)).await {
+        return;
+    }
+    let guild_id: Option<String> = sqlx::query_scalar("SELECT guild_id FROM channels WHERE id = ?")
+        .bind(channel_id)
+        .fetch_optional(&state.pool)
+        .await
+        .ok()
+        .flatten();
+    let Some(guild_id) = guild_id else { return };
+    let source = NotificationSource {
+        id: format!("dismiss-{}", ulid()),
+        guild_id,
+        channel_id: channel_id.to_string(),
+        author_id: String::new(),
+        content: String::new(),
+        has_attachment: false,
+        has_sticker: false,
+        created_at: now_ms(),
+    };
+    let kind = notifications::DISMISS_KIND;
+    let result = if crate::federation::is_local(state, user_id) {
+        deliver_private_notification(state, user_id, &source, kind).await
+    } else {
+        queue_remote_notification(state, user_id, &source, kind).await
+    };
+    if let Err(error) = result {
+        tracing::debug!(
+            target: crate::logcat::PUSH,
+            %user_id,
+            %channel_id,
+            %error,
+            "could not send a notification dismissal"
+        );
     }
 }
 
@@ -1269,6 +1335,7 @@ pub async fn wake_conversation(
         if !conversation_wants_background_notification(state, conversation_id, user_id).await {
             continue;
         }
+        notifications::note_notified(state, user_id, &conversation_scope(conversation_id)).await;
         if let Err(error) =
             seal_conversation_notification(state, user_id, conversation_id, source_id, &plaintext)
                 .await
@@ -1281,6 +1348,42 @@ pub async fn wake_conversation(
                 "could not queue a conversation notification"
             );
         }
+    }
+}
+
+pub(crate) fn conversation_scope(conversation_id: &str) -> String {
+    format!("conversation:{conversation_id}")
+}
+
+/// The user read `conversation_id` on some device (`POST /conversations/{id}/seen`). If their
+/// devices were woken for it since, send each one a content-free `dismiss` in the conversation's
+/// bucket. Only the account home is involved: the other members learn nothing, read receipts on or off.
+pub async fn dismiss_conversation_notifications(state: &AppState, user_id: &str, conversation_id: &str) {
+    if !notifications::take_notified(state, user_id, &conversation_scope(conversation_id)).await {
+        return;
+    }
+    let descriptor = notifications::dismiss_descriptor(json!({
+        "type": "conversation",
+        "conversation_id": conversation_id,
+    }));
+    let Ok(plaintext) = serde_json::to_vec(&descriptor) else { return };
+    let source_id = format!("dismiss-{}", ulid());
+    if let Err(error) = seal_conversation_row(
+        state,
+        user_id,
+        conversation_id,
+        &source_id,
+        notifications::DISMISS_KIND,
+        &plaintext,
+    )
+    .await
+    {
+        tracing::debug!(
+            target: crate::logcat::PUSH,
+            conversation = conversation_id,
+            %error,
+            "could not send a conversation notification dismissal"
+        );
     }
 }
 
@@ -1305,6 +1408,18 @@ async fn seal_conversation_notification(
     source_id: &str,
     plaintext: &[u8],
 ) -> ApiResult<()> {
+    seal_conversation_row(state, user_id, conversation_id, source_id, "encrypted_message", plaintext)
+        .await
+}
+
+async fn seal_conversation_row(
+    state: &AppState,
+    user_id: &str,
+    conversation_id: &str,
+    source_id: &str,
+    kind: &str,
+    plaintext: &[u8],
+) -> ApiResult<()> {
     let devices = notifications::keys_for_local_user(state, user_id).await?;
     let mut sealed = Vec::new();
     for device in devices {
@@ -1317,7 +1432,7 @@ async fn seal_conversation_notification(
             &state.cfg.server_name,
             source_id,
             None,
-            "encrypted_message",
+            kind,
         );
         let envelope =
             notifications::seal_descriptor(&device.public_key, &associated_data, plaintext)?;
@@ -1336,7 +1451,7 @@ async fn seal_conversation_notification(
         user_id,
         conversation_id,
         source_id,
-        "encrypted_message",
+        kind,
         &sealed,
     )
     .await?;

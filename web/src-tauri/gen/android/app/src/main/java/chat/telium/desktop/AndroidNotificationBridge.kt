@@ -54,6 +54,7 @@ object AndroidNotificationBridge {
             "status" -> status(activity, payload, replyProxy, requestId)
             "clear" -> clear(activity, payload, replyProxy, requestId)
             "take_destination" -> takeDestination(activity, replyProxy, requestId)
+            "dismiss_place" -> dismissPlace(activity, payload, replyProxy, requestId)
             else -> reply(
               replyProxy,
               requestId,
@@ -228,7 +229,22 @@ object AndroidNotificationBridge {
     AndroidNotificationStore.clear(activity, scope)
     AndroidNotificationTapStore.clear(activity)
     NotificationManagerCompat.from(activity).cancelAll()
+    AndroidNotificationIndex.clear(activity)
     reply(replyProxy, requestId, "cleared", ok = true)
+  }
+
+  /// The user opened this conversation or channel here: its alerts come off the shade at once,
+  /// without waiting for the account home's dismissal to come back round.
+  private fun dismissPlace(
+    activity: Activity,
+    payload: JSONObject,
+    replyProxy: JavaScriptReplyProxy,
+    requestId: String?,
+  ) {
+    val scope = scope(payload)
+    val place = AndroidNotificationIndex.placeOf(payload.optJSONObject("destination"))
+    val cancelled = place?.let { AndroidNotificationIndex.dismiss(activity, scope.id, it) } ?: 0
+    reply(replyProxy, requestId, "dismissed", ok = true, extra = mapOf("cancelled" to cancelled))
   }
 
   private fun takeDestination(

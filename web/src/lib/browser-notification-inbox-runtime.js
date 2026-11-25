@@ -198,6 +198,31 @@
         destination: { type: 'conversation', conversation_id: conversationId },
       };
     }
+    // The account home's own alert for a DM frame (the device was offline, no sender hint yet).
+    if (row.kind === 'encrypted_message') {
+      const destination = descriptor.destination;
+      if (destination?.type !== 'conversation' || !destination.conversation_id || row.guild_id != null) {
+        throw new Error('Conversation notification is malformed.');
+      }
+      return {
+        title: 'Telium',
+        body: 'Encrypted message',
+        tag: `conversation:${destination.conversation_id}`,
+        destination: { type: 'conversation', conversation_id: destination.conversation_id },
+      };
+    }
+    // Read on another device: take the matching alert down, show nothing.
+    if (row.kind === 'dismiss') {
+      const destination = descriptor.destination;
+      if (destination?.type === 'conversation' && destination.conversation_id && row.guild_id == null) {
+        return { silent: true, dismiss: `conversation:${destination.conversation_id}` };
+      }
+      if (destination?.type === 'guild_channel' && destination.channel_id
+        && destination.guild_id === row.guild_id && destination.guild_origin === row.origin) {
+        return { silent: true, dismiss: `channel:${destination.channel_id}` };
+      }
+      throw new Error('Notification dismissal is malformed.');
+    }
     if (row.kind === 'mention' || row.kind === 'reply') {
       const destination = descriptor.destination;
       if (destination?.type !== 'guild_message'
@@ -247,9 +272,10 @@
     if (!registration.background_token) throw new Error('Notification credential is unavailable.');
     const fetchImpl = options.fetchImpl || fetch;
     const onNotification = options.onNotification || (async () => {});
+    const onDismiss = options.onDismiss || (async () => {});
     let processed = 0;
     for (let page = 0; page < 10; page += 1) {
-      const response = await fetchImpl(`${scope.home_base}/_telium/v1/notifications?limit=50`, {
+      const response = await fetchImpl(`${scope.home_base}/_telium/v1/notifications?limit=50&accept=dismiss`, {
         headers: { Authorization: `Telium-Notification ${registration.background_token}` },
       });
       if (!response.ok) throw new Error(`Notification inbox pull failed (${response.status}).`);
@@ -261,6 +287,7 @@
         try {
           const descriptor = await decryptInboxRow(row, registration);
           const notification = notificationForInboxRow(row, descriptor, options.now?.() ?? Date.now());
+          if (notification.dismiss) await onDismiss(notification.dismiss, row, descriptor);
           if (!notification.silent) await onNotification(notification, row, descriptor);
           through = row.id;
           processed += 1;

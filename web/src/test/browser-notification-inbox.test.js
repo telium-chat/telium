@@ -164,6 +164,49 @@ describe('browser notification inbox', () => {
     }
   });
 
+  it('shows the home\'s own DM alerts and takes alerts down when read elsewhere', async () => {
+    const registration = await browserRegistration();
+    const convo = { type: 'conversation', conversation_id: 'conversation-1' };
+    expect(notificationForInboxRow(
+      { kind: 'encrypted_message', guild_id: null },
+      { v: 1, kind: 'encrypted_message', title: 'Bob', body: 'Encrypted message', destination: convo },
+    )).toMatchObject({ body: 'Encrypted message', tag: 'conversation:conversation-1' });
+    expect(notificationForInboxRow(
+      { kind: 'dismiss', guild_id: null },
+      { v: 1, kind: 'dismiss', destination: convo },
+    )).toEqual({ silent: true, dismiss: 'conversation:conversation-1' });
+    expect(notificationForInboxRow(
+      { kind: 'dismiss', guild_id: 'guild-1', origin: 'guild.example' },
+      { v: 1, kind: 'dismiss', destination: { type: 'guild_channel', guild_origin: 'guild.example', guild_id: 'guild-1', channel_id: 'channel-1' } },
+    )).toEqual({ silent: true, dismiss: 'channel:channel-1' });
+    expect(() => notificationForInboxRow(
+      { kind: 'dismiss', guild_id: 'guild-2', origin: 'guild.example' },
+      { v: 1, kind: 'dismiss', destination: { type: 'guild_channel', guild_origin: 'guild.example', guild_id: 'guild-1', channel_id: 'channel-1' } },
+    )).toThrow();
+
+    const { row: mention } = await guildRow(registration);
+    const { row: dismissal } = await guildRow(registration, { id: '01ROW2', source_id: 'dismiss-1', kind: 'dismiss' });
+    // guildRow seals a guild_message destination; rebuild the dismissal's descriptor properly.
+    dismissal.ciphertext = await seal(
+      registration.public_key,
+      notificationAad(registration.user_id, registration.device_id, dismissal.origin, dismissal.source_id, dismissal.guild_id, 'dismiss'),
+      { v: 1, kind: 'dismiss', destination: { type: 'guild_channel', guild_origin: 'guild.example', guild_id: 'guild-1', channel_id: 'channel-1' } },
+    );
+    const fetchImpl = vi.fn(async (url) => (url.endsWith('/ack')
+      ? { ok: true, json: async () => ({}) }
+      : { ok: true, json: async () => ({ notifications: [mention, dismissal] }) }));
+    const shown = [];
+    const dismissed = [];
+    await drainNotificationInbox(registration, {
+      fetchImpl,
+      onNotification: async (n) => { shown.push(n.tag); },
+      onDismiss: async (tag) => { dismissed.push(tag); },
+    });
+    expect(shown).toEqual(['channel:channel-1']);
+    expect(dismissed).toEqual(['channel:channel-1']);
+    expect(JSON.parse(fetchImpl.mock.calls.at(-1)[1].body)).toEqual({ through: '01ROW2' });
+  });
+
   it('acks only the contiguous rows processed before a malformed row', async () => {
     const registration = await browserRegistration();
     const first = await guildRow(registration, { id: '01A', source_id: 'message-a' });
@@ -171,7 +214,7 @@ describe('browser notification inbox', () => {
     const third = { ...second.row, id: '01C', source_id: 'message-c', ciphertext: { bad: true } };
     const acks = [];
     const fetchImpl = vi.fn(async (url, options = {}) => {
-      if (url.endsWith('/_telium/v1/notifications?limit=50')) {
+      if (url.endsWith('/_telium/v1/notifications?limit=50&accept=dismiss')) {
         return new Response(JSON.stringify({ notifications: [first.row, second.row, third] }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },

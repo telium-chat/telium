@@ -53,6 +53,7 @@ pub const RESIDUE_TABLES: &[(&str, &str)] = &[
     // A trigger clears this for devices active at deletion; earlier-revoked devices kept theirs.
     ("notification_devices", "user_id"),
     ("notification_inbox", "user_id"),
+    ("notified_scopes", "user_id"),
     ("notification_outbox", "recipient_id"),
     // Devices are only marked inactive in the transaction because `announce` needs them.
     ("devices", "user_id"),

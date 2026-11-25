@@ -147,6 +147,18 @@ export function CallStage({
     }
   };
 
+  // A headset connecting or dropping mid-call changes the list while the picker is open.
+  useEffect(() => {
+    if (!audioRouteSheet || typeof window === 'undefined') return undefined;
+    const refresh = () => {
+      getAndroidAudioRoutes()
+        .then((routes) => setAudioRouteState({ ...routes, loading: false }))
+        .catch(() => {});
+    };
+    window.addEventListener('telium:android-routes-changed', refresh);
+    return () => window.removeEventListener('telium:android-routes-changed', refresh);
+  }, [audioRouteSheet]);
+
   const chooseAudioRoute = async (routeId) => {
     try {
       const selected = await setAndroidAudioRoute(routeId);

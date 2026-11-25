@@ -124,7 +124,7 @@ export const timelineMethods = {
     const api = this.apiForChannel(channelId);
     if (!api) return;
     try {
-      await api.ack(channelId, last.id);
+      await api.ack(channelId, last.id, { seen: personLooking() });
       this.readState.set(channelId, { channel_id: channelId, last_read_id: last.id, unread: 0, mentions: 0 });
       this.emit('unread', this.channels.get(channelId)?.guild_id);
     } catch {}
@@ -178,3 +178,11 @@ export const timelineMethods = {
       .sort((a, b) => (a.position || 0) - (b.position || 0) || a.name.localeCompare(b.name));
   },
 };
+
+/// The window is on screen and has focus: a person can be reading it. A timeline that keeps
+/// itself read in a minimised window must not take alerts off the user's phone.
+export function personLooking() {
+  if (typeof document === 'undefined') return false;
+  if (document.visibilityState === 'hidden') return false;
+  return typeof document.hasFocus !== 'function' || document.hasFocus();
+}

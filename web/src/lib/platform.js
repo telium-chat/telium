@@ -156,7 +156,12 @@ export async function takeAndroidSharedText() {
   });
 }
 
-export function setAndroidCallActive(active, { muted = false, deafened = false } = {}) {
+/// `video`: a camera, screen share or remote video is in the call, so Android keeps the screen
+/// lit; a voice-only call lets it sleep and uses the proximity sensor on the earpiece.
+/// `camera`: this device's own camera is on, so the call service also holds the camera.
+export function setAndroidCallActive(active, {
+  muted = false, deafened = false, video = false, camera = false,
+} = {}) {
   if (!isAndroid || !isActualTauriRuntime() || typeof window === 'undefined') return false;
   const bridge = androidCallBridge();
   if (!bridge?.postMessage) return false;
@@ -166,6 +171,8 @@ export function setAndroidCallActive(active, { muted = false, deafened = false }
       active: Boolean(active),
       muted: Boolean(muted),
       deafened: Boolean(deafened),
+      video: Boolean(video),
+      camera: Boolean(camera),
     }));
     return true;
   } catch {
