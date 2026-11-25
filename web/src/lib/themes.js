@@ -7,6 +7,7 @@
 // Fetches are throttled and cached; installed theme CSS is device-local so a
 // theme survives offline, while only the chosen id syncs with the account.
 
+import { setThemeStrings } from './i18n/index.js';
 import { storage } from './util.js';
 
 export const THEMES_URL = import.meta.env?.VITE_TELIUM_THEMES_URL
@@ -69,6 +70,45 @@ function catalogUrlOk(url) {
   return /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?\//.test(url);
 }
 
+const ASSET_NAME = /^[A-Za-z0-9._-]{1,64}$/;
+const MAX_ASSETS = 10;
+const MAX_STRINGS = 400;
+const MAX_STRING_KEY = 120;
+const MAX_STRING_VALUE = 200;
+const STRING_KEY = /^[A-Za-z0-9._-]{1,120}$/;
+
+/// Per-theme image assets: `{ filename: url }`. The theme CSS references them
+/// by bare filename inside `url(...)`; the rewrite at injection time swaps in
+/// these URLs. Same origin rules as every catalog URL.
+function parseAssets(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out = {};
+  let count = 0;
+  for (const [name, url] of Object.entries(raw)) {
+    if (count >= MAX_ASSETS) break;
+    if (!ASSET_NAME.test(name) || !catalogUrlOk(url)) continue;
+    out[name] = url;
+    count += 1;
+  }
+  return out;
+}
+
+/// Per-theme UI string overrides: `{ 'settings.market.title': '…' }`. Keys
+/// the running build does not know are dropped later, at apply time — here
+/// they are only shape-checked.
+function parseStrings(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out = {};
+  let count = 0;
+  for (const [key, value] of Object.entries(raw)) {
+    if (count >= MAX_STRINGS) break;
+    if (!STRING_KEY.test(key) || typeof value !== 'string' || !value) continue;
+    out[key] = value.slice(0, MAX_STRING_VALUE);
+    count += 1;
+  }
+  return out;
+}
+
 /// Contract: `{ generatedAt, themes: [{ id, name, author, version, description,
 /// tags, downloads, thumbnailUrl, cssUrl }] }`, ids unique and slug-shaped.
 /// Anything else fails whole — a half-read catalog shows a half-marketplace.
@@ -100,6 +140,8 @@ export function parseCatalog(text) {
       downloads: Number.isFinite(entry.downloads) ? Math.max(0, Math.floor(entry.downloads)) : 0,
       thumbnailUrl: catalogUrlOk(entry.thumbnailUrl) ? entry.thumbnailUrl : null,
       cssUrl,
+      assets: parseAssets(entry.assets),
+      strings: parseStrings(entry.strings),
     });
   }
   return { generatedAt: typeof doc.generatedAt === 'string' ? doc.generatedAt : null, themes };
@@ -264,11 +306,19 @@ export function marketThemeCss(id, storageImpl = storage) {
   return installedTheme(id, storageImpl)?.css || null;
 }
 
-export function installTheme(id, css, storageImpl = storage) {
+export function installTheme(id, css, storageImpl = storage, extras = {}) {
   const meta = parseThemeMeta(css);
   if (!id || typeof css !== 'string' || !meta) return null;
   const row = readInstalled(storageImpl);
-  row.installed[id] = { meta, css, installedAt: Date.now() };
+  row.installed[id] = {
+    meta,
+    css,
+    installedAt: Date.now(),
+    // Images and string overrides ride along; both were sanitized when the
+    // catalog was parsed, and both are re-checked at apply time.
+    assets: parseAssets(extras.assets),
+    strings: parseStrings(extras.strings),
+  };
   return writeInstalled(row, storageImpl) ? { id, meta } : null;
 }
 
@@ -281,6 +331,19 @@ export function removeTheme(id, storageImpl = storage) {
 }
 
 // -------------------------------------------------------------------- applied
+
+/// Relative `url(...)` references in a theme's CSS resolve against the app's
+/// origin, which is wrong for everything — so filenames that match one of the
+/// theme's declared assets are rewritten to the asset's catalog URL before
+/// injection. Absolute URLs pass through untouched; anything else is left
+/// exactly as authored (BetterDiscord parity).
+export function rewriteAssetUrls(css, assets = {}) {
+  if (!css || typeof css !== 'string' || !Object.keys(assets).length) return css;
+  return css.replace(/url\(\s*(['"]?)([^'")\s]+)\1\s*\)/g, (whole, quote, name) => {
+    const url = assets[name];
+    return url ? `url(${quote}${url}${quote})` : whole;
+  });
+}
 
 /// One reusable style element, replaced rather than appended: a previous
 /// theme's rules must never outlive its uninstall.
@@ -301,7 +364,7 @@ export function boostThemeCss(css) {
     .replace(/\[data-theme=(["'])(light|dark)\1\]/g, ':root[data-theme=$2]');
 }
 
-export function applyMarketTheme(css) {
+export function applyMarketTheme(css, assets = {}) {
   if (typeof document === 'undefined') return;
   let el = document.getElementById(STYLE_ID);
   if (typeof css !== 'string' || !css.trim()) {
@@ -313,14 +376,18 @@ export function applyMarketTheme(css) {
     el.id = STYLE_ID;
     document.head.append(el);
   }
-  el.textContent = boostThemeCss(css);
+  el.textContent = boostThemeCss(rewriteAssetUrls(css, assets));
   const mode = parseThemeMeta(css)?.mode;
   if (mode === 'light' || mode === 'dark') document.documentElement.dataset.theme = mode;
 }
 
-/// Reads the synced choice and applies whatever is on this device for it.
+/// Reads the synced choice and applies whatever is on this device for it:
+/// the boosted CSS with asset URLs resolved, plus the theme's string
+/// overrides (cleared when the id is empty or the file is missing).
 export function applyMarketThemeFromPrefs(id, storageImpl = storage) {
-  applyMarketTheme(marketThemeCss(id, storageImpl));
+  const theme = id ? installedTheme(id, storageImpl) : null;
+  applyMarketTheme(theme?.css ?? null, theme?.assets ?? {});
+  setThemeStrings(theme?.strings ?? null);
 }
 
 // ------------------------------------------------------------------ trending
@@ -445,6 +512,8 @@ export const THEME_ERRORS = {
 export async function downloadTheme({
   id,
   cssUrl,
+  assets = {},
+  strings = {},
   onProgress = null,
   fetchImpl = globalThis.fetch,
   timeoutMs = FETCH_TIMEOUT_MS,
@@ -513,7 +582,7 @@ export async function downloadTheme({
       css = new TextDecoder().decode(bytes);
     }
 
-    const installed = installTheme(id, css, storageImpl);
+    const installed = installTheme(id, css, storageImpl, { assets, strings });
     if (!installed) return { error: THEME_ERRORS.noMeta };
     return { theme: installed };
   } catch {

@@ -325,18 +325,18 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
       if (mounted.current) setProgress(null);
     }, 50_000);
     try {
-      let outcome = await downloadTheme({ id: theme.id, cssUrl: theme.cssUrl, onProgress: track });
-      if (outcome.error === THEME_ERRORS.unreachable) {
-        // A stale cached catalog can carry URLs from a previous host (the CDN
-        // before the local rebuild, an old repo name); force one refresh and
-        // retry through the fresh URL before reporting failure.
-        const fresh = await refreshThemes();
-        const updated = fresh?.themes?.find((entry) => entry.id === theme.id);
-        if (updated && updated.cssUrl !== theme.cssUrl) {
-          setCatalog(fresh);
-          outcome = await downloadTheme({ id: theme.id, cssUrl: updated.cssUrl, onProgress: track });
-        }
+    let outcome = await downloadTheme({ id: theme.id, cssUrl: theme.cssUrl, assets: theme.assets, strings: theme.strings, onProgress: track });
+    if (outcome.error === THEME_ERRORS.unreachable) {
+      // A stale cached catalog can carry URLs from a previous host (the CDN
+      // before the local rebuild, an old repo name); force one refresh and
+      // retry through the fresh URL before reporting failure.
+      const fresh = await refreshThemes();
+      const updated = fresh?.themes?.find((entry) => entry.id === theme.id);
+      if (updated && updated.cssUrl !== theme.cssUrl) {
+        setCatalog(fresh);
+        outcome = await downloadTheme({ id: theme.id, cssUrl: updated.cssUrl, assets: updated.assets, strings: updated.strings, onProgress: track });
       }
+    }
       if (!mounted.current) return;
       if (outcome.error === THEME_ERRORS.noMeta) {
         setError('noMeta');

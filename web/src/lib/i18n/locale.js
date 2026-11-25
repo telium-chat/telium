@@ -155,6 +155,12 @@ function notify() {
   }
 }
 
+/// For sibling modules inside the i18n door (theme-string overrides) whose
+/// changes must repaint mounted components without a locale switch.
+export function notifyChange() {
+  notify();
+}
+
 export function applyDocument(locale) {
   if (typeof document === 'undefined') return;
   document.documentElement.lang = locale;

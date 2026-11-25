@@ -139,6 +139,17 @@ describe('parseCatalog', () => {
     expect(catalog.themes[0].downloads).toBe(0);
     expect(catalog.themes[0].thumbnailUrl).toBeNull();
   });
+
+  it('carries assets and string overrides through sanitization', () => {
+    const catalog = parseCatalog(`{"themes": [{
+      "id": "one", "name": "n", "author": "a", "cssUrl": "https://x/1.css",
+      "assets": { "background.svg": "https://x/bg.svg", "skip me": "https://x/nope.svg", "evil.png": "http://lan/x.png" },
+      "strings": { "settings.market.title": "Renamed", "bogus key!": "dropped", "empty": "", "junk": 42 }
+    }]}`);
+    const theme = catalog.themes[0];
+    expect(theme.assets).toEqual({ 'background.svg': 'https://x/bg.svg' });
+    expect(theme.strings).toEqual({ 'settings.market.title': 'Renamed' });
+  });
 });
 
 describe('fetch and cache', () => {
@@ -215,6 +226,47 @@ describe('install, apply and remove', () => {
     expect(installedThemeIds(storageImpl)).toEqual([]);
     expect(installTheme('midnight-glass', META_CSS, storageImpl).meta.name).toBe('Midnight Glass');
     expect(installedTheme('midnight-glass', storageImpl).css).toBe(META_CSS);
+  });
+
+  it('applyMarketTheme rewrites shipped-asset filenames into catalog urls', () => {
+    applyMarketTheme(`body { background: url('background.svg') center / cover; }`, {
+      'background.svg': 'https://cdn.jsdelivr.net/gh/telium-chat/themes@main/themes/x/background.svg',
+    });
+    const el = document.getElementById('telium-market-theme');
+    expect(el?.textContent).toContain("url('https://cdn.jsdelivr.net/gh/telium-chat/themes@main/themes/x/background.svg')");
+    applyMarketTheme(null);
+  });
+
+  it('unknown asset filenames pass through untouched (BetterDiscord parity)', () => {
+    applyMarketTheme(`body { background: url('mystery.png') }`, { 'background.svg': 'https://x/bg.svg' });
+    expect(document.getElementById('telium-market-theme')?.textContent).toContain("url('mystery.png')");
+    applyMarketTheme(null);
+  });
+
+  it('applyMarketThemeFromPrefs applies string overrides and clears them on deactivate', async () => {
+    const { setThemeStrings } = await import('../lib/i18n/index.js');
+    const { t } = await import('../lib/i18n/index.js');
+    const storageImpl = store();
+    installTheme('midnight-glass', META_CSS, storageImpl);
+    // Extend the installed row with strings the way installTheme extras do.
+    const row = storageImpl.get('telium.themes.v1');
+    row.installed['midnight-glass'].strings = { 'settings.theme.preset.graphite.name': 'Graphite (glass)' };
+    storageImpl.set('telium.themes.v1', row);
+
+    applyMarketThemeFromPrefs('midnight-glass', storageImpl);
+    expect(t('settings.theme.preset.graphite.name')).toBe('Graphite (glass)');
+
+    // A key the build does not know is dropped, not rendered.
+    const row2 = storageImpl.get('telium.themes.v1');
+    row2.installed['midnight-glass'].strings = { 'not.a.real.key': 'nope' };
+    storageImpl.set('telium.themes.v1', row2);
+    applyMarketThemeFromPrefs('midnight-glass', storageImpl);
+    expect(t('not.a.real.key')).not.toBe('nope');
+
+    // Deactivation clears overrides.
+    applyMarketThemeFromPrefs(null, storageImpl);
+    expect(t('settings.theme.preset.graphite.name')).toBe('Graphite');
+    setThemeStrings(null);
   });
 
   it('applyMarketTheme keeps exactly one style element', () => {
