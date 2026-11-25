@@ -1,18 +1,18 @@
 {
-  "generated_at": "2026-11-24T22:18:59.198Z",
+  "generated_at": "2026-11-25T08:17:06.998Z",
   "sfus": {
     "https://sfu.notdiscord.fyi": {
       "url": "https://sfu.notdiscord.fyi",
       "ok": true,
-      "checked_at": "2026-11-24T22:18:58.739Z",
+      "checked_at": "2026-11-25T08:17:06.522Z",
       "error": null,
       "accepting": true,
       "rooms": 0,
       "participants": 0,
       "service": "telium-sfu",
-      "probe_ms": 414,
+      "probe_ms": 121,
       "uptime_30d": null,
-      "samples": 15,
+      "samples": 16,
       "first_probe_at": "2026-11-19T06:56:39.000Z",
       "eligibility": {
         "eligible": true,
@@ -23,15 +23,15 @@
     "https://sfu.yapper.cloud": {
       "url": "https://sfu.yapper.cloud",
       "ok": true,
-      "checked_at": "2026-11-24T22:18:58.743Z",
+      "checked_at": "2026-11-25T08:17:06.525Z",
       "error": null,
       "accepting": true,
       "rooms": 0,
       "participants": 0,
       "service": "telium-sfu",
-      "probe_ms": 455,
+      "probe_ms": 473,
       "uptime_30d": null,
-      "samples": 14,
+      "samples": 15,
       "first_probe_at": "2026-11-19T07:02:32.000Z",
       "eligibility": {
         "eligible": true,
