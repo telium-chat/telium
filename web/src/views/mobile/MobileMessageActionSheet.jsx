@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { useStore } from '../../hooks/useStore.jsx';
 import { useModal } from '../../hooks/useModal.jsx';
 import { quickEmoji, rememberEmoji } from '../../lib/emoji.js';
@@ -6,13 +6,16 @@ import { has } from '../../lib/perms.js';
 import { Twemoji } from '../../components/Twemoji.jsx';
 import { PlusIcon } from '../../components/index.js';
 import { EmojiPickerDialog } from '../dialogs/EmojiPickerDialog.jsx';
+import { useSheetDrag } from '../../hooks/useSheetDrag.js';
 import { useMobileBackDismiss } from '../../hooks/useMobileBackDismiss.js';
 import { MenuRows } from './MobileActionSheet.jsx';
 
 const DEFAULT_QUICK_EMOJIS = ['❤️', '👍', '😂', '🎉', '🔥', '😮'];
 
 export function MobileMessageActionSheet({ msg, surface, onClose, onReply, onEdit }) {
-  useMobileBackDismiss(onClose);
+  const scrimRef = useRef(null);
+  const { sheetRef, dismiss } = useSheetDrag(onClose, { scrimRef });
+  useMobileBackDismiss(dismiss);
   const store = useStore();
   const modal = useModal();
   const mayReact = has(surface.perms, 'ADD_REACTIONS');
@@ -48,12 +51,14 @@ export function MobileMessageActionSheet({ msg, surface, onClose, onReply, onEdi
   return (
     <>
       <button
+        ref={scrimRef}
         type="button"
         aria-label="Close message options"
         className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs animate-fade-in"
-        onClick={onClose}
+        onClick={dismiss}
       />
       <section
+        ref={sheetRef}
         role="dialog"
         aria-modal="true"
         data-mobile-gesture-lock

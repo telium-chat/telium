@@ -10,6 +10,7 @@ import { toast } from './hooks/useToast.jsx';
 import { t } from './lib/i18n/index.js';
 import { register, onNotificationNavigate } from './lib/serviceworker.js';
 import { bindRouting } from './lib/routing.js';
+import { isMobileTauri } from './lib/platform.js';
 import { captureHandoff, isHandoffPath } from './lib/handoff.js';
 import { installDesktopRichPresence } from './lib/rich-presence.js';
 import { installAndroidNotificationNavigation } from './lib/android-notification-navigation.js';
@@ -18,6 +19,15 @@ import {
 } from './lib/net/transport.js';
 import { App } from './App.jsx';
 import './index.css';
+
+// The Android app is an app, not a page: no pinch-zooming the interface. Photos
+// zoom inside the image viewer instead (usePinchZoom).
+if (isMobileTauri) {
+  document.querySelector('meta[name="viewport"]')?.setAttribute(
+    'content',
+    'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover',
+  );
+}
 
 // The network guard goes up first: modules that captured the original globals before the swap keep them.
 try {
@@ -62,7 +72,7 @@ function boot() {
       store.on('network-privacy', () => publishProtectedHosts()),
       installDesktopRichPresence(store),
       installAndroidNotificationNavigation(store),
-      bindRouting(store),
+      bindRouting(store, window, { push: !isMobileTauri }),
     ];
     if (applyUpdate) store.applyUpdate = applyUpdate;
     if (serviceWorker) store.serviceWorker = serviceWorker;

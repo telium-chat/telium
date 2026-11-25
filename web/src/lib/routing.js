@@ -61,7 +61,10 @@ export function routeFrom(pathname) {
 }
 
 /// Store -> URL via `store.navigate` events; URL -> store via `popstate`, which matches the path so nothing is pushed.
-export function bindRouting(store, win = window) {
+/// `push: false` rewrites the address in place instead of adding history entries. The Android shell
+/// needs that: with entries in the WebView's history, the system Back walked back through every
+/// channel visited before it would leave the app.
+export function bindRouting(store, win = window, { push = true } = {}) {
   const { history, location } = win;
   // The migration receiver is intentionally not a chat route. Keep its path
   // intact even after it consumes the handoff secret, because the source tab
@@ -77,7 +80,9 @@ export function bindRouting(store, win = window) {
 
   const off = store.on('route', (route) => {
     const path = pathFor(route);
-    if (path !== location.pathname) history.pushState(null, '', path);
+    if (path === location.pathname) return;
+    if (push) history.pushState(null, '', path);
+    else history.replaceState(null, '', path);
   });
   win.addEventListener('popstate', apply);
   return () => { off(); win.removeEventListener('popstate', apply); };

@@ -102,13 +102,11 @@ export const MessageRow = memo(function MessageRow({
     onReply?.(msg);
     navigator.vibrate?.(10);
   };
-  const swipeToNavigation = () => {
-    onOpenNavigation?.();
-    navigator.vibrate?.(8);
-  };
+  // Swiping toward the inline end opens the channel drawer; the shell tracks that drag
+  // (useDrawerGestures), so the row only handles swipe-to-reply.
   const swipe = useSwipeGesture({
-    onSwipeLeft: rtl ? swipeToNavigation : swipeToReply,
-    onSwipeRight: rtl ? swipeToReply : swipeToNavigation,
+    onSwipeLeft: rtl ? undefined : swipeToReply,
+    onSwipeRight: rtl ? swipeToReply : undefined,
     disabled: !mobile || Boolean(editing) || pending,
   });
 
@@ -144,8 +142,9 @@ export const MessageRow = memo(function MessageRow({
     }
     if (swipeFrom.current == null) return;
     const travelled = touch.clientX - swipeFrom.current;
-    setSwipeOffset(Math.sign(travelled) * Math.min(Math.abs(travelled) * 0.45, 55));
-  }, [mobile, editing]);
+    const replyward = rtl ? travelled > 0 : travelled < 0;
+    setSwipeOffset(replyward && mayReply ? Math.sign(travelled) * Math.min(Math.abs(travelled) * 0.45, 55) : 0);
+  }, [mobile, editing, rtl, mayReply]);
 
   const resetTouch = useCallback(() => {
     clearTimeout(pressTimer.current);
@@ -247,9 +246,14 @@ export const MessageRow = memo(function MessageRow({
       style={swipeOffset ? { transform: `translateX(${swipeOffset}px)` } : undefined}
     >
       {(rtl ? swipeOffset > 15 : swipeOffset < -15) ? (
+        // Sits just past the row's end edge, in the gap the slide uncovers.
         <div
-          className="pointer-events-none absolute top-0 end-2 bottom-0 flex items-center justify-center"
-          style={{ opacity: Math.min(Math.abs(swipeOffset) / 45, 1) }}
+          aria-hidden
+          className="pointer-events-none absolute top-0 -end-10 bottom-0 flex w-8 items-center justify-center"
+          style={{
+            opacity: Math.min(Math.abs(swipeOffset) / 45, 1),
+            transform: `scale(${0.6 + 0.4 * Math.min(Math.abs(swipeOffset) / 55, 1)})`,
+          }}
         >
           <div className="flex size-7 items-center justify-center rounded-full bg-accent/20 text-accent">
             <ReplyIcon className="size-4 -scale-x-100" />

@@ -14,10 +14,13 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Base64
 import android.webkit.CookieManager
+import android.view.View
+import android.view.ViewGroup
 import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.JavaScriptReplyProxy
@@ -140,11 +143,17 @@ class MainActivity : TauriActivity() {
 
     // Tauri/Wry already owns the WebChromeClient, including Android runtime
     // permission requests for getUserMedia. Keep that intact and only bridge
-    // system-bar/cutout/IME insets into CSS. Some Android System WebView releases
+    // system-bar/cutout insets into CSS. Some Android System WebView releases
     // report env(safe-area-inset-*) as zero under edge-to-edge.
-    ViewCompat.setOnApplyWindowInsetsListener(webView) { _, insets ->
-      publishSafeArea(webView, insets)
-      insets
+    //
+    // The keyboard is handled natively: edge-to-edge turns off adjustResize, so the
+    // WebView is lifted above the IME here. The page then really is shorter
+    // (innerHeight, 100dvh, visualViewport all agree), which keeps sheets and
+    // dialogs outside the chat shell clear of the keyboard too.
+    ViewCompat.setOnApplyWindowInsetsListener(webView) { view, insets ->
+      val adjusted = liftAboveKeyboard(view, insets)
+      publishSafeArea(webView, adjusted, keyboardOpen = insets.isVisible(WindowInsetsCompat.Type.ime()))
+      adjusted
     }
     webView.post { ViewCompat.requestApplyInsets(webView) }
 
@@ -950,11 +959,31 @@ class MainActivity : TauriActivity() {
     proxy.postMessage(json.toString())
   }
 
-  private fun publishSafeArea(webView: WebView, insets: WindowInsetsCompat) {
+  /// Shrinks the WebView by the keyboard height and returns the insets as the
+  /// shortened WebView sees them: no IME, and no navigation bar underneath while
+  /// the keyboard covers it.
+  private fun liftAboveKeyboard(view: View, insets: WindowInsetsCompat): WindowInsetsCompat {
+    val imeBottom = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom.coerceAtLeast(0)
+    (view.layoutParams as? ViewGroup.MarginLayoutParams)?.let { params ->
+      if (params.bottomMargin != imeBottom) {
+        params.bottomMargin = imeBottom
+        view.layoutParams = params
+      }
+    }
+    if (imeBottom == 0) return insets
+    val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+    val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
+    return WindowInsetsCompat.Builder(insets)
+      .setInsets(WindowInsetsCompat.Type.ime(), Insets.NONE)
+      .setInsets(WindowInsetsCompat.Type.navigationBars(), Insets.of(nav.left, nav.top, nav.right, 0))
+      .setInsets(WindowInsetsCompat.Type.displayCutout(), Insets.of(cutout.left, cutout.top, cutout.right, 0))
+      .build()
+  }
+
+  private fun publishSafeArea(webView: WebView, insets: WindowInsetsCompat, keyboardOpen: Boolean) {
     val bars = insets.getInsets(
       WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
     )
-    val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
     val density = resources.displayMetrics.density.coerceAtLeast(1f)
 
     fun cssPx(value: Int): String =
@@ -964,7 +993,7 @@ class MainActivity : TauriActivity() {
     val right = cssPx(bars.right)
     val bottom = cssPx(bars.bottom)
     val left = cssPx(bars.left)
-    val imeBottom = cssPx(ime.bottom)
+    val keyboard = if (keyboardOpen) "open" else "closed"
 
     val script = """
       (() => {
@@ -974,7 +1003,7 @@ class MainActivity : TauriActivity() {
         root.style.setProperty('--android-safe-area-right', '$right');
         root.style.setProperty('--android-safe-area-bottom', '$bottom');
         root.style.setProperty('--android-safe-area-left', '$left');
-        root.style.setProperty('--android-ime-bottom', '$imeBottom');
+        root.dataset.androidKeyboard = '$keyboard';
         window.dispatchEvent(new CustomEvent('telium:android-insets'));
       })();
     """.trimIndent()

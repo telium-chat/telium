@@ -1,21 +1,26 @@
-import { useId } from 'react';
+import { useId, useRef } from 'react';
+import { useSheetDrag } from '../../hooks/useSheetDrag.js';
 import { useMobileBackDismiss } from '../../hooks/useMobileBackDismiss.js';
 import { ProfileBody } from '../profile/ProfileBody.jsx';
 
 export function MobileProfileSheet({ userId, guildId, close, zIndex = 50 }) {
-  useMobileBackDismiss(close);
+  const scrimRef = useRef(null);
+  const { sheetRef, dismiss } = useSheetDrag(close, { scrimRef });
+  useMobileBackDismiss(dismiss);
   const nameId = useId();
 
   return (
     <>
       <button
+        ref={scrimRef}
         type="button"
         aria-label="Close profile"
         className="fixed inset-0 bg-black/60 backdrop-blur-xs animate-fade-in"
         style={{ zIndex: zIndex - 1 }}
-        onClick={close}
+        onClick={dismiss}
       />
       <section
+        ref={sheetRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={nameId}

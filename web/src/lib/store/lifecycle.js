@@ -118,6 +118,8 @@ export const lifecycleMethods = {
     }
     // After the connect: a bad token is renewed on the same path as a woken tab.
     this.freshenSessions();
+    // Servers this device has never signed in to: guilds joined on another device.
+    this.adoptRemoteServers().catch((e) => console.warn('could not list memberships', e));
     this.loadCapabilities(home.domain).catch(() => {});
     // Asked now: where to go when it stops cannot be looked up afterwards.
     learnFallback(home.base).then((f) => {

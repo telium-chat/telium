@@ -39,6 +39,8 @@ import {
 } from './mobile/MobileNavigation.jsx';
 import { useMobileBackDismiss } from '../hooks/useMobileBackDismiss.js';
 import { useMobileViewport } from '../hooks/useMobileViewport.js';
+import { MobileDrawer } from './mobile/MobileDrawer.jsx';
+import { useDrawerGestures } from './mobile/drawer-gesture.js';
 import { UserSettings } from './settings.jsx';
 
 export function Shell() {
@@ -195,66 +197,48 @@ function MobileShell() {
       setMembersOpen(false);
       return;
     }
-    if (backAction === 'close-drawer') {
-      setDrawerOpen(false);
+    if (backAction === 'open-drawer') {
+      openDrawer();
       return;
     }
     if (backAction === 'dm-list') {
       store.navigate({ view: 'dms', conversationId: null });
     }
-  }, { active: backAction !== 'exit' });
+  }, { active: backAction !== 'exit', base: true });
 
-  const touchStartRef = useRef(null);
+  // The members drawer frame is always there for drags to grab; its list loads on first use.
+  const [membersMounted, setMembersMounted] = useState(false);
+  useEffect(() => { if (membersOpen) setMembersMounted(true); }, [membersOpen]);
 
-  const handleTouchStart = useCallback((e) => {
-    if (voiceStageOpen || e.touches.length !== 1) return;
-    const target = e.target instanceof Element ? e.target : null;
-    if (target?.closest('.msg-row, .composer-shell, input, textarea, [role="dialog"], [data-mobile-gesture-lock]')) {
-      touchStartRef.current = null;
-      return;
-    }
-    const touch = e.touches[0];
-    touchStartRef.current = {
-      x: touch.clientX,
-      y: touch.clientY,
-      time: Date.now(),
-    };
-  }, [voiceStageOpen]);
-
-  const handleTouchEnd = useCallback((e) => {
-    if (!touchStartRef.current || voiceStageOpen || e.changedTouches.length !== 1) {
-      touchStartRef.current = null;
-      return;
-    }
-    const touch = e.changedTouches[0];
-    const dx = touch.clientX - touchStartRef.current.x;
-    const dy = touch.clientY - touchStartRef.current.y;
-    const startX = touchStartRef.current.x;
-    touchStartRef.current = null;
-
-    if (Math.abs(dx) < Math.abs(dy) * 1.5 || Math.abs(dx) < 60) return;
-
-    if (dx > 0) {
-      if (membersOpen) {
-        setMembersOpen(false);
-      } else if (!drawerOpen && startX < 70) {
-        openDrawer();
+  const shellRef = useRef(null);
+  const drawerRef = useRef(null);
+  const membersRef = useRef(null);
+  useDrawerGestures(shellRef, {
+    disabled: voiceStageOpen,
+    rtl: typeof document !== 'undefined' && document.documentElement.dir === 'rtl',
+    drawerOpen,
+    membersOpen,
+    membersAvailable: Boolean(route.guildId) && route.view !== 'dms',
+    drawers: { drawer: () => drawerRef.current, members: () => membersRef.current },
+    onDragStart: (action) => {
+      if (action.startsWith('open')) dismissKeyboard();
+      if (action === 'open-members') setMembersMounted(true);
+    },
+    onSettle: (which, open) => {
+      if (which === 'drawer') {
+        if (open) setMembersOpen(false);
+        setDrawerOpen(open);
+      } else {
+        if (open) setDrawerOpen(false);
+        setMembersOpen(open);
       }
-    } else {
-      if (drawerOpen) {
-        setDrawerOpen(false);
-      } else if (!membersOpen && route.guildId && startX > window.innerWidth - 30) {
-        openMembers();
-      }
-    }
-  }, [drawerOpen, membersOpen, voiceStageOpen, route.guildId, openDrawer, openMembers]);
+    },
+  });
 
   return (
     <div
+      ref={shellRef}
       className="shell-in mobile-shell flex h-screen h-[100dvh] flex-col bg-background text-foreground overflow-hidden"
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
-      onTouchCancel={() => { touchStartRef.current = null; }}
     >
       <BannerStack />
 
@@ -274,68 +258,62 @@ function MobileShell() {
           }}
         />
 
-        {drawerOpen && (
-          <>
-            <button
-              type="button"
-              aria-label={t('shell.a11y.closeMenu')}
-              className="fixed inset-0 z-40 bg-black/60 backdrop-blur-xs animate-fade-in"
-              onClick={() => setDrawerOpen(false)}
-            />
-            <div
-              className="fixed inset-y-0 start-0 z-50 flex w-[88vw] max-w-[360px] bg-rail shadow-2xl animate-panel-slide-start"
-              style={{ paddingInlineStart: 'var(--safe-area-start)' }}
-            >
-              <MobileLeftDrawer
-                selectedGuildId={selectedGuildId}
-                onSelectGuild={(id) => setSelectedGuildId(id)}
-                onClose={() => setDrawerOpen(false)}
+        <MobileDrawer
+          ref={drawerRef}
+          side="start"
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          closeLabel={t('shell.a11y.closeMenu')}
+          className="w-[88vw] max-w-[360px] bg-rail"
+          style={{ paddingInlineStart: 'var(--safe-area-start)' }}
+        >
+          <MobileLeftDrawer
+            selectedGuildId={selectedGuildId}
+            onSelectGuild={(id) => setSelectedGuildId(id)}
+            onClose={() => setDrawerOpen(false)}
+          />
+        </MobileDrawer>
+
+        {route.guildId && route.view !== 'dms' && (
+          <MobileDrawer
+            ref={membersRef}
+            side="end"
+            open={membersOpen}
+            onClose={() => setMembersOpen(false)}
+            closeLabel={t('shell.a11y.closeMembers')}
+            className="w-[82vw] max-w-[320px] flex-col bg-background"
+            style={{
+              paddingTop: 'var(--safe-area-top)',
+              paddingInlineEnd: 'var(--safe-area-end)',
+              paddingBottom: 'var(--safe-area-bottom)',
+            }}
+          >
+            <div className="flex min-h-14 items-center gap-2 border-b border-separator px-3 py-2">
+              <SearchField
+                label={t('shell.members.search')}
+                placeholder={t('shell.members.search')}
+                value={memberSearch}
+                onChange={(e) => setMemberSearch(e.target.value)}
+                onClear={() => setMemberSearch('')}
+                size="base"
+                className="min-h-11 min-w-0 flex-1 rounded-xl border-0 bg-surface"
               />
+              <button
+                type="button"
+                aria-label={t('shell.a11y.closeMembers')}
+                onClick={() => setMembersOpen(false)}
+                className="flex size-11 shrink-0 items-center justify-center rounded-row text-muted active:bg-surface-tertiary"
+              >
+                <CloseIcon className="size-4" />
+              </button>
             </div>
-          </>
-        )}
 
-        {membersOpen && route.guildId && (
-          <>
-            <button
-              type="button"
-              aria-label={t('shell.a11y.closeMembers')}
-              className="fixed inset-0 z-40 bg-black/60 backdrop-blur-xs animate-fade-in"
-              onClick={() => setMembersOpen(false)}
-            />
-            <div
-              className="fixed inset-y-0 end-0 z-50 flex w-[82vw] max-w-[320px] flex-col bg-background shadow-2xl animate-panel-slide-end"
-              style={{
-                paddingTop: 'var(--safe-area-top)',
-                paddingInlineEnd: 'var(--safe-area-end)',
-                paddingBottom: 'var(--safe-area-bottom)',
-              }}
-            >
-              <div className="flex min-h-14 items-center gap-2 border-b border-separator px-3 py-2">
-                <SearchField
-                  label={t('shell.members.search')}
-                  placeholder={t('shell.members.search')}
-                  value={memberSearch}
-                  onChange={(e) => setMemberSearch(e.target.value)}
-                  onClear={() => setMemberSearch('')}
-                  size="base"
-                  className="min-h-11 min-w-0 flex-1 rounded-xl border-0 bg-surface"
-                />
-                <button
-                  type="button"
-                  aria-label={t('shell.a11y.closeMembers')}
-                  onClick={() => setMembersOpen(false)}
-                  className="flex size-11 shrink-0 items-center justify-center rounded-row text-muted active:bg-surface-tertiary"
-                >
-                  <CloseIcon className="size-4" />
-                </button>
-              </div>
-
-              <div className="min-h-0 flex-1 overflow-hidden">
+            <div className="min-h-0 flex-1 overflow-hidden">
+              {membersMounted ? (
                 <MembersPane guildId={route.guildId} mobile searchQuery={memberSearch} />
-              </div>
+              ) : null}
             </div>
-          </>
+          </MobileDrawer>
         )}
 
         <PersistentMediaMiniView

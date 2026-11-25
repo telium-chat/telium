@@ -106,7 +106,7 @@ export function MobileDmPanel({ onSelectConversation, onClose }) {
           type="button"
           onClick={() => {
             onSelectConversation?.();
-            modal.open((close) => <MessageRequestsDialog close={close} />, { wide: true });
+            modal.open((close) => <MessageRequestsDialog close={close} />, { wide: true, mobileSheet: true });
           }}
           className="flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-start text-foreground transition-colors active:bg-surface-tertiary"
         >

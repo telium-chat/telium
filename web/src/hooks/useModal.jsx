@@ -2,7 +2,8 @@ import { Component, useCallback, useEffect, useMemo, useState } from 'react';
 import { Dialog } from '@cloudflare/kumo/primitives/dialog';
 import { cn } from '../lib/cn.js';
 import { isMobileTauri } from '../lib/platform.js';
-import { useMobileBackDismiss } from './useMobileBackDismiss.js';
+import { BackDepthContext, backLevel, useMobileBackDismiss } from './useMobileBackDismiss.js';
+import { useSheetDrag } from './useSheetDrag.js';
 
 import { ModalContext, useModal } from './modalContext.js';
 
@@ -63,6 +64,8 @@ export function ModalProvider({ children }) {
     backdrop = 'opaque',
     place = 'center',
     desktopSize = wide ? 'wide' : 'default',
+    // On phones, a bottom sheet (swipe down to close) instead of a full-screen page.
+    mobileSheet = false,
   } = {}) => {
     const id = nextId++;
     setStack((s) => [...s, {
@@ -74,6 +77,7 @@ export function ModalProvider({ children }) {
       backdrop,
       place,
       desktopSize,
+      mobileSheet,
       open: true,
       returnTo: returnTarget(),
     }]);
@@ -92,7 +96,6 @@ export function ModalProvider({ children }) {
     return () => document.removeEventListener('keydown', onKey);
   }, [stack.length, close]);
 
-  useMobileBackDismiss(() => close(), { active: stack.length > 0 });
 
   return <ModalContext.Provider value={value}>{children}</ModalContext.Provider>;
 }
@@ -102,7 +105,9 @@ export function ModalHost() {
   return (
     <>
       {stack.map((modal, at) => {
-        const fullscreen = modal.fullscreen || ((isMobileTauri || (typeof window !== 'undefined' && window.innerWidth <= 768)) && modal.wide);
+        const phone = isMobileTauri || (typeof window !== 'undefined' && window.innerWidth <= 768);
+        const sheet = phone && modal.mobileSheet && !modal.fullscreen;
+        const fullscreen = !sheet && (modal.fullscreen || (phone && modal.wide));
         return (
         <Dialog.Root
           key={modal.id}
@@ -118,10 +123,13 @@ export function ModalHost() {
               )}
               style={{ zIndex: LAYER(at) }}
             />
-            <Dialog.Popup
+            <ModalPopup
+              sheet={sheet}
+              onSheetClose={() => close(modal.id)}
               className={cn(
-                'fixed inset-0 m-auto flex flex-col overflow-hidden bg-surface text-foreground outline-none',
-                fullscreen
+                'fixed flex flex-col overflow-hidden bg-surface text-foreground outline-none',
+                sheet ? 'mobile-modal-sheet inset-x-0 bottom-0 w-full rounded-t-3xl' : 'inset-0 m-auto',
+                sheet ? null : fullscreen
                   ? 'mobile-fullscreen-dialog h-dvh w-full max-h-none rounded-none border-0'
                   : cn(
                     'h-fit max-h-[var(--modal-max-h,86dvh)] w-[calc(100vw-2rem)] rounded-card',
@@ -133,7 +141,7 @@ export function ModalHost() {
                         : modal.wide ? 'max-w-3xl' : 'max-w-[440px]',
                     modal.place === 'top' && 'modal--top',
                   ),
-                fullscreen ? 'sheet-in' : 'overlay-in',
+                fullscreen || sheet ? 'sheet-in' : 'overlay-in',
                 modal.bare && 'p-0',
                 modal.backdrop === 'transparent' && 'bg-transparent shadow-none',
               )}
@@ -141,9 +149,12 @@ export function ModalHost() {
               finalFocus={modal.returnTo}
             >
               <ModalBoundary onError={() => close(modal.id)}>
-                {modal.render(() => close(modal.id))}
+                <BackDepthContext.Provider value={at + 1}>
+                  <ModalBack depth={at + 1} onBack={() => close(modal.id)} />
+                  {modal.render(() => close(modal.id))}
+                </BackDepthContext.Provider>
               </ModalBoundary>
-            </Dialog.Popup>
+            </ModalPopup>
           </Dialog.Portal>
         </Dialog.Root>
         );
@@ -152,3 +163,24 @@ export function ModalHost() {
   );
 }
 
+/// Dialog.Popup, or on phones a bottom sheet that follows a downward drag.
+function ModalPopup({ sheet, onSheetClose, children, ...props }) {
+  if (!sheet) return <Dialog.Popup {...props}>{children}</Dialog.Popup>;
+  return <SheetPopup onClose={onSheetClose} {...props}>{children}</SheetPopup>;
+}
+
+function SheetPopup({ onClose, children, ...props }) {
+  const { sheetRef } = useSheetDrag(onClose);
+  return (
+    <Dialog.Popup ref={sheetRef} {...props}>
+      <span className="mobile-modal-sheet__grip" aria-hidden="true" />
+      {children}
+    </Dialog.Popup>
+  );
+}
+
+/// Android Back for one modal of the stack, below whatever that modal shows.
+function ModalBack({ depth, onBack }) {
+  useMobileBackDismiss(onBack, { level: backLevel.modal(depth) });
+  return null;
+}

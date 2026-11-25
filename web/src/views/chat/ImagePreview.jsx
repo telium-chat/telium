@@ -4,6 +4,8 @@ import { cn } from '../../lib/cn.js';
 import { AnimatedImage } from '../../components/AnimatedImage.jsx';
 import { CloseIcon, IconButton } from '../../components/index.js';
 import { useT } from '../../lib/i18n/react.jsx';
+import { usePinchZoom } from '../../hooks/usePinchZoom.js';
+import { useMobileBackDismiss } from '../../hooks/useMobileBackDismiss.js';
 
 function wantsNewTab(e) {
   return e.button === 1 || e.metaKey || e.ctrlKey;
@@ -206,6 +208,17 @@ function Lightbox({
     return () => restore?.focus?.();
   }, [triggerRef]);
 
+  // Touch: pinch, drag and double-tap zoom the photo (the app itself never zooms);
+  // dragging it up or down closes it. A tap on the backdrop closes at once, unless
+  // zoomed in. Android Back closes the viewer.
+  const zoomRef = useRef(null);
+  const zoom = usePinchZoom(zoomRef, { onSwipeDismiss: () => close() });
+  useMobileBackDismiss(close);
+  const onBackdrop = () => {
+    if (zoom.zoomed) return;
+    close();
+  };
+
   if (typeof document === 'undefined') return null;
 
   const stop = (e) => e.stopPropagation();
@@ -219,33 +232,39 @@ function Lightbox({
       aria-label={alt || t('chat.image.preview')}
       className="lightbox"
       data-phase={phase}
-      onClick={close}
+      onClick={onBackdrop}
     >
-      <div role="document" className="lightbox__scrim" />
+      <div
+        role="document"
+        className="lightbox__scrim"
+        style={zoom.pullProgress ? { opacity: 1 - zoom.pullProgress * 0.8 } : undefined}
+      />
 
       <div ref={frameRef} className="lightbox__frame" aria-hidden="true" />
 
-      <AnimatedImage
-        src={src}
-        alt={alt}
-        animated={animated}
-        gif={gif}
-        onClick={stop}
-        onLoad={(e) => {
-          const img = e?.target;
-          if (!natural && img?.naturalWidth) {
-            setNatural({ width: img.naturalWidth, height: img.naturalHeight });
-          }
-        }}
-        className={cn('lightbox__image', !target && 'lightbox__image--auto')}
-        style={target ? {
-          left: `${target.left}px`,
-          top: `${target.top}px`,
-          width: `${target.width}px`,
-          height: `${target.height}px`,
-          transform,
-        } : { transform }}
-      />
+      <div ref={zoomRef} className="lightbox__zoom" style={zoom.style}>
+        <AnimatedImage
+          src={src}
+          alt={alt}
+          animated={animated}
+          gif={gif}
+          onClick={stop}
+          onLoad={(e) => {
+            const img = e?.target;
+            if (!natural && img?.naturalWidth) {
+              setNatural({ width: img.naturalWidth, height: img.naturalHeight });
+            }
+          }}
+          className={cn('lightbox__image', !target && 'lightbox__image--auto')}
+          style={target ? {
+            left: `${target.left}px`,
+            top: `${target.top}px`,
+            width: `${target.width}px`,
+            height: `${target.height}px`,
+            transform,
+          } : { transform }}
+        />
+      </div>
 
       <div ref={closeWrapRef} className="lightbox__close">
         <IconButton

@@ -11,6 +11,13 @@ import { useDialogs } from './Modal.jsx';
 import { EmojiText } from './Twemoji.jsx';
 import { buildTitle } from '../lib/build.js';
 import { UpdateStatus } from './UpdateStatus.jsx';
+import { useMobileBackDismiss } from '../hooks/useMobileBackDismiss.js';
+import { useSwipeBack } from '../hooks/useSwipeBack.js';
+
+// Phones show the list and a page one at a time, like Android settings.
+const narrow = () => typeof window !== 'undefined'
+  && typeof window.matchMedia === 'function'
+  && window.matchMedia('(max-width: 639.98px)').matches;
 
 export function SettingsLayout({
   id, title, panes, initial, footerLabel, footerValue, footerDetail, onClose,
@@ -22,7 +29,8 @@ export function SettingsLayout({
   const pane = panes[current];
   const Pane = pane.component;
 
-  const [view, setView] = useState('pane');
+  // On a phone, open on the list unless a particular page was asked for.
+  const [view, setView] = useState(() => (narrow() && !(initial && panes[initial]) ? 'nav' : 'pane'));
   const [query, setQuery] = useState('');
   const [scrolled, setScrolled] = useState(false);
   const dialogs = useDialogs();
@@ -72,10 +80,33 @@ export function SettingsLayout({
 
   const nav = { go: (key) => { if (panes[key]) show(key); }, has: (key) => Boolean(panes[key]) };
 
+  // Android Back: from a page back to the list; from the list the modal closes.
+  const [isNarrow, setIsNarrow] = useState(narrow);
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
+    const query = window.matchMedia('(max-width: 639.98px)');
+    const sync = () => setIsNarrow(query.matches);
+    query.addEventListener?.('change', sync);
+    return () => query.removeEventListener?.('change', sync);
+  }, []);
+  useMobileBackDismiss(() => leaving(() => setView('nav')), { active: isNarrow && view === 'pane' });
+  const rootRef = useRef(null);
+  const paneRef = useRef(null);
+  // A swipe already showed the list sliding in; its entrance animation stays off
+  // until a page is opened again.
+  useEffect(() => {
+    if (view === 'pane') rootRef.current?.removeAttribute('data-swiped');
+  }, [view]);
+  useSwipeBack(rootRef, paneRef, {
+    enabled: isNarrow && view === 'pane',
+    canLeave: () => !dirty.current,
+    onBack: () => leaving(() => setView('nav')),
+  });
+
   return (
     <GuardContext.Provider value={guard}>
      <PaneContext.Provider value={nav}>
-      <div className="settings" data-view={view} onKeyDownCapture={onKeyDownCapture}>
+      <div ref={rootRef} className="settings" data-view={view} data-narrow={isNarrow || undefined} onKeyDownCapture={onKeyDownCapture}>
         <nav aria-label="Settings sections" className="settings__nav">
           <div className="settings__head">
             <div className="settings__host">
@@ -182,16 +213,17 @@ export function SettingsLayout({
           <UpdateStatus />
         </nav>
 
-        <div className="settings__pane">
+        <div ref={paneRef} className="settings__pane">
           <div className="settings__controls" data-scrolled={scrolled || undefined}>
             <IconButton
               title="All settings"
               className="shrink-0 sm:hidden"
               onClick={() => leaving(() => setView('nav'))}
             >
-              <BackIcon className="size-4" />
+              <BackIcon className="size-5" />
             </IconButton>
-            <IconButton title="Close settings (Esc)" className="shrink-0" onClick={close}>
+            <span className="settings__bar-title sm:hidden" aria-hidden="true">{pane.label}</span>
+            <IconButton title="Close settings (Esc)" className="settings__close shrink-0" onClick={close}>
               <CloseIcon className="size-4" />
             </IconButton>
           </div>

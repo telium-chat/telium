@@ -159,10 +159,12 @@ describe('mobile navigation primitives', () => {
     expect(voice.leave).toHaveBeenCalledOnce();
   });
 
-  it('uses the Android back stack in voice stage, drawer, conversation, then exit order', () => {
-    expect(mobileBackAction({ voiceStageOpen: true })).toBe('close-voice');
-    expect(mobileBackAction({ membersOpen: true })).toBe('close-members');
-    expect(mobileBackAction({ drawerOpen: true })).toBe('close-drawer');
+  it('uses the Android back stack: voice stage, members, up to the list, then exit', () => {
+    const channel = { view: 'chat', guildId: 'g1', channelId: 'c1' };
+    expect(mobileBackAction({ voiceStageOpen: true, route: channel })).toBe('close-voice');
+    expect(mobileBackAction({ membersOpen: true, route: channel })).toBe('close-members');
+    expect(mobileBackAction({ route: channel })).toBe('open-drawer');
+    expect(mobileBackAction({ drawerOpen: true, route: channel })).toBe('exit');
     expect(mobileBackAction({ route: { view: 'dms', conversationId: 'dm-1' } })).toBe('dm-list');
     expect(mobileBackAction({ route: { view: 'dms', conversationId: null } })).toBe('exit');
   });

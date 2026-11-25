@@ -9,7 +9,7 @@ import { shortName } from '../../lib/util.js';
 import { describeRequest } from '../../lib/failure.js';
 import { defaultExpiry, expiryOptions } from '../../lib/upload.js';
 import {
-  AttachIcon, CloseIcon, ContextMenu, CopyIcon, CutIcon, EmojiIcon, IconButton, ImageIcon,
+  AttachIcon, CloseIcon, ContextMenu, CopyIcon, CutIcon, EmojiIcon, IconButton, ImageIcon, KeyboardIcon,
   LockIcon, MenuItem, MenuSeparator, Notice, PlusIcon, ReplyIcon, SendIcon,
 } from '../../components/index.js';
 import { useModal } from '../../hooks/useModal.jsx';
@@ -19,7 +19,7 @@ import { DropHint, StagedAttachments } from './StagedAttachments.jsx';
 import { useFileDrop, useStagedFiles } from './useStaging.jsx';
 import { GifPopover } from './GifPicker.jsx';
 import { QuotePreview } from './QuotePreview.jsx';
-import { EmojiPickerDialog } from '../dialogs/EmojiPickerDialog.jsx';
+import { MobileExpressionPanel } from './MobileExpressionPanel.jsx';
 import { EmojiPopover } from './EmojiPicker.jsx';
 import { GifPickerDialog } from '../dialogs/GifPickerDialog.jsx';
 import { MobileActionSheet } from '../mobile/MobileNavigation.jsx';
@@ -323,11 +323,55 @@ export function Composer({ surface, replyTo, onCancelReply, onEditLast, send, mo
     replaceRange(at, end, shown, [at + shown.length, at + shown.length]);
   };
 
+  // Phones: the emoji/GIF panel takes the keyboard's place. Inserting must not focus
+  // the text box (that would raise the keyboard over the panel), so the caret is
+  // tracked on the unfocused textarea instead.
+  const [panelOpen, setPanelOpen] = useState(false);
+  const panelHandoff = useRef(null);
+  const insertQuiet = (emoji) => {
+    const node = textareaRef.current;
+    if (!node) return;
+    const value = node.value;
+    const at = node.selectionStart ?? value.length;
+    const end = node.selectionEnd ?? at;
+    const shown = toDisplay(emoji);
+    setDraftText(value.slice(0, at) + shown + value.slice(end));
+    const caret = at + shown.length;
+    requestAnimationFrame(() => { try { node.setSelectionRange(caret, caret); } catch {} });
+  };
+  const closePanelWhenKeyboardUp = () => {
+    clearTimeout(panelHandoff.current);
+    const root = document.documentElement;
+    const started = Date.now();
+    const check = () => {
+      if (root.dataset.mobileKeyboard === 'open' || Date.now() - started > 450) {
+        setPanelOpen(false);
+        return;
+      }
+      panelHandoff.current = setTimeout(check, 30);
+    };
+    check();
+  };
+  useEffect(() => () => clearTimeout(panelHandoff.current), []);
+  const togglePanel = () => {
+    if (panelOpen) {
+      textareaRef.current?.focus();
+      closePanelWhenKeyboardUp();
+      return;
+    }
+    setPanelOpen(true);
+    textareaRef.current?.blur();
+  };
+
   return (
     <div
       ref={rootRef}
       className="shrink-0 px-4"
-      style={{ paddingBottom: mobile ? 'max(1rem, var(--safe-area-bottom))' : 'max(1.5rem, var(--safe-area-bottom))' }}
+      style={{
+        paddingBottom: mobile
+          ? (panelOpen ? 0 : 'max(1rem, var(--safe-area-bottom))')
+          : 'max(1.5rem, var(--safe-area-bottom))',
+      }}
     >
       {dragging ? <DropHint where={surface.dropTarget} /> : null}
 
@@ -405,6 +449,7 @@ export function Composer({ surface, replyTo, onCancelReply, onEditLast, send, mo
                 className="composer-input composer-text"
                 onScroll={syncInkScroll}
                 onBlur={() => surface.typing(false)}
+                onFocus={() => { if (mobile && panelOpen) closePanelWhenKeyboardUp(); }}
                 onChange={(e) => {
                   setDraftText(e.target.value);
                   complete.sync(e.target);
@@ -469,17 +514,10 @@ export function Composer({ surface, replyTo, onCancelReply, onEditLast, send, mo
             active={emojiOpen}
             onClick={() => {
               if (!mobile) { setEmojiOpen((open) => !open); return; }
-              modal.open((close) => (
-                <EmojiPickerDialog
-                  guildId={surface.guildId}
-                  close={close}
-                  onPick={insert}
-                  onPickSticker={surface.stickers ? setSticker : undefined}
-                />
-              ), { wide: true, desktopSize: 'emoji' });
+              togglePanel();
             }}
           >
-            <EmojiIcon />
+            {mobile && panelOpen ? <KeyboardIcon /> : <EmojiIcon />}
           </IconButton>
           <IconButton
             className="composer-control"
@@ -512,6 +550,17 @@ export function Composer({ surface, replyTo, onCancelReply, onEditLast, send, mo
           onPick={insert}
           onPickSticker={surface.stickers ? setSticker : undefined}
           onClosed={() => textareaRef.current?.focus()}
+        />
+      ) : null}
+
+      {mobile && panelOpen ? (
+        <MobileExpressionPanel
+          guildId={surface.guildId}
+          onPickEmoji={insertQuiet}
+          onPickSticker={surface.stickers ? setSticker : undefined}
+          onPickGif={sendGif}
+          encrypted={surface.kind === 'dm'}
+          onClose={() => setPanelOpen(false)}
         />
       ) : null}
 

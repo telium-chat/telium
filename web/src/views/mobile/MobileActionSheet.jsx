@@ -2,6 +2,7 @@ import { Children, Fragment, useCallback, useEffect, useRef, useState } from 're
 import { createPortal } from 'react-dom';
 import { cn } from '../../lib/cn.js';
 import { EmojiText, extractMenuItemProps } from '../../components/index.js';
+import { useSheetDrag } from '../../hooks/useSheetDrag.js';
 import { useMobileBackDismiss } from '../../hooks/useMobileBackDismiss.js';
 
 export function MobileContextMenu({ children, content, isDisabled: disabledProp = false, title }) {
@@ -157,17 +158,21 @@ export function MenuRows({ children, onClose }) {
 }
 
 export function MobileActionSheet({ title, onClose, children }) {
-  useMobileBackDismiss(onClose);
+  const scrimRef = useRef(null);
+  const { sheetRef, dismiss } = useSheetDrag(onClose, { scrimRef });
+  useMobileBackDismiss(dismiss);
 
   return createPortal((
     <>
       <button
+        ref={scrimRef}
         type="button"
         aria-label="Close menu"
         className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-xs animate-fade-in"
-        onClick={onClose}
+        onClick={dismiss}
       />
       <section
+        ref={sheetRef}
         role="dialog"
         aria-modal="true"
         data-mobile-gesture-lock

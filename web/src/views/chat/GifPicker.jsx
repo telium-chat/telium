@@ -106,7 +106,7 @@ function gifHost(config) {
 
 export function GifPickerPanel({
   onPick, onClose, encrypted = false, className = 'gif-popover',
-  resizable = false, fullscreen = false, onToggleFullscreen = null,
+  resizable = false, fullscreen = false, onToggleFullscreen = null, autoFocusSearch = true,
 }) {
   const store = useStore();
   const t = useT();
@@ -485,7 +485,7 @@ export function GifPickerPanel({
             label={t('chat.gif.search')}
             placeholder={t('chat.gif.search')}
             size="sm"
-            autoFocus
+            autoFocus={autoFocusSearch}
             role="combobox"
             aria-expanded={visible.length > 0}
             aria-controls={gridId}
