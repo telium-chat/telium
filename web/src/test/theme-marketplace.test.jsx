@@ -306,6 +306,36 @@ describe('the theme workshop', () => {
     expect(store.prefs.marketTheme).toBeUndefined();
   });
 
+  it('community themes page three pages deep, then a Show more button adds one page at a time', async () => {
+    // Twenty-one themes: three pages of six show up front (18), Show more
+    // reveals the rest, and then the button disappears — nothing paginates
+    // forever.
+    const big = {
+      generatedAt: '2026-11-25T00:00:00Z',
+      themes: Array.from({ length: 21 }, (_, i) => ({
+        id: `theme-${String(i).padStart(2, '0')}`,
+        name: `Theme ${i}`,
+        author: 'a',
+        version: '1.0.0',
+        description: 'd',
+        tags: [],
+        downloads: 100 - i,
+        thumbnailUrl: null,
+        cssUrl: `https://cdn.jsdelivr.net/gh/telium-chat/themes@main/themes/theme-${String(i).padStart(2, '0')}/theme-${String(i).padStart(2, '0')}.theme.css`,
+      })),
+    };
+    seeded(big);
+    vi.stubGlobal('fetch', json(big));
+    const { user } = mount(<ThemeMarketplaceSection />, signedInStore());
+    await screen.findByText('Theme 0');
+    // 3 pages × 6 = 18 visible; Show more reveals the last 3.
+    expect(screen.getAllByRole('button', { name: 'Install' }).length).toBe(18);
+    expect(screen.getByRole('button', { name: 'Show more themes' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Show more themes' }));
+    expect(screen.getAllByRole('button', { name: 'Install' }).length).toBe(21);
+    expect(screen.queryByRole('button', { name: 'Show more themes' })).toBeNull();
+  });
+
   it('a theme file without its meta header is refused with an explanation', async () => {
     seeded(CATALOG);
     vi.stubGlobal('fetch', async (url) => {

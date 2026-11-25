@@ -194,6 +194,8 @@ function BaseCard({ preset, active, locked, t, onChoose }) {
 }
 
 const FILTERS = ['all', 'trending', 'favorites'];
+const PAGE_SIZE = 6;
+const INITIAL_PAGES = 3;
 
 export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLocked = false, onChooseBase = null }) {
   const t = useT();
@@ -240,17 +242,43 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
   );
   const filters = showTrending ? FILTERS : FILTERS.filter((name) => name !== 'trending');
 
+  // Three pages up front, one more per Show-more tap: a thousand-theme
+  // catalog must not render a thousand cards by default, and the button only
+  // appears while themes remain unpaged.
+  const [page, setPage] = useState(INITIAL_PAGES);
+
   const community = useMemo(() => {
     const found = searchThemes(catalog, query);
     const week = found.filter((theme) => trending.has(theme.id));
-    const rest = found.filter((theme) => !trending.has(theme.id));
-    const ordered = [...week, ...rest];
-    if (filter === 'trending') return { week, rest: [] };
+    const ordered = [...week, ...found.filter((theme) => !trending.has(theme.id))];
+    const shown = ordered.slice(0, page * PAGE_SIZE);
+    const shownWeek = shown.filter((theme) => trending.has(theme.id));
+    const shownRest = shown.filter((theme) => !trending.has(theme.id));
+    if (filter === 'trending') return { week: shown, rest: [], more: ordered.length > shown.length };
     if (filter === 'favorites') {
-      return { week: [], rest: ordered.filter((theme) => favorites.includes(theme.id)) };
+      const favs = ordered.filter((theme) => favorites.includes(theme.id));
+      const shownFavs = favs.slice(0, page * PAGE_SIZE);
+      return { week: [], rest: shownFavs, more: favs.length > shownFavs.length };
     }
-    return { week, rest };
-  }, [catalog, query, filter, favorites, trending]);
+    return { week: shownWeek, rest: shownRest, more: ordered.length > shown.length };
+  }, [catalog, query, filter, favorites, trending, page]);
+  const communityMore = community.more;
+
+  // A new search or filter starts at page one: hidden matches would never be
+  // found behind the pagination. Skips the first run — mount starts at the
+  // full three-page window, not one page.
+  const pageKey = useRef(null);
+  useEffect(() => {
+    const key = `${query}\u0000${filter}`;
+    if (pageKey.current === null) {
+      pageKey.current = key;
+      return;
+    }
+    if (pageKey.current !== key) {
+      pageKey.current = key;
+      setPage(1);
+    }
+  }, [query, filter]);
 
   const baseList = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -419,6 +447,25 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
       ) : null}
       {error === 'noMeta' ? <Notice tone="warn">{t('settings.market.noMeta')}</Notice> : null}
 
+      {baseList.length ? (
+        <div className="flex flex-col gap-2">
+          <span className="text-sm font-medium">{t('settings.market.included')}</span>
+          <div className={cn('grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]')}>
+            {baseList.map((preset) => (
+              <BaseCard
+                key={preset.id}
+                preset={preset}
+                active={baseActiveId === preset.id}
+                locked={baseLocked}
+                t={t}
+                onChoose={() => onChooseBase?.(preset.id)}
+              />
+            ))}
+          </div>
+          {baseLocked ? <Notice tone="accent">{t('settings.theme.locked')}</Notice> : null}
+        </div>
+      ) : null}
+
       {community.week.length ? (
         <>
           <span className="text-sm font-medium">{t('settings.market.community')}</span>
@@ -443,23 +490,12 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
         </div>
       ) : null}
 
-      {baseList.length ? (
-        <div className="flex flex-col gap-2">
-          <span className="text-sm font-medium">{t('settings.market.included')}</span>
-          <div className={cn('grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]')}>
-            {baseList.map((preset) => (
-              <BaseCard
-                key={preset.id}
-                preset={preset}
-                active={baseActiveId === preset.id}
-                locked={baseLocked}
-                t={t}
-                onChoose={() => onChooseBase?.(preset.id)}
-              />
-            ))}
-          </div>
-          {baseLocked ? <Notice tone="accent">{t('settings.theme.locked')}</Notice> : null}
-        </div>
+      {/* Three pages up front, then one per Show-more tap: a long catalog
+          never renders forever, and nothing is fetched that is not shown. */}
+      {communityMore ? (
+        <Button onClick={() => setPage((n) => n + 1)}>
+          {t('settings.market.showMore')}
+        </Button>
       ) : null}
 
       {nothing ? (

@@ -117,6 +117,9 @@ export const settings = {
   'settings.market.activeBanner': 'You are using {name}. Tap Active on its card to turn it off.',
   'settings.market.missingBanner': 'Your synced theme ({name}) is not on this device — install it again below, or pick an included theme.',
   'settings.market.remove': 'Remove theme',
+  // Community themes page three pages deep before this appears; each tap
+  // reveals one more page rather than ever rendering the whole catalog.
+  'settings.market.showMore': 'Show more themes',
   'settings.market.community': 'From the community',
   'settings.market.included': 'Included with Telium',
   'settings.market.retry': 'Retry',
