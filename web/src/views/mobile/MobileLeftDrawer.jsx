@@ -4,9 +4,9 @@ import { useModal } from '../../hooks/useModal.jsx';
 import { cn } from '../../lib/cn.js';
 import { faceOf } from '../../lib/faces.js';
 import { shortName, statusLine } from '../../lib/util.js';
-import { orderedGuildIds } from '../../lib/rail.js';
+import { guildVoiceCount, orderedGuildIds } from '../../lib/rail.js';
 import {
-  Avatar, Badge, EmojiText, PlusIcon, SettingsIcon, StatusText, TeliumMark
+  Avatar, Badge, EmojiText, PlusIcon, SettingsIcon, StatusText, TeliumMark, VoiceIcon,
 } from '../../components/index.js';
 import { GuildFace } from '../../components/GuildFace.jsx';
 import { UserSettings } from '../settings.jsx';
@@ -30,7 +30,7 @@ export function MobileLeftDrawer({
 }) {
   const store = useStore();
   const modal = useModal();
-  useStoreEvent('guilds', 'channels', 'route', 'unread', 'conversations', 'friends', 'prefs');
+  useStoreEvent('guilds', 'channels', 'route', 'unread', 'conversations', 'friends', 'prefs', 'voice');
   const nodes = store.railNodes();
   const ids = useMemo(() => orderedGuildIds(nodes), [nodes]);
   const isDmMode = selectedGuildId === null;
@@ -79,11 +79,12 @@ export function MobileLeftDrawer({
           const guild = store.guilds.get(id);
           const { unread, mentions } = store.guildUnread(id);
           const isSelected = selectedGuildId === id;
+          const talking = guildVoiceCount(store, id);
           return (
             <div key={id} className="rail-tile">
               <button
                 type="button"
-                aria-label={guild?.name || 'Guild'}
+                aria-label={talking ? `${guild?.name || 'Guild'} · ${talking} in voice` : (guild?.name || 'Guild')}
                 onClick={() => onSelectGuild(id)}
                 className="flex size-12 items-center justify-center transition-all"
               >
@@ -96,6 +97,11 @@ export function MobileLeftDrawer({
                 className="rail-pill"
                 data-state={isSelected ? 'active' : unread > 0 ? 'unread' : 'none'}
               />
+              {talking ? (
+                <span aria-hidden className="rail-voice pointer-events-none absolute -start-1 -bottom-1">
+                  <VoiceIcon className="size-[11px]" />
+                </span>
+              ) : null}
               <Badge count={mentions} className="pointer-events-none absolute -top-1 -end-1" />
             </div>
           );

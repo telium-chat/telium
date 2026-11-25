@@ -114,6 +114,9 @@ const SNIPPET_MAX = 200;
 
 const GROUP_NAME_MAX = 100;
 const RENAME_LOG_MAX = 50;
+// Call lines are this device's own record (who rang, how long it ran), kept locally so a reload keeps them.
+const CALL_LOG_MAX = 50;
+const CALL_LOG_KINDS = new Set(['incoming', 'outgoing', 'missed', 'ended']);
 
 function validGroupName(text) {
   return typeof text === 'string' && text.trim() === text && text.length > 0 && text.length <= GROUP_NAME_MAX;
@@ -228,6 +231,7 @@ export class Mls {
     this.names = new Map();
     // Who renamed it, and to what, in order: the lines the timeline draws.
     this.renames = new Map();
+    this.calls = new Map();
     // Edit/delete are author-only.
     this.authors = new Map();
     this.stateRead = new Set();
@@ -1636,6 +1640,63 @@ export class Mls {
     // Mirror first so everything after reads one store.
     await this.pullMirror(conversationId).catch(() => {});
     await this.readFolds(conversationId);
+  }
+
+  /// This device's call lines, on a record of their own: not the conversation's `cx` state and not the backup, so a
+  /// ring arriving before that state was read can never overwrite its edits, pins or names. Read once, by id.
+  loadCalls(conversationId) {
+    if (!this.callsRead) this.callsRead = new Map();
+    if (!this.callsRead.has(conversationId)) {
+      this.callsRead.set(conversationId, (async () => {
+        const rows = await get(OPENED, `${this.scope}:cl:${conversationId}`).catch(() => null);
+        const held = new Map((this.calls.get(conversationId) || []).map((row) => [row.id, row]));
+        for (const row of Array.isArray(rows) ? rows : []) {
+          if (typeof row?.id !== 'string' || held.has(row.id) || !CALL_LOG_KINDS.has(row.kind)) continue;
+          const at = Number(row.at);
+          if (!Number.isFinite(at) || at <= 0) continue;
+          const duration = Number(row.durationMs);
+          held.set(row.id, {
+            id: row.id,
+            conversationId,
+            kind: row.kind,
+            from: typeof row.from === 'string' ? row.from : null,
+            at,
+            endedAt: row.kind === 'ended' ? at : null,
+            durationMs: row.kind === 'ended' && Number.isFinite(duration) && duration >= 0 ? duration : null,
+          });
+        }
+        this.calls.set(conversationId, [...held.values()].sort((a, b) => a.at - b.at).slice(-CALL_LOG_MAX));
+      })());
+    }
+    return this.callsRead.get(conversationId);
+  }
+
+  /// A line already held is replaced (a ring that became missed).
+  async rememberCalls(conversationId, entries) {
+    if (!conversationId || !Array.isArray(entries) || !entries.length) return;
+    await this.loadCalls(conversationId);
+    const held = new Map((this.calls.get(conversationId) || []).map((row) => [row.id, row]));
+    for (const row of entries) {
+      if (typeof row?.id !== 'string' || !CALL_LOG_KINDS.has(row.kind)) continue;
+      held.set(row.id, {
+        id: row.id,
+        conversationId,
+        kind: row.kind,
+        from: row.from || null,
+        at: row.at,
+        endedAt: row.endedAt ?? null,
+        durationMs: row.durationMs ?? null,
+      });
+    }
+    const list = [...held.values()].sort((a, b) => a.at - b.at).slice(-CALL_LOG_MAX);
+    this.calls.set(conversationId, list);
+    this.track(put(OPENED, `${this.scope}:cl:${conversationId}`, list.map((c) => ({
+      id: c.id, kind: c.kind, from: c.from, at: c.at, durationMs: c.durationMs,
+    }))));
+  }
+
+  callsIn(conversationId) {
+    return this.calls.get(conversationId) || [];
   }
 
   /// `adopt` reruns it after another tab writes.

@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useStore, useStoreEvent } from '../../hooks/useStore.jsx';
 import {
   gifFavorites, gifUrlsIn, isGifOnlyContent, isGiphyShareUrl, isKlipyShareUrl,
-  isTenorShareUrl, GiphyProvider, KlipyProvider, klipyConfig, tenorConfig,
-  TenorProvider, toggleGifFavorite,
+  isTenorShareUrl, GiphyProvider, KlipyProvider, klipyConfig, normalizeGifUrl, tenorConfig,
+  removeGifFavorite, TenorProvider, toggleGifFavorite,
 } from '../../lib/gifs.js';
 import { IconButton, StarIcon } from '../../components/index.js';
 import { useT } from '../../lib/i18n/react.jsx';
@@ -82,7 +82,17 @@ export function GifEmbed({ url, alt = null, linkUrl = url }) {
   const store = useStore();
   useStoreEvent('gif-favorites');
   const [broken, setBroken] = useState(false);
-  const favorite = gifFavorites(store.sync).includes(url);
+  // A favourite may be the share page that was sent (`linkUrl`) or the media it resolved to (`url`); either counts.
+  const favorites = gifFavorites(store.sync);
+  const sent = normalizeGifUrl(linkUrl);
+  const media = normalizeGifUrl(url);
+  const held = [...new Set([sent, media])].filter((value) => value && favorites.includes(value));
+  const favorite = held.length > 0;
+  // Unstarring clears both forms, so one click always turns the star off.
+  const toggle = () => {
+    if (!favorite) toggleGifFavorite(store, linkUrl || url);
+    else for (const value of held) removeGifFavorite(store, value);
+  };
 
   useEffect(() => { setBroken(false); }, [url]);
 
@@ -110,7 +120,7 @@ export function GifEmbed({ url, alt = null, linkUrl = url }) {
       <IconButton
         title={favorite ? t('chat.gif.unfavorite') : t('chat.gif.favorite')}
         active={favorite}
-        onClick={() => toggleGifFavorite(store, url)}
+        onClick={toggle}
         className="touch-visible-action pointer-events-none absolute top-1.5 end-1.5 size-10 rounded-[var(--radius-row)] bg-background/85 opacity-0 backdrop-blur-sm group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 sm:size-8"
       >
         <StarIcon className={favorite ? 'size-4 fill-current text-accent' : 'size-4'} />

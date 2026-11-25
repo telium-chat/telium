@@ -6,13 +6,13 @@ import { useModal } from '../hooks/useModal.jsx';
 import { useConversationPeer } from '../hooks/useConversationPeer.js';
 import { Status } from '../lib/gateway.js';
 import {
-  addToFolder, combine, dissolveFolder, folderLabel, moveTo, renameFolder, setCollapsed,
+  addToFolder, combine, dissolveFolder, folderLabel, guildVoiceCount, moveTo, renameFolder, setCollapsed,
 } from '../lib/rail.js';
 import {
   cachedChangelog, hasUnreadChangelog, readMarker, refreshChangelogIfStale,
 } from '../lib/changelog.js';
 import {
-  Avatar, Badge, ContextMenu, EditIcon, EmojiText, FolderOpenIcon, MenuItem, MenuSeparator, PlusIcon, Reorder, SparklesIcon, TeliumMark, TrashIcon, useDialogs, useReorderItem,
+  Avatar, Badge, ContextMenu, EditIcon, VoiceIcon, EmojiText, FolderOpenIcon, MenuItem, MenuSeparator, PlusIcon, Reorder, SparklesIcon, TeliumMark, TrashIcon, useDialogs, useReorderItem,
 } from '../components/index.js';
 import { Tooltip } from '../components/Tooltip.jsx';
 import { useMenus } from './menus.jsx';
@@ -67,7 +67,7 @@ function useTravellingMark(railRef) {
 
 function Rail() {
   const store = useStore();
-  useStoreEvent('guilds', 'unread', 'status', 'route', 'conversations', 'capabilities', 'friends', 'prefs');
+  useStoreEvent('guilds', 'unread', 'status', 'route', 'conversations', 'capabilities', 'friends', 'prefs', 'voice');
   const modal = useModal();
   const route = store.route;
   const railRef = useRef(null);
@@ -217,6 +217,10 @@ function Rail() {
   );
 }
 
+function inVoiceLabel(count) {
+  return count === 1 ? '1 in voice' : `${count} in voice`;
+}
+
 function Divider() {
   return <div className="my-0.5 h-px w-6 shrink-0 bg-separator" />;
 }
@@ -236,6 +240,10 @@ function GuildTile({ guild, active, onOpen, inFolder = null }) {
   const status = store.gw.statusOf(guild.domain);
   const unreachable = status !== Status.Ready;
   const { unread, mentions } = store.guildUnread(guild.id);
+  const talking = guildVoiceCount(store, guild.id);
+  const base = unreachable
+    ? `${guild.name} - ${guild.domain} is ${status}`
+    : `${guild.name} on ${guild.domain}`;
   return (
     <ContextMenu content={() => menus.guild(guild)}>
       <RailTile
@@ -243,10 +251,9 @@ function GuildTile({ guild, active, onOpen, inFolder = null }) {
         wrapClass={cn(dragProps.className, 'drag-item--tile')}
         onPointerDown={dragProps.onPointerDown}
         onKeyDown={dragProps.onKeyDown}
-        label={unreachable
-          ? `${guild.name} - ${guild.domain} is ${status}`
-          : `${guild.name} on ${guild.domain}`}
+        label={talking ? `${base} · ${inVoiceLabel(talking)}` : base}
         active={active}
+        inCall={talking > 0}
         unread={Boolean(unread || mentions)}
         dim={unreachable}
         badge={mentions || null}
@@ -274,10 +281,12 @@ function Folder({ folder, inDms, onOpen }) {
   const holdsCurrent = !inDms && folder.guilds.includes(store.route.guildId);
   let unread = 0;
   let mentions = 0;
+  let talking = 0;
   for (const id of folder.guilds) {
     const state = store.guildUnread(id);
     unread += state.unread;
     mentions += state.mentions;
+    talking += guildVoiceCount(store, id);
   }
 
   const menu = () => (
@@ -317,6 +326,7 @@ function Folder({ folder, inDms, onOpen }) {
         active={folder.collapsed ? holdsCurrent : undefined}
         unread={folder.collapsed && Boolean(unread || mentions)}
         badge={folder.collapsed ? mentions || null : null}
+        inCall={folder.collapsed && talking > 0}
         className={cn(
           'bg-transparent',
           !folder.collapsed && 'text-accent',
@@ -391,10 +401,12 @@ function DmTile({ convo, active }) {
   const menus = useMenus();
   const { peer, title, peerTyping } = useConversationPeer(convo);
   const unread = store.dmUnreadFor(convo.id);
+  const talking = store.voice.get(convo.id)?.length || 0;
   return (
     <ContextMenu content={() => menus.conversation(convo)}>
       <RailTile
-        label={title}
+        label={talking ? `${title} · ${inVoiceLabel(talking)}` : title}
+        inCall={talking > 0}
         active={active}
         unread={unread > 0}
         round
@@ -418,7 +430,7 @@ function DmTile({ convo, active }) {
 }
 
 function RailTile({
-  label, active, dim, unread, badge, round, children, onClick, className, style,
+  label, active, dim, unread, badge, inCall, round, children, onClick, className, style,
   wrapClass, innerRef, ref: outerRef, ...rest
 }) {
   const setNode = useCallback((node) => {
@@ -462,6 +474,11 @@ function RailTile({
           className="rail-pill"
           data-state={active ? 'active' : unread ? 'unread' : 'none'}
         />
+      ) : null}
+      {inCall ? (
+        <span aria-hidden className="rail-voice pointer-events-none absolute -start-1 -bottom-1">
+          <VoiceIcon className="size-[11px]" />
+        </span>
       ) : null}
       <Badge
         count={badge}

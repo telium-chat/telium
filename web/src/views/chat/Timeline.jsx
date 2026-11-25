@@ -462,13 +462,17 @@ function withPinNotices(items, notices) {
   );
 }
 
-function rowsFor(list, firstUnread) {
+export function rowsFor(list, firstUnread) {
   const rows = [];
   let previous = null;
   let previousMsg = null;
+  // Tracked apart from `previous`: a call, pin or rename row resets grouping but is not a new day.
+  let day = null;
   for (const msg of list) {
-    if (!previous || dayOf(msg.created_at) !== dayOf(previous.created_at)) {
-      rows.push({ kind: 'day', key: msg.id, label: dayOf(msg.created_at) });
+    const today = dayOf(msg.created_at);
+    if (today !== day) {
+      rows.push({ kind: 'day', key: msg.id, label: today });
+      day = today;
       previous = null;
       previousMsg = null;
     }

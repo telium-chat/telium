@@ -145,3 +145,12 @@ export function folderLabel(folder, guilds) {
 export function orderedGuildIds(nodes) {
   return nodes.flatMap((node) => (node.kind === 'folder' ? node.guilds : [node.id]));
 }
+
+/// How many people sit in this guild's voice channels right now; the rail marks a guild with a call going.
+export function guildVoiceCount(store, guildId) {
+  let count = 0;
+  for (const [channelId, list] of store.voice || []) {
+    if (store.channels?.get(channelId)?.guild_id === guildId) count += list?.length || 0;
+  }
+  return count;
+}

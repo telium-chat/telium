@@ -114,6 +114,18 @@
   border-radius: 999px;
 }
 
+/* Someone is in a call here: a small speaker pip opposite the mention badge. */
+.rail-voice {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background-color: var(--success);
+  color: white;
+  box-shadow: 0 0 0 3px var(--strip);
+}
+
 .rail-pill {
   position: absolute;
   top: 0;
