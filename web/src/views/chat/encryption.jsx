@@ -56,8 +56,9 @@ export const PASSWORD_UNLOCK = note(
   { pane: 'settings.nav.recovery' },
 );
 
-/// Opaque custody opens with the password, so a device that only lacks it is not waiting on another device.
-export const deviceNote = (vault) => (vault?.needs_password && vault.mode !== 'none'
+/// The password alone opens the account's vault (or makes it, for an account that has none yet), so a device that only
+/// lacks the password is not waiting on another device. A session that did not sign in with OPAQUE has no password path.
+export const deviceNote = (store) => (store?.opaqueAuth && store.vault?.needs_password
   ? PASSWORD_UNLOCK
   : DEVICE_APPROVAL);
 
@@ -225,7 +226,7 @@ export function ConversationNotices({
       ) : null}
       {needsDevice ? (
         <Notice tone="warn">
-          <NoticeText head={deviceNote(store.vault)} />
+          <NoticeText head={deviceNote(store)} />
         </Notice>
       ) : null}
       {awaiting && !needsDevice ? (

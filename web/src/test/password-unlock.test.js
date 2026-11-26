@@ -59,4 +59,46 @@ describe('an opaque vault on a device that signed in without the password', () =
     expect(store.vault.locked).toBeFalsy();
     expect(store.authRecoveryWrapper).toEqual(stub.wrapper);
   });
+
+  describe('trust after the ring arrives', () => {
+    const ring = { key: new Uint8Array(32), mode: 'opaque_custody' };
+    const withTrust = (held) => {
+      const store = new Store();
+      store.trust = held;
+      const fresh = { canSign: true, sealRootProperly: vi.fn() };
+      // As the real one: the running instance if there is one, otherwise a new start.
+      store.startTrust = vi.fn(async () => {
+        if (!store.trust) store.trust = fresh;
+        return store.trust;
+      });
+      return { store, fresh };
+    };
+
+    it('starts trust again when the running one could not open the root', async () => {
+      const held = { canSign: false, sealRootProperly: vi.fn() };
+      const { store, fresh } = withTrust(held);
+      await store.trustWithAccountKey(ring);
+      expect(store.trust).toBe(fresh);
+      expect(fresh.recovery).toBe(ring);
+      expect(held.sealRootProperly).not.toHaveBeenCalled();
+    });
+
+    it('keeps a trust that holds the root and seals it under the account key', async () => {
+      const held = { canSign: true, sealRootProperly: vi.fn(async () => true) };
+      const { store } = withTrust(held);
+      await store.trustWithAccountKey(ring);
+      expect(store.trust).toBe(held);
+      expect(held.recovery).toBe(ring);
+      expect(held.sealRootProperly).toHaveBeenCalledWith(ring.key);
+    });
+
+    it('keeps the old trust when the restart fails', async () => {
+      const held = { canSign: false, sealRootProperly: vi.fn() };
+      const store = new Store();
+      store.trust = held;
+      store.startTrust = vi.fn(async () => null);
+      await store.trustWithAccountKey(ring);
+      expect(store.trust).toBe(held);
+    });
+  });
 });

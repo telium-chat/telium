@@ -352,7 +352,7 @@ export function RecoveryPane() {
 
       {locked && (!retired || (vault?.retiredMode === 'device_custody' && vault?.hasRecoveryCopy)) ? (
         <Section title={t('auth.unlock.title')}>
-          {!retired && vault?.needs_password ? (
+          {!retired && store.opaqueAuth && vault?.needs_password ? (
             <>
               <TextInput
                 label={t('auth.unlock.passwordLabel')}

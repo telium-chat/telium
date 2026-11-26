@@ -229,7 +229,7 @@ export function useDmSurface(convo) {
       : !store.mls
         ? noteText(NO_ENCRYPTION)
         : store.vault?.needs_device
-          ? noteText(deviceNote(store.vault))
+          ? noteText(deviceNote(store))
           : null,
     mayAttach: true,
     stickers: false,

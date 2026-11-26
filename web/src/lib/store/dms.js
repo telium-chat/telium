@@ -291,11 +291,30 @@ export const dmMethods = {
     await this.mls?.adoptRecoveryKey(opened);
     this.emit('vault', opened);
     await this.refreshCustody().catch(() => {});
-    await this.startTrust().catch(() => {});
+    await this.trustWithAccountKey(opened);
 
     const id = this.route.conversationId;
     if (id && this.mls) await this.openConversation(id);
     return opened;
+  },
+
+  /// Trust starts at launch, and on a locked device it starts with no account key: it cannot open the root's
+  /// `recovery-v1:` seal, so it holds no signing key and this device never signs itself. `startTrust` returns that same
+  /// instance, so a ring opened later (password or recovery key) has to be handed to it here. Without the root, trust
+  /// starts again with the ring, which opens the root (or creates it when the account has none) and vouches for this
+  /// device. With the root already held, it is only sealed under the account key if the server's copy is in another form (I4).
+  async trustWithAccountKey(opened) {
+    const held = this.trust;
+    if (held && !held.canSign && opened?.key) this.trust = null;
+    const trust = await this.startTrust().catch(() => null);
+    // A restart that fails (an outage) keeps the instance it replaced rather than leaving no trust at all.
+    if (!trust && held && !this.trust) this.trust = held;
+    if (!trust || !opened?.key) return;
+    trust.recovery = opened;
+    if (trust === held && opened.mode === 'opaque_custody') {
+      await trust.sealRootProperly(opened.key)
+        .catch((e) => console.warn('could not seal the account key under the recovery key', e));
+    }
   },
 
   /// For a vault left in a retired custody mode (`vault.retiredMode`) that nothing can open: replaces it with a new one under
