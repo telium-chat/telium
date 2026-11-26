@@ -141,7 +141,7 @@ jobs:
           # deploy/releases.json, hence it is a server input.
           grep -qE '^(sfu|telium-protocol)/'        <<<"$changed" && sfu=true
           grep -qE '^(server|telium-protocol)/|^deploy/releases\.json' <<<"$changed" && { server=true; rust=true; }
-          grep -qE '^(web/|sdk/bot/js/)'            <<<"$changed" && web=true
+          grep -qE '^(web/|sdk/bot/(js|python)/)'            <<<"$changed" && web=true
           # The web suite also runs the client against a real server build
           # (e2ee-real-server.test.js), so a server change can break it too.
           grep -qE '^server/'                       <<<"$changed" && web=true
@@ -417,6 +417,14 @@ jobs:
       - name: Bot SDK suite
         if: matrix.shard == 1
         run: node --test sdk/bot/js/test/*.test.js
+
+      - name: Python bot SDK suite
+        if: matrix.shard == 1
+        working-directory: sdk/bot/python
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -q -e '.[test]'
+          .venv/bin/pytest -q
 
   # Keep this job name stable: this is the check branch/ruleset protection
   # should require.

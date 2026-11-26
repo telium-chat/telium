@@ -130,6 +130,33 @@ export const timelineMethods = {
     } catch {}
   },
 
+  /// Marks every channel of a guild read, including ones whose messages were never loaded:
+  /// those are acked at the newest message the server reports.
+  async markGuildRead(guildId) {
+    const ids = [...this.channels.values()]
+      .filter((ch) => ch.guild_id === guildId)
+      .map((ch) => ch.id)
+      .filter((id) => {
+        const state = this.unreadFor(id);
+        return (state.unread || 0) > 0 || (state.mentions || 0) > 0;
+      });
+    await Promise.all(ids.map(async (id) => {
+      const loaded = this.messages.get(id) || [];
+      if (loaded.length) { await this.ack(id); return; }
+      const api = this.apiForChannel(id);
+      if (!api) return;
+      try {
+        const resp = await api.history(id, { limit: 1 });
+        const list = resp.messages || [];
+        const last = list[list.length - 1];
+        if (!last) return;
+        await api.ack(id, last.id);
+        this.readState.set(id, { channel_id: id, last_read_id: last.id, unread: 0, mentions: 0 });
+      } catch {}
+    }));
+    this.emit('unread', guildId);
+  },
+
   openTimeline(channelId) { this.reading = channelId; },
 
   closeTimeline(channelId) { if (this.reading === channelId) this.reading = null; },

@@ -24,6 +24,9 @@ use telium_protocol::compat;
 use tokio::sync::mpsc;
 
 const HEARTBEAT_INTERVAL_MS: u64 = 45_000;
+
+/// How long a bot may be between connections before the member list shows it offline.
+const BOT_OFFLINE_GRACE_MS: u64 = 15_000;
 const IDENTIFY_TIMEOUT_MS: u64 = 30_000;
 
 const MAX_MEMBER_RANGES: usize = 8;
@@ -360,18 +363,36 @@ async fn run_session(socket: WebSocket, state: AppState) -> anyhow::Result<()> {
             }
         });
     }
-    if state.hub.connection_closed(&session.user_id).await {
-        let presence = state.hub.presence_of(&session.user_id).await;
-        for guild_id in &guild_ids {
-            state
-                .hub
-                .publish(Event::new(
-                    "PRESENCE_UPDATE",
-                    guild_id.clone(),
-                    events::INTENT_GUILD_PRESENCES,
-                    presence.to_json(&session.user_id),
-                ))
-                .await;
+    if state.hub.connection_dropped(&session.user_id).await {
+        // A bot's session lapses every few minutes and it reconnects at once; showing it
+        // offline for that gap makes the member list flicker, so a bot gets a short grace.
+        let grace = if session.is_bot { BOT_OFFLINE_GRACE_MS } else { 0 };
+        let state = state.clone();
+        let user_id = session.user_id.clone();
+        let guild_ids = guild_ids.clone();
+        let settle = async move {
+            if grace > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(grace)).await;
+            }
+            if state.hub.settle_offline(&user_id).await {
+                let presence = state.hub.presence_of(&user_id).await;
+                for guild_id in &guild_ids {
+                    state
+                        .hub
+                        .publish(Event::new(
+                            "PRESENCE_UPDATE",
+                            guild_id.clone(),
+                            events::INTENT_GUILD_PRESENCES,
+                            presence.to_json(&user_id),
+                        ))
+                        .await;
+                }
+            }
+        };
+        if grace > 0 {
+            tokio::spawn(settle);
+        } else {
+            settle.await;
         }
     }
     if let Some((code, reason)) = close_reason {
