@@ -181,7 +181,7 @@ export const onboarding = {
   // A worked example, and the only place on this screen the shape of an
   // account id is shown. `home.example` is the reserved example domain and
   // should stay as it is; `yourname` is a word and should be translated.
-  'onboarding.invite.accountIdPlaceholder': 'yourname or @you:home.example',
+  'onboarding.invite.accountIdPlaceholder': 'yourname or you@home.example',
   // Said once, here, rather than in a paragraph about federation. "The first
   // part" is deliberately vague about the rest of it: the homeserver half is
   // decided by the field further down and explaining both at once is what the

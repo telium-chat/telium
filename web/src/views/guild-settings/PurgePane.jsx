@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { reportError, toast } from '../../hooks/useToast.jsx';
+import { fullId } from '../../lib/people.js';
 import { t } from '../../lib/i18n/index.js';
 import { useT } from '../../lib/i18n/react.jsx';
 import { Button, Field, Hint, Section, TextInput } from '../../components/index.js';
@@ -37,7 +38,7 @@ export function PurgePane({ guildId, api }) {
           setBusy(true);
           try {
             const result = await api.purgeMessages(guildId, {
-              user_id: userId.trim(),
+              user_id: fullId(userId),
               limit: Math.min(1000, Math.max(1, Number(limit) || 100)),
             });
             toast(t('guild.purge.deleted', { count: result.deleted ?? 0 }));

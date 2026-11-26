@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { fullId } from '../../lib/people.js';
 import { useAsync, useStore, useStoreEvent } from '../../hooks/useStore.jsx';
 import { toast } from '../../hooks/useToast.jsx';
 import { copyToClipboard } from '../../lib/clipboard.js';
@@ -239,7 +240,7 @@ export function RecoveryPane() {
   });
 
   const saveGuardians = async () => {
-    const selected = guardianIds.filter(Boolean);
+    const selected = guardianIds.filter(Boolean).map((id) => fullId(id));
     if (selected.length !== 3 || new Set(selected).size !== 3) {
       toast(t('auth.guardians.needThree'));
       return;
@@ -303,7 +304,7 @@ export function RecoveryPane() {
             : t('auth.encryption.ok.noteFallback'),
         };
 
-  const filledGuardians = guardianIds.filter(Boolean);
+  const filledGuardians = guardianIds.filter(Boolean).map((id) => fullId(id));
   const guardianFault = filledGuardians.length < 3
     ? t('auth.guardians.incomplete')
     : new Set(filledGuardians).size !== 3

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { fullId } from '../../lib/people.js';
 import { useAsync, useStore } from '../../hooks/useStore.jsx';
 import { useModal } from '../../hooks/useModal.jsx';
 import { reportError, toast } from '../../hooks/useToast.jsx';
@@ -102,7 +103,7 @@ function TransferPane({ guildId, api, guild, onTransferred }) {
           danger: true,
           onSubmit: async (value) => {
             try {
-              await api.transferOwnership(guildId, value.trim());
+              await api.transferOwnership(guildId, fullId(value));
               toast(t('guild.overview.transfer.done'));
               onTransferred?.();
             } catch (e) { reportError(e, t('guild.overview.transfer.failed')); }

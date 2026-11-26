@@ -317,11 +317,11 @@ export const migration = {
   'migration.receive.subject': 'What are you receiving?',
   'migration.receive.subjectAccount': 'An account',
   'migration.receive.subjectGuild': 'A guild',
-  'migration.receive.accountIdHint': 'Your full ID on the old server, for example @you:old.example.',
+  'migration.receive.accountIdHint': 'Your full ID on the old server, for example you@old.example.',
   // An example identifier, not a sentence. `old.example` is a reserved name
   // (RFC 2606); leave the shape `@name:server` alone, since it is the shape
   // the field is checked against.
-  'migration.receive.accountIdPlaceholder': '@you:old.example',
+  'migration.receive.accountIdPlaceholder': 'you@old.example',
   'migration.receive.guildIdHint': 'Copy the guild ID exactly as shown on the old server.',
   'migration.receive.guildIdPlaceholder': 'guild ID from the old server',
   'migration.receive.sourcePlaceholder': 'old.example',

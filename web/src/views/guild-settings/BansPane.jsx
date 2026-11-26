@@ -1,6 +1,7 @@
 import { useAsync } from '../../hooks/useStore.jsx';
 import { reportError } from '../../hooks/useToast.jsx';
 import { relative } from '../../lib/util.js';
+import { fullId } from '../../lib/people.js';
 import { t } from '../../lib/i18n/index.js';
 import { useT } from '../../lib/i18n/react.jsx';
 import { Async, Button, DataTable, Hint, Meta, Section, useDialogs } from '../../components/index.js';
@@ -66,7 +67,7 @@ export function BansPane({ guildId, api }) {
             label: t('guild.bans.dialogLabel'),
             confirmLabel: t('guild.bans.confirm'),
             onSubmit: async (id) => {
-              try { await api.ban(guildId, id.trim(), {}); state.reload(); }
+              try { await api.ban(guildId, fullId(id), {}); state.reload(); }
               catch (e) { reportError(e, t('guild.bans.banFailed')); }
             },
           })}

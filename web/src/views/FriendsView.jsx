@@ -4,6 +4,7 @@ import { useStore, useStoreEvent } from '../hooks/useStore.jsx';
 import { reportError, toast } from '../hooks/useToast.jsx';
 import { faceOf } from '../lib/faces.js';
 import { shortName } from '../lib/util.js';
+import { fullId } from '../lib/people.js';
 import {
   Avatar, BanIcon, Button, CheckIcon, CloseIcon, ContextMenu, EmojiText, EmptyState,
   IconButton, MembersIcon, MessageIcon, MoreIcon, Pill, RemoveFriendIcon, StatusLine,
@@ -22,7 +23,7 @@ const TABS = [
 
 const EMPTY = {
   online: 'None of your friends are online right now.',
-  all: 'Add someone by their full ID to get started.',
+  all: 'Add someone by their full ID, like alice@example.org, to get started.',
   pending: 'No requests waiting, in either direction.',
   blocked: 'Nobody is blocked.',
 };
@@ -129,7 +130,7 @@ function AddFriend({ mobile = false }) {
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
-    const id = value.trim();
+    const id = fullId(value, store.session?.home?.domain);
     if (!id || busy) return;
     setBusy(true);
     try {
@@ -155,7 +156,7 @@ function AddFriend({ mobile = false }) {
     >
       <TextInput
         aria-label="Add friend"
-        placeholder="Add a friend with their ID, like @alice:example.org"
+        placeholder="Add a friend with their ID, like alice@example.org"
         value={value}
         onChange={(e) => setValue(e.target.value)}
         className={cn('min-w-0 flex-1', !mobile && 'max-w-xl')}

@@ -4,6 +4,7 @@ import {
 import { createPortal } from 'react-dom';
 import { useStore, useStoreEvent, useStoreEventFor } from '../hooks/useStore.jsx';
 import { faceOf } from '../lib/faces.js';
+import { fullId } from '../lib/people.js';
 import { relative, shortName } from '../lib/util.js';
 import { cn } from '../lib/cn.js';
 import { clipContent } from '../lib/emoji.js';
@@ -76,7 +77,7 @@ const CARRIES = {
 
 const TYPED_TOKEN = /(?:^|\s)(from|mentions|has|in):$/i;
 
-const FULL_ID = /^@?[^:@\s]+:[^\s@]+$/;
+const FULL_ID = /^@?[^:@\s]+[:@][^\s@]+$/;
 
 const named = (m) => m.nickname || m.display_name || shortName(m.user_id);
 
@@ -123,7 +124,7 @@ function guildCandidates(store, guildId, kind, raw) {
 
   const out = memberCandidates([...(store.members.get(guildId)?.values() || [])], term);
 
-  const typed = FULL_ID.test(raw.trim()) ? `@${raw.trim().replace(/^@/, '')}` : null;
+  const typed = FULL_ID.test(raw.trim()) ? fullId(raw) : null;
   if (typed && !out.some((o) => o.value.toLowerCase() === typed.toLowerCase())) {
     out.unshift({ key: typed, value: typed, label: typed, sub: 'Use this ID', icon: UserIcon });
   }

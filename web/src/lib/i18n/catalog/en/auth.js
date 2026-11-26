@@ -129,12 +129,12 @@ export const auth = {
   'auth.find.title': 'Sign in to Telium',
   'auth.find.label': 'Telium address',
   // DATA-shaped: an example handle on the project's own server. The shape --
-  // `@name:server` -- is the message; translate "you" only if the locale
+  // `name@server` -- is the message; translate "you" only if the locale
   // writes example names differently.
-  'auth.find.placeholder': '@you:example.org',
+  'auth.find.placeholder': 'you@example.org',
   // Forgetting the server has to read as fine, because it is: a bare name is
   // looked for on the servers this device knows.
-  'auth.find.hint': 'Your username and server, like @ada:example.org. Forgot your server? Just type your username.',
+  'auth.find.hint': 'Your username and server, like ada@example.org. Forgot your server? Just type your username.',
   // Screen-reader name for the list of accounts this machine has used.
   'auth.find.recentLabel': 'Accounts on this device',
   // `{user}` is a full handle and is data.
@@ -143,7 +143,7 @@ export const auth = {
   // field naming what is being looked up. `{host}` is data.
   'auth.find.busy': 'Looking up…',
   'auth.find.lookingUp': 'Looking up {host}…',
-  'auth.find.invalid': 'That doesn\'t look like a Telium address. Try @name:server.',
+  'auth.find.invalid': 'That doesn\'t look like a Telium address. Try name@server.',
   'auth.find.unreachable': 'Couldn\'t reach {host}. Check the spelling, or your connection.',
   // Deliberately definite, unlike the vague sign-in failure in `errors.js`:
   // the server's public status route has already said so, and the fix -- a
@@ -164,7 +164,7 @@ export const auth = {
   // Under the rows, for somebody whose account is on none of them.
   'auth.find.elsewhere': 'On a different server?',
   'auth.find.whichServer': 'Which server is {user} on?',
-  'auth.find.afterColon': 'Or type it after a colon, like @{user}:your.server',
+  'auth.find.afterColon': 'Or add it after an @, like {user}@your.server',
   // On the password step when the address had a forwarding note on it.
   'auth.find.moved': 'Your account moved to {host}.',
   // Said before any password is typed, so it cannot say "the same password".
@@ -194,10 +194,10 @@ export const auth = {
   'auth.identity.titleLogin': 'Who is signing in?',
   // Example usernames. "ada" is Ada Lovelace and is a name, so a locale may
   // swap it for one its readers will recognise as an example -- what must
-  // survive is the *shape*: a bare name, or a full `@name:server` id. `{host}`
+  // survive is the *shape*: a bare name, or a full `name@server` address. `{host}`
   // is the homeserver this flow is pointed at and is data.
   'auth.identity.placeholderNew': 'ada',
-  'auth.identity.placeholder': 'ada or @ada:{host}',
+  'auth.identity.placeholder': 'ada or ada@{host}',
   // Shown under the username field while registering. The server is part of the
   // address, so the preview spells it out. `{address}` is the whole thing, e.g.
   // `@ada:example.org`, and is data.
@@ -655,7 +655,7 @@ export const auth = {
   // An example user id. The shape is the message -- a full id with a server on
   // it, not a display name -- so whatever name a locale substitutes must keep
   // the `@name:host` form.
-  'auth.guardians.placeholder': '@friend:home.example',
+  'auth.guardians.placeholder': 'friend@home.example',
   // The two ways to get the form wrong, told apart rather than collapsed into
   // one "invalid" line: from the outside a blank field and a repeated one look
   // identical, and a disabled button with no reason beside it is a dead end.
