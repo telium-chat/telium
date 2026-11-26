@@ -567,7 +567,7 @@ export const messages = {
   // ASCII by protocol, so a Japanese-language local part would be an example
   // the field itself rejects, which is worse than an opaque one. `example.org`
   // is reserved by RFC 2606 and stays. The `@` and `:` are syntax.
-  'guild.overview.transfer.placeholder': '@member:example.org',
+  'guild.overview.transfer.placeholder': 'member@example.org',
   'guild.overview.transfer.done': '所有権を譲渡しました。',
   'guild.overview.transfer.failed': '所有権を譲渡できませんでした',
 
@@ -886,7 +886,7 @@ export const messages = {
   // label carries an example; English's "like" has no direct equivalent that
   // is not wordier. The id itself is untouched -- see the note on
   // `guild.overview.transfer.placeholder`.
-  'guild.bans.dialogLabel': '完全なアカウントID（例：@someone:example.org）',
+  'guild.bans.dialogLabel': '完全なアカウントID（例：someone@example.org）',
   'guild.bans.confirm': 'BANする',
   'guild.bans.banFailed': 'BANできませんでした',
 
@@ -905,7 +905,7 @@ export const messages = {
   // field rejects. English's joke in "spammer" does not survive, and nothing
   // is lost -- what the placeholder has to communicate is the *shape*
   // `@localpart:domain`, which it still does.
-  'guild.purge.accountPlaceholder': '@spammer:example.org',
+  'guild.purge.accountPlaceholder': 'spammer@example.org',
   // 件 counts messages, here and in `guild.purge.deleted` below. Japanese
   // counts messages, notifications and records with 件; 通 exists and is for
   // letters and postal mail; 個 would be for objects and is wrong for a
@@ -5037,7 +5037,7 @@ export const messages = {
   'auth.encryption.ok.title': 'あなたのプライベートメッセージは保護されています。',
   'auth.encryption.settingUp.note': 'サインイン後、少し時間がかかります。',
   'auth.encryption.settingUp.title': 'この端末で暗号化を設定しています。',
-  'auth.find.afterColon': 'または、@{user}:your.server のようにコロンの後に入力してください',
+  'auth.find.afterColon': 'または、{user}@your.server のように @ の後に入力してください',
   'auth.find.busy': '照会しています…',
   'auth.find.changeAddress': '別のアドレスを使う',
   'auth.find.changeHome': '別のホームを選ぶ',
@@ -5047,16 +5047,16 @@ export const messages = {
   'auth.find.forget': 'この端末から {user} を削除',
   'auth.find.found': '見つかりました：{user}＠{host}',
   'auth.find.foundLabel': 'アカウント：{user}',
-  'auth.find.hint': '@ada:example.org のような、あなたのユーザー名とサーバーです。サーバーを忘れた場合は、ユーザー名だけを入力してください。',
+  'auth.find.hint': 'ada@example.org のような、あなたのユーザー名とサーバーです。サーバーを忘れた場合は、ユーザー名だけを入力してください。',
   'auth.find.homeExplainer': 'アカウントのホームは、プロフィール、サインイン、友だち、メッセージを保管します。ほかの場所でホストされているコミュニティにも参加できます。',
-  'auth.find.invalid': 'これは Telium アドレスではないようです。@name:server の形式で試してください。',
+  'auth.find.invalid': 'これは Telium アドレスではないようです。name@server の形式で試してください。',
   'auth.find.label': 'Telium アドレス',
   'auth.find.lookingUp': '照会しています：{host}…',
   'auth.find.moved': 'あなたのアカウントは {host} に移転しました。',
   'auth.find.newTitle': 'Telium は初めてですか？',
   'auth.find.noAccount': 'アカウント {user} は {host} にありません。綴りを確認するか、<create>アカウントを作成</create>してください。',
   'auth.find.noSuchAccount': 'アカウント {user} は {host} にありません。',
-  'auth.find.placeholder': '@you:example.org',
+  'auth.find.placeholder': 'you@example.org',
   'auth.find.recentLabel': 'この端末のアカウント',
   'auth.find.searching': '探しています：{user}…',
   'auth.find.title': 'Telium にサインイン',
@@ -5068,7 +5068,7 @@ export const messages = {
   'auth.guardians.name': '復旧連絡先（3人中2人）',
   'auth.guardians.needThree': '別々の3人を選んでください。',
   'auth.guardians.person': '人物 {index}',
-  'auth.guardians.placeholder': '@friend:home.example',
+  'auth.guardians.placeholder': 'friend@home.example',
   'auth.guardians.replace': 'この3人を変更',
   'auth.guardians.save': 'この3人を保存',
   'auth.guardians.saved': '3人の復旧連絡先を保存しました。',
@@ -5081,7 +5081,7 @@ export const messages = {
   'auth.guardians.verifyFirst': 'まず絵文字の照合で相手を確認し、その後でその人の完全な ID をここに入力してください。',
   'auth.handoff.account': '<b>アカウント {account} を {destination} へ移転します。</b>移転先になるアカウントにサインインするか、新しいアカウントを登録してください。{source} に何かが送信される前に確認を求められます。',
   'auth.handoff.guild': '<b>ギルド {name} を {destination} へ移転します。</b>そこで所有者になるアカウントにサインインするか、新しいアカウントを登録してください。{source} に何かが送信される前に確認を求められます。',
-  'auth.identity.placeholder': 'ada または @ada:{host}',
+  'auth.identity.placeholder': 'ada または ada@{host}',
   'auth.identity.placeholderNew': 'ada',
   'auth.identity.titleLogin': '誰がサインインしますか？',
   'auth.identity.titleRegister': 'ユーザー名を選ぶ',
@@ -5316,8 +5316,8 @@ export const messages = {
   'migration.manual.step2Cooling': '予約するとクーリングオフ期間が始まります。移転が実行される前に、有効な端末から取り消せます。',
   'migration.manual.step2Password': '下に現在のパスワードをもう一度入力してください。',
   'migration.manual.useGuided': 'ガイド付きの移転を使う',
-  'migration.receive.accountIdHint': '元のサーバーでのあなたの完全な ID（例：@you:old.example）です。',
-  'migration.receive.accountIdPlaceholder': '@you:old.example',
+  'migration.receive.accountIdHint': '元のサーバーでのあなたの完全な ID（例：you@old.example）です。',
+  'migration.receive.accountIdPlaceholder': 'you@old.example',
   'migration.receive.another': '別のコードを作成',
   'migration.receive.approvalFor': 'この承認は {subjectId} に対する、{source} からのものです。',
   'migration.receive.create': 'インポートコードを作成',
@@ -5444,7 +5444,7 @@ export const messages = {
   'onboarding.home.useDomain': 'サーバーのドメインを使う',
   'onboarding.home.why': 'ここがあなたのアカウントの居場所で、メールプロバイダーを選ぶのに少し似ています。どのサーバーを使っていても、誰とでも話せて、どんなコミュニティにも参加できます。Telium が一つの会社に依存しないよう、新しい人たちを信頼できるサーバーに分けています。',
   'onboarding.invite.accountIdLabel': 'ユーザー名またはアカウント ID',
-  'onboarding.invite.accountIdPlaceholder': 'yourname または @you:home.example',
+  'onboarding.invite.accountIdPlaceholder': 'yourname または you@home.example',
   'onboarding.invite.accountReady': 'アカウントの準備ができました。',
   'onboarding.invite.backToSignIn': 'サインインに戻る',
   'onboarding.invite.createAndJoin': 'アカウントを作成して参加：{guild}',

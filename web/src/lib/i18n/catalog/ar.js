@@ -630,7 +630,7 @@ export const messages = {
   // rejects -- an example that cannot be typed is worse than an English one.
   // `example.org` is reserved by RFC 2606 and stays for the reason the English
   // comment gives. The `@` and `:` are syntax.
-  'guild.overview.transfer.placeholder': '@member:example.org',
+  'guild.overview.transfer.placeholder': 'member@example.org',
   'guild.overview.transfer.done': 'تم نقل الملكية.',
   'guild.overview.transfer.failed': 'تعذّر نقل الملكية',
 
@@ -987,7 +987,7 @@ export const messages = {
   // `example.org` is RFC 2606 reserved. See the note on
   // `guild.overview.transfer.placeholder` -- the same reasoning, and the same
   // refusal to localise an example that would then be rejected on submit.
-  'guild.bans.dialogLabel': 'معرّف الحساب الكامل، مثل @someone:example.org',
+  'guild.bans.dialogLabel': 'معرّف الحساب الكامل، مثل someone@example.org',
   // The commit button names the act. Bare مصدر, no article, because it is a
   // button and not a heading.
   'guild.bans.confirm': 'حظر',
@@ -1009,7 +1009,7 @@ export const messages = {
   // same one as the other two id examples: account local parts are ASCII, so
   // an Arabic stand-in name would be an example the field rejects.
   // `example.org` is reserved.
-  'guild.purge.accountPlaceholder': '@spammer:example.org',
+  'guild.purge.accountPlaceholder': 'spammer@example.org',
   'guild.purge.limitLabel': 'أقصى عدد للرسائل',
   'guild.purge.button': 'حذف الرسائل الأخيرة',
   // ALL SIX ARMS PLUS THE `=0` LITERAL, which is preserved exactly as English
@@ -5519,7 +5519,7 @@ export const messages = {
   'auth.encryption.ok.title': 'رسائلك الخاصة محمية.',
   'auth.encryption.settingUp.note': 'يستغرق هذا لحظة بعد تسجيل الدخول.',
   'auth.encryption.settingUp.title': 'إعداد التشفير على هذا الجهاز.',
-  'auth.find.afterColon': 'أو اكتبه بعد نقطتين، مثل @{user}:your.server',
+  'auth.find.afterColon': 'أو أضفه بعد @، مثل {user}@your.server',
   'auth.find.busy': 'جارٍ البحث…',
   'auth.find.changeAddress': 'استخدام عنوان مختلف',
   'auth.find.changeHome': 'اختيار موطن مختلف',
@@ -5529,16 +5529,16 @@ export const messages = {
   'auth.find.forget': 'تجاهل {user} على هذا الجهاز',
   'auth.find.found': 'تم العثور على {user} على {host}',
   'auth.find.foundLabel': 'حسابات باسم {user}',
-  'auth.find.hint': 'اسم المستخدم والخادم، مثل @ada:example.org. نسيت خادمك؟ اكتب اسم المستخدم فقط.',
+  'auth.find.hint': 'اسم المستخدم والخادم، مثل ada@example.org. نسيت خادمك؟ اكتب اسم المستخدم فقط.',
   'auth.find.homeExplainer': 'يحفظ موطن حسابك ملفّك الشخصي وتسجيل دخولك وأصدقاءك ورسائلك. ويمكنك مع ذلك الانضمام إلى مجتمعات مستضافة في مكان آخر.',
-  'auth.find.invalid': 'لا يبدو هذا عنوان Telium. جرّب @name:server.',
+  'auth.find.invalid': 'لا يبدو هذا عنوان Telium. جرّب name@server.',
   'auth.find.label': 'عنوان Telium',
   'auth.find.lookingUp': 'جارٍ البحث عن {host}…',
   'auth.find.moved': 'انتقل حسابك إلى {host}.',
   'auth.find.newTitle': 'جديد على Telium؟',
   'auth.find.noAccount': 'لا يوجد حساب باسم {user} على {host}. تحقّق من الكتابة، أو <create>أنشئ حسابًا</create>.',
   'auth.find.noSuchAccount': 'لا يوجد حساب باسم {user} على {host}.',
-  'auth.find.placeholder': '@you:example.org',
+  'auth.find.placeholder': 'you@example.org',
   'auth.find.recentLabel': 'الحسابات على هذا الجهاز',
   'auth.find.searching': 'جارٍ البحث عن {user}…',
   'auth.find.title': 'تسجيل الدخول إلى Telium',
@@ -5550,7 +5550,7 @@ export const messages = {
   'auth.guardians.name': 'جهات اتصال الاستعادة (أيّ اثنتين من ثلاث)',
   'auth.guardians.needThree': 'اختر ثلاثة أشخاص مختلفين.',
   'auth.guardians.person': 'الشخص {index}',
-  'auth.guardians.placeholder': '@friend:home.example',
+  'auth.guardians.placeholder': 'friend@home.example',
   'auth.guardians.replace': 'استبدال هؤلاء الثلاثة',
   'auth.guardians.save': 'حفظ هؤلاء الثلاثة',
   'auth.guardians.saved': 'تم حفظ جهات اتصال الاستعادة الثلاث.',
@@ -5563,7 +5563,7 @@ export const messages = {
   'auth.guardians.verifyFirst': 'وثّق أحدهم عبر فحص الرموز التعبيرية أولًا، ثم ضع معرّفه الكامل هنا.',
   'auth.handoff.account': '<b>نقل {account} إلى {destination}.</b> سجّل الدخول إلى الحساب الذي ينبغي أن ينتقل إليه، أو أنشئ حسابًا جديدًا. سيُطلب منك التأكيد قبل إرسال أي شيء إلى {source}.',
   'auth.handoff.guild': '<b>نقل النقابة {name} إلى {destination}.</b> سجّل الدخول إلى الحساب الذي ينبغي أن يملكها هناك، أو أنشئ حسابًا جديدًا. سيُطلب منك التأكيد قبل إرسال أي شيء إلى {source}.',
-  'auth.identity.placeholder': 'ada أو @ada:{host}',
+  'auth.identity.placeholder': 'ada أو ada@{host}',
   'auth.identity.placeholderNew': 'ada',
   'auth.identity.titleLogin': 'من يسجّل الدخول؟',
   'auth.identity.titleRegister': 'اختر اسم مستخدم',
@@ -5798,8 +5798,8 @@ export const messages = {
   'migration.manual.step2Cooling': 'تبدأ الجدولة فترة تهدئة. ويمكن لأي جهاز نشط الإلغاء قبل تنفيذ النقل.',
   'migration.manual.step2Password': 'أعد إدخال كلمة مرورك الحالية أدناه.',
   'migration.manual.useGuided': 'استخدام النقل الموجَّه',
-  'migration.receive.accountIdHint': 'معرّفك الكامل على الخادم القديم، مثل @you:old.example.',
-  'migration.receive.accountIdPlaceholder': '@you:old.example',
+  'migration.receive.accountIdHint': 'معرّفك الكامل على الخادم القديم، مثل you@old.example.',
+  'migration.receive.accountIdPlaceholder': 'you@old.example',
   'migration.receive.another': 'إنشاء رمز آخر',
   'migration.receive.approvalFor': 'هذه الموافقة تخصّ {subjectId} من {source}.',
   'migration.receive.create': 'إنشاء رمز استيراد',
@@ -5926,7 +5926,7 @@ export const messages = {
   'onboarding.home.useDomain': 'استخدام نطاق خادم',
   'onboarding.home.why': 'هنا يعيش حسابك، قليلًا كاختيار مزوّد بريد إلكتروني. وما زال بإمكانك التحدّث إلى أي أحد والانضمام إلى أي مجتمع، أيًّا كان الخادم الذي يستخدمونه. ونوزّع الوافدين الجدد على خوادم موثوقة حتى لا تعتمد Telium أبدًا على شركة واحدة.',
   'onboarding.invite.accountIdLabel': 'اسم المستخدم أو معرّف الحساب',
-  'onboarding.invite.accountIdPlaceholder': 'yourname أو @you:home.example',
+  'onboarding.invite.accountIdPlaceholder': 'yourname أو you@home.example',
   'onboarding.invite.accountReady': 'حسابك جاهز.',
   'onboarding.invite.backToSignIn': 'العودة إلى تسجيل الدخول',
   'onboarding.invite.createAndJoin': 'إنشاء حساب والانضمام إلى {guild}',

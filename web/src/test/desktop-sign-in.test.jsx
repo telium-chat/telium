@@ -194,7 +194,7 @@ describe('the desktop first screen', () => {
     mount();
     expect(await screen.findByRole('heading', { name: 'Sign in to Telium' })).toBeTruthy();
     const field = await addressField();
-    expect(field.getAttribute('placeholder')).toBe('@you:example.org');
+    expect(field.getAttribute('placeholder')).toBe('you@example.org');
     expect(screen.getByText(/Forgot your server\? Just type your username\./)).toBeTruthy();
     expect(document.querySelector('.auth-host')).toBeNull();
     expect(screen.queryByRole('button', { name: /^Get started/ })).toBeNull();
@@ -252,7 +252,7 @@ describe('the desktop first screen', () => {
   it('says what an address looks like when the text is not one', async () => {
     const { user } = mount();
     await enterAddress(user, 'not an address');
-    expect(await screen.findByText("That doesn't look like a Telium address. Try @name:server."))
+    expect(await screen.findByText("That doesn't look like a Telium address. Try name@server."))
       .toBeTruthy();
   });
 

@@ -252,7 +252,7 @@ export const guild = {
   // documentation cannot accidentally name somebody's real server. Substitute
   // a different reserved domain (`example.com`, `example.net`) if one reads
   // better; never a domain that resolves.
-  'guild.overview.transfer.placeholder': '@member:example.org',
+  'guild.overview.transfer.placeholder': 'member@example.org',
   'guild.overview.transfer.done': 'Ownership transferred.',
   'guild.overview.transfer.failed': 'Could not transfer ownership',
 
@@ -519,7 +519,7 @@ export const guild = {
   // id and not a display name, and that is the single mistake people make
   // here. See the note on `guild.overview.transfer.placeholder` for what may
   // and may not be changed about the example.
-  'guild.bans.dialogLabel': 'Full account id, like @someone:example.org',
+  'guild.bans.dialogLabel': 'Full account id, like someone@example.org',
   'guild.bans.confirm': 'Ban',
   'guild.bans.banFailed': 'Could not ban',
 
@@ -533,7 +533,7 @@ export const guild = {
   // See `guild.overview.transfer.placeholder`. The local part being "spammer"
   // is a joke that survives translation badly; a translator should use
   // whatever their readers would recognise as a stand-in name.
-  'guild.purge.accountPlaceholder': '@spammer:example.org',
+  'guild.purge.accountPlaceholder': 'spammer@example.org',
   'guild.purge.limitLabel': 'Maximum messages',
   'guild.purge.button': 'Delete recent messages',
   // What actually happened, reported as a count. This used to be built in

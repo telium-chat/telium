@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { fullId } from '../../lib/people.js';
 import { useStore } from '../../hooks/useStore.jsx';
 import { toast } from '../../hooks/useToast.jsx';
 import { copyToClipboard } from '../../lib/clipboard.js';
@@ -52,7 +53,7 @@ export function ReceiveMigrationDialog({ close, handoff = null }) {
       const next = await store.home.acceptMigration({
         subject_type: subjectType,
         source: prettyHost(source),
-        source_id: sourceId.trim(),
+        source_id: subjectType === 'user' ? fullId(sourceId) : sourceId.trim(),
       });
       setClaim(next);
       setStatus('');
@@ -208,8 +209,9 @@ export function ReceiveMigrationDialog({ close, handoff = null }) {
 }
 
 function sourceFromUserId(value) {
-  const separator = value.indexOf(':');
-  return separator > 0 ? value.slice(separator + 1).trim() : '';
+  const id = fullId(value);
+  const separator = id.indexOf(':');
+  return separator > 0 ? id.slice(separator + 1).trim() : '';
 }
 
 function ReceiveHandoff({ handoff, close }) {

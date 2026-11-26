@@ -72,9 +72,12 @@ export function fullId(typed, domain) {
   const raw = String(typed || '').trim();
   if (!raw) return '';
   const local = raw.startsWith('@') ? raw.slice(1) : raw;
-  if (local.includes(':')) return `@${local}`;
   // `ada@server.com`, as people now write it, is the same account as `@ada:server.com`.
+  // Checked first: `ada@server.com:8448` carries a colon that is the port, not the separator.
   const at = local.indexOf('@');
-  if (at > 0 && at < local.length - 1) return `@${local.slice(0, at)}:${local.slice(at + 1)}`;
+  if (at > 0 && at < local.length - 1 && !local.slice(0, at).includes(':')) {
+    return `@${local.slice(0, at)}:${local.slice(at + 1)}`;
+  }
+  if (local.includes(':')) return `@${local}`;
   return domain ? `@${local}:${domain}` : `@${local}`;
 }

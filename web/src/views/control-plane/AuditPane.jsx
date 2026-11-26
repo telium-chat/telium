@@ -1,3 +1,4 @@
+import { fullId } from '../../lib/people.js';
 import { useCallback, useMemo, useState } from 'react';
 import {
   Button, Field, Hint, Notice, Pill, Section, Select, TextInput,
@@ -75,7 +76,7 @@ export function AuditPane() {
 
   const submitActor = (e) => {
     e.preventDefault();
-    setActor(actorInput.trim());
+    setActor(fullId(actorInput));
   };
 
   return (
@@ -95,7 +96,7 @@ export function AuditPane() {
               label="Actor"
               className="min-w-0 flex-1"
               value={actorInput}
-              placeholder="@operator:example.org"
+              placeholder="operator@example.org"
               hint="A whole user id — the filter is an exact match, not a search."
               onChange={(e) => setActorInput(e.target.value)}
             />

@@ -607,7 +607,7 @@ export const messages = {
   // angetastet: das `@` und der `:`, weil das die Syntax ist, die das Feld
   // prüft, und `example.org`, das nach RFC 2606 reserviert ist, damit eine
   // Dokumentation nie versehentlich den echten Server von jemandem nennt.
-  'guild.overview.transfer.placeholder': '@mitglied:example.org',
+  'guild.overview.transfer.placeholder': 'mitglied@example.org',
   'guild.overview.transfer.done': 'Das Eigentum wurde übertragen.',
   'guild.overview.transfer.failed': 'Das Eigentum ließ sich nicht übertragen',
 
@@ -946,7 +946,7 @@ export const messages = {
   // alle machen. Zum Beispiel selbst siehe
   // `guild.overview.transfer.placeholder`: der lokale Teil ist übersetzt,
   // `example.org` bleibt.
-  'guild.bans.dialogLabel': 'Vollständige Konto-ID, etwa @jemand:example.org',
+  'guild.bans.dialogLabel': 'Vollständige Konto-ID, etwa jemand@example.org',
   'guild.bans.confirm': 'Sperren',
   'guild.bans.banFailed': 'Das Konto ließ sich nicht sperren',
 
@@ -961,7 +961,7 @@ export const messages = {
   // Der lokale Teil bleibt "spammer", weil das Wort im Deutschen genauso
   // gebraucht wird und als Platzhalter sofort erkennbar ist -- hier ist die
   // Nicht-Übersetzung ausnahmsweise die bessere Übersetzung.
-  'guild.purge.accountPlaceholder': '@spammer:example.org',
+  'guild.purge.accountPlaceholder': 'spammer@example.org',
   'guild.purge.limitLabel': 'Höchstzahl der Nachrichten',
   'guild.purge.button': 'Neueste Nachrichten löschen',
   // Der `=0`-Arm ist kein Plural von nichts: eine Bereinigung, die nichts
@@ -5003,7 +5003,7 @@ export const messages = {
   'auth.encryption.ok.title': 'Deine privaten Nachrichten sind geschützt.',
   'auth.encryption.settingUp.note': 'Das dauert nach der Anmeldung einen Moment.',
   'auth.encryption.settingUp.title': 'Verschlüsselung wird auf diesem Gerät eingerichtet.',
-  'auth.find.afterColon': 'Oder tippe ihn nach einem Doppelpunkt ein, etwa @{user}:dein.server',
+  'auth.find.afterColon': 'Oder hänge ihn nach einem @ an, etwa {user}@dein.server',
   'auth.find.busy': 'Wird gesucht…',
   'auth.find.changeAddress': 'Andere Adresse verwenden',
   'auth.find.changeHome': 'Anderen Heimserver wählen',
@@ -5013,16 +5013,16 @@ export const messages = {
   'auth.find.forget': 'Vergiss {user} auf diesem Gerät',
   'auth.find.found': 'Gefunden: {user} auf {host}',
   'auth.find.foundLabel': 'Konten namens {user}',
-  'auth.find.hint': 'Dein Benutzername und dein Server, etwa @ada:example.org. Server vergessen? Tipp einfach deinen Benutzernamen ein.',
+  'auth.find.hint': 'Dein Benutzername und dein Server, etwa ada@example.org. Server vergessen? Tipp einfach deinen Benutzernamen ein.',
   'auth.find.homeExplainer': 'Der Heimserver deines Kontos trägt dein Profil, deine Anmeldung, deine Freunde und deine Nachrichten. Gemeinschaften, die woanders gehostet werden, kannst du trotzdem beitreten.',
-  'auth.find.invalid': 'Das sieht nicht nach einer Telium-Adresse aus. Versuch es mit @name:server.',
+  'auth.find.invalid': 'Das sieht nicht nach einer Telium-Adresse aus. Versuch es mit name@server.',
   'auth.find.label': 'Telium-Adresse',
   'auth.find.lookingUp': 'Suche nach {host}…',
   'auth.find.moved': 'Dein Konto ist nach {host} umgezogen.',
   'auth.find.newTitle': 'Neu bei Telium?',
   'auth.find.noAccount': 'Es gibt kein Konto namens {user} auf {host}. Prüf die Schreibweise, oder <create>erstelle ein Konto</create>.',
   'auth.find.noSuchAccount': 'Es gibt kein Konto namens {user} auf {host}.',
-  'auth.find.placeholder': '@du:example.org',
+  'auth.find.placeholder': 'du@example.org',
   'auth.find.recentLabel': 'Konten auf diesem Gerät',
   'auth.find.searching': 'Suche nach {user}…',
   'auth.find.title': 'Bei Telium anmelden',
@@ -5034,7 +5034,7 @@ export const messages = {
   'auth.guardians.name': 'Wiederherstellungskontakte (beliebige zwei von drei)',
   'auth.guardians.needThree': 'Wähle drei verschiedene Personen.',
   'auth.guardians.person': 'Person {index}',
-  'auth.guardians.placeholder': '@freund:home.example',
+  'auth.guardians.placeholder': 'freund@home.example',
   'auth.guardians.replace': 'Diese drei ersetzen',
   'auth.guardians.save': 'Diese drei speichern',
   'auth.guardians.saved': 'Deine drei Wiederherstellungskontakte sind gespeichert.',
@@ -5047,7 +5047,7 @@ export const messages = {
   'auth.guardians.verifyFirst': 'Verifiziere zuerst jemanden mit dem Emoji-Abgleich und trage dann die vollständige ID hier ein.',
   'auth.handoff.account': '<b>Ziehe {account} nach {destination} um.</b> Melde dich bei dem Konto an, in das umgezogen werden soll, oder registriere ein neues. Du wirst um Bestätigung gebeten, bevor etwas an {source} gesendet wird.',
   'auth.handoff.guild': '<b>Die Gilde {name} wird nach {destination} umgezogen.</b> Melde dich bei dem Konto an, dem sie dort gehören soll, oder registriere ein neues. Du wirst um Bestätigung gebeten, bevor etwas an {source} gesendet wird.',
-  'auth.identity.placeholder': 'ada oder @ada:{host}',
+  'auth.identity.placeholder': 'ada oder ada@{host}',
   'auth.identity.placeholderNew': 'ada',
   'auth.identity.titleLogin': 'Wer meldet sich an?',
   'auth.identity.titleRegister': 'Wähle einen Benutzernamen',
@@ -5274,8 +5274,8 @@ export const messages = {
   'migration.manual.step2Cooling': 'Mit dem Planen beginnt eine Bedenkzeit. Jedes aktive Gerät kann abbrechen, bevor die Übertragung ausgeführt wird.',
   'migration.manual.step2Password': 'Gib unten dein aktuelles Passwort erneut ein.',
   'migration.manual.useGuided': 'Den geführten Umzug verwenden',
-  'migration.receive.accountIdHint': 'Deine vollständige ID auf dem alten Server, zum Beispiel @du:old.example.',
-  'migration.receive.accountIdPlaceholder': '@du:old.example',
+  'migration.receive.accountIdHint': 'Deine vollständige ID auf dem alten Server, zum Beispiel du@old.example.',
+  'migration.receive.accountIdPlaceholder': 'du@old.example',
   'migration.receive.another': 'Weiteren Code erstellen',
   'migration.receive.approvalFor': 'Diese Freigabe gilt für {subjectId} von {source}.',
   'migration.receive.create': 'Importcode erstellen',
@@ -5402,7 +5402,7 @@ export const messages = {
   'onboarding.home.useDomain': 'Eine Serverdomain verwenden',
   'onboarding.home.why': 'Hier liegt dein Konto, ein bisschen wie die Wahl eines E-Mail-Anbieters. Du kannst weiterhin mit allen sprechen und jeder Gemeinschaft beitreten, egal welchen Server sie nutzen. Wir verteilen neue Leute auf vertrauenswürdige Server, damit Telium nie von einer einzigen Firma abhängt.',
   'onboarding.invite.accountIdLabel': 'Benutzername oder Konto-ID',
-  'onboarding.invite.accountIdPlaceholder': 'deinname oder @du:home.example',
+  'onboarding.invite.accountIdPlaceholder': 'deinname oder du@home.example',
   'onboarding.invite.accountReady': 'Dein Konto ist bereit.',
   'onboarding.invite.backToSignIn': 'Zurück zur Anmeldung',
   'onboarding.invite.createAndJoin': 'Konto erstellen & Beitritt zu {guild}',
