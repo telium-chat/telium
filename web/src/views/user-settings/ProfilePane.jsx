@@ -6,7 +6,7 @@ import { copyToClipboard } from '../../lib/clipboard.js';
 import { uploadMedia, profileRef } from '../../lib/upload.js';
 import { downscaleToFit } from '../../lib/image.js';
 import { publicProfileLink } from '../PublicProfileLanding.jsx';
-import { displayId, themeOf } from '../../lib/util.js';
+import { displayId, shortName, themeOf } from '../../lib/util.js';
 import { useImageCrop } from '../dialogs/CropImageDialog.jsx';
 import { useUnsavedChanges } from '../../components/SettingsLayout.jsx';
 import { useAutosize } from '../chat/MarkdownInk.jsx';
@@ -323,48 +323,66 @@ function Editor({ me }) {
 
 function Preview({ me, draft, base, avatarMenu, bannerMenu }) {
   const name = draft.displayName.trim() || me.user_id;
+  const themed = Boolean(draft.themeTop);
+  const local = shortName(me.user_id);
+  const domain = displayId(me.user_id).slice(local.length + 1);
   return (
-    <div
-      className="profile-edit__card"
-      data-themed={draft.themeTop ? 'true' : undefined}
-      style={draft.themeTop
-        ? { '--pc-theme-top': draft.themeTop, '--pc-theme-bottom': draft.themeBottom }
-        : undefined}
-    >
-      <div className="profile-edit__banner" style={{ background: draft.accent }}>
-        {draft.bannerRef ? (
-          <AnimatedImage
-            src={`${base}/_telium/v1/media/${draft.bannerRef}`}
-            alt=""
-            animated
-            className="size-full object-cover"
-          />
-        ) : null}
-        {bannerMenu}
-      </div>
-      <div className="profile-edit__face">
-        <Avatar
-          id={me.user_id}
-          name={name}
-          size="xl"
-          mediaRef={draft.avatarRef}
-          base={base}
-        />
-        {avatarMenu}
-      </div>
-      <div className="profile-edit__who">
-        <div className="profile-edit__name">
-          <EmojiText>{name}</EmojiText>
-          {draft.pronouns.trim() ? (
-            <span className="profile-edit__pronouns">{draft.pronouns.trim()}</span>
-          ) : null}
+    <div className="popup popup--card pc-preview">
+      <div
+        className="pc"
+        data-surface="popover"
+        data-full="false"
+        data-themed={themed ? 'true' : undefined}
+        style={themed
+          ? { '--pc-accent': draft.accent, '--pc-theme-top': draft.themeTop, '--pc-theme-bottom': draft.themeBottom }
+          : { '--pc-accent': draft.accent }}
+      >
+        <div className="pc__left">
+          <div className="pc__banner" style={{ background: draft.accent }}>
+            {draft.bannerRef ? (
+              <AnimatedImage
+                src={`${base}/_telium/v1/media/${draft.bannerRef}`}
+                alt=""
+                animated
+                className="size-full object-cover"
+              />
+            ) : null}
+          </div>
+          <div className="pc__top-actions">{bannerMenu}</div>
+
+          <div className="pc__face">
+            <div className="pc__cut" style={{ '--presence-ring': 'var(--pc-fill)' }}>
+              <div className="pc-preview__avatar">
+                <Avatar id={me.user_id} name={name} size="xl" mediaRef={draft.avatarRef} base={base} />
+                {avatarMenu}
+              </div>
+            </div>
+          </div>
+
+          <div className="pc__head">
+            <div className="pc__ident">
+              <h2 className="pc__name"><EmojiText>{name}</EmojiText></h2>
+            </div>
+            <div className="pc__meta">
+              <span className="pc__handle">
+                <span className="pc__handle-local">{local}</span>
+                <span className="pc__handle-domain">{`@${domain}`}</span>
+              </span>
+              {draft.pronouns.trim() ? (
+                <span className="pc__fact"><span>{draft.pronouns.trim()}</span></span>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="pc__body">
+            {draft.bio.trim() ? (
+              <div className="pc__prose"><BioText>{draft.bio}</BioText></div>
+            ) : (
+              <div className="pc__prose text-muted">Nothing written yet.</div>
+            )}
+          </div>
+          <div className="pc-preview__foot" />
         </div>
-        <div className="profile-edit__handle">{displayId(me.user_id)}</div>
-        {draft.bio.trim() ? (
-          <div className="profile-edit__bio"><BioText>{draft.bio}</BioText></div>
-        ) : (
-          <div className="profile-edit__bio profile-edit__bio--empty">Nothing written yet.</div>
-        )}
       </div>
     </div>
   );

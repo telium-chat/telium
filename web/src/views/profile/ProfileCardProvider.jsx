@@ -23,6 +23,8 @@ export function ProfileCardProvider({ children }) {
   const depth = useRef(0);
   depth.current = modal.depth;
   const trigger = useRef(null);
+  const live = useRef(null);
+  live.current = card && card.open !== false ? card : null;
 
   useEffect(() => {
     const track = (e) => { pointer.current = { x: e.clientX, y: e.clientY }; };
@@ -32,6 +34,13 @@ export function ProfileCardProvider({ children }) {
 
   const open = useCallback((userId, { guildId = null, anchor = null, source = null } = {}) => {
     if (!userId) return;
+    // Clicking the thing that opened the card again closes it.
+    const current = live.current;
+    if (current && !current.mobile && anchor && trigger.current === anchor
+      && current.userId === userId && (current.guildId ?? null) === guildId) {
+      setCard((c) => (c?.key === current.key ? { ...c, open: false } : c));
+      return;
+    }
     trigger.current = anchor || null;
     if (checkIsMobile()) {
       setCard({
