@@ -514,28 +514,39 @@ impl Hub {
         entry.connections += 1;
     }
 
-    pub async fn connection_closed(&self, user_id: &str) -> bool {
+    /// Counts a connection gone. True when it was the user's last, without touching presence yet.
+    pub async fn connection_dropped(&self, user_id: &str) -> bool {
         let mut map = self.presence.write().await;
         let Some(entry) = map.get_mut(user_id) else { return false };
         entry.connections = entry.connections.saturating_sub(1);
-        if entry.connections == 0 {
-            entry.current = if entry.keep_custom_status {
-                Presence {
-                    status: "offline".into(),
-                    custom_status: entry.current.custom_status.clone(),
-                    activity: None,
-                    rich_activities: Vec::new(),
-                    updated_at: now_ms(),
-                }
-            } else {
-                Presence::offline()
-            };
-            entry.dirty = false;
-            entry.last_sent = now_ms();
-            true
-        } else {
-            false
+        entry.connections == 0
+    }
+
+    /// Marks the user offline if they still have no connection. False if they came back.
+    pub async fn settle_offline(&self, user_id: &str) -> bool {
+        let mut map = self.presence.write().await;
+        let Some(entry) = map.get_mut(user_id) else { return false };
+        if entry.connections != 0 {
+            return false;
         }
+        entry.current = if entry.keep_custom_status {
+            Presence {
+                status: "offline".into(),
+                custom_status: entry.current.custom_status.clone(),
+                activity: None,
+                rich_activities: Vec::new(),
+                updated_at: now_ms(),
+            }
+        } else {
+            Presence::offline()
+        };
+        entry.dirty = false;
+        entry.last_sent = now_ms();
+        true
+    }
+
+    pub async fn connection_closed(&self, user_id: &str) -> bool {
+        self.connection_dropped(user_id).await && self.settle_offline(user_id).await
     }
 
     pub async fn set_presence(
@@ -866,6 +877,28 @@ mod tests {
         hub.connection_opened("@a:x").await;
         assert!(!hub.connection_closed("@a:x").await);
         assert!(hub.connection_closed("@a:x").await);
+        assert_eq!(hub.presence_of("@a:x").await.status, "offline");
+    }
+
+    #[tokio::test]
+    async fn a_reconnect_inside_the_grace_never_shows_offline() {
+        let hub = Hub::new(30);
+        hub.connection_opened("@a:x").await;
+        hub.set_presence("@a:x", presence("online"), false).await;
+        assert!(hub.connection_dropped("@a:x").await);
+        assert_eq!(hub.presence_of("@a:x").await.status, "online");
+        hub.connection_opened("@a:x").await;
+        assert!(!hub.settle_offline("@a:x").await);
+        assert_eq!(hub.presence_of("@a:x").await.status, "online");
+    }
+
+    #[tokio::test]
+    async fn settling_after_the_grace_marks_offline() {
+        let hub = Hub::new(30);
+        hub.connection_opened("@a:x").await;
+        hub.set_presence("@a:x", presence("online"), false).await;
+        assert!(hub.connection_dropped("@a:x").await);
+        assert!(hub.settle_offline("@a:x").await);
         assert_eq!(hub.presence_of("@a:x").await.status, "offline");
     }
 

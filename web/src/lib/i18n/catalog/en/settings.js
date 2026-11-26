@@ -193,6 +193,8 @@ export const settings = {
   'settings.messages.members.hint': 'The member list is range-subscribed, so hiding it also stops the updates.',
   'settings.messages.typing.label': 'Send typing indicators',
   'settings.messages.typing.hint': 'Off means guild servers are never told that you started writing.',
+  'settings.messages.gifFavorites.label': 'Open the GIF picker on favorites',
+  'settings.messages.gifFavorites.hint': 'Skips the catalog when you have favorites saved. The catalog is one tap away.',
 
   // How a date is written when a message is old enough to carry one -- which
   // is "any day that is not today"; see `beforeToday` for where that boundary

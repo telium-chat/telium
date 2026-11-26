@@ -48,12 +48,21 @@ export const networkItems = (env, g) => {
 };
 
 export const guild = (env, g) => {
-  const { store, modal, dialogs } = env;
+  const { store, modal, dialogs, t: tr } = env;
   const perms = store.guildPermissions(g.id);
   const isOwner = Boolean(store.myMember(g.id)?.is_owner);
   const api = () => store.apiForGuild(g.id);
+  const { unread, mentions } = store.guildUnread(g.id);
   return (
     <>
+      {unread || mentions ? (
+        <>
+          <MenuItem icon={CheckIcon} onAction={() => store.markGuildRead(g.id)}>
+            {tr('chat.menu.markRead')}
+          </MenuItem>
+          <MenuSeparator />
+        </>
+      ) : null}
       {has(perms, 'CREATE_INVITE') ? (
         <MenuItem
           icon={LinkIcon}

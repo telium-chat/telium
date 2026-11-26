@@ -137,7 +137,9 @@ export function GifPickerPanel({
   const [seen, watch] = useNearViewport(scrollRef);
 
   const favorites = gifFavorites(store.sync);
-  const [showFavorites, setShowFavorites] = useState(false);
+  const [showFavorites, setShowFavorites] = useState(
+    () => Boolean(store.prefs?.gifOpensFavorites) && favorites.length > 0,
+  );
   const stash = useRef(null);
   const [favoriteItems, setFavoriteItems] = useState([]);
   const [sizes, setSizes] = useState({});

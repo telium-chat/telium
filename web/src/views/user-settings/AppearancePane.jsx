@@ -266,6 +266,12 @@ export function AppearancePane() {
             checked={prefs.typing !== false}
             onChange={(next) => set(() => { prefs.typing = next; })}
           />
+          <Switch
+            label={t('settings.messages.gifFavorites.label')}
+            hint={t('settings.messages.gifFavorites.hint')}
+            checked={Boolean(prefs.gifOpensFavorites)}
+            onChange={(next) => set(() => { prefs.gifOpensFavorites = next; })}
+          />
         </div>
       </Section>
     </>

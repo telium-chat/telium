@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "telium-bot"
+version = "0.2.0"
+description = "First-party Telium bot client for Python"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+dependencies = ["aiohttp>=3.9"]
+keywords = ["telium", "bot", "chat", "federated"]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pytest-asyncio>=0.23", "pytest-aiohttp>=1.0"]
+
+[project.urls]
+Homepage = "https://github.com/telium-chat/telium/tree/main/sdk/bot/python#readme"
+Issues = "https://github.com/telium-chat/telium/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/telium_bot"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
