@@ -9,7 +9,7 @@ import { faceOf } from '../../lib/faces.js';
 import { InfoIcon, MenuItem, MenuSeparator } from '../../components/index.js';
 import { useT } from '../../lib/i18n/react.jsx';
 import { DeliveryDetails } from './DeliveryDetails.jsx';
-import { DEVICE_APPROVAL, NO_ENCRYPTION, noteText } from './encryption.jsx';
+import { deviceNote, NO_ENCRYPTION, noteText } from './encryption.jsx';
 
 const EMPTY = [];
 
@@ -229,7 +229,7 @@ export function useDmSurface(convo) {
       : !store.mls
         ? noteText(NO_ENCRYPTION)
         : store.vault?.needs_device
-          ? noteText(DEVICE_APPROVAL)
+          ? noteText(deviceNote(store.vault))
           : null,
     mayAttach: true,
     stickers: false,

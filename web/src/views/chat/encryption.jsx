@@ -50,6 +50,17 @@ export const DEVICE_APPROVAL = note(
   'chat.encryption.deviceApproval.body',
 );
 
+export const PASSWORD_UNLOCK = note(
+  'chat.encryption.passwordUnlock.title',
+  'chat.encryption.passwordUnlock.body',
+  { pane: 'settings.nav.recovery' },
+);
+
+/// Opaque custody opens with the password, so a device that only lacks it is not waiting on another device.
+export const deviceNote = (vault) => (vault?.needs_password && vault.mode !== 'none'
+  ? PASSWORD_UNLOCK
+  : DEVICE_APPROVAL);
+
 export const RETIRED_CUSTODY = note(
   'chat.encryption.retired.title',
   'chat.encryption.retired.body',
@@ -214,7 +225,7 @@ export function ConversationNotices({
       ) : null}
       {needsDevice ? (
         <Notice tone="warn">
-          <NoticeText head={DEVICE_APPROVAL} />
+          <NoticeText head={deviceNote(store.vault)} />
         </Notice>
       ) : null}
       {awaiting && !needsDevice ? (

@@ -4,6 +4,7 @@ import { frameMayInterrupt } from '../interrupts.js';
 import { KEYS } from '../sync.js';
 import { worthRetrying } from '../mls.js';
 import * as vault from '../vault.js';
+import { secureAuth } from './shared.js';
 
 const PENDING_FRAMES = 200;
 const PENDING_CONVERSATIONS = 32;
@@ -258,7 +259,33 @@ export const dmMethods = {
       throw new Error('that recovery key did not open the vault');
     }
     this.accountRecoveryWrapper = recoveryWrapper;
+    return this.adoptOpenedVault(opened);
+  },
 
+  /// Opaque custody is opened by the password alone. A session restored without it (or whose sign-in could not finish
+  /// the vault) asks for it here rather than sending the person to another device or a recovery key they may not have.
+  async unlockVaultWithPassword(password) {
+    if (!this.home) throw new Error('sign in before unlocking encrypted DMs');
+    if (!password) throw new Error('Enter your account password.');
+    if (!this.opaqueAuth) throw new Error('This homeserver cannot unlock encrypted messages with a password.');
+    const userId = this.session?.home?.user_id || null;
+    const { currentWrapperOpaque } = await secureAuth();
+    const { recoveryWrapper } = await currentWrapperOpaque(this.home, password);
+    const opened = await vault.load(
+      this.home,
+      userId,
+      recoveryWrapper,
+      this.accountRecoveryWrapper,
+      { reseal: true },
+    );
+    if (opened.locked || !opened.key) {
+      throw new Error('that password did not open the vault');
+    }
+    this.authRecoveryWrapper = recoveryWrapper;
+    return this.adoptOpenedVault(opened);
+  },
+
+  async adoptOpenedVault(opened) {
     this.vault = opened;
     this.sync.adoptKeyring(opened, { current: true }).catch(() => {});
     await this.mls?.adoptRecoveryKey(opened);
