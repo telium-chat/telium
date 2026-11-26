@@ -37,6 +37,7 @@ export function RecoveryPane() {
   const backup = store.custody?.backup || null;
 
   const [recoveryKey, setRecoveryKey] = useState('');
+  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [guardianIds, setGuardianIds] = useState(['', '', '']);
   const [currentPassword, setCurrentPassword] = useState('');
@@ -102,6 +103,23 @@ export function RecoveryPane() {
     try {
       await store.unlockVault(recoveryKey);
       setRecoveryKey('');
+      toast(t('auth.unlock.done'));
+    } catch (e) {
+      failed('auth.unlock.failed', e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const unlockWithPassword = async () => {
+    if (!password) {
+      toast(t('auth.unlock.enterPassword'));
+      return;
+    }
+    setBusy(true);
+    try {
+      await store.unlockVaultWithPassword(password);
+      setPassword('');
       toast(t('auth.unlock.done'));
     } catch (e) {
       failed('auth.unlock.failed', e);
@@ -334,6 +352,29 @@ export function RecoveryPane() {
 
       {locked && (!retired || (vault?.retiredMode === 'device_custody' && vault?.hasRecoveryCopy)) ? (
         <Section title={t('auth.unlock.title')}>
+          {!retired && store.opaqueAuth && vault?.needs_password ? (
+            <>
+              <TextInput
+                label={t('auth.unlock.passwordLabel')}
+                type="password"
+                value={password}
+                autoComplete="current-password"
+                hint={t('auth.unlock.passwordHint')}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !busy) unlockWithPassword();
+                }}
+              />
+              <Button
+                variant="primary"
+                className="self-start"
+                disabled={busy || !password}
+                onClick={unlockWithPassword}
+              >
+                {t('auth.unlock.button')}
+              </Button>
+            </>
+          ) : null}
           {vault?.needs_recovery_key || (retired && !vault?.needs_password) ? (
             <>
               <TextInput

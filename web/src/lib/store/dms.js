@@ -4,6 +4,7 @@ import { frameMayInterrupt } from '../interrupts.js';
 import { KEYS } from '../sync.js';
 import { worthRetrying } from '../mls.js';
 import * as vault from '../vault.js';
+import { secureAuth } from './shared.js';
 
 const PENDING_FRAMES = 200;
 const PENDING_CONVERSATIONS = 32;
@@ -258,17 +259,62 @@ export const dmMethods = {
       throw new Error('that recovery key did not open the vault');
     }
     this.accountRecoveryWrapper = recoveryWrapper;
+    return this.adoptOpenedVault(opened);
+  },
 
+  /// Opaque custody is opened by the password alone. A session restored without it (or whose sign-in could not finish
+  /// the vault) asks for it here rather than sending the person to another device or a recovery key they may not have.
+  async unlockVaultWithPassword(password) {
+    if (!this.home) throw new Error('sign in before unlocking encrypted DMs');
+    if (!password) throw new Error('Enter your account password.');
+    if (!this.opaqueAuth) throw new Error('This homeserver cannot unlock encrypted messages with a password.');
+    const userId = this.session?.home?.user_id || null;
+    const { currentWrapperOpaque } = await secureAuth();
+    const { recoveryWrapper } = await currentWrapperOpaque(this.home, password);
+    const opened = await vault.load(
+      this.home,
+      userId,
+      recoveryWrapper,
+      this.accountRecoveryWrapper,
+      { reseal: true },
+    );
+    if (opened.locked || !opened.key) {
+      throw new Error('that password did not open the vault');
+    }
+    this.authRecoveryWrapper = recoveryWrapper;
+    return this.adoptOpenedVault(opened);
+  },
+
+  async adoptOpenedVault(opened) {
     this.vault = opened;
     this.sync.adoptKeyring(opened, { current: true }).catch(() => {});
     await this.mls?.adoptRecoveryKey(opened);
     this.emit('vault', opened);
     await this.refreshCustody().catch(() => {});
-    await this.startTrust().catch(() => {});
+    await this.trustWithAccountKey(opened);
 
     const id = this.route.conversationId;
     if (id && this.mls) await this.openConversation(id);
     return opened;
+  },
+
+  /// Trust starts at launch, and on a locked device it starts with no account key: it cannot open the root's
+  /// `recovery-v1:` seal, so it holds no signing key and this device never signs itself. `startTrust` returns that same
+  /// instance, so a ring opened later (password or recovery key) has to be handed to it here. Without the root, trust
+  /// starts again with the ring, which opens the root (or creates it when the account has none) and vouches for this
+  /// device. With the root already held, it is only sealed under the account key if the server's copy is in another form (I4).
+  async trustWithAccountKey(opened) {
+    const held = this.trust;
+    if (held && !held.canSign && opened?.key) this.trust = null;
+    const trust = await this.startTrust().catch(() => null);
+    // A restart that fails (an outage) keeps the instance it replaced rather than leaving no trust at all.
+    if (!trust && held && !this.trust) this.trust = held;
+    if (!trust || !opened?.key) return;
+    trust.recovery = opened;
+    if (trust === held && opened.mode === 'opaque_custody') {
+      await trust.sealRootProperly(opened.key)
+        .catch((e) => console.warn('could not seal the account key under the recovery key', e));
+    }
   },
 
   /// For a vault left in a retired custody mode (`vault.retiredMode`) that nothing can open: replaces it with a new one under

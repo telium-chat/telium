@@ -524,6 +524,9 @@ export const auth = {
   // by Telium when the account was made.
   'auth.unlock.keyHint': 'The key you were given when this account was made.',
   'auth.unlock.button': 'Unlock',
+  'auth.unlock.enterPassword': 'Enter your account password.',
+  'auth.unlock.passwordLabel': 'Account password',
+  'auth.unlock.passwordHint': 'Your password is enough to open your keys on this device. It is checked, not sent.',
   'auth.unlock.enterKey': 'Enter your recovery key.',
   // After unlocking on an OPAQUE account: the password now derives the wrapper,
   // so the key is not needed again on this device. Worth saying, because

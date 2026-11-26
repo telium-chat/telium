@@ -517,6 +517,8 @@ export const chat = {
   'chat.encryption.vaultLocked.title': 'Your older messages are locked on this device.',
   'chat.encryption.vaultLocked.body': 'Enter your recovery key under Settings → {pane} to get them back.',
 
+  'chat.encryption.passwordUnlock.title': 'Enter your password to unlock your messages.',
+  'chat.encryption.passwordUnlock.body': 'This device signed in without it. Open {pane} and type your password; no other device is needed.',
   'chat.encryption.deviceApproval.title': 'This device does not have your keys yet.',
   // "travel directly between your devices" is a claim about where the keys go
   // and is not decoration: it is the reason approving from another device is
