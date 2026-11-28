@@ -1,6 +1,6 @@
 import { useStore } from '../../hooks/useStore.jsx';
 import { PRESETS } from '../../lib/scheme.js';
-import { installedTheme } from '../../lib/themes.js';
+import { usableTheme } from '../../lib/themes.js';
 import { ThemeMarketplaceSection } from './ThemeMarketplaceSection.jsx';
 
 export function AppearancePane() {
@@ -11,7 +11,9 @@ export function AppearancePane() {
   // CSS is actually on this device. A synced id whose CSS went missing (a
   // fresh install, a wiped browser) must not lock the included themes: the
   // honest state is "nothing applied", so they stay clickable.
-  const marketThemeUsable = Boolean(prefs.marketTheme) && Boolean(installedTheme(prefs.marketTheme));
+  // A theme the network policy refuses is not applied either, so it must not
+  // lock anything.
+  const marketThemeUsable = Boolean(prefs.marketTheme) && Boolean(usableTheme(prefs.marketTheme));
   const marketThemeOn = Boolean(prefs.marketTheme) && marketThemeUsable;
   const activeId = PRESETS.some((preset) => preset.id === prefs.scheme) ? prefs.scheme : PRESETS[0].id;
 

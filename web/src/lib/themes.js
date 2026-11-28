@@ -2,8 +2,12 @@
 // in the style of BetterDiscord themes: one `.theme.css` file whose meta
 // header (`@name`, `@author`, …) is read by machines and whose body is
 // injected verbatim over the app's own palette. Like the changelog this is
-// display-only data fetched over plain HTTPS and deliberately unsigned — the
-// worst a hostile theme can do is look bad, and the report is one click away.
+// display-only data fetched over plain HTTPS and deliberately unsigned. CSS is
+// not harmless, though: any url() is a network request, so a theme could log
+// the IP and online times of everyone wearing it. Every theme therefore passes
+// a network policy before it is stored or applied (see `checkThemeUrls`):
+// files may load only from the theme catalog itself, never from a host the
+// author controls. Text overrides skip security and safety wording.
 // Fetches are throttled and cached; installed theme CSS is device-local so a
 // theme survives offline, while only the chosen id syncs with the account.
 
@@ -306,6 +310,8 @@ export function marketThemeCss(id, storageImpl = storage) {
   return installedTheme(id, storageImpl)?.css || null;
 }
 
+/// Null when the CSS has no usable header; false when storage refused the
+/// write (quota) — the two are different problems with different fixes.
 export function installTheme(id, css, storageImpl = storage, extras = {}) {
   const meta = parseThemeMeta(css);
   if (!id || typeof css !== 'string' || !meta) return null;
@@ -314,12 +320,13 @@ export function installTheme(id, css, storageImpl = storage, extras = {}) {
     meta,
     css,
     installedAt: Date.now(),
+    source: extras.source === 'local' ? 'local' : 'catalog',
     // Images and string overrides ride along; both were sanitized when the
     // catalog was parsed, and both are re-checked at apply time.
     assets: parseAssets(extras.assets),
     strings: parseStrings(extras.strings),
   };
-  return writeInstalled(row, storageImpl) ? { id, meta } : null;
+  return writeInstalled(row, storageImpl) ? { id, meta } : false;
 }
 
 export function removeTheme(id, storageImpl = storage) {
@@ -340,9 +347,214 @@ export function removeTheme(id, storageImpl = storage) {
 export function rewriteAssetUrls(css, assets = {}) {
   if (!css || typeof css !== 'string' || !Object.keys(assets).length) return css;
   return css.replace(/url\(\s*(['"]?)([^'")\s]+)\1\s*\)/g, (whole, quote, name) => {
-    const url = assets[name];
+    // The validator accepts `url(images/bg.svg)` by its last segment, and the
+    // catalog keys assets by bare filename — so a relative path resolves by
+    // basename too. Absolute and root-relative references are left alone.
+    const relative = !/^([a-z][a-z0-9+.-]*:|\/)/i.test(name);
+    const url = assets[name] || (relative ? assets[name.split('/').pop()] : undefined);
     return url ? `url(${quote}${url}${quote})` : whole;
   });
+}
+
+// ------------------------------------------------------------ network policy
+
+/// Where theme CSS may load files from. Everything a theme fetches is a
+/// request someone can log, so the list is the catalog's own reviewed files
+/// and nothing an author can point somewhere else: the jsDelivr path is
+/// scoped to this repository's `main` branch, because the bare host serves
+/// any GitHub repository (and any commit SHA, fork commits included).
+/// `VITE_TELIUM_THEME_HOSTS` adds comma-separated https prefixes at build
+/// time; the catalog's own directory is always allowed, which is how a
+/// loopback `dev-serve` catalog keeps working.
+const DEFAULT_ALLOWED_PREFIXES = [
+  'https://cdn.jsdelivr.net/gh/telium-chat/themes@main/',
+  'https://raw.githubusercontent.com/telium-chat/themes/main/',
+];
+
+function normalizedPrefix(raw) {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'https:' && !catalogUrlOk(url.href)) return null;
+    return url.href.endsWith('/') ? url.href : `${url.href}/`;
+  } catch {
+    return null;
+  }
+}
+
+export function allowedThemePrefixes() {
+  const extra = String(import.meta.env?.VITE_TELIUM_THEME_HOSTS || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => /^https:\/\//.test(entry));
+  let catalogDir = null;
+  try { catalogDir = new URL('./', THEMES_URL).href; } catch { /* malformed override */ }
+  return [...new Set([...DEFAULT_ALLOWED_PREFIXES, ...extra, catalogDir]
+    .map((entry) => (entry ? normalizedPrefix(entry) : null))
+    .filter(Boolean))];
+}
+
+const HEX = /[0-9a-fA-F]/;
+const SPACE = /[ \t\n\r\f]/;
+const isNameChar = (c) => c !== undefined && (/[A-Za-z0-9_-]/.test(c) || c.charCodeAt(0) >= 0x80);
+const validEscape = (css, i) => css[i] === '\\' && css[i + 1] !== undefined && !/[\n\r\f]/.test(css[i + 1]);
+
+function consumeEscape(css, i) {
+  let j = i + 1;
+  if (j >= css.length) return ['\uFFFD', j];
+  if (!HEX.test(css[j])) return [css[j], j + 1];
+  let hex = '';
+  while (j < css.length && hex.length < 6 && HEX.test(css[j])) hex += css[j++];
+  if (css[j] === '\r' && css[j + 1] === '\n') j += 2;
+  else if (SPACE.test(css[j] || '')) j += 1;
+  const cp = parseInt(hex, 16);
+  const bad = cp === 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff);
+  return [bad ? '\uFFFD' : String.fromCodePoint(cp), j];
+}
+
+/// A tokenizer just deep enough for the policy, following CSS Syntax 3 where
+/// it matters: comments are skipped, strings and unquoted `url()` bodies are
+/// read with escapes decoded, and identifiers are decoded too — so `\75rl(`
+/// and `@\69mport` are seen for what the browser will see. Regexes over the
+/// raw text cannot be trusted with this; escapes and quote games walk past
+/// them. Strings inside `[...]` are attribute-selector operands (never
+/// fetched) and are left out, so `a[href^="https://…"]` is not a violation.
+export function scanThemeCss(css) {
+  const refs = [];
+  let imports = 0;
+  if (typeof css !== 'string') return { refs, imports };
+  const n = css.length;
+  let i = 0;
+  let brackets = 0;
+  const readName = () => {
+    let name = '';
+    while (i < n) {
+      if (isNameChar(css[i])) { name += css[i]; i += 1; } else if (validEscape(css, i)) {
+        const [ch, j] = consumeEscape(css, i);
+        name += ch;
+        i = j;
+      } else break;
+    }
+    return name;
+  };
+  const readString = (quote) => {
+    i += 1;
+    let value = '';
+    while (i < n) {
+      const c = css[i];
+      if (c === quote) { i += 1; break; }
+      if (c === '\n' || c === '\r' || c === '\f') break;
+      if (c === '\\') {
+        const next = css[i + 1];
+        if (next === undefined) { i += 1; break; }
+        if (next === '\n' || next === '\f') { i += 2; continue; }
+        if (next === '\r') { i += css[i + 2] === '\n' ? 3 : 2; continue; }
+        const [ch, j] = consumeEscape(css, i);
+        value += ch;
+        i = j;
+        continue;
+      }
+      value += c;
+      i += 1;
+    }
+    return value;
+  };
+  while (i < n) {
+    const c = css[i];
+    if (c === '/' && css[i + 1] === '*') {
+      const end = css.indexOf('*/', i + 2);
+      i = end < 0 ? n : end + 2;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      const value = readString(c);
+      if (brackets === 0) refs.push(value);
+      continue;
+    }
+    if (c === '[') { brackets += 1; i += 1; continue; }
+    if (c === ']') { brackets = Math.max(0, brackets - 1); i += 1; continue; }
+    if (c === '{' || c === '}' || c === ';') { brackets = 0; i += 1; continue; }
+    if (c === '@') {
+      i += 1;
+      if (readName().toLowerCase() === 'import') imports += 1;
+      continue;
+    }
+    if (isNameChar(c) || validEscape(css, i)) {
+      const name = readName();
+      if (css[i] === '(' && name.toLowerCase() === 'url') {
+        i += 1;
+        while (i < n && SPACE.test(css[i])) i += 1;
+        // A quoted argument is an ordinary string token: the branch above
+        // reads it on the next turn of the loop.
+        if (css[i] === '"' || css[i] === "'") continue;
+        let value = '';
+        while (i < n && css[i] !== ')') {
+          if (validEscape(css, i)) {
+            const [ch, j] = consumeEscape(css, i);
+            value += ch;
+            i = j;
+          } else { value += css[i]; i += 1; }
+        }
+        i += 1;
+        refs.push(value.trim());
+      }
+      continue;
+    }
+    i += 1;
+  }
+  return { refs, imports };
+}
+
+function documentBase() {
+  try {
+    if (typeof document !== 'undefined' && document.baseURI) return document.baseURI;
+  } catch { /* detached documents in tests */ }
+  return 'http://localhost/';
+}
+
+/// `{ ok, blocked, imports }`: `blocked` lists the hosts a theme would reach
+/// that are not allowed. `@import` is refused outright — it pulls a whole
+/// stylesheet nobody reviewed, from anywhere. `data:` URLs and the app's own
+/// origin are fine (no third party sees them); so are the theme's declared
+/// asset URLs, which the catalog itself produced.
+export function checkThemeUrls(css, assets = {}, { prefixes = allowedThemePrefixes(), base = documentBase() } = {}) {
+  const { refs, imports } = scanThemeCss(css);
+  const exact = new Set(Object.values(assets || {}).filter((url) => typeof url === 'string'));
+  let origin = null;
+  try { origin = new URL(base).origin; } catch { /* opaque base */ }
+  const blocked = new Set();
+  for (const ref of refs) {
+    let url;
+    try {
+      url = new URL(ref.trim(), base);
+    } catch {
+      continue; // not a URL a browser could fetch either
+    }
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') continue;
+    if (origin && origin !== 'null' && url.origin === origin) continue;
+    if (exact.has(url.href) || exact.has(ref.trim())) continue;
+    if (prefixes.some((prefix) => url.href.startsWith(prefix))) continue;
+    blocked.add(url.host || url.href);
+  }
+  const hosts = [...blocked];
+  return { ok: hosts.length === 0 && imports === 0, blocked: hosts, imports };
+}
+
+/// The CSS exactly as it will be injected, or null with the reason when the
+/// policy refuses it. One place, so the pane's banner and the injector can
+/// never disagree about whether a theme is on.
+export function preparedThemeCss(theme, opts) {
+  if (!theme || typeof theme.css !== 'string') return { css: null, policy: null };
+  const rewritten = rewriteAssetUrls(theme.css, theme.assets || {});
+  const policy = checkThemeUrls(rewritten, theme.assets || {}, opts);
+  return { css: policy.ok ? rewritten : null, policy };
+}
+
+/// The installed theme for an id, only when it is actually wearable: on this
+/// device and allowed by the policy.
+export function usableTheme(id, storageImpl = storage) {
+  const theme = id ? installedTheme(id, storageImpl) : null;
+  if (!theme) return null;
+  return preparedThemeCss(theme).css ? theme : null;
 }
 
 /// One reusable style element, replaced rather than appended: a previous
@@ -364,30 +576,39 @@ export function boostThemeCss(css) {
     .replace(/\[data-theme=(["'])(light|dark)\1\]/g, ':root[data-theme=$2]');
 }
 
+/// Returns the policy verdict: a theme the policy refuses is not injected at
+/// all (fail closed — half a theme with its tracking rule cut out is still a
+/// theme someone wrote to track), and the pane says why.
 export function applyMarketTheme(css, assets = {}) {
-  if (typeof document === 'undefined') return;
+  if (typeof document === 'undefined') return null;
   let el = document.getElementById(STYLE_ID);
-  if (typeof css !== 'string' || !css.trim()) {
+  const prepared = typeof css === 'string' && css.trim()
+    ? preparedThemeCss({ css, assets })
+    : { css: null, policy: null };
+  if (!prepared.css) {
     el?.remove();
-    return;
+    return prepared.policy;
   }
   if (!el) {
     el = document.createElement('style');
     el.id = STYLE_ID;
     document.head.append(el);
   }
-  el.textContent = boostThemeCss(rewriteAssetUrls(css, assets));
+  el.textContent = boostThemeCss(prepared.css);
   const mode = parseThemeMeta(css)?.mode;
   if (mode === 'light' || mode === 'dark') document.documentElement.dataset.theme = mode;
+  return prepared.policy;
 }
 
 /// Reads the synced choice and applies whatever is on this device for it:
 /// the boosted CSS with asset URLs resolved, plus the theme's string
-/// overrides (cleared when the id is empty or the file is missing).
+/// overrides (cleared when the id is empty, the file is missing, or the
+/// policy refused the CSS).
 export function applyMarketThemeFromPrefs(id, storageImpl = storage) {
   const theme = id ? installedTheme(id, storageImpl) : null;
-  applyMarketTheme(theme?.css ?? null, theme?.assets ?? {});
-  setThemeStrings(theme?.strings ?? null);
+  const policy = applyMarketTheme(theme?.css ?? null, theme?.assets ?? {});
+  setThemeStrings(policy?.ok ? (theme?.strings ?? null) : null);
+  return policy;
 }
 
 // ------------------------------------------------------------------ trending
@@ -500,6 +721,7 @@ export const THEME_ERRORS = {
   ...FETCH_ERRORS,
   noMeta: 'no_meta',
   quota: 'quota',
+  blocked: 'blocked',
 };
 
 /// Downloads a theme's CSS and stores it device-local. Never throws.
@@ -545,7 +767,15 @@ export async function downloadTheme({
       let total = null;
       try {
         const declared = Number(response.headers?.get?.('content-length'));
-        if (Number.isFinite(declared) && declared > 0) total = declared;
+        // Content-Length counts the bytes on the wire. jsDelivr and GitHub
+        // serve CSS brotli/gzip-compressed, while the reader yields decoded
+        // bytes — a 3.6 kB header for a 70 kB file would pin the bar at 100%
+        // after one chunk. When the encoding is visible (jsDelivr exposes
+        // all headers) a compressed length is ignored outright; when it is
+        // not, overrunning the length below drops the bar to the pulse.
+        const encoding = String(response.headers?.get?.('content-encoding') || '').trim().toLowerCase();
+        const compressed = encoding && encoding !== 'identity';
+        if (!compressed && Number.isFinite(declared) && declared > 0) total = declared;
       } catch { /* fakes without headers still stream fine */ }
       let received = 0;
       const chunks = [];
@@ -567,6 +797,7 @@ export async function downloadTheme({
           return { error: THEME_ERRORS.tooLarge };
         }
         chunks.push(value);
+        if (total !== null && received > total) total = null;
         onProgress?.({ received, total });
       }
       const bytes = new Uint8Array(received);
@@ -582,7 +813,11 @@ export async function downloadTheme({
       css = new TextDecoder().decode(bytes);
     }
 
+    if (!parseThemeMeta(css)) return { error: THEME_ERRORS.noMeta };
+    const policy = checkThemeUrls(rewriteAssetUrls(css, parseAssets(assets)), parseAssets(assets));
+    if (!policy.ok) return { error: THEME_ERRORS.blocked, blocked: policy.blocked, imports: policy.imports };
     const installed = installTheme(id, css, storageImpl, { assets, strings });
+    if (installed === false) return { error: THEME_ERRORS.quota };
     if (!installed) return { error: THEME_ERRORS.noMeta };
     return { theme: installed };
   } catch {
@@ -591,6 +826,129 @@ export async function downloadTheme({
   } finally {
     clearTimeout(timer);
   }
+}
+
+// --------------------------------------------------------------- local themes
+
+/// Themes that never went through the catalog: imported from a `.theme.css`
+/// a friend sent, pasted, or written in the editor. They live in the same
+/// installed row as catalog themes (so applying, the ghost banner and the
+/// palette lock all work unchanged) under an id the catalog can never use —
+/// catalog ids are `[a-z0-9-]` slugs, so nothing ever overwrites a `local:`.
+export const LOCAL_PREFIX = 'local:';
+
+export function isLocalThemeId(id) {
+  return typeof id === 'string' && id.startsWith(LOCAL_PREFIX) && id.length > LOCAL_PREFIX.length;
+}
+
+function slugify(name) {
+  return String(name || 'theme').toLowerCase().normalize('NFKD')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'theme';
+}
+
+export function themeFileName(meta) {
+  return `${slugify(meta?.name)}.theme.css`;
+}
+
+/// A starter for "New theme": the header the format requires and the
+/// variables worth knowing about, so a blank editor is never the first step.
+export const STARTER_THEME = `/**
+ * @name My theme
+ * @author me
+ * @description A theme I made in Telium.
+ * @version 1.0.0
+ * @mode dark
+ */
+:root {
+  --background: oklch(18% 0.02 260);
+  --accent: oklch(72% 0.15 250);
+  /* Fonts: ship your own with @font-face (a data: URL works for a theme
+     you share as one file), then point the app at it. */
+  --font-sans: system-ui, sans-serif;
+}
+`;
+
+/// A local theme's id lives in its own header as `@localId`, so it travels
+/// with the file. `prefs.marketTheme` syncs across devices: if importing the
+/// same file on a second device minted a fresh id, applying it there would
+/// sync that id back and knock the first device's theme off, and the two
+/// would take turns forever. With the id in the file, every device that
+/// imports it agrees, and re-importing an updated file replaces it in place.
+const LOCAL_ID = /^[a-z0-9][a-z0-9-]{2,63}$/;
+
+function withLocalId(css, localId) {
+  return css.replace(/(\/\*\*[\s\S]*?)([ \t]*\*\/)/, (whole, head, close) => {
+    const cleaned = head.replace(/\r?\n[ \t]*\*?[ \t]*@localId\b[^\r\n]*/g, '');
+    return `${cleaned.replace(/[ \t]*$/, '')}${cleaned.endsWith('\n') ? '' : '\n'} * @localId ${localId}\n ${close.trimStart()}`;
+  });
+}
+
+/// Validates and stores a local theme. Never throws. `id` re-saves an
+/// existing local theme in place (the editor's Save); otherwise the file's
+/// own `@localId` is used, or a new one is minted and written into the
+/// header. Returns `{ theme }` or `{ error, blocked? }`.
+export function saveLocalTheme(css, { id = null, strings = null, freshId = false } = {}, storageImpl = storage) {
+  if (typeof css !== 'string' || !css.trim()) return { error: THEME_ERRORS.noMeta };
+  if (new TextEncoder().encode(css).byteLength > MAX_THEME_BYTES) return { error: THEME_ERRORS.tooLarge };
+  const meta = parseThemeMeta(css);
+  if (!meta) return { error: THEME_ERRORS.noMeta };
+  const policy = checkThemeUrls(css);
+  if (!policy.ok) return { error: THEME_ERRORS.blocked, blocked: policy.blocked, imports: policy.imports };
+  const fromFile = !freshId && LOCAL_ID.test(meta.localId || '') ? meta.localId : null;
+  const localId = isLocalThemeId(id)
+    ? id.slice(LOCAL_PREFIX.length)
+    : fromFile || `${slugify(meta.name)}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const themeId = `${LOCAL_PREFIX}${localId}`;
+  const stamped = withLocalId(css, localId);
+  // Re-saving keeps the theme's rewording (a copy of a catalog theme carries
+  // its strings.json over); a file carries none of its own.
+  const keep = strings ?? installedTheme(themeId, storageImpl)?.strings ?? {};
+  const installed = installTheme(themeId, stamped, storageImpl, { source: 'local', strings: keep });
+  if (installed === false) return { error: THEME_ERRORS.quota };
+  if (!installed) return { error: THEME_ERRORS.noMeta };
+  return { theme: installed };
+}
+
+export async function importLocalThemeFile(file, storageImpl = storage) {
+  if (!file || typeof file.text !== 'function') return { error: THEME_ERRORS.invalid };
+  if (Number(file.size) > MAX_THEME_BYTES) return { error: THEME_ERRORS.tooLarge };
+  let css;
+  try {
+    css = await file.text();
+  } catch {
+    return { error: THEME_ERRORS.invalid };
+  }
+  return saveLocalTheme(css, {}, storageImpl);
+}
+
+/// Local themes, newest first, as `{ id, meta, css }`.
+export function localThemes(storageImpl = storage) {
+  const { installed } = readInstalled(storageImpl);
+  return Object.entries(installed)
+    .filter(([id, theme]) => isLocalThemeId(id) && theme && typeof theme.css === 'string')
+    .sort((a, b) => (b[1].installedAt || 0) - (a[1].installedAt || 0))
+    .map(([id, theme]) => ({ id, meta: theme.meta, css: theme.css }));
+}
+
+/// One self-contained `.theme.css` for any installed theme: catalog asset
+/// filenames become their absolute catalog URLs (allowed by the policy), so
+/// the file works on its own once imported elsewhere.
+export function exportThemeCss(id, storageImpl = storage) {
+  const theme = installedTheme(id, storageImpl);
+  if (!theme) return null;
+  return rewriteAssetUrls(theme.css, theme.assets || {});
+}
+
+/// "Edit a copy": a catalog theme becomes a local one the editor can change,
+/// renamed in its header so the two are never confused on the cards.
+export function copyThemeForEditing(id, suffix = '(edited)', storageImpl = storage) {
+  const css = exportThemeCss(id, storageImpl);
+  if (!css) return { error: THEME_ERRORS.invalid };
+  const renamed = css.replace(/(\/\*\*[\s\S]*?@name[ \t]+)([^\r\n]+?)([ \t]*\r?\n)/, (whole, head, name, tail) => (
+    name.endsWith(suffix) ? whole : `${head}${name} ${suffix}${tail}`
+  ));
+  const strings = installedTheme(id, storageImpl)?.strings || {};
+  return saveLocalTheme(renamed, { strings, freshId: true }, storageImpl);
 }
 
 // ------------------------------------------------------------------ formatting

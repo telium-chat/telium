@@ -1694,7 +1694,6 @@ export const messages = {
   'settings.scheme.title': 'Ваша схема',
   'settings.theme.custom.description': 'Несколько ползунков, и приложение меняется под ними по ходу.',
   'settings.theme.custom.label': 'Создайте свою',
-  'settings.theme.description': 'Следует за вами на другие устройства.',
   'settings.theme.preset.ash.description': 'Более тёплый, светлый серый для комнаты с включённой лампой.',
   'settings.theme.preset.ash.name': 'Пепел',
   'settings.theme.preset.evergreen.description': 'Тёмный, с зеленью долгой ночи в помещении.',
@@ -1707,7 +1706,6 @@ export const messages = {
   'settings.theme.preset.obsidian.name': 'Обсидиан',
   'settings.theme.preset.paper.description': 'Бумажно-белый для светлой комнаты.',
   'settings.theme.preset.paper.name': 'Бумага',
-  'settings.theme.title': 'Тема',
 
   // ---- shell
   'shell.a11y.closeMembers': 'Закрыть участников',

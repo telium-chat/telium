@@ -357,3 +357,67 @@ describe('the theme workshop', () => {
     expect(screen.getByText('From the community')).toBeTruthy();
   });
 });
+
+describe('your themes (local, never published)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    document.getElementById('telium-market-theme')?.remove();
+  });
+
+  const LOCAL_CSS = `/**
+ * @name Friend Theme
+ * @author pal
+ * @description Sent over chat as a file.
+ */
+:root { --accent: oklch(70% 0.2 30); }
+`;
+
+  it('imports a .theme.css file, applies it, and exports it back', async () => {
+    seeded(CATALOG);
+    vi.stubGlobal('fetch', json(CATALOG));
+    const { user, store } = await boot();
+    const input = screen.getByLabelText('Choose a .theme.css file to import');
+    await user.upload(input, new File([LOCAL_CSS], 'friend.theme.css', { type: 'text/css' }));
+    await waitFor(() => expect(store.prefs.marketTheme).toMatch(/^local:friend-theme-/));
+    expect(styleTag()?.textContent).toContain('oklch(70% 0.2 30)');
+    expect(screen.getByText('Friend Theme')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Active' }).length).toBeGreaterThan(0);
+  });
+
+  it('refuses a file that would phone home, and says which host', async () => {
+    seeded(CATALOG);
+    vi.stubGlobal('fetch', json(CATALOG));
+    const { user, store } = await boot();
+    const tracker = LOCAL_CSS.replace(':root', 'body { background: url(https://tracker.example/p.gif) }\n:root');
+    await user.upload(
+      screen.getByLabelText('Choose a .theme.css file to import'),
+      new File([tracker], 'friend.theme.css', { type: 'text/css' }),
+    );
+    expect(await screen.findByText(/tracker\.example/)).toBeTruthy();
+    expect(store.prefs.marketTheme ?? null).toBeNull();
+    expect(styleTag()).toBeNull();
+  });
+
+  it('writes a new theme in the editor and saves it', async () => {
+    seeded(CATALOG);
+    vi.stubGlobal('fetch', json(CATALOG));
+    const { user, store } = await boot();
+    await user.click(screen.getByRole('button', { name: 'New theme' }));
+    const editor = screen.getByLabelText('Theme CSS');
+    await user.clear(editor);
+    // userEvent treats { and [ as key descriptors; doubled they type literally.
+    await user.type(editor, LOCAL_CSS.replace(/\{/g, '{{').replace(/\[/g, '[['));
+    await user.click(screen.getByRole('button', { name: 'Save and apply' }));
+    await waitFor(() => expect(store.prefs.marketTheme).toMatch(/^local:/));
+    expect(styleTag()?.textContent).toContain('--accent');
+  });
+
+  it('a synced local id with no file here explains how to bring it over', async () => {
+    seeded(CATALOG);
+    vi.stubGlobal('fetch', json(CATALOG));
+    const store = signedInStore();
+    store.prefs.marketTheme = 'local:from-laptop-abc';
+    mount(<PaneWithPrefsBridge />, store);
+    expect(await screen.findByText(/Import its \.theme\.css on this device/)).toBeTruthy();
+  });
+});

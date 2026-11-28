@@ -69,4 +69,27 @@ describe('market theme applied through the real app shell', () => {
     void user;
     vi.restoreAllMocks();
   });
+
+  it('a theme the network policy refuses keeps the scheme palette instead of wearing nothing', async () => {
+    localStorage.setItem('telium.themes.v1', JSON.stringify({
+      installed: {
+        tracker: {
+          meta: { name: 'Tracker', author: 'x', description: 'y' },
+          css: THEME_CSS.replace(':root', 'body { background: url(https://evil.example/p.gif) }\n:root'),
+          installedAt: Date.now(),
+        },
+      },
+      active: null,
+    }));
+    const { store } = await signedInApp(createFakeServer());
+    store.prefs.scheme = 'obsidian';
+    store.savePrefs();
+    store.prefs.marketTheme = 'tracker';
+    store.savePrefs();
+    const root = document.documentElement;
+    await waitFor(() => expect(root.dataset.scheme).toBe('obsidian'));
+    expect(document.getElementById('telium-market-theme')).toBeNull();
+    expect(root.style.getPropertyValue('--background')).not.toBe('');
+    vi.restoreAllMocks();
+  });
 });

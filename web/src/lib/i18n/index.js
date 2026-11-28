@@ -12,14 +12,14 @@ import {
 } from './locale.js';
 import {
   clearThemeStrings, completeness, EN, hasMessage, isLoaded, loadCatalog, messageFor,
-  registerCatalog, setThemeStrings,
+  registerCatalog, setThemeStrings, themeMayReword,
 } from './catalog/index.js';
 
 export {
   activeLocale, activeDirection, deviceLanguages, directionOf, FALLBACK, listLanguages,
   LOCALES, localeOptions, localeVersion, onLocaleChange, resolveLocale,
   completeness, hasMessage, isLoaded, registerCatalog, pluralCategories, EN,
-  setThemeStrings, clearThemeStrings,
+  setThemeStrings, clearThemeStrings, themeMayReword,
 };
 
 const STRONG_RTL = /[\u0590-\u05ff\u0600-\u07bf\u0800-\u085f\u08a0-\u08ff\ufb1d-\ufdff\ufe70-\ufeff]/;

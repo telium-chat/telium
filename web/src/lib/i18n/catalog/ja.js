@@ -205,8 +205,6 @@ export const messages = {
   'perms.group.voice': 'ボイスチャンネル',
   'perms.group.advanced': '詳細',
 
-  'settings.theme.title': 'テーマ',
-  'settings.theme.description': 'ほかの端末にも引き継がれます。',
   'settings.theme.preset.graphite.name': 'グラファイト',
   'settings.theme.preset.graphite.description': '深みのあるニュートラルグレー。初期設定です。',
   'settings.theme.preset.obsidian.name': '黒曜石',

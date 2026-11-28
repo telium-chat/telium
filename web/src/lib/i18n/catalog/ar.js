@@ -194,8 +194,6 @@ export const messages = {
   'perms.group.voice': 'القنوات الصوتية',
   'perms.group.advanced': 'متقدّم',
 
-  'settings.theme.title': 'المظهر',
-  'settings.theme.description': 'ينتقل معك إلى أجهزتك الأخرى.',
   'settings.theme.preset.graphite.name': 'غرافيت',
   'settings.theme.preset.graphite.description': 'رمادي محايد عميق. الافتراضي.',
   'settings.theme.preset.obsidian.name': 'سبج',

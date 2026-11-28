@@ -1699,7 +1699,6 @@ export const messages = {
   'settings.scheme.title': '你的配色方案',
   'settings.theme.custom.description': '几个滑块，应用会随你拖动而实时变化。',
   'settings.theme.custom.label': '自己动手做',
-  'settings.theme.description': '会跟随你到其他设备。',
   'settings.theme.preset.ash.description': '更暖、更浅的灰色，适合亮着灯的房间。',
   'settings.theme.preset.ash.name': '灰烬',
   'settings.theme.preset.evergreen.description': '深色，带着室内漫长夜晚的绿意。',
@@ -1712,7 +1711,6 @@ export const messages = {
   'settings.theme.preset.obsidian.name': '黑曜石',
   'settings.theme.preset.paper.description': '纸白色，适合明亮的房间。',
   'settings.theme.preset.paper.name': '纸张',
-  'settings.theme.title': '主题',
 
   // ---- shell
   'shell.a11y.closeMembers': '关闭成员列表',

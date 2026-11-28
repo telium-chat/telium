@@ -128,6 +128,32 @@ export const settings = {
   // cannot show who made it or what it is called, so it refuses the file.
   'settings.market.noMeta': 'That theme file is missing its name, author, or description header, so it was not installed.',
   'settings.market.empty': 'No themes match.',
+  // The network policy refused a theme: it would load files from a host
+  // outside the theme catalog (anyone running that host sees who wears it),
+  // or it pulls in a whole stylesheet through @import.
+  'settings.market.blocked': 'This theme loads files from {hosts}, which Telium does not allow, so it was not installed. A theme may only load files from the Telium theme catalog, or embed them as data: URLs.',
+  'settings.market.blockedImport': 'This theme uses @import, which Telium does not allow, so it was not installed. Paste the imported CSS into the theme itself instead.',
+  'settings.market.blockedBanner': 'Your theme ({name}) loads files from somewhere Telium does not allow, so it is switched off. Pick another theme, or edit or remove this one.',
+  'settings.market.quota': 'There is no room left on this device to store that theme. Remove a theme you no longer use and try again.',
+  'settings.market.tooLarge': 'That theme file is over 512 KB, so it was not installed.',
+  'settings.market.unreadable': 'That file could not be read as a theme.',
+  // Local themes: imported from a file, pasted, or written in the editor.
+  // Nothing here is published; sharing is exporting the file and sending it.
+  'settings.market.local.title': 'Your themes',
+  'settings.market.local.description': 'Themes you imported or made yourself. They stay on this device and are never published. To share one, export it and send the file; the other person imports it here.',
+  'settings.market.local.import': 'Import theme file',
+  'settings.market.local.importLabel': 'Choose a .theme.css file to import',
+  'settings.market.local.new': 'New theme',
+  'settings.market.local.edit': 'Edit',
+  'settings.market.local.editCopy': 'Edit a copy',
+  'settings.market.local.editCopyHint': 'Copy {name} into Your themes so you can change it',
+  'settings.market.local.export': 'Export',
+  'settings.market.local.editor': 'Theme CSS',
+  'settings.market.local.save': 'Save and apply',
+  'settings.market.local.cancel': 'Cancel',
+  'settings.market.local.badge': 'Your theme',
+  'settings.market.local.empty': 'Nothing here yet. Import a .theme.css someone sent you, or start a new one.',
+  'settings.market.local.missing': 'Your synced theme was imported or made on another device, so its file is not here. Import its .theme.css on this device to use it.',
   // A theme was installed before but the catalog is unreachable: its card is
   // gone from the grid, though the theme itself keeps working.
   'settings.market.offlineNote': 'The community list is offline; installed themes still apply.',

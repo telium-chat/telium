@@ -1694,7 +1694,6 @@ export const messages = {
   'settings.scheme.title': 'Tu esquema',
   'settings.theme.custom.description': 'Un puñado de controles deslizantes, y la aplicación cambia bajo ellos mientras los mueves.',
   'settings.theme.custom.label': 'Crea el tuyo',
-  'settings.theme.description': 'Te sigue a tus otros dispositivos.',
   'settings.theme.preset.ash.description': 'Un gris más cálido y claro para una habitación con una lámpara encendida.',
   'settings.theme.preset.ash.name': 'Ceniza',
   'settings.theme.preset.evergreen.description': 'Oscuro, con el verde de una larga noche en interiores.',
@@ -1707,7 +1706,6 @@ export const messages = {
   'settings.theme.preset.obsidian.name': 'Obsidiana',
   'settings.theme.preset.paper.description': 'Blanco papel, para una habitación luminosa.',
   'settings.theme.preset.paper.name': 'Papel',
-  'settings.theme.title': 'Tema',
 
   // ---- shell
   'shell.a11y.closeMembers': 'Cerrar miembros',

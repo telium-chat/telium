@@ -6,11 +6,14 @@ import {
 import { useT } from '../../lib/i18n/react.jsx';
 import { cn } from '../../lib/cn.js';
 import {
-  THEME_ERRORS, THEMES_SUBMIT_URL, cachedCatalog, downloadTheme, favoriteIds, formatDownloads,
-  installedTheme, installedThemeIds, localInstallCount, noteLocalInstall, refreshThemes,
-  refreshThemesIfStale, removeTheme, searchThemes, toggleFavorite, trendingThemes, TRENDING,
+  THEME_ERRORS, THEMES_SUBMIT_URL, cachedCatalog, copyThemeForEditing, downloadTheme, favoriteIds,
+  formatDownloads, installedTheme, installedThemeIds, isLocalThemeId, localInstallCount,
+  noteLocalInstall, refreshThemes, refreshThemesIfStale, removeTheme, searchThemes, toggleFavorite,
+  trendingThemes, TRENDING, usableTheme,
 } from '../../lib/themes.js';
 import { schemePreview } from '../../lib/scheme.js';
+import { LocalThemesSection } from './LocalThemesSection.jsx';
+import { themeOutcomeMessage } from './themeMessages.js';
 
 function Thumb({ name, thumbnailUrl }) {
   const [failed, setFailed] = useState(false);
@@ -87,7 +90,7 @@ function DownloadBar({ progress, t }) {
 
 function ThemeCard({
   theme, state, trending, favorited, locked, progress, t,
-  onApply, onDeactivate, onInstall, onRemove, onToggleFavorite,
+  onApply, onDeactivate, onInstall, onRemove, onToggleFavorite, onEditCopy,
 }) {
   const installed = state !== 'none';
   return (
@@ -104,7 +107,7 @@ function ThemeCard({
       />
       <Thumb name={theme.name} thumbnailUrl={theme.thumbnailUrl} />
       <div className="flex items-baseline justify-between gap-2">
-        <span className="truncate text-sm font-medium">{theme.name}</span>
+        <span className="min-w-0 truncate text-sm font-medium">{theme.name}</span>
         <span className="flex shrink-0 items-center gap-1.5">
           {trending ? (
             <span className="rounded-full bg-accent/15 px-2 py-0.5 text-xs font-medium text-accent">
@@ -136,6 +139,11 @@ function ThemeCard({
             {t('settings.market.install')}
           </AsyncButton>
         )}
+        {installed ? (
+          <Button size="sm" title={t('settings.market.local.editCopyHint', { name: theme.name })} onClick={onEditCopy}>
+            {t('settings.market.local.editCopy')}
+          </Button>
+        ) : null}
         {installed && state !== 'active' ? (
           <Button size="sm" shape="square" aria-label={t('settings.market.remove')} onClick={onRemove}>
             <TrashIcon />
@@ -175,7 +183,7 @@ function BaseCard({ preset, active, locked, t, onChoose }) {
         <span className="absolute bottom-2 right-2 size-4 rounded-full" style={{ backgroundColor: accent, opacity: 0.55 }} />
       </span>
       <span className="flex items-baseline justify-between gap-2">
-        <span className="truncate text-sm font-medium">{name}</span>
+        <span className="min-w-0 truncate text-sm font-medium">{name}</span>
         {active ? (
           <span className="shrink-0 rounded-full bg-accent/15 px-2 py-0.5 text-xs font-medium text-accent">
             {t('settings.theme.baseActive')}
@@ -229,8 +237,11 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
   // "On" means the CSS is on this device. A synced id without its file is a
   // ghost: nothing is applied, the included themes stay usable, and the card
   // shows Install so the file can come back.
-  const marketUsable = activeId ? installedTheme(activeId) : null;
-  const marketName = marketUsable?.meta?.name
+  // Installed but refused by the network policy counts as off, too: the
+  // injector will not apply it, so nothing may pretend it is on.
+  const marketInstalled = activeId ? installedTheme(activeId) : null;
+  const marketUsable = activeId ? usableTheme(activeId) : null;
+  const marketName = marketInstalled?.meta?.name
     || catalog?.themes?.find((entry) => entry.id === activeId)?.name
     || activeId;
   // A catalog smaller than one page is all "top" — trending means nothing
@@ -338,12 +349,12 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
       }
     }
       if (!mounted.current) return;
-      if (outcome.error === THEME_ERRORS.noMeta) {
-        setError('noMeta');
+      if (outcome.error === THEME_ERRORS.unreachable) {
+        setError(true);
         return;
       }
       if (outcome.error) {
-        setError(true);
+        setError({ message: themeOutcomeMessage(outcome, t) });
         return;
       }
       noteLocalInstall(theme.id);
@@ -374,6 +385,15 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
     .map((id) => installedTheme(id))
     .filter(Boolean);
 
+  const editCopy = (id) => {
+    const outcome = copyThemeForEditing(id);
+    if (outcome.error) {
+      setError({ message: themeOutcomeMessage(outcome, t) });
+      return;
+    }
+    apply(outcome.theme.id);
+  };
+
   const cardProps = (theme) => ({
     // Catalog counts refresh hourly from the CDN; this device's own installs
     // are added so the number moves the moment someone presses Install.
@@ -390,6 +410,7 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
     onInstall: () => install(theme),
     onRemove: () => uninstall(theme.id),
     onToggleFavorite: () => toggleFavorite(store, theme.id),
+    onEditCopy: () => editCopy(theme.id),
   });
 
   return (
@@ -410,8 +431,15 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
       {marketUsable ? (
         <Notice tone="accent">{t('settings.market.activeBanner', { name: marketName })}</Notice>
       ) : null}
-      {activeId && !marketUsable ? (
-        <Notice tone="warn">{t('settings.market.missingBanner', { name: marketName })}</Notice>
+      {activeId && marketInstalled && !marketUsable ? (
+        <Notice tone="warn">{t('settings.market.blockedBanner', { name: marketName })}</Notice>
+      ) : null}
+      {activeId && !marketInstalled ? (
+        <Notice tone="warn">
+          {isLocalThemeId(activeId)
+            ? t('settings.market.local.missing')
+            : t('settings.market.missingBanner', { name: marketName })}
+        </Notice>
       ) : null}
 
       <SearchField
@@ -428,6 +456,7 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
             key={name}
             size="sm"
             variant={filter === name ? 'primary' : 'secondary'}
+            className="min-w-0"
             aria-pressed={filter === name}
             onClick={() => setFilter(name)}
           >
@@ -445,7 +474,7 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
           <Button size="sm" onClick={load}>{t('settings.market.retry')}</Button>
         </Notice>
       ) : null}
-      {error === 'noMeta' ? <Notice tone="warn">{t('settings.market.noMeta')}</Notice> : null}
+      {error?.message ? <Notice tone="warn">{error.message}</Notice> : null}
 
       {baseList.length ? (
         <div className="flex flex-col gap-2">
@@ -464,6 +493,21 @@ export function ThemeMarketplaceSection({ base = [], baseActiveId = null, baseLo
           </div>
           {baseLocked ? <Notice tone="accent">{t('settings.theme.locked')}</Notice> : null}
         </div>
+      ) : null}
+
+      {filter === 'all' ? (
+        <LocalThemesSection
+          t={t}
+          activeId={activeId}
+          usable={Boolean(marketUsable)}
+          query={query}
+          onApply={apply}
+          onDeactivate={() => {
+            store.prefs.marketTheme = null;
+            store.savePrefs();
+          }}
+          onRemove={uninstall}
+        />
       ) : null}
 
       {community.week.length ? (

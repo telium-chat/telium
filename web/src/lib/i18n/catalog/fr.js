@@ -681,12 +681,10 @@ export const messages = {
   // fait : le curseur règle à quel point le fond d’une carte diffère de celui
   // de la page. Traduire le fait, pas la figure de style.
 
-  'settings.theme.title': 'Thème',
   // « Vous suit » = synchronisé avec le compte, et non conservé sur cet
   // appareil. C’est une information, pas un argument : quelqu’un qui ne veut
   // pas du thème de son ordinateur professionnel sur son téléphone mérite de
   // l’apprendre ici et pas plus tard.
-  'settings.theme.description': 'Vous suit sur vos autres appareils.',
 
   'settings.theme.preset.graphite.name': 'Graphite',
   'settings.theme.preset.graphite.description': 'Gris neutre profond. Le thème par défaut.',
