@@ -14,7 +14,7 @@ import { publicProfileLink } from '../views/PublicProfileLanding.jsx';
 const GUILD_PANES = ['Overview', 'Roles', 'Channel permissions',
   'Gates and origins', 'Moderation queue', 'Bans', 'Emoji', 'Audit log'];
 const USER_PANES = ['Profile', 'Account', 'Messages & calls', 'Profile lookups',
-  'Network privacy', 'Connected servers', 'Notifications', 'Appearance', 'Extras', 'Local data'];
+  'Network privacy', 'Connected servers', 'Notifications', 'Themes', 'Language & formatting', 'Extras', 'Local data'];
 
 async function boot({ strict = false } = {}) {
   const server = createFakeServer();
@@ -187,7 +187,7 @@ describe('every screen mounts', () => {
 
     await openUserSettings(user);
     const dialog = await screen.findByRole('dialog');
-    await user.click(within(dialog).getByRole('button', { name: 'Appearance' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Language & formatting' }));
     await user.click(await screen.findByRole('switch', { name: 'Show the member list' }));
     await dismiss(user);
 

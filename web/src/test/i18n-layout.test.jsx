@@ -10,6 +10,7 @@ import { EN } from '../lib/i18n/catalog/index.js';
 import { installPseudo, pseudoCatalog } from '../lib/i18n/pseudo.js';
 import { MigrationBanner } from '../views/MigrationBanner.jsx';
 import { AppearancePane } from '../views/user-settings/AppearancePane.jsx';
+import { LanguageFormattingPane } from '../views/user-settings/LanguageFormattingPane.jsx';
 
 const FIXED_SIZE = /(?:^|\s)(?:w|h|size)-(?:\d|\[)/;
 const CLIPS = /(?:^|\s)(?:truncate|overflow-hidden|whitespace-nowrap)(?:\s|$)/;
@@ -110,9 +111,18 @@ const SCREENS = [
     allowed: ['new.example', 'home.example', 'alice'],
   },
   {
-    name: 'the appearance and language pane',
+    name: 'the appearance pane',
     async mount() {
       return draw(<AppearancePane />, settingsStore());
+    },
+    allowed: ['English', 'auto'],
+  },
+  {
+    // Language & formatting left Appearance for a pane of its own; it keeps
+    // the same long-string coverage it had there.
+    name: 'the language and formatting pane',
+    async mount() {
+      return draw(<LanguageFormattingPane />, settingsStore());
     },
     allowed: ['English', 'auto'],
   },

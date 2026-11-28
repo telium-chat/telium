@@ -1694,7 +1694,6 @@ export const messages = {
   'settings.scheme.title': 'Seu esquema',
   'settings.theme.custom.description': 'Alguns controles deslizantes, e o aplicativo muda conforme você mexe neles.',
   'settings.theme.custom.label': 'Crie o seu próprio',
-  'settings.theme.description': 'Acompanha você nos seus outros dispositivos.',
   'settings.theme.preset.ash.description': 'Um cinza mais quente e mais claro, para um ambiente com uma lâmpada acesa.',
   'settings.theme.preset.ash.name': 'Cinza',
   'settings.theme.preset.evergreen.description': 'Escuro, com o verde de uma longa noite em ambiente fechado.',
@@ -1707,7 +1706,6 @@ export const messages = {
   'settings.theme.preset.obsidian.name': 'Obsidiana',
   'settings.theme.preset.paper.description': 'Branco-papel, para um ambiente claro.',
   'settings.theme.preset.paper.name': 'Papel',
-  'settings.theme.title': 'Tema',
 
   // ---- shell
   'shell.a11y.closeMembers': 'Fechar membros',

@@ -31,7 +31,7 @@
 // throws in development and in tests so it never reaches anybody.
 
 import { EN } from './en/index.js';
-import { LOCALES } from '../locale.js';
+import { LOCALES, notifyChange } from '../locale.js';
 
 /// Loaded catalogues, by tag. English is here from the first tick because
 /// everything else falls back to it; nothing may ever evict it.
@@ -95,6 +95,65 @@ export function hasMessage(key) {
   return Object.hasOwn(EN, key);
 }
 
+/// The active theme's string overrides, checked before every catalogue.
+/// Keys not present in this build's English catalogue are dropped at set
+/// time, so a theme can only reword what exists — never invent screens.
+let themeStrings = null;
+
+/// Wording a theme may never change. A theme is CSS from a stranger, and the
+/// text below is what people read to decide whether something is safe:
+/// sign-in and recovery, encryption and verification, delivery state,
+/// permissions, bot grants, update warnings, errors, the shared buttons
+/// (a "Cancel" that reads "Confirm" is a trap), and the controls that turn
+/// the theme itself off. Prefixes end at a dot so `auth.` never swallows a
+/// sibling namespace that merely starts with the same letters.
+const PROTECTED_PREFIXES = [
+  'common.', 'errors.', 'auth.', 'security.', 'migration.', 'privacy.', 'perms.', 'updates.',
+  'app.crash.', 'onboarding.recoveryKey.', 'chat.encryption.', 'chat.delivery.',
+  'bots.install.', 'bots.intent.', 'bots.capability.', 'settings.market.local.',
+];
+const PROTECTED_KEYS = new Set([
+  'settings.market.active', 'settings.market.activeHint', 'settings.market.activeBanner',
+  'settings.market.missingBanner', 'settings.market.remove', 'settings.market.blockedBanner',
+  'settings.market.blocked', 'settings.market.blockedImport',
+]);
+
+export function themeMayReword(key) {
+  return typeof key === 'string'
+    && !PROTECTED_KEYS.has(key)
+    && !PROTECTED_PREFIXES.some((prefix) => key.startsWith(prefix));
+}
+
+export function setThemeStrings(map) {
+  if (!map || typeof map !== 'object') {
+    // Called on every prefs tick from usePreferences: clearing an absent
+    // override is a no-op, NOT a repaint — otherwise the render loop
+    // repaints forever (bump → effect → bump).
+    if (!themeStrings) return;
+    themeStrings = null;
+    notifyChange();
+    return;
+  }
+  const clean = {};
+  for (const [key, value] of Object.entries(map)) {
+    if (Object.hasOwn(EN, key) && themeMayReword(key) && typeof value === 'string' && value) clean[key] = value;
+  }
+  const next = Object.keys(clean).length ? clean : null;
+  // Equality check for the same reason: setting identical strings must not
+  // start an unbounded repaint cycle.
+  if (JSON.stringify(next) === JSON.stringify(themeStrings)) return;
+  themeStrings = next;
+  notifyChange();
+}
+
+export function themeStringsActive() {
+  return Boolean(themeStrings);
+}
+
+export function clearThemeStrings() {
+  setThemeStrings(null);
+}
+
 /// The pattern for a key in a locale, falling back to English.
 ///
 /// Returns `null` -- not a string -- when English does not have it either, so
@@ -104,6 +163,8 @@ export function hasMessage(key) {
 /// a key becomes indistinguishable from an untranslated string and therefore
 /// never gets fixed.
 export function messageFor(tag, key) {
+  const themed = themeStrings ? themeStrings[key] : undefined;
+  if (typeof themed === 'string') return themed;
   const catalog = loaded.get(tag);
   const hit = catalog ? catalog[key] : undefined;
   if (typeof hit === 'string') return hit;

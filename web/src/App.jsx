@@ -30,6 +30,7 @@ import { setLocale, t } from './lib/i18n/index.js';
 import { errorMessage } from './lib/i18n/errors.js';
 import { useT } from './lib/i18n/react.jsx';
 import { applyScheme, resolveScheme } from './lib/scheme.js';
+import { applyMarketThemeFromPrefs, usableTheme } from './lib/themes.js';
 import { showLocalNotification } from './lib/notifications.js';
 import { clearHandoff, isHandoffPath, pendingHandoff } from './lib/handoff.js';
 import { notificationPreview } from './lib/notification-preview.js';
@@ -515,7 +516,16 @@ function usePreferences() {
   const store = useStore();
   useStoreEvent('prefs');
   useEffect(() => {
-    applyScheme(document.documentElement, resolveScheme(store.prefs.scheme, store.prefs.theme));
+    // A community theme replaces the scheme's palette, not layers over it:
+    // non-native schemes paint their tokens as inline styles on <html>,
+    // and inline styles beat any stylesheet, so a theme applied under them
+    // would silently do nothing. While a theme is active the scheme only
+    // still sets light/dark (`data-theme`) and clears any stale vars.
+    // "Active" means actually injected: a synced id with no file on this
+    // device, or one the network policy refuses, keeps the scheme's palette
+    // — otherwise the app would wear neither.
+    applyScheme(document.documentElement, resolveScheme(store.prefs.scheme, store.prefs.theme), { skipVars: Boolean(usableTheme(store.prefs.marketTheme)) });
+    applyMarketThemeFromPrefs(store.prefs.marketTheme);
     setLocale(store.prefs.locale || 'auto');
     document.body.classList.toggle('compact', !!store.prefs.compact);
   });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { act, screen } from '@testing-library/react';
 import { Timeline } from '../views/chat/Timeline.jsx';
-import { AppearancePane } from '../views/user-settings/AppearancePane.jsx';
+import { LanguageFormattingPane } from '../views/user-settings/LanguageFormattingPane.jsx';
 import { dateOrdered, dateTimeOrdered, dateOrder } from '../lib/i18n/index.js';
 import { beforeToday, timeOf } from '../lib/util.js';
 import { freshStore, HOME } from './fake-server.js';
@@ -129,7 +129,7 @@ describe('the date format setting', () => {
   it('writes the order the row reads, to the preference it belongs to', async () => {
     const store = freshStore();
     store.session = { home: { user_id: ME, device_id: 'd1', domain: HOME } };
-    const { user } = mount(<AppearancePane />, store);
+    const { user } = mount(<LanguageFormattingPane />, store);
 
     const trigger = screen.getByRole('combobox', { name: 'Date format' });
     expect(trigger).toBeTruthy();

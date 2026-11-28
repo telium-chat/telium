@@ -9,6 +9,7 @@ import { isElectronRuntime } from '../../lib/platform.js';
 import { storage } from '../../lib/util.js';
 import { ProfilePane } from './ProfilePane.jsx';
 import { AppearancePane } from './AppearancePane.jsx';
+import { LanguageFormattingPane } from './LanguageFormattingPane.jsx';
 import { DevicesPane } from './DevicesPane.jsx';
 import { ServersPane } from './ServersPane.jsx';
 import { NetworkPrivacyPane } from './NetworkPrivacyPane.jsx';
@@ -63,12 +64,19 @@ const BASE_PANES = {
     icon: AdvancedIcon,
     keywords: ['bots', 'applications', 'developer', 'token', 'api'],
   },
-  appearance: {
-    label: 'Appearance',
+  themes: {
+    label: 'Themes',
     component: AppearancePane,
     group: 'App',
     icon: SunIcon,
-    keywords: ['theme', 'dark', 'light', 'language', 'locale'],
+    keywords: ['theme', 'themes', 'dark', 'light', 'marketplace', 'market', 'community', 'download', 'favorite', 'favorites', 'starred', 'wallpaper'],
+  },
+  language: {
+    label: 'Language & formatting',
+    component: LanguageFormattingPane,
+    group: 'App',
+    icon: GlobeIcon,
+    keywords: ['language', 'locale', 'translate', 'translation', 'date', 'format', 'formatting', 'compact', 'messages'],
   },
   notifications: {
     label: 'Notifications',

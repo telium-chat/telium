@@ -80,12 +80,91 @@ export const settings = {
 
   // ------------------------------------------------------------------- theme
 
-  'settings.theme.title': 'Theme',
-  // "Follows you" = syncs with the account rather than staying on this device.
-  // Worth saying because the alternative is genuinely what people expect from
-  // a display setting, and somebody who does not want their work laptop's
-  // theme on their phone deserves to find that out here and not later.
-  'settings.theme.description': 'Follows you to your other devices.',
+  // One grid, one action per theme: tap to apply, tap the active one to turn
+  // it off. Community themes come from a GitHub repository, are checked by a
+  // bot and a human before they appear here. The six included palettes wear
+  // the same card shape and live in the same grid.
+  'settings.market.title': 'Themes',
+  'settings.market.description': 'Tap a theme to apply it. Community themes come straight from GitHub.',
+  'settings.market.submit': 'Submit a theme',
+  'settings.market.search': 'Search themes',
+  'settings.market.filters': 'Filter themes',
+  'settings.market.all': 'All',
+  // The week's picks, derived on the device from download counts and the ISO
+  // week number: no key, no server, and everyone sees the same set until the
+  // week turns over. As a filter chip it shows just those themes.
+  'settings.market.trending': 'Trending',
+  // Favorites are a synced bookmark list, not an install. The star's label
+  // names the theme so a screen reader announces what is being kept.
+  'settings.market.favorites': 'Favorites',
+  'settings.market.favorite': 'Keep {name} in your favorites',
+  'settings.market.unfavorite': 'Take {name} out of your favorites',
+  'settings.market.favoritesEmpty': 'No favorites yet — tap the star on a theme to keep it here.',
+  // `count` arrives already rounded ("12.4k"); a translator only moves the word.
+  'settings.market.downloads': '{count} downloads',
+  // One button per card: install applies in the same tap, and tapping the
+  // active theme turns it off. The hint on the active button says so.
+  'settings.market.install': 'Install',
+  // Shown under the bar while a theme's CSS streams in; `Active` arrives the
+  // moment the bytes land, so install is never a silent freeze.
+  'settings.market.downloading': 'Downloading…',
+  'settings.market.apply': 'Apply',
+  'settings.market.active': 'Active',
+  'settings.market.activeHint': 'Tap to turn this theme off',
+  // The banner at the top of the grid answers "which theme am I using" in one
+  // line, and its twin handles the ghost case: a synced theme id whose CSS
+  // file is not on this device, so nothing is actually applied.
+  'settings.market.activeBanner': 'You are using {name}. Tap Active on its card to turn it off.',
+  'settings.market.missingBanner': 'Your synced theme ({name}) is not on this device — install it again below, or pick an included theme.',
+  'settings.market.remove': 'Remove theme',
+  // Community themes page three pages deep before this appears; each tap
+  // reveals one more page rather than ever rendering the whole catalog.
+  'settings.market.showMore': 'Show more themes',
+  'settings.market.community': 'From the community',
+  'settings.market.included': 'Included with Telium',
+  'settings.market.retry': 'Retry',
+  'settings.market.error': 'The theme list could not be reached. You can retry, and themes you already installed keep working offline.',
+  // A theme whose file carries no BetterDiscord-style header: the marketplace
+  // cannot show who made it or what it is called, so it refuses the file.
+  'settings.market.noMeta': 'That theme file is missing its name, author, or description header, so it was not installed.',
+  'settings.market.empty': 'No themes match.',
+  // The network policy refused a theme: it would load files from a host
+  // outside the theme catalog (anyone running that host sees who wears it),
+  // or it pulls in a whole stylesheet through @import.
+  'settings.market.blocked': 'This theme loads files from {hosts}, which Telium does not allow, so it was not installed. A theme may only load files from the Telium theme catalog, or embed them as data: URLs.',
+  'settings.market.blockedImport': 'This theme uses @import, which Telium does not allow, so it was not installed. Paste the imported CSS into the theme itself instead.',
+  'settings.market.blockedBanner': 'Your theme ({name}) loads files from somewhere Telium does not allow, so it is switched off. Pick another theme, or edit or remove this one.',
+  'settings.market.quota': 'There is no room left on this device to store that theme. Remove a theme you no longer use and try again.',
+  'settings.market.tooLarge': 'That theme file is over 512 KB, so it was not installed.',
+  'settings.market.unreadable': 'That file could not be read as a theme.',
+  // Local themes: imported from a file, pasted, or written in the editor.
+  // Nothing here is published; sharing is exporting the file and sending it.
+  'settings.market.local.title': 'Your themes',
+  'settings.market.local.description': 'Themes you imported or made yourself. They stay on this device and are never published. To share one, export it and send the file; the other person imports it here.',
+  'settings.market.local.import': 'Import theme file',
+  'settings.market.local.importLabel': 'Choose a .theme.css file to import',
+  'settings.market.local.new': 'New theme',
+  'settings.market.local.edit': 'Edit',
+  'settings.market.local.editCopy': 'Edit a copy',
+  'settings.market.local.editCopyHint': 'Copy {name} into Your themes so you can change it',
+  'settings.market.local.export': 'Export',
+  'settings.market.local.editor': 'Theme CSS',
+  'settings.market.local.save': 'Save and apply',
+  'settings.market.local.cancel': 'Cancel',
+  'settings.market.local.badge': 'Your theme',
+  'settings.market.local.empty': 'Nothing here yet. Import a .theme.css someone sent you, or start a new one.',
+  'settings.market.local.missing': 'Your synced theme was imported or made on another device, so its file is not here. Import its .theme.css on this device to use it.',
+  // A theme was installed before but the catalog is unreachable: its card is
+  // gone from the grid, though the theme itself keeps working.
+  'settings.market.offlineNote': 'The community list is offline; installed themes still apply.',
+
+  // The badge on whichever included theme is currently the under-layer for a
+  // marketplace theme (or the whole look, when no marketplace theme is on).
+  'settings.theme.baseActive': 'In use',
+  // A marketplace theme owns the palette while it is on, so the included
+  // themes are display-only until it is deactivated. The copy names the door
+  // back: the grid right above.
+  'settings.theme.locked': 'A marketplace theme is on, so the included themes are paused. Turn it off above to pick one of these again.',
 
   'settings.theme.preset.graphite.name': 'Graphite',
   'settings.theme.preset.graphite.description': 'Deep neutral grey. The default.',

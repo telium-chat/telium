@@ -1694,7 +1694,6 @@ export const messages = {
   'settings.scheme.title': '당신의 색 구성',
   'settings.theme.custom.description': '슬라이더 몇 개면 되고, 조작하는 동안 앱이 그 아래에서 바뀌어요.',
   'settings.theme.custom.label': '직접 만들기',
-  'settings.theme.description': '다른 기기로도 따라가요.',
   'settings.theme.preset.ash.description': '램프를 켠 방을 위한 더 따뜻하고 밝은 회색이에요.',
   'settings.theme.preset.ash.name': '재',
   'settings.theme.preset.evergreen.description': '실내에서 긴 밤을 보내는 초록빛이 도는 어두운 색이에요.',
@@ -1707,7 +1706,6 @@ export const messages = {
   'settings.theme.preset.obsidian.name': '흑요석',
   'settings.theme.preset.paper.description': '밝은 방을 위한 종이 같은 흰색이에요.',
   'settings.theme.preset.paper.name': '종이',
-  'settings.theme.title': '테마',
 
   // ---- shell
   'shell.a11y.closeMembers': '멤버 닫기',

@@ -237,11 +237,22 @@ export function schemePreview(scheme) {
   };
 }
 
-export function applyScheme(root, scheme) {
+/// `skipVars` is how a community theme takes over the palette: the scheme
+/// still records its mode on `data-theme` and clears any inline vars a
+/// previous scheme painted, but writes none of its own — inline styles would
+/// out-rank the theme's stylesheet and the theme would silently do nothing.
+/// `data-scheme` is set to `market` rather than removed, so the derived
+/// tokens (accent hover and washes, link and focus ink) re-derive from the
+/// theme's own accent instead of keeping the base scheme's hardcoded ones.
+export function applyScheme(root, scheme, { skipVars = false } = {}) {
   const vars = schemeVars(scheme);
   root.dataset.theme = scheme.mode;
   for (const token of SCHEME_TOKENS) root.style.removeProperty(`--${token}`);
-  if (!vars) {
+  if (skipVars || !vars) {
+    if (skipVars) {
+      root.dataset.scheme = 'market';
+      return;
+    }
     delete root.dataset.scheme;
     return;
   }

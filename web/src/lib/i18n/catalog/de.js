@@ -231,8 +231,6 @@ export const messages = {
 
   // ------------------------------------------------------------- settings
 
-  'settings.theme.title': 'Erscheinungsbild',
-  'settings.theme.description': 'Gilt auch auf deinen anderen Geräten.',
   'settings.theme.preset.graphite.name': 'Graphit',
   'settings.theme.preset.graphite.description': 'Tiefes, neutrales Grau. Die Voreinstellung.',
   'settings.theme.preset.obsidian.name': 'Obsidian',
